@@ -143,51 +143,61 @@ pub fn main(init: std.process.Init) !void {
     };
     program.deinit();
 
-    try stdout_writer.print("\nEnter your message: ", .{});
-    try stdout_writer.flush();
-
     var stdin_buffer: [4096]u8 = undefined;
     var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
     const stdin_reader = &stdin_file_reader.interface;
 
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
-    _ = try stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len));
-    const user_message = line_alloc.written();
 
-    try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
-    try stdout_writer.flush();
+    while (true) {
+        line_alloc.clearRetainingCapacity();
 
-    var msg = try std.json.ObjectMap.init(arena, &.{}, &.{});
-    try msg.put(arena, "type", .{ .string = "text" });
-    try msg.put(arena, "content", .{ .string = user_message });
-
-    var messages = try std.json.Array.initCapacity(arena, 1);
-    try messages.append(.{ .object = msg });
-
-    const chat_request = lmstudio.ChatRequest{
-        .model = model_key,
-        .input = .{ .array = messages },
-    };
-
-    var callback = ChatStreamCallback{
-        .stdout = stdout_writer,
-        .arena = arena,
-        .has_header = false,
-        .stats = null,
-    };
-
-    try lmstudio.chatStreaming(&client, chat_request, &callback);
-
-    if (callback.stats) |stats| {
-        try stdout_writer.print("\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
-        try stdout_writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
-        try stdout_writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.total_output_tokens, stats.reasoning_output_tokens });
-        try stdout_writer.print("  Tokens per second:   {d:.1}\n", .{stats.tokens_per_second});
-        try stdout_writer.print("  Time to first token: {d:.2}s\n", .{stats.time_to_first_token_seconds});
-        if (stats.model_load_time_seconds) |load_time| {
-            try stdout_writer.print("  Model load time:     {d:.2}s\n", .{load_time});
-        }
+        try stdout_writer.print("\nEnter your message: ", .{});
         try stdout_writer.flush();
+
+        stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
+            error.EndOfStream => return,
+            else => return err,
+        };
+
+        const user_message = line_alloc.written();
+        if (user_message.len == 0) continue;
+
+        try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
+        try stdout_writer.flush();
+
+        var msg = try std.json.ObjectMap.init(arena, &.{}, &.{});
+        try msg.put(arena, "type", .{ .string = "text" });
+        try msg.put(arena, "content", .{ .string = user_message });
+
+        var messages = try std.json.Array.initCapacity(arena, 1);
+        try messages.append(.{ .object = msg });
+
+        const chat_request = lmstudio.ChatRequest{
+            .model = model_key,
+            .input = .{ .array = messages },
+        };
+
+        var callback = ChatStreamCallback{
+            .stdout = stdout_writer,
+            .arena = arena,
+            .has_header = false,
+            .stats = null,
+        };
+
+        try lmstudio.chatStreaming(&client, chat_request, &callback);
+
+        if (callback.stats) |stats| {
+            try stdout_writer.print("\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
+            try stdout_writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
+            try stdout_writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.total_output_tokens, stats.reasoning_output_tokens });
+            try stdout_writer.print("  Tokens per second:   {d:.1}\n", .{stats.tokens_per_second});
+            try stdout_writer.print("  Time to first token: {d:.2}s\n", .{stats.time_to_first_token_seconds});
+            if (stats.model_load_time_seconds) |load_time| {
+                try stdout_writer.print("  Model load time:     {d:.2}s\n", .{load_time});
+            }
+            try stdout_writer.flush();
+        }
     }
 }
