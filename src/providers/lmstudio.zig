@@ -417,6 +417,9 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
     var event_data: std.Io.Writer.Allocating = .init(allocator);
     defer event_data.deinit();
 
+    var current_event: std.Io.Writer.Allocating = .init(allocator);
+    defer current_event.deinit();
+
     while (true) {
         line_buf.clearRetainingCapacity();
 
@@ -438,38 +441,45 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
             break :blk false;
         };
 
-        if (try processSseLine(&event_data, line_buf.written(), callback)) return;
+        if (try processSseLine(&event_data, &current_event, line_buf.written(), callback)) return;
         if (!ended_with_delimiter) break;
     }
 
-    _ = try dispatchSseEvent(&event_data, callback);
+    _ = try dispatchSseEvent(&event_data, &current_event, callback);
 }
 
-fn processSseLine(event_data: *std.Io.Writer.Allocating, raw_line: []const u8, callback: anytype) !bool {
+fn processSseLine(event_data: *std.Io.Writer.Allocating, current_event: *std.Io.Writer.Allocating, raw_line: []const u8, callback: anytype) !bool {
     const line = std.mem.trimEnd(u8, raw_line, "\r");
-    if (line.len == 0) return try dispatchSseEvent(event_data, callback);
+    if (line.len == 0) return try dispatchSseEvent(event_data, current_event, callback);
     if (line[0] == ':') return false;
 
     const colon = std.mem.indexOfScalar(u8, line, ':') orelse return false;
     const field = line[0..colon];
-    if (!std.mem.eql(u8, field, "data")) return false;
 
     var value = line[colon + 1 ..];
     if (value.len > 0 and value[0] == ' ') value = value[1..];
-    const separator_len: usize = if (event_data.written().len == 0) 0 else 1;
-    if (event_data.written().len + separator_len + value.len > max_sse_event_size) return error.SseEventTooLong;
-    if (separator_len != 0) try event_data.writer.writeByte('\n');
-    try event_data.writer.writeAll(value);
+
+    if (std.mem.eql(u8, field, "data")) {
+        const separator_len: usize = if (event_data.written().len == 0) 0 else 1;
+        if (event_data.written().len + separator_len + value.len > max_sse_event_size) return error.SseEventTooLong;
+        if (separator_len != 0) try event_data.writer.writeByte('\n');
+        try event_data.writer.writeAll(value);
+    } else if (std.mem.eql(u8, field, "event")) {
+        current_event.clearRetainingCapacity();
+        try current_event.writer.writeAll(value);
+    }
+
     return false;
 }
 
-fn dispatchSseEvent(event_data: *std.Io.Writer.Allocating, callback: anytype) !bool {
+fn dispatchSseEvent(event_data: *std.Io.Writer.Allocating, current_event: *std.Io.Writer.Allocating, callback: anytype) !bool {
     const data = event_data.written();
     if (data.len == 0) return false;
     defer event_data.clearRetainingCapacity();
+    defer current_event.clearRetainingCapacity();
 
     if (std.mem.eql(u8, data, "[DONE]")) return true;
-    try callback.event(data);
+    try callback.event(current_event.written(), data);
     return false;
 }
 
@@ -478,7 +488,8 @@ fn TypedSseCallback(comptime T: type, comptime Callback: type) type {
         allocator: std.mem.Allocator,
         callback: *Callback,
 
-        pub fn event(self: *@This(), data: []const u8) !void {
+        pub fn event(self: *@This(), event_name: []const u8, data: []const u8) !void {
+            _ = event_name;
             var parsed = try std.json.parseFromSlice(T, self.allocator, data, .{ .ignore_unknown_fields = true });
             defer parsed.deinit();
             try self.callback.event(&parsed.value);
@@ -522,7 +533,7 @@ fn streamJsonTyped(comptime T: type, client: *Client, path: []const u8, requestB
     try streamJson(client, path, requestBody, &typed_callback);
 }
 
-fn streamJson(client: *Client, path: []const u8, requestBody: anytype, callback: anytype) !void {
+pub fn streamJson(client: *Client, path: []const u8, requestBody: anytype, callback: anytype) !void {
     const allocator = client.allocator;
     const payload = try stringifyStreamRequest(allocator, requestBody);
     defer allocator.free(payload);
@@ -813,6 +824,10 @@ pub fn chatRaw(client: *Client, requestBody: ChatRequest) !RawResponse {
 
 pub fn chatResult(client: *Client, requestBody: ChatRequest) !ApiResult(ChatResponse) {
     return parseRawResponse(ChatResponse, try chatRaw(client, requestBody));
+}
+
+pub fn chatStreaming(client: *Client, requestBody: ChatRequest, callback: anytype) !void {
+    try streamJson(client, "/api/v1/chat", requestBody, callback);
 }
 
 const _chat = chat;
