@@ -1,15 +1,15 @@
-LM Studio offers a powerful REST API with first-class support for local inference and model management. In addition to our native API, we provide OpenAI-compatible endpoints ([learn more](/docs/developer/openai-compat)) and Anthropic-compatible endpoints ([learn more](/docs/developer/anthropic-compat)).
+LM Studio offers a powerful REST API with first-class support for local inference and model management. In addition to our native API, we provide OpenAI-compatible endpoints ([learn more](https://lmstudio.ai/docs/developer/openai-compat)) and Anthropic-compatible endpoints ([learn more](/docs/developer/anthropic-compat)).
 
 ## What's new
 
-Previously, there was a [v0 REST API](/docs/developer/rest/endpoints). With LM Studio 0.4.0, we have officially released our native v1 REST API at `/api/v1/*` endpoints and recommend using it.
+Previously, there was a [v0 REST API](https://lmstudio.ai/docs/developer/rest/endpoints). With LM Studio 0.4.0, we have officially released our native v1 REST API at `/api/v1/*` endpoints and recommend using it.
 
 The v1 REST API includes enhanced features such as:
 
-- [MCP via API](/docs/developer/core/mcp)
-- [Stateful chats](/docs/developer/rest/stateful-chats)
-- [Authentication](/docs/developer/core/authentication) configuration with API tokens
-- Model [download](/docs/developer/rest/download), [load](/docs/developer/rest/load) and [unload](/docs/developer/rest/unload) endpoints
+- [MCP via API](https://lmstudio.ai/docs/developer/core/mcp)
+- [Stateful chats](https://lmstudio.ai/docs/developer/rest/stateful-chats)
+- [Authentication](https://lmstudio.ai/docs/developer/core/authentication) configuration with API tokens
+- Model [download](https://lmstudio.ai/docs/developer/rest/download), [load](/docs/developer/rest/load) and [unload](/docs/developer/rest/unload) endpoints
 
 ## Supported endpoints
 
@@ -27,32 +27,32 @@ The following endpoints are available in LM Studio's v1 REST API.
     <tr>
       <td><code>/api/v1/chat</code></td>
       <td><apimethod method="POST" /></td>
-      <td><a href="/docs/developer/rest/chat">Chat</a></td>
+      <td><a href="https://lmstudio.ai/docs/developer/rest/chat">Chat</a></td>
     </tr>
     <tr>
       <td><code>/api/v1/models</code></td>
       <td><apimethod method="GET" /></td>
-      <td><a href="/docs/developer/rest/list">List Models</a></td>
+      <td><a href="https://lmstudio.ai/docs/developer/rest/list">List Models</a></td>
     </tr>
     <tr>
       <td><code>/api/v1/models/load</code></td>
       <td><apimethod method="POST" /></td>
-      <td><a href="/docs/developer/rest/load">Load</a></td>
+      <td><a href="https://lmstudio.ai/docs/developer/rest/load">Load</a></td>
     </tr>
     <tr>
         <td><code>/api/v1/models/unload</code></td>
         <td><apimethod method="POST" /></td>
-        <td><a href="/docs/developer/rest/unload">Unload</a></td>
+        <td><a href="https://lmstudio.ai/docs/developer/rest/unload">Unload</a></td>
     </tr>
     <tr>
       <td><code>/api/v1/models/download</code></td>
       <td><apimethod method="POST" /></td>
-      <td><a href="/docs/developer/rest/download">Download</a></td>
+      <td><a href="https://lmstudio.ai/docs/developer/rest/download">Download</a></td>
     </tr>
     <tr>
       <td><code>/api/v1/models/download/status</code></td>
       <td><apimethod method="GET" /></td>
-      <td><a href="/docs/developer/rest/download-status">Download Status</a></td>
+      <td><a href="https://lmstudio.ai/docs/developer/rest/download-status">Download Status</a></td>
     </tr>
   </tbody>
 </table>
@@ -65,10 +65,10 @@ The table below compares the features of LM Studio's `/api/v1/chat` endpoint wit
   <thead>
     <tr>
       <th>Feature</th>
-      <th><a href="/docs/developer/rest/chat"><code>/api/v1/chat</code></a></th>
-      <th><a href="/docs/developer/openai-compat/responses"><code>/v1/responses</code></a></th>
-      <th><a href="/docs/developer/openai-compat/chat-completions"><code>/v1/chat/completions</code></a></th>
-      <th><a href="/docs/developer/anthropic-compat/messages"><code>/v1/messages</code></a></th>
+      <th><a href="https://lmstudio.ai/docs/developer/rest/chat"><code>/api/v1/chat</code></a></th>
+      <th><a href="https://lmstudio.ai/docs/developer/openai-compat/responses"><code>/v1/responses</code></a></th>
+      <th><a href="https://lmstudio.ai/docs/developer/openai-compat/chat-completions"><code>/v1/chat/completions</code></a></th>
+      <th><a href="https://lmstudio.ai/docs/developer/anthropic-compat/messages"><code>/v1/messages</code></a></th>
     </tr>
   </thead>
   <tbody>
