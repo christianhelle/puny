@@ -4,3 +4,4 @@ zig-cache/
 *.obj
 *.pdb
 *.exe
+zig-pkg
