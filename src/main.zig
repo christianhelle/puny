@@ -125,11 +125,26 @@ pub fn main(init: std.process.Init) !void {
     stop_spinner = true;
     spinner.join();
 
-    if (response.value().output.len > 0) {
-        const output = response.value().output[0];
-        if (output == .object) {
-            if (output.object.get("content")) |content| {
-                try stdout_writer.print("Response: {s}\n", .{content.string});
+    const ansi_reset = "\x1b[0m";
+    const ansi_dim = "\x1b[2m";
+    const ansi_bright = "\x1b[1;37m";
+    const ansi_gray = "\x1b[90m";
+
+    try stdout_writer.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
+
+    for (response.value().output) |item| {
+        if (item == .object) {
+            const output_type = item.object.get("type") orelse continue;
+            const content = item.object.get("content") orelse continue;
+            if (content != .string) continue;
+            if (output_type != .string) continue;
+
+            if (std.mem.eql(u8, output_type.string, "reasoning")) {
+                try stdout_writer.print("{s}{s}{s}\n", .{ ansi_gray, content.string, ansi_reset });
+            } else if (std.mem.eql(u8, output_type.string, "message")) {
+                try stdout_writer.print("{s}{s}{s}\n", .{ ansi_bright, content.string, ansi_reset });
+            } else {
+                try stdout_writer.print("{s}\n", .{content.string});
             }
         }
     }
