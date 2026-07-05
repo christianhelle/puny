@@ -1,71 +1,56 @@
 const std = @import("std");
-const Io = std.Io;
-
-const puny = @import("puny");
+const lmstudio = @import("providers/lmstudio.zig");
 
 pub fn main(init: std.process.Init) !void {
-    // Prints to stderr, unbuffered, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
-    // This is appropriate for anything that lives as long as the process.
     const arena: std.mem.Allocator = init.arena.allocator();
-
-    // Accessing command line arguments:
-    const args = try init.minimal.args.toSlice(arena);
-    for (args) |arg| {
-        std.log.info("arg: {s}", .{arg});
-    }
-
-    // In order to do I/O operations need an `Io` instance.
     const io = init.io;
 
-    // Stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
-    try puny.printAnotherMessage(stdout_writer);
+    var client = lmstudio.Client.init(arena, io, "");
+    defer client.deinit();
 
-    try stdout_writer.flush(); // Don't forget to flush!
-}
+    // List available models from LM Studio
+    var models = try lmstudio.listModels(&client);
+    defer models.deinit();
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+    try stdout_writer.print("Available models:\n", .{});
+    for (models.value().models) |model| {
+        try stdout_writer.print("  - {s} ({s})\n", .{ model.display_name, model.key });
+    }
+    try stdout_writer.flush();
 
-test "fuzz example" {
-    try std.testing.fuzz({}, testOne, .{});
-}
+    // Chat with the first available model
+    if (models.value().models.len > 0) {
+        const model_key = models.value().models[0].key;
+        try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
 
-fn testOne(context: void, smith: *std.testing.Smith) !void {
-    _ = context;
-    // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
+        var msg = try std.json.ObjectMap.init(arena, &.{}, &.{});
+        try msg.put(arena, "type", .{ .string = "text" });
+        try msg.put(arena, "content", .{ .string = "Say 'Hello from Puny!' and nothing else." });
 
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(u8) = .empty;
-    defer list.deinit(gpa);
-    while (!smith.eos()) switch (smith.value(enum { add_data, dup_data })) {
-        .add_data => {
-            const slice = try list.addManyAsSlice(gpa, smith.value(u4));
-            smith.bytes(slice);
-        },
-        .dup_data => {
-            if (list.items.len == 0) continue;
-            if (list.items.len > std.math.maxInt(u32)) return error.SkipZigTest;
-            const len = smith.valueRangeAtMost(u32, 1, @min(32, list.items.len));
-            const off = smith.valueRangeAtMost(u32, 0, @intCast(list.items.len - len));
-            try list.appendSlice(gpa, list.items[off..][0..len]);
-            try std.testing.expectEqualSlices(
-                u8,
-                list.items[off..][0..len],
-                list.items[list.items.len - len ..],
-            );
-        },
-    };
+        var messages = try std.json.Array.initCapacity(arena, 1);
+        try messages.append(.{ .object = msg });
+
+        const chat_request = lmstudio.ChatRequest{
+            .model = model_key,
+            .input = .{ .array = messages },
+        };
+
+        var response = try lmstudio.chat(&client, chat_request);
+        defer response.deinit();
+
+        if (response.value().output.len > 0) {
+            const output = response.value().output[0];
+            if (output == .object) {
+                if (output.object.get("content")) |content| {
+                    try stdout_writer.print("Response: {s}\n", .{content.string});
+                }
+            }
+        }
+    }
+
+    try stdout_writer.flush();
 }
