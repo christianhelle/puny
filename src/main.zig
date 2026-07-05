@@ -49,21 +49,58 @@ const PickModel = struct {
     }
 };
 
-fn spinnerAnimation(io: std.Io, stop: *volatile bool) void {
-    const frames = "|/-\\";
-    var i: usize = 0;
-    var buf: [64]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), io, &buf);
-    const w = &stderr_writer.interface;
-    while (!stop.*) {
-        const c = frames[i % frames.len];
-        w.print("\rThinking... {c}", .{c}) catch break;
-        w.flush() catch break;
-        std.Io.sleep(io, std.Io.Duration.fromMilliseconds(100), .awake) catch {};
-        i += 1;
+const ansi_reset = "\x1b[0m";
+const ansi_dim = "\x1b[2m";
+const ansi_bright = "\x1b[1;37m";
+const ansi_gray = "\x1b[90m";
+
+const ChatStreamCallback = struct {
+    stdout: *std.Io.Writer,
+    arena: std.mem.Allocator,
+    has_header: bool,
+    stats: ?lmstudio.ChatStats,
+
+    pub fn event(self: *@This(), event_name: []const u8, data: []const u8) !void {
+        if (std.mem.eql(u8, event_name, "reasoning.delta")) {
+            if (!self.has_header) {
+                try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
+                self.has_header = true;
+            }
+            const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+            const content = parsed.value.object.get("content") orelse return;
+            if (content != .string) return;
+            try self.stdout.print("{s}{s}{s}", .{ ansi_gray, content.string, ansi_reset });
+            try self.stdout.flush();
+        } else if (std.mem.eql(u8, event_name, "reasoning.end")) {
+            try self.stdout.print("\n", .{});
+        } else if (std.mem.eql(u8, event_name, "message.delta")) {
+            if (!self.has_header) {
+                try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
+                self.has_header = true;
+            }
+            const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+            const content = parsed.value.object.get("content") orelse return;
+            if (content != .string) return;
+            try self.stdout.print("{s}{s}{s}", .{ ansi_bright, content.string, ansi_reset });
+            try self.stdout.flush();
+        } else if (std.mem.eql(u8, event_name, "chat.end")) {
+            const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+            const result = parsed.value.object.get("result") orelse return;
+            const stats_val = result.object.get("stats") orelse return;
+            var s: lmstudio.ChatStats = undefined;
+            s.input_tokens = stats_val.object.get("input_tokens").?.integer;
+            s.total_output_tokens = stats_val.object.get("total_output_tokens").?.integer;
+            s.reasoning_output_tokens = stats_val.object.get("reasoning_output_tokens").?.integer;
+            s.tokens_per_second = @floatCast(stats_val.object.get("tokens_per_second").?.float);
+            s.time_to_first_token_seconds = @floatCast(stats_val.object.get("time_to_first_token_seconds").?.float);
+            s.model_load_time_seconds = if (stats_val.object.get("model_load_time_seconds")) |v| @floatCast(v.float) else null;
+            self.stats = s;
+        }
     }
-    w.print("\r                \r", .{}) catch {};
-}
+};
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
@@ -116,48 +153,24 @@ pub fn main(init: std.process.Init) !void {
         .input = .{ .array = messages },
     };
 
-    var stop_spinner: bool = false;
-    const spinner = try std.Thread.spawn(.{}, spinnerAnimation, .{ io, &stop_spinner });
+    var callback = ChatStreamCallback{
+        .stdout = stdout_writer,
+        .arena = arena,
+        .has_header = false,
+        .stats = null,
+    };
 
-    var response = try lmstudio.chat(&client, chat_request);
-    defer response.deinit();
+    try lmstudio.chatStreaming(&client, chat_request, &callback);
 
-    stop_spinner = true;
-    spinner.join();
-
-    const ansi_reset = "\x1b[0m";
-    const ansi_dim = "\x1b[2m";
-    const ansi_bright = "\x1b[1;37m";
-    const ansi_gray = "\x1b[90m";
-
-    try stdout_writer.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
-
-    for (response.value().output) |item| {
-        if (item == .object) {
-            const output_type = item.object.get("type") orelse continue;
-            const content = item.object.get("content") orelse continue;
-            if (content != .string) continue;
-            if (output_type != .string) continue;
-
-            if (std.mem.eql(u8, output_type.string, "reasoning")) {
-                try stdout_writer.print("{s}{s}{s}\n", .{ ansi_gray, content.string, ansi_reset });
-            } else if (std.mem.eql(u8, output_type.string, "message")) {
-                try stdout_writer.print("{s}{s}{s}\n", .{ ansi_bright, content.string, ansi_reset });
-            } else {
-                try stdout_writer.print("{s}\n", .{content.string});
-            }
+    if (callback.stats) |stats| {
+        try stdout_writer.print("\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
+        try stdout_writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
+        try stdout_writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.total_output_tokens, stats.reasoning_output_tokens });
+        try stdout_writer.print("  Tokens per second:   {d:.1}\n", .{stats.tokens_per_second});
+        try stdout_writer.print("  Time to first token: {d:.2}s\n", .{stats.time_to_first_token_seconds});
+        if (stats.model_load_time_seconds) |load_time| {
+            try stdout_writer.print("  Model load time:     {d:.2}s\n", .{load_time});
         }
+        try stdout_writer.flush();
     }
-
-    const stats = response.value().stats;
-    try stdout_writer.print("\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
-    try stdout_writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
-    try stdout_writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.total_output_tokens, stats.reasoning_output_tokens });
-    try stdout_writer.print("  Tokens per second:   {d:.1}\n", .{stats.tokens_per_second});
-    try stdout_writer.print("  Time to first token: {d:.2}s\n", .{stats.time_to_first_token_seconds});
-    if (stats.model_load_time_seconds) |load_time| {
-        try stdout_writer.print("  Model load time:     {d:.2}s\n", .{load_time});
-    }
-
-    try stdout_writer.flush();
 }
