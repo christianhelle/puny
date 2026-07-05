@@ -149,5 +149,15 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    const stats = response.value().stats;
+    try stdout_writer.print("\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
+    try stdout_writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
+    try stdout_writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.total_output_tokens, stats.reasoning_output_tokens });
+    try stdout_writer.print("  Tokens per second:   {d:.1}\n", .{stats.tokens_per_second});
+    try stdout_writer.print("  Time to first token: {d:.2}s\n", .{stats.time_to_first_token_seconds});
+    if (stats.model_load_time_seconds) |load_time| {
+        try stdout_writer.print("  Model load time:     {d:.2}s\n", .{load_time});
+    }
+
     try stdout_writer.flush();
 }
