@@ -49,6 +49,22 @@ const PickModel = struct {
     }
 };
 
+fn spinnerAnimation(io: std.Io, stop: *volatile bool) void {
+    const frames = "|/-\\";
+    var i: usize = 0;
+    var buf: [64]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), io, &buf);
+    const w = &stderr_writer.interface;
+    while (!stop.*) {
+        const c = frames[i % frames.len];
+        w.print("\rThinking... {c}", .{c}) catch break;
+        w.flush() catch break;
+        std.Io.sleep(io, std.Io.Duration.fromMilliseconds(100), .awake) catch {};
+        i += 1;
+    }
+    w.print("\r                \r", .{}) catch {};
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
@@ -73,12 +89,24 @@ pub fn main(init: std.process.Init) !void {
     };
     program.deinit();
 
+    try stdout_writer.print("\nEnter your message: ", .{});
+    try stdout_writer.flush();
+
+    var stdin_buffer: [4096]u8 = undefined;
+    var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
+    const stdin_reader = &stdin_file_reader.interface;
+
+    var line_alloc: std.Io.Writer.Allocating = .init(arena);
+    defer line_alloc.deinit();
+    _ = try stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len));
+    const user_message = line_alloc.written();
+
     try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
     try stdout_writer.flush();
 
     var msg = try std.json.ObjectMap.init(arena, &.{}, &.{});
     try msg.put(arena, "type", .{ .string = "text" });
-    try msg.put(arena, "content", .{ .string = "Say 'Hello from Puny!' and nothing else." });
+    try msg.put(arena, "content", .{ .string = user_message });
 
     var messages = try std.json.Array.initCapacity(arena, 1);
     try messages.append(.{ .object = msg });
@@ -88,8 +116,14 @@ pub fn main(init: std.process.Init) !void {
         .input = .{ .array = messages },
     };
 
+    var stop_spinner: bool = false;
+    const spinner = try std.Thread.spawn(.{}, spinnerAnimation, .{ io, &stop_spinner });
+
     var response = try lmstudio.chat(&client, chat_request);
     defer response.deinit();
+
+    stop_spinner = true;
+    spinner.join();
 
     if (response.value().output.len > 0) {
         const output = response.value().output[0];
