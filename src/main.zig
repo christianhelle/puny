@@ -102,6 +102,23 @@ const ChatStreamCallback = struct {
     }
 };
 
+fn isTransientError(err: anyerror) bool {
+    return switch (err) {
+        error.ConnectionRefused,
+        error.ConnectionTimedOut,
+        error.ReadTimedOut,
+        error.ReadFailed,
+        error.WriteFailed,
+        error.DnsFailed,
+        error.NameResolveFailed,
+        error.TlsFailure,
+        error.SslUpgradeFailed,
+        error.EndOfStream,
+        => true,
+        else => false,
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
