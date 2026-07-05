@@ -127,6 +127,9 @@ pub fn main(init: std.process.Init) !void {
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
+    var random_source: std.Random.IoSource = .{ .io = io };
+    const random = random_source.interface();
+
     var client = lmstudio.Client.init(arena, io, "");
     defer client.deinit();
 
@@ -156,10 +159,8 @@ pub fn main(init: std.process.Init) !void {
         try stdout_writer.print("\nEnter your message: ", .{});
         try stdout_writer.flush();
 
-        stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
-            error.EndOfStream => return,
-            else => return err,
-        };
+        const bytes_read = try stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len));
+        if (bytes_read == 0) return;
 
         const user_message = line_alloc.written();
         if (user_message.len == 0) continue;
@@ -186,7 +187,32 @@ pub fn main(init: std.process.Init) !void {
             .stats = null,
         };
 
-        try lmstudio.chatStreaming(&client, chat_request, &callback);
+        const max_retries = 5;
+        var retry_count: usize = 0;
+
+        while (true) {
+            if (lmstudio.chatStreaming(&client, chat_request, &callback)) |_| break else |err| {
+                if (!isTransientError(err)) {
+                    try stdout_writer.print("\nChat failed: {}\n", .{err});
+                    break;
+                }
+
+                retry_count += 1;
+                if (retry_count >= max_retries) {
+                    try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{max_retries, err});
+                    break;
+                }
+
+                var delay_ms: u64 = 500;
+                var i: usize = 1;
+                while (i < retry_count) : (i += 1) delay_ms *= 2;
+                delay_ms += random.intRangeAtMost(u64, 0, 250);
+
+                try stdout_writer.print("\n{s}Connection error ({}), retrying in {}ms ({d}/{d})...{s}\n", .{ ansi_dim, err, delay_ms, retry_count, max_retries, ansi_reset });
+                try stdout_writer.flush();
+                io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+            }
+        }
 
         if (callback.stats) |stats| {
             try stdout_writer.print("\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
