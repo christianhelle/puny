@@ -60,15 +60,15 @@ pub const StreamCallback = struct {
                         if (parseStats(result_val.object)) |s| {
                             self.stats = s;
                         }
+
+                        if (result_val.object.get("response_id")) |rid| {
+                            if (rid == .string) {
+                                self.response_id = try self.arena.dupe(u8, rid.string);
+                            }
+                        }
                     }
                 } else if (parseStats(root.object)) |s| {
                     self.stats = s;
-                }
-
-                if (root.object.get("response_id")) |rid| {
-                    if (rid == .string) {
-                        self.response_id = try self.arena.dupe(u8, rid.string);
-                    }
                 }
             }
         }
