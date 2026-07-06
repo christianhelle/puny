@@ -36,6 +36,8 @@ pub fn main(init: std.process.Init) !void {
     };
     program.deinit();
 
+    var previous_response_id: ?[]const u8 = null;
+
     var stdin_buffer: [4096]u8 = undefined;
 
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
@@ -81,6 +83,7 @@ pub fn main(init: std.process.Init) !void {
         const chat_request = lmstudio.ChatRequest{
             .model = model_key,
             .input = .{ .array = messages },
+            .previous_response_id = previous_response_id,
         };
 
         var callback = chat.StreamCallback{
@@ -116,6 +119,8 @@ pub fn main(init: std.process.Init) !void {
                 io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
             }
         }
+
+        previous_response_id = callback.response_id;
 
         if (callback.stats) |stats| {
             try chat.printStats(stdout_writer, stats);
