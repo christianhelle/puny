@@ -166,8 +166,6 @@ pub fn main(init: std.process.Init) !void {
     program.deinit();
 
     var stdin_buffer: [4096]u8 = undefined;
-    var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
-    const stdin_reader = &stdin_file_reader.interface;
 
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
@@ -175,11 +173,16 @@ pub fn main(init: std.process.Init) !void {
     while (true) {
         line_alloc.clearRetainingCapacity();
 
+        var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
+        const stdin_reader = &stdin_file_reader.interface;
+
         try stdout_writer.print("\nEnter your message: ", .{});
         try stdout_writer.flush();
 
-        const bytes_read = try stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len));
-        if (bytes_read == 0) return;
+        _ = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
+            error.EndOfStream => return,
+            else => return err,
+        };
 
         const user_message = line_alloc.written();
         if (user_message.len == 0) continue;
