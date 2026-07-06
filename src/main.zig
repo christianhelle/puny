@@ -187,6 +187,11 @@ pub fn main(init: std.process.Init) !void {
         const user_message = line_alloc.written();
         if (user_message.len == 0) continue;
 
+        if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
+            try stdout_writer.print("Goodbye.\n", .{});
+            return;
+        }
+
         try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
         try stdout_writer.flush();
 
