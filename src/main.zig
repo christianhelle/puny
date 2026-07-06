@@ -188,7 +188,8 @@ pub fn main(init: std.process.Init) !void {
         };
         if (bytes_read == 0) return;
 
-        const user_message = line_alloc.written();
+        const raw_message = line_alloc.written();
+        const user_message = if (raw_message.len > 0 and raw_message[raw_message.len - 1] == '\r') raw_message[0 .. raw_message.len - 1] else raw_message;
         if (user_message.len == 0) continue;
 
         if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
