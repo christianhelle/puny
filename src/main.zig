@@ -54,50 +54,69 @@ const ansi_dim = "\x1b[2m";
 const ansi_bright = "\x1b[1;37m";
 const ansi_gray = "\x1b[90m";
 
+fn parseStats(obj: std.json.ObjectMap) ?lmstudio.ChatStats {
+    const stats_val = obj.get("stats") orelse return null;
+    if (stats_val != .object) return null;
+    return lmstudio.ChatStats{
+        .input_tokens = stats_val.object.get("input_tokens").?.integer,
+        .total_output_tokens = stats_val.object.get("total_output_tokens").?.integer,
+        .reasoning_output_tokens = stats_val.object.get("reasoning_output_tokens").?.integer,
+        .tokens_per_second = @floatCast(stats_val.object.get("tokens_per_second").?.float),
+        .time_to_first_token_seconds = @floatCast(stats_val.object.get("time_to_first_token_seconds").?.float),
+        .model_load_time_seconds = if (stats_val.object.get("model_load_time_seconds")) |v| @floatCast(v.float) else null,
+    };
+}
+
 const ChatStreamCallback = struct {
     stdout: *std.Io.Writer,
     arena: std.mem.Allocator,
     has_header: bool,
     stats: ?lmstudio.ChatStats,
 
-    pub fn event(self: *@This(), event_name: []const u8, data: []const u8) !void {
-        if (std.mem.eql(u8, event_name, "reasoning.delta")) {
-            if (!self.has_header) {
-                try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
-                self.has_header = true;
+    pub fn event(self: *@This(), data: []const u8) !void {
+        const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+        const root = parsed.value;
+        if (root != .object) return;
+
+        if (root.object.get("type")) |event_type| {
+            if (event_type != .string) return;
+
+            if (std.mem.eql(u8, event_type.string, "reasoning.start")) {
+                if (!self.has_header) {
+                    try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
+                    self.has_header = true;
+                }
+                try self.stdout.print("{s}─── Reasoning ───{s}\n", .{ ansi_gray, ansi_reset });
+                try self.stdout.flush();
+            } else if (std.mem.eql(u8, event_type.string, "reasoning.delta")) {
+                const content = root.object.get("content") orelse return;
+                if (content != .string) return;
+                try self.stdout.print("{s}{s}{s}", .{ ansi_gray, content.string, ansi_reset });
+                try self.stdout.flush();
+            } else if (std.mem.eql(u8, event_type.string, "reasoning.end")) {
+                try self.stdout.print("\n{s}─── End reasoning ───{s}\n\n", .{ ansi_gray, ansi_reset });
+                try self.stdout.flush();
+            } else if (std.mem.eql(u8, event_type.string, "message.delta")) {
+                if (!self.has_header) {
+                    try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
+                    self.has_header = true;
+                }
+                const content = root.object.get("content") orelse return;
+                if (content != .string) return;
+                try self.stdout.print("{s}{s}{s}", .{ ansi_bright, content.string, ansi_reset });
+                try self.stdout.flush();
+            } else if (std.mem.eql(u8, event_type.string, "chat.end")) {
+                if (root.object.get("result")) |result_val| {
+                    if (result_val == .object) {
+                        if (parseStats(result_val.object)) |s| {
+                            self.stats = s;
+                        }
+                    }
+                } else if (parseStats(root.object)) |s| {
+                    self.stats = s;
+                }
             }
-            const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
-            defer parsed.deinit();
-            const content = parsed.value.object.get("content") orelse return;
-            if (content != .string) return;
-            try self.stdout.print("{s}{s}{s}", .{ ansi_gray, content.string, ansi_reset });
-            try self.stdout.flush();
-        } else if (std.mem.eql(u8, event_name, "reasoning.end")) {
-            try self.stdout.print("\n", .{});
-        } else if (std.mem.eql(u8, event_name, "message.delta")) {
-            if (!self.has_header) {
-                try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
-                self.has_header = true;
-            }
-            const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
-            defer parsed.deinit();
-            const content = parsed.value.object.get("content") orelse return;
-            if (content != .string) return;
-            try self.stdout.print("{s}{s}{s}", .{ ansi_bright, content.string, ansi_reset });
-            try self.stdout.flush();
-        } else if (std.mem.eql(u8, event_name, "chat.end")) {
-            const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
-            defer parsed.deinit();
-            const result = parsed.value.object.get("result") orelse return;
-            const stats_val = result.object.get("stats") orelse return;
-            var s: lmstudio.ChatStats = undefined;
-            s.input_tokens = stats_val.object.get("input_tokens").?.integer;
-            s.total_output_tokens = stats_val.object.get("total_output_tokens").?.integer;
-            s.reasoning_output_tokens = stats_val.object.get("reasoning_output_tokens").?.integer;
-            s.tokens_per_second = @floatCast(stats_val.object.get("tokens_per_second").?.float);
-            s.time_to_first_token_seconds = @floatCast(stats_val.object.get("time_to_first_token_seconds").?.float);
-            s.model_load_time_seconds = if (stats_val.object.get("model_load_time_seconds")) |v| @floatCast(v.float) else null;
-            self.stats = s;
         }
     }
 };
