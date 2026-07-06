@@ -25,7 +25,9 @@
         "operationId": "chat",
         "summary": "Chat with a model",
         "description": "Send a message to a model and receive a response. Supports MCP integration.",
-        "tags": ["Chat"],
+        "tags": [
+          "Chat"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -44,6 +46,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ChatResponse"
                 }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
               }
             }
           }
@@ -55,7 +62,9 @@
         "operationId": "listModels",
         "summary": "List your models",
         "description": "Get a list of available models on your system, including both LLMs and embedding models.",
-        "tags": ["Models"],
+        "tags": [
+          "Models"
+        ],
         "responses": {
           "200": {
             "description": "List of available models",
@@ -75,7 +84,9 @@
         "operationId": "loadModel",
         "summary": "Load a model",
         "description": "Load an LLM or Embedding model into memory with custom configuration for inference.",
-        "tags": ["Models"],
+        "tags": [
+          "Models"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -105,7 +116,9 @@
         "operationId": "unloadModel",
         "summary": "Unload a model",
         "description": "Unload a loaded model from memory.",
-        "tags": ["Models"],
+        "tags": [
+          "Models"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -135,7 +148,9 @@
         "operationId": "downloadModel",
         "summary": "Download a model",
         "description": "Download LLMs and embedding models.",
-        "tags": ["Models"],
+        "tags": [
+          "Models"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -165,7 +180,9 @@
         "operationId": "getDownloadStatus",
         "summary": "Get download status",
         "description": "Get the status of model downloads.",
-        "tags": ["Models"],
+        "tags": [
+          "Models"
+        ],
         "parameters": [
           {
             "name": "job_id",
@@ -204,7 +221,10 @@
     "schemas": {
       "ChatRequest": {
         "type": "object",
-        "required": ["model", "input"],
+        "required": [
+          "model",
+          "input"
+        ],
         "properties": {
           "model": {
             "type": "string",
@@ -285,7 +305,13 @@
           "reasoning": {
             "type": "string",
             "description": "Reasoning setting. Will error if the model being used does not support the reasoning setting",
-            "enum": ["off", "low", "medium", "high", "on"]
+            "enum": [
+              "off",
+              "low",
+              "medium",
+              "high",
+              "on"
+            ]
           },
           "context_length": {
             "type": "integer",
@@ -305,7 +331,9 @@
       },
       "ChatInputItem": {
         "type": "object",
-        "required": ["type"],
+        "required": [
+          "type"
+        ],
         "oneOf": [
           {
             "$ref": "#/components/schemas/TextInput"
@@ -324,11 +352,16 @@
       },
       "TextInput": {
         "type": "object",
-        "required": ["type", "content"],
+        "required": [
+          "type",
+          "content"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["message"],
+            "enum": [
+              "message"
+            ],
             "description": "Type of input item"
           },
           "content": {
@@ -339,11 +372,16 @@
       },
       "ImageInput": {
         "type": "object",
-        "required": ["type", "data_url"],
+        "required": [
+          "type",
+          "data_url"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["image"],
+            "enum": [
+              "image"
+            ],
             "description": "Type of input item"
           },
           "data_url": {
@@ -355,11 +393,16 @@
       },
       "PluginIntegration": {
         "type": "object",
-        "required": ["type", "id"],
+        "required": [
+          "type",
+          "id"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["plugin"],
+            "enum": [
+              "plugin"
+            ],
             "description": "Type of integration"
           },
           "id": {
@@ -377,11 +420,17 @@
       },
       "EphemeralMcpIntegration": {
         "type": "object",
-        "required": ["type", "server_label", "server_url"],
+        "required": [
+          "type",
+          "server_label",
+          "server_url"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["ephemeral_mcp"],
+            "enum": [
+              "ephemeral_mcp"
+            ],
             "description": "Type of integration"
           },
           "server_label": {
@@ -411,7 +460,11 @@
       },
       "ChatResponse": {
         "type": "object",
-        "required": ["model_instance_id", "output", "stats"],
+        "required": [
+          "model_instance_id",
+          "output",
+          "stats"
+        ],
         "properties": {
           "model_instance_id": {
             "type": "string",
@@ -436,7 +489,9 @@
       },
       "ChatOutputItem": {
         "type": "object",
-        "required": ["type"],
+        "required": [
+          "type"
+        ],
         "oneOf": [
           {
             "$ref": "#/components/schemas/MessageOutput"
@@ -463,11 +518,16 @@
       },
       "MessageOutput": {
         "type": "object",
-        "required": ["type", "content"],
+        "required": [
+          "type",
+          "content"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["message"],
+            "enum": [
+              "message"
+            ],
             "description": "Type of output item"
           },
           "content": {
@@ -478,11 +538,19 @@
       },
       "ToolCallOutput": {
         "type": "object",
-        "required": ["type", "tool", "arguments", "output", "provider_info"],
+        "required": [
+          "type",
+          "tool",
+          "arguments",
+          "output",
+          "provider_info"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["tool_call"],
+            "enum": [
+              "tool_call"
+            ],
             "description": "Type of output item"
           },
           "tool": {
@@ -505,11 +573,16 @@
       },
       "ReasoningOutput": {
         "type": "object",
-        "required": ["type", "content"],
+        "required": [
+          "type",
+          "content"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["reasoning"],
+            "enum": [
+              "reasoning"
+            ],
             "description": "Type of output item"
           },
           "content": {
@@ -520,11 +593,17 @@
       },
       "InvalidToolCallOutput": {
         "type": "object",
-        "required": ["type", "reason", "metadata"],
+        "required": [
+          "type",
+          "reason",
+          "metadata"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["invalid_tool_call"],
+            "enum": [
+              "invalid_tool_call"
+            ],
             "description": "Type of output item"
           },
           "reason": {
@@ -533,11 +612,17 @@
           },
           "metadata": {
             "type": "object",
-            "required": ["type", "tool_name"],
+            "required": [
+              "type",
+              "tool_name"
+            ],
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["invalid_name", "invalid_arguments"],
+                "enum": [
+                  "invalid_name",
+                  "invalid_arguments"
+                ],
                 "description": "Type of error that occurred"
               },
               "tool_name": {
@@ -559,11 +644,16 @@
       },
       "ProviderInfo": {
         "type": "object",
-        "required": ["type"],
+        "required": [
+          "type"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["plugin", "ephemeral_mcp"],
+            "enum": [
+              "plugin",
+              "ephemeral_mcp"
+            ],
             "description": "Provider type"
           },
           "plugin_id": {
@@ -578,7 +668,13 @@
       },
       "ChatStats": {
         "type": "object",
-        "required": ["input_tokens", "total_output_tokens", "reasoning_output_tokens", "tokens_per_second", "time_to_first_token_seconds"],
+        "required": [
+          "input_tokens",
+          "total_output_tokens",
+          "reasoning_output_tokens",
+          "tokens_per_second",
+          "time_to_first_token_seconds"
+        ],
         "properties": {
           "input_tokens": {
             "type": "integer",
@@ -608,7 +704,9 @@
       },
       "ListModelsResponse": {
         "type": "object",
-        "required": ["models"],
+        "required": [
+          "models"
+        ],
         "properties": {
           "models": {
             "type": "array",
@@ -621,11 +719,23 @@
       },
       "ModelInfo": {
         "type": "object",
-        "required": ["type", "publisher", "key", "display_name", "size_bytes", "loaded_instances", "max_context_length", "format"],
+        "required": [
+          "type",
+          "publisher",
+          "key",
+          "display_name",
+          "size_bytes",
+          "loaded_instances",
+          "max_context_length",
+          "format"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["llm", "embedding"],
+            "enum": [
+              "llm",
+              "embedding"
+            ],
             "description": "Type of model"
           },
           "publisher": {
@@ -648,7 +758,10 @@
           "quantization": {
             "type": "object",
             "nullable": true,
-            "required": ["name", "bits_per_weight"],
+            "required": [
+              "name",
+              "bits_per_weight"
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -685,7 +798,11 @@
           "format": {
             "type": "string",
             "nullable": true,
-            "enum": ["gguf", "mlx", null],
+            "enum": [
+              "gguf",
+              "mlx",
+              null
+            ],
             "description": "Model file format"
           },
           "capabilities": {
@@ -703,19 +820,34 @@
               "reasoning": {
                 "type": "object",
                 "description": "Public reasoning configuration for the model. Absent when no reasoning config is exposed",
-                "required": ["allowed_options", "default"],
+                "required": [
+                  "allowed_options",
+                  "default"
+                ],
                 "properties": {
                   "allowed_options": {
                     "type": "array",
                     "description": "Allowed public reasoning settings for the model",
                     "items": {
                       "type": "string",
-                      "enum": ["off", "on", "low", "medium", "high"]
+                      "enum": [
+                        "off",
+                        "on",
+                        "low",
+                        "medium",
+                        "high"
+                      ]
                     }
                   },
                   "default": {
                     "type": "string",
-                    "enum": ["off", "on", "low", "medium", "high"],
+                    "enum": [
+                      "off",
+                      "on",
+                      "low",
+                      "medium",
+                      "high"
+                    ],
                     "description": "Default public reasoning setting for the model"
                   }
                 }
@@ -742,7 +874,10 @@
       },
       "LoadedInstance": {
         "type": "object",
-        "required": ["id", "config"],
+        "required": [
+          "id",
+          "config"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -755,7 +890,9 @@
       },
       "LoadedInstanceConfig": {
         "type": "object",
-        "required": ["context_length"],
+        "required": [
+          "context_length"
+        ],
         "properties": {
           "context_length": {
             "type": "integer",
@@ -785,7 +922,9 @@
       },
       "LoadModelRequest": {
         "type": "object",
-        "required": ["model"],
+        "required": [
+          "model"
+        ],
         "properties": {
           "model": {
             "type": "string",
@@ -820,11 +959,19 @@
       },
       "LoadModelResponse": {
         "type": "object",
-        "required": ["type", "instance_id", "load_time_seconds", "status"],
+        "required": [
+          "type",
+          "instance_id",
+          "load_time_seconds",
+          "status"
+        ],
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["llm", "embedding"],
+            "enum": [
+              "llm",
+              "embedding"
+            ],
             "description": "Type of the loaded model"
           },
           "instance_id": {
@@ -837,7 +984,9 @@
           },
           "status": {
             "type": "string",
-            "enum": ["loaded"],
+            "enum": [
+              "loaded"
+            ],
             "description": "Load status"
           },
           "load_config": {
@@ -855,7 +1004,9 @@
       },
       "LlmLoadConfig": {
         "type": "object",
-        "required": ["context_length"],
+        "required": [
+          "context_length"
+        ],
         "properties": {
           "context_length": {
             "type": "integer",
@@ -881,7 +1032,9 @@
       },
       "EmbeddingLoadConfig": {
         "type": "object",
-        "required": ["context_length"],
+        "required": [
+          "context_length"
+        ],
         "properties": {
           "context_length": {
             "type": "integer",
@@ -891,7 +1044,9 @@
       },
       "UnloadModelRequest": {
         "type": "object",
-        "required": ["instance_id"],
+        "required": [
+          "instance_id"
+        ],
         "properties": {
           "instance_id": {
             "type": "string",
@@ -901,7 +1056,9 @@
       },
       "UnloadModelResponse": {
         "type": "object",
-        "required": ["instance_id"],
+        "required": [
+          "instance_id"
+        ],
         "properties": {
           "instance_id": {
             "type": "string",
@@ -911,7 +1068,9 @@
       },
       "DownloadModelRequest": {
         "type": "object",
-        "required": ["model"],
+        "required": [
+          "model"
+        ],
         "properties": {
           "model": {
             "type": "string",
@@ -925,7 +1084,9 @@
       },
       "DownloadModelResponse": {
         "type": "object",
-        "required": ["status"],
+        "required": [
+          "status"
+        ],
         "properties": {
           "job_id": {
             "type": "string",
@@ -933,7 +1094,13 @@
           },
           "status": {
             "type": "string",
-            "enum": ["downloading", "paused", "completed", "failed", "already_downloaded"],
+            "enum": [
+              "downloading",
+              "paused",
+              "completed",
+              "failed",
+              "already_downloaded"
+            ],
             "description": "Current status of the download"
           },
           "completed_at": {
@@ -954,7 +1121,10 @@
       },
       "DownloadStatusResponse": {
         "type": "object",
-        "required": ["job_id", "status"],
+        "required": [
+          "job_id",
+          "status"
+        ],
         "properties": {
           "job_id": {
             "type": "string",
@@ -962,7 +1132,12 @@
           },
           "status": {
             "type": "string",
-            "enum": ["downloading", "paused", "completed", "failed"],
+            "enum": [
+              "downloading",
+              "paused",
+              "completed",
+              "failed"
+            ],
             "description": "Current status of the download"
           },
           "bytes_per_second": {
