@@ -20,6 +20,7 @@ pub const StreamCallback = struct {
     arena: std.mem.Allocator,
     has_header: bool,
     stats: ?lmstudio.ChatStats,
+    response_id: ?[]const u8 = null,
 
     pub fn event(self: *@This(), data: []const u8) !void {
         const parsed = try std.json.parseFromSlice(std.json.Value, self.arena, data, .{ .ignore_unknown_fields = true });
@@ -62,6 +63,12 @@ pub const StreamCallback = struct {
                     }
                 } else if (parseStats(root.object)) |s| {
                     self.stats = s;
+                }
+
+                if (root.object.get("response_id")) |rid| {
+                    if (rid == .string) {
+                        self.response_id = try self.arena.dupe(u8, rid.string);
+                    }
                 }
             }
         }
