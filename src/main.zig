@@ -179,10 +179,14 @@ pub fn main(init: std.process.Init) !void {
         try stdout_writer.print("\nEnter your message: ", .{});
         try stdout_writer.flush();
 
-        _ = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
-            error.EndOfStream => return,
+        const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
+            error.StreamTooLong => {
+                try stdout_writer.print("\nInput too long (max {d} bytes).\n", .{stdin_buffer.len});
+                continue;
+            },
             else => return err,
         };
+        if (bytes_read == 0) return;
 
         const user_message = line_alloc.written();
         if (user_message.len == 0) continue;
