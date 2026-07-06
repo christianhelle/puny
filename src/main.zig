@@ -70,6 +70,12 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
 
+        if (std.mem.eql(u8, user_message, "/reset")) {
+            previous_response_id = null;
+            try stdout_writer.print("Conversation reset.\n", .{});
+            continue;
+        }
+
         try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
         try stdout_writer.flush();
 
