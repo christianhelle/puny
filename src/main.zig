@@ -131,6 +131,7 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     var client = lmstudio.Client.init(arena, io, "");
+    client.withBaseUrl("http://127.0.0.1:1234");
     defer client.deinit();
 
     var models = try lmstudio.listModels(&client);
