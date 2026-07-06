@@ -18,7 +18,7 @@ pub const Widget = struct {
 
     pub fn init(self: *Widget, ctx: *zz.Context) zz.Cmd(Msg) {
         self.* = .{
-            .list = zz.List([]const u8).init(ctx.allocator),
+            .list = zz.List([]const u8).init(ctx.persistent_allocator),
             .selected = null,
         };
         for (model_pick_list) |m| {
