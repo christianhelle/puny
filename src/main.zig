@@ -4,7 +4,7 @@ const zz = @import("zigzag");
 
 var model_pick_list: []const lmstudio.ModelInfo = &.{};
 
-const PickModel = struct {
+const ModelPicker = struct {
     list: zz.List([]const u8),
     selected: ?[]const u8 = null,
 
@@ -12,7 +12,7 @@ const PickModel = struct {
         key: zz.KeyEvent,
     };
 
-    pub fn init(self: *PickModel, ctx: *zz.Context) zz.Cmd(Msg) {
+    pub fn init(self: *ModelPicker, ctx: *zz.Context) zz.Cmd(Msg) {
         self.* = .{
             .list = zz.List([]const u8).init(ctx.allocator),
             .selected = null,
@@ -24,7 +24,7 @@ const PickModel = struct {
         return .none;
     }
 
-    pub fn update(self: *PickModel, msg: Msg, _: *zz.Context) zz.Cmd(Msg) {
+    pub fn update(self: *ModelPicker, msg: Msg, _: *zz.Context) zz.Cmd(Msg) {
         switch (msg) {
             .key => |k| {
                 if (k.key == .enter) {
@@ -42,7 +42,7 @@ const PickModel = struct {
         return .none;
     }
 
-    pub fn view(self: *const PickModel, ctx: *const zz.Context) []const u8 {
+    pub fn view(self: *const ModelPicker, ctx: *const zz.Context) []const u8 {
         const header = "Select a model (Use arrow keys to navigate, Enter to select, 'q' to quit):\n";
         const list_view = self.list.view(ctx.allocator) catch "Error rendering";
         return std.fmt.allocPrint(ctx.allocator, "{s}{s}", .{ header, list_view }) catch "Error";
@@ -80,14 +80,13 @@ const ChatStreamCallback = struct {
         if (root != .object) return;
 
         if (root.object.get("type")) |event_type| {
-            if (event_type != .string) return;
-
+            if (event_type != .string)
+                return;
             if (std.mem.eql(u8, event_type.string, "reasoning.start")) {
                 if (!self.has_header) {
-                    try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi_dim, ansi_reset });
                     self.has_header = true;
                 }
-                try self.stdout.print("{s}─── Reasoning ───{s}\n", .{ ansi_gray, ansi_reset });
+                try self.stdout.print("\n", .{});
                 try self.stdout.flush();
             } else if (std.mem.eql(u8, event_type.string, "reasoning.delta")) {
                 const content = root.object.get("content") orelse return;
@@ -95,7 +94,7 @@ const ChatStreamCallback = struct {
                 try self.stdout.print("{s}{s}{s}", .{ ansi_gray, content.string, ansi_reset });
                 try self.stdout.flush();
             } else if (std.mem.eql(u8, event_type.string, "reasoning.end")) {
-                try self.stdout.print("\n{s}─── End reasoning ───{s}\n\n", .{ ansi_gray, ansi_reset });
+                try self.stdout.print("\n{s}Done reasoning...{s}\n", .{ ansi_gray, ansi_reset });
                 try self.stdout.flush();
             } else if (std.mem.eql(u8, event_type.string, "message.delta")) {
                 if (!self.has_header) {
@@ -156,7 +155,7 @@ pub fn main(init: std.process.Init) !void {
     var models = try lmstudio.listModels(&client);
     model_pick_list = models.value().models;
 
-    var program = zz.Program(PickModel).init(init.gpa, io, init.environ_map);
+    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
     try program.run();
 
     const model_key = program.model.selected orelse {
@@ -219,7 +218,7 @@ pub fn main(init: std.process.Init) !void {
 
                 retry_count += 1;
                 if (retry_count >= max_retries) {
-                    try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{max_retries, err});
+                    try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ max_retries, err });
                     break;
                 }
 
@@ -235,7 +234,7 @@ pub fn main(init: std.process.Init) !void {
         }
 
         if (callback.stats) |stats| {
-            try stdout_writer.print("\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
+            try stdout_writer.print("\n\n{s}─── Stats ───{s}\n", .{ ansi_dim, ansi_reset });
             try stdout_writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
             try stdout_writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.total_output_tokens, stats.reasoning_output_tokens });
             try stdout_writer.print("  Tokens per second:   {d:.1}\n", .{stats.tokens_per_second});
