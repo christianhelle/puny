@@ -41,11 +41,13 @@ pub fn main(init: std.process.Init) !void {
 
     const selected_model = program.model.selected orelse {
         program.deinit();
+        models.deinit();
         try stdout_writer.print("No model selected.\n", .{});
         return;
     };
     const model_key = try arena.dupe(u8, selected_model);
     program.deinit();
+    models.deinit();
 
     var messages = std.array_list.Managed(openai.Message).init(arena);
     defer messages.deinit();
