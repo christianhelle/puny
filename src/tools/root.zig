@@ -42,6 +42,7 @@ const filesystem = @import("filesystem.zig");
 const shell = @import("shell.zig");
 const search = @import("search.zig");
 const git = @import("git.zig");
+const web = @import("web.zig");
 
 pub const registry = blk: {
     @setEvalBranchQuota(10000);
@@ -53,5 +54,6 @@ pub const registry = blk: {
         search.grep_search,
         git.git_status,
         git.git_diff,
+        web.web_fetch,
     };
 };
