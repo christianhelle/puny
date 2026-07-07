@@ -560,7 +560,7 @@ fn streamJson(client: *Client, path: []const u8, requestBody: anytype, callback:
     };
 }
 
-fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), client: *Client, content_type: ?[]const u8, accept: []const u8) !?[]u8 {
+pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), client: *Client, content_type: ?[]const u8, accept: []const u8) !?[]u8 {
     if (content_type) |ct| {
         try headers.append(allocator, .{ .name = "Content-Type", .value = ct });
     }

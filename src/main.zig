@@ -1,5 +1,6 @@
 const std = @import("std");
 const lmstudio = @import("providers/lmstudio.zig");
+const openai = @import("providers/openai.zig");
 const zz = @import("zigzag");
 const ansi = @import("ansi.zig");
 const chat = @import("chat.zig");
