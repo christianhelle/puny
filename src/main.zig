@@ -166,7 +166,7 @@ fn runChatTurn(
         try messages.append(.{ .assistant = assistant_content });
 
         for (assistant_content.tool_calls.?) |tc| {
-            try stdout_writer.print("\n{s}🔧 {s}{s}\n", .{ ansi.dim, tc.function.name, ansi.reset });
+            try stdout_writer.print("\n{s}🔧 {s} {s}{s}", .{ ansi.dim, tc.function.name, tc.function.arguments, ansi.reset });
             try stdout_writer.flush();
             const result = try executeTool(arena, io, tc);
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
