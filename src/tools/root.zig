@@ -41,6 +41,7 @@ pub fn dispatch(name: []const u8) ?Tool {
 const filesystem = @import("filesystem.zig");
 const shell = @import("shell.zig");
 const search = @import("search.zig");
+const git = @import("git.zig");
 
 pub const registry = blk: {
     @setEvalBranchQuota(10000);
@@ -50,5 +51,7 @@ pub const registry = blk: {
         filesystem.list_directory,
         shell.execute_shell,
         search.grep_search,
+        git.git_status,
+        git.git_diff,
     };
 };
