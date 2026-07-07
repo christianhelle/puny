@@ -89,6 +89,7 @@ const TestParams = struct {
     recursive: bool,
     count: i32,
     tags: []const []const u8,
+    limit: ?i32 = null,
 };
 
 test "schema generation" {
@@ -105,6 +106,10 @@ test "schema generation" {
     try std.testing.expectEqualStrings("boolean", props.get("recursive").?.object.get("type").?.string);
     try std.testing.expectEqualStrings("integer", props.get("count").?.object.get("type").?.string);
     try std.testing.expectEqualStrings("array", props.get("tags").?.object.get("type").?.string);
+    try std.testing.expectEqualStrings("integer", props.get("limit").?.object.get("type").?.string);
+
+    const required = params.get("required").?.array;
+    try std.testing.expectEqual(@as(usize, 4), required.items.len);
 }
 
 fn freeSchema(allocator: std.mem.Allocator, value: std.json.Value) void {
