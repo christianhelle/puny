@@ -6,14 +6,14 @@ pub const Tool = struct {
     name: []const u8,
     description: []const u8,
     schema: *const fn (allocator: std.mem.Allocator) std.mem.Allocator.Error!std.json.Value,
-    execute: *const fn (allocator: std.mem.Allocator, args: std.json.Value) anyerror![]const u8,
+    execute: *const fn (allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) anyerror![]const u8,
 };
 
 pub fn defineTool(
     comptime name: []const u8,
     comptime description: []const u8,
     comptime Params: type,
-    comptime handler: fn (allocator: std.mem.Allocator, params: Params) anyerror![]const u8,
+    comptime handler: fn (allocator: std.mem.Allocator, io: std.Io, params: Params) anyerror![]const u8,
 ) Tool {
     const Schema = schema.ToolDefinition(name, description, Params);
 
@@ -22,10 +22,10 @@ pub fn defineTool(
         .description = description,
         .schema = Schema.schema,
         .execute = struct {
-            pub fn exec(allocator: std.mem.Allocator, args: std.json.Value) ![]const u8 {
+            pub fn exec(allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) ![]const u8 {
                 const parsed = try std.json.parseFromValue(Params, allocator, args, .{});
                 defer parsed.deinit();
-                return handler(allocator, parsed.value);
+                return handler(allocator, io, parsed.value);
             }
         }.exec,
     };

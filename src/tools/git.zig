@@ -1,45 +1,19 @@
 const std = @import("std");
 const tools = @import("root.zig");
-
-fn runGit(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 {
-    var child = std.process.Child.init(args, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-
-    try child.spawn();
-
-    const stdout = try child.stdout.?.reader().readAllAlloc(allocator, 1024 * 1024);
-    errdefer allocator.free(stdout);
-    const stderr = try child.stderr.?.reader().readAllAlloc(allocator, 1024 * 1024);
-    defer allocator.free(stderr);
-
-    const term = try child.wait();
-
-    if (stdout.len == 0 and term == .Exited and term.Exited != 0) {
-        allocator.free(stdout);
-        return std.fmt.allocPrint(allocator, "git failed: {s}", .{stderr});
-    }
-
-    if (stdout.len == 0) {
-        allocator.free(stdout);
-        return "No output.";
-    }
-
-    return stdout;
-}
+const io_helpers = @import("io_helpers.zig");
 
 const GitStatusParams = struct {
     path: ?[]const u8 = null,
 };
 
-fn gitStatus(allocator: std.mem.Allocator, params: GitStatusParams) ![]const u8 {
-    var argv = std.ArrayList([]const u8).init(allocator);
+fn gitStatus(allocator: std.mem.Allocator, io: std.Io, params: GitStatusParams) ![]const u8 {
+    var argv = std.array_list.Managed([]const u8).init(allocator);
     defer argv.deinit();
     try argv.appendSlice(&[_][]const u8{ "git", "status", "--short", "--branch" });
     if (params.path) |path| {
         try argv.append(path);
     }
-    return runGit(allocator, argv.items);
+    return io_helpers.runCommand(allocator, io, argv.items, null);
 }
 
 const GitDiffParams = struct {
@@ -47,8 +21,8 @@ const GitDiffParams = struct {
     staged: ?bool = null,
 };
 
-fn gitDiff(allocator: std.mem.Allocator, params: GitDiffParams) ![]const u8 {
-    var argv = std.ArrayList([]const u8).init(allocator);
+fn gitDiff(allocator: std.mem.Allocator, io: std.Io, params: GitDiffParams) ![]const u8 {
+    var argv = std.array_list.Managed([]const u8).init(allocator);
     defer argv.deinit();
     try argv.appendSlice(&[_][]const u8{ "git", "diff" });
     if (params.staged) |staged| {
@@ -60,7 +34,7 @@ fn gitDiff(allocator: std.mem.Allocator, params: GitDiffParams) ![]const u8 {
         try argv.append("--");
         try argv.append(path);
     }
-    return runGit(allocator, argv.items);
+    return io_helpers.runCommand(allocator, io, argv.items, null);
 }
 
 pub const git_status = tools.defineTool(
