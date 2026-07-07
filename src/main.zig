@@ -46,11 +46,11 @@ pub fn main(init: std.process.Init) !void {
     };
     program.deinit();
 
-    var messages = std.ArrayList(openai.Message).init(arena);
+    var messages = std.array_list.Managed(openai.Message).init(arena);
     defer messages.deinit();
     try messages.append(.{ .system = system_prompt });
 
-    var tool_definitions = std.ArrayList(openai.ToolDefinition).init(arena);
+    var tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
     defer tool_definitions.deinit();
     for (tools.registry) |tool| {
         const schema = try tool.schema(arena);
@@ -115,7 +115,7 @@ fn runChatTurn(
     stdout_writer: *std.Io.Writer,
     random: std.Random,
     model_key: []const u8,
-    messages: *std.ArrayList(openai.Message),
+    messages: *std.array_list.Managed(openai.Message),
     tool_definitions: []const openai.ToolDefinition,
 ) !bool {
     const request = openai.ChatRequest{
@@ -163,7 +163,7 @@ fn runChatTurn(
         for (accumulator.tool_calls.items) |tc| {
             try stdout_writer.print("\n{s}🔧 {s}{s}\n", .{ ansi.dim, tc.function.name, ansi.reset });
             try stdout_writer.flush();
-            const result = try executeTool(arena, tc);
+            const result = try executeTool(arena, io, tc);
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
@@ -179,7 +179,7 @@ fn runChatTurn(
     return true;
 }
 
-fn executeTool(arena: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8 {
+fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
     const tool = tools.dispatch(tool_call.function.name) orelse {
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
     };
@@ -187,7 +187,7 @@ fn executeTool(arena: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8
     var parsed = try std.json.parseFromSlice(std.json.Value, arena, tool_call.function.arguments, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
-    return tool.execute(arena, parsed.value) catch |err| {
+    return tool.execute(arena, io, parsed.value) catch |err| {
         return std.fmt.allocPrint(arena, "Tool {s} failed: {}", .{ tool_call.function.name, err });
     };
 }
