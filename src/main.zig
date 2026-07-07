@@ -5,6 +5,7 @@ const ansi = @import("ansi.zig");
 const chat = @import("chat.zig");
 const model_picker = @import("tui/model_picker.zig");
 const retry = @import("retry.zig");
+const tools = @import("tools");
 
 const ModelPicker = model_picker.Widget;
 

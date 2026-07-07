@@ -37,4 +37,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("zigzag", zigzag.module("zigzag"));
+    exe.root_module.addImport("tools", b.createModule(.{
+        .root_source_file = b.path("src/tools/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
 }
