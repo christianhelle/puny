@@ -81,7 +81,7 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
         .exited => |code| {
             try result.appendSlice("Exit code: ");
             var buf: [32]u8 = undefined;
-            const n = try std.fmt.bufPrint(&buf, "{d}\n", .{code});
+            const n = try std.fmt.bufPrint(&buf, "{d}", .{code});
             try result.appendSlice(n);
         },
         else => {
