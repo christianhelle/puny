@@ -1,5 +1,15 @@
 const std = @import("std");
 
+pub fn dupeString(allocator: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error![]const u8 {
+    if (s.len == 0) return "";
+    return try allocator.dupe(u8, s);
+}
+
+pub fn ownedSliceOrEmpty(list: *std.array_list.Managed(u8)) std.mem.Allocator.Error![]const u8 {
+    if (list.items.len == 0) return "";
+    return try list.toOwnedSlice();
+}
+
 pub fn readFileAlloc(allocator: std.mem.Allocator, io: std.Io, path: []const u8, max_size: usize) ![]const u8 {
     const cwd = std.Io.Dir.cwd();
     return cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(max_size));
@@ -26,7 +36,7 @@ pub fn listDirectory(allocator: std.mem.Allocator, io: std.Io, path: []const u8)
         try list.append('\n');
     }
 
-    return list.toOwnedSlice();
+    return ownedSliceOrEmpty(&list);
 }
 
 pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []const u8, cwd: ?[]const u8) ![]const u8 {
@@ -90,7 +100,7 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
         try result.append('\n');
     }
 
-    return result.toOwnedSlice();
+    return ownedSliceOrEmpty(&result);
 }
 
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
@@ -104,5 +114,6 @@ pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]con
         .method = .GET,
         .response_writer = &response_body.writer,
     });
+    if (response_body.written().len == 0) return "";
     return response_body.toOwnedSlice();
 }
