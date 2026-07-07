@@ -8,6 +8,7 @@ pub fn schemaForType(allocator: std.mem.Allocator, comptime T: type, comptime fi
     switch (@typeInfo(T)) {
         .bool => return propertyObject(allocator, "boolean", field_name),
         .int, .comptime_int => return propertyObject(allocator, "integer", field_name),
+        .optional => |opt| return schemaForType(allocator, opt.child, field_name),
         .pointer => |ptr| {
             if (ptr.size == .slice and ptr.child == u8) {
                 return propertyObject(allocator, "string", field_name);
@@ -49,7 +50,9 @@ pub fn fromStruct(allocator: std.mem.Allocator, comptime T: type) !std.json.Valu
     inline for (info.@"struct".fields) |field| {
         const field_schema = try schemaForType(allocator, field.type, field.name);
         try properties.put(allocator, field.name, field_schema);
-        try required.append(.{ .string = field.name });
+        if (@typeInfo(field.type) != .optional) {
+            try required.append(.{ .string = field.name });
+        }
     }
 
     var obj = try newObject(allocator);
