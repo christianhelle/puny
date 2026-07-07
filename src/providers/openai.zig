@@ -28,22 +28,21 @@ pub const Message = union(enum) {
 
     pub fn toJson(self: Message, allocator: std.mem.Allocator) !std.json.Value {
         return switch (self) {
-            .system => |content| .{
-                .object = try std.json.ObjectMap.init(allocator, &.{
-                    .{ "role", .{ .string = "system" } },
-                    .{ "content", .{ .string = content } },
-                }, &.{}),
+            .system => |content| blk: {
+                var obj = try newObject(allocator);
+                try obj.put(allocator, "role", .{ .string = "system" });
+                try obj.put(allocator, "content", .{ .string = content });
+                break :blk .{ .object = obj };
             },
-            .user => |content| .{
-                .object = try std.json.ObjectMap.init(allocator, &.{
-                    .{ "role", .{ .string = "user" } },
-                    .{ "content", .{ .string = content } },
-                }, &.{}),
+            .user => |content| blk: {
+                var obj = try newObject(allocator);
+                try obj.put(allocator, "role", .{ .string = "user" });
+                try obj.put(allocator, "content", .{ .string = content });
+                break :blk .{ .object = obj };
             },
             .assistant => |assistant| blk: {
-                var obj = try std.json.ObjectMap.init(allocator, &.{
-                    .{ "role", .{ .string = "assistant" } },
-                }, &.{});
+                var obj = try newObject(allocator);
+                try obj.put(allocator, "role", .{ .string = "assistant" });
                 if (assistant.content) |content| {
                     try obj.put(allocator, "content", .{ .string = content });
                 } else {
@@ -52,35 +51,34 @@ pub const Message = union(enum) {
                 if (assistant.tool_calls) |tool_calls| {
                     var arr = try std.json.Array.initCapacity(allocator, tool_calls.len);
                     for (tool_calls) |tc| {
-                        const tc_obj = try std.json.ObjectMap.init(allocator, &.{
-                            .{ "id", .{ .string = tc.id } },
-                            .{ "type", .{ .string = tc.type } },
-                            .{
-                                "function",
-                                .{
-                                    .object = try std.json.ObjectMap.init(allocator, &.{
-                                        .{ "name", .{ .string = tc.function.name } },
-                                        .{ "arguments", .{ .string = tc.function.arguments } },
-                                    }, &.{}),
-                                },
-                            },
-                        }, &.{});
+                        var func = try newObject(allocator);
+                        try func.put(allocator, "name", .{ .string = tc.function.name });
+                        try func.put(allocator, "arguments", .{ .string = tc.function.arguments });
+
+                        var tc_obj = try newObject(allocator);
+                        try tc_obj.put(allocator, "id", .{ .string = tc.id });
+                        try tc_obj.put(allocator, "type", .{ .string = tc.type });
+                        try tc_obj.put(allocator, "function", .{ .object = func });
                         try arr.append(.{ .object = tc_obj });
                     }
                     try obj.put(allocator, "tool_calls", .{ .array = arr });
                 }
                 break :blk .{ .object = obj };
             },
-            .tool => |tool| .{
-                .object = try std.json.ObjectMap.init(allocator, &.{
-                    .{ "role", .{ .string = "tool" } },
-                    .{ "tool_call_id", .{ .string = tool.tool_call_id } },
-                    .{ "content", .{ .string = tool.content } },
-                }, &.{}),
+            .tool => |tool| blk: {
+                var obj = try newObject(allocator);
+                try obj.put(allocator, "role", .{ .string = "tool" });
+                try obj.put(allocator, "tool_call_id", .{ .string = tool.tool_call_id });
+                try obj.put(allocator, "content", .{ .string = tool.content });
+                break :blk .{ .object = obj };
             },
         };
     }
 };
+
+fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
+    return try std.json.ObjectMap.init(allocator, &.{}, &.{});
+}
 
 pub const ToolDefinition = struct {
     type: []const u8 = "function",
@@ -221,6 +219,36 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
     try lmstudio.parseSseReader(allocator, reader, &sse);
 }
 
+fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
+    var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
+    for (request.messages) |msg| {
+        try messages.append(try msg.toJson(allocator));
+    }
+
+    var tools = try std.json.Array.initCapacity(allocator, request.tools.len);
+    for (request.tools) |tool| {
+        var obj = try newObject(allocator);
+        try obj.put(allocator, "type", .{ .string = tool.type });
+        try obj.put(allocator, "function", tool.function);
+        try tools.append(.{ .object = obj });
+    }
+
+    var body_obj = try newObject(allocator);
+    try body_obj.put(allocator, "model", .{ .string = request.model });
+    try body_obj.put(allocator, "messages", .{ .array = messages });
+    try body_obj.put(allocator, "tools", .{ .array = tools });
+    try body_obj.put(allocator, "stream", .{ .bool = request.stream });
+
+    if (request.temperature) |temperature| {
+        try body_obj.put(allocator, "temperature", .{ .float = temperature });
+    }
+
+    var str: std.Io.Writer.Allocating = .init(allocator);
+    defer str.deinit();
+    try std.json.Stringify.value(std.json.Value{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
+    return str.toOwnedSlice();
+}
+
 test "message JSON conversion" {
     const allocator = std.testing.allocator;
 
@@ -233,37 +261,4 @@ test "message JSON conversion" {
     try std.testing.expectEqualStrings("tool", tool_msg.object.get("role").?.string);
     try std.testing.expectEqualStrings("call_1", tool_msg.object.get("tool_call_id").?.string);
     tool_msg.object.deinit(allocator);
-}
-
-fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
-    var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
-    for (request.messages) |msg| {
-        try messages.append(try msg.toJson(allocator));
-    }
-
-    var tools = try std.json.Array.initCapacity(allocator, request.tools.len);
-    for (request.tools) |tool| {
-        try tools.append(.{
-            .object = try std.json.ObjectMap.init(allocator, &.{
-                .{ "type", .{ .string = tool.type } },
-                .{ "function", tool.function },
-            }, &.{}),
-        });
-    }
-
-    var body_obj = try std.json.ObjectMap.init(allocator, &.{
-        .{ "model", .{ .string = request.model } },
-        .{ "messages", .{ .array = messages } },
-        .{ "tools", .{ .array = tools } },
-        .{ "stream", .{ .bool = request.stream } },
-    }, &.{});
-
-    if (request.temperature) |temperature| {
-        try body_obj.put(allocator, "temperature", .{ .float = temperature });
-    }
-
-    var str: std.Io.Writer.Allocating = .init(allocator);
-    defer str.deinit();
-    try std.json.Stringify.value(.{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
-    return str.toOwnedSlice();
 }

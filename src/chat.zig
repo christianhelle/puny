@@ -91,16 +91,16 @@ pub fn printStats(writer: *std.Io.Writer, stats: lmstudio.ChatStats) !void {
 const PartialToolCall = struct {
     id: []const u8,
     name: []const u8,
-    args: std.ArrayList(u8),
+    args: std.array_list.Managed(u8),
 };
 
 pub const OpenAiAccumulator = struct {
     allocator: std.mem.Allocator,
     stdout: ?*std.Io.Writer,
     has_header: bool,
-    content: std.ArrayList(u8),
-    partial_calls: std.AutoArrayHashMap(usize, PartialToolCall),
-    tool_calls: std.ArrayList(openai.ToolCall),
+    content: std.array_list.Managed(u8),
+    partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
+    tool_calls: std.array_list.Managed(openai.ToolCall),
     finish_reason: ?[]const u8,
 
     pub fn init(allocator: std.mem.Allocator, stdout: ?*std.Io.Writer) OpenAiAccumulator {
@@ -108,9 +108,9 @@ pub const OpenAiAccumulator = struct {
             .allocator = allocator,
             .stdout = stdout,
             .has_header = false,
-            .content = std.ArrayList(u8).init(allocator),
-            .partial_calls = std.AutoArrayHashMap(usize, PartialToolCall).init(allocator),
-            .tool_calls = std.ArrayList(openai.ToolCall).init(allocator),
+            .content = std.array_list.Managed(u8).init(allocator),
+            .partial_calls = .{},
+            .tool_calls = std.array_list.Managed(openai.ToolCall).init(allocator),
             .finish_reason = null,
         };
     }
@@ -121,7 +121,7 @@ pub const OpenAiAccumulator = struct {
         while (it.next()) |entry| {
             entry.value_ptr.args.deinit();
         }
-        self.partial_calls.deinit();
+        self.partial_calls.deinit(self.allocator);
         self.tool_calls.deinit();
     }
 
@@ -151,12 +151,12 @@ pub const OpenAiAccumulator = struct {
                 try self.content.appendSlice(text);
             },
             .tool_call_start => |tc| {
-                const gop = try self.partial_calls.getOrPut(tc.index);
+                const gop = try self.partial_calls.getOrPut(self.allocator, tc.index);
                 if (!gop.found_existing) {
                     gop.value_ptr.* = .{
                         .id = try self.allocator.dupe(u8, tc.id),
                         .name = try self.allocator.dupe(u8, tc.name),
-                        .args = std.ArrayList(u8).init(self.allocator),
+                        .args = std.array_list.Managed(u8).init(self.allocator),
                     };
                 }
             },
