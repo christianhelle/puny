@@ -39,11 +39,12 @@ pub fn main(init: std.process.Init) !void {
     var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
     try program.run();
 
-    const model_key = program.model.selected orelse {
+    const selected_model = program.model.selected orelse {
         program.deinit();
         try stdout_writer.print("No model selected.\n", .{});
         return;
     };
+    const model_key = try arena.dupe(u8, selected_model);
     program.deinit();
 
     var messages = std.array_list.Managed(openai.Message).init(arena);
@@ -99,7 +100,7 @@ pub fn main(init: std.process.Init) !void {
         try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
         try stdout_writer.flush();
 
-        try messages.append(.{ .user = user_message });
+        try messages.append(.{ .user = try arena.dupe(u8, user_message) });
 
         var turn_complete = false;
         while (!turn_complete) {
@@ -157,10 +158,10 @@ fn runChatTurn(
     }
 
     if (accumulator.hasToolCalls()) {
-        const assistant_content = accumulator.assistantContent().?;
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return true;
         try messages.append(.{ .assistant = assistant_content });
 
-        for (accumulator.tool_calls.items) |tc| {
+        for (assistant_content.tool_calls.?) |tc| {
             try stdout_writer.print("\n{s}🔧 {s}{s}\n", .{ ansi.dim, tc.function.name, ansi.reset });
             try stdout_writer.flush();
             const result = try executeTool(arena, io, tc);
@@ -171,7 +172,8 @@ fn runChatTurn(
     }
 
     if (accumulator.content.items.len > 0) {
-        try messages.append(.{ .assistant = .{ .content = accumulator.content.items } });
+        const content = try tools.dupeString(arena, accumulator.content.items);
+        try messages.append(.{ .assistant = .{ .content = content } });
     }
 
     try stdout_writer.print("\n", .{});
