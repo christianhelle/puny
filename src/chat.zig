@@ -96,14 +96,18 @@ const PartialToolCall = struct {
 
 pub const OpenAiAccumulator = struct {
     allocator: std.mem.Allocator,
+    stdout: ?*std.Io.Writer,
+    has_header: bool,
     content: std.ArrayList(u8),
     partial_calls: std.AutoArrayHashMap(usize, PartialToolCall),
     tool_calls: std.ArrayList(openai.ToolCall),
     finish_reason: ?[]const u8,
 
-    pub fn init(allocator: std.mem.Allocator) OpenAiAccumulator {
+    pub fn init(allocator: std.mem.Allocator, stdout: ?*std.Io.Writer) OpenAiAccumulator {
         return .{
             .allocator = allocator,
+            .stdout = stdout,
+            .has_header = false,
             .content = std.ArrayList(u8).init(allocator),
             .partial_calls = std.AutoArrayHashMap(usize, PartialToolCall).init(allocator),
             .tool_calls = std.ArrayList(openai.ToolCall).init(allocator),
@@ -135,7 +139,17 @@ pub const OpenAiAccumulator = struct {
 
     pub fn onEvent(self: *@This(), ev: openai.StreamEvent) !void {
         switch (ev) {
-            .content => |text| try self.content.appendSlice(text),
+            .content => |text| {
+                if (self.stdout) |stdout| {
+                    if (!self.has_header) {
+                        try stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi.dim, ansi.reset });
+                        self.has_header = true;
+                    }
+                    try stdout.print("{s}{s}{s}", .{ ansi.bright, text, ansi.reset });
+                    try stdout.flush();
+                }
+                try self.content.appendSlice(text);
+            },
             .tool_call_start => |tc| {
                 const gop = try self.partial_calls.getOrPut(tc.index);
                 if (!gop.found_existing) {

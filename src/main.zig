@@ -10,6 +10,14 @@ const tools = @import("tools");
 
 const ModelPicker = model_picker.Widget;
 
+const system_prompt =
+    \\You are Puny, a local AI coding assistant powered by LM Studio.
+    \\You have access to file-system, shell, search, git, and web tools.
+    \\All tools execute automatically without asking the user for confirmation.
+    \\Prefer read_file and grep_search before editing files.
+    \\When you have enough information, produce a concise final text answer.
+;
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
@@ -38,7 +46,16 @@ pub fn main(init: std.process.Init) !void {
     };
     program.deinit();
 
-    var previous_response_id: ?[]const u8 = null;
+    var messages = std.ArrayList(openai.Message).init(arena);
+    defer messages.deinit();
+    try messages.append(.{ .system = system_prompt });
+
+    var tool_definitions = std.ArrayList(openai.ToolDefinition).init(arena);
+    defer tool_definitions.deinit();
+    for (tools.registry) |tool| {
+        const schema = try tool.schema(arena);
+        try tool_definitions.append(.{ .function = schema });
+    }
 
     var stdin_buffer: [4096]u8 = undefined;
 
@@ -73,7 +90,8 @@ pub fn main(init: std.process.Init) !void {
         }
 
         if (std.mem.eql(u8, user_message, "/reset")) {
-            previous_response_id = null;
+            messages.clearRetainingCapacity();
+            try messages.append(.{ .system = system_prompt });
             try stdout_writer.print("Conversation reset.\n", .{});
             continue;
         }
@@ -81,57 +99,93 @@ pub fn main(init: std.process.Init) !void {
         try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
         try stdout_writer.flush();
 
-        var msg = try std.json.ObjectMap.init(arena, &.{}, &.{});
-        try msg.put(arena, "type", .{ .string = "text" });
-        try msg.put(arena, "content", .{ .string = user_message });
+        try messages.append(.{ .user = user_message });
 
-        var messages = try std.json.Array.initCapacity(arena, 1);
-        try messages.append(.{ .object = msg });
-
-        const chat_request = lmstudio.ChatRequest{
-            .model = model_key,
-            .input = .{ .array = messages },
-            .previous_response_id = previous_response_id,
-        };
-
-        var callback = chat.StreamCallback{
-            .stdout = stdout_writer,
-            .arena = arena,
-            .has_header = false,
-            .stats = null,
-        };
-
-        var retry_count: usize = 0;
-        const cfg = retry.default_config;
-
-        while (true) {
-            if (lmstudio.chatStreaming(&client, chat_request, &callback)) |_| break else |err| {
-                if (!retry.isTransientError(err)) {
-                    try stdout_writer.print("\nChat failed: {}\n", .{err});
-                    break;
-                }
-
-                retry_count += 1;
-                if (retry_count >= cfg.max_retries) {
-                    try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
-                    break;
-                }
-
-                var delay_ms: u64 = cfg.base_delay_ms;
-                var i: usize = 1;
-                while (i < retry_count) : (i += 1) delay_ms *= 2;
-                delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
-
-                try stdout_writer.print("\n{s}Connection error ({}), retrying in {}ms ({d}/{d})...{s}\n", .{ ansi.dim, err, delay_ms, retry_count, cfg.max_retries, ansi.reset });
-                try stdout_writer.flush();
-                io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
-            }
-        }
-
-        previous_response_id = callback.response_id;
-
-        if (callback.stats) |stats| {
-            try chat.printStats(stdout_writer, stats);
+        var turn_complete = false;
+        while (!turn_complete) {
+            turn_complete = try runChatTurn(&client, arena, io, stdout_writer, random, model_key, &messages, tool_definitions.items);
         }
     }
+}
+
+fn runChatTurn(
+    client: *lmstudio.Client,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    random: std.Random,
+    model_key: []const u8,
+    messages: *std.ArrayList(openai.Message),
+    tool_definitions: []const openai.ToolDefinition,
+) !bool {
+    const request = openai.ChatRequest{
+        .model = model_key,
+        .messages = messages.items,
+        .tools = tool_definitions,
+        .stream = true,
+    };
+
+    var accumulator = chat.OpenAiAccumulator.init(arena, stdout_writer);
+    defer accumulator.deinit();
+    const callback = accumulator.streamCallback();
+
+    var retry_count: usize = 0;
+    const cfg = retry.default_config;
+
+    while (true) {
+        if (openai.chatStreaming(client, request, callback)) |_| break else |err| {
+            if (!retry.isTransientError(err)) {
+                try stdout_writer.print("\nChat failed: {}\n", .{err});
+                return true;
+            }
+
+            retry_count += 1;
+            if (retry_count >= cfg.max_retries) {
+                try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
+                return true;
+            }
+
+            var delay_ms: u64 = cfg.base_delay_ms;
+            var i: usize = 1;
+            while (i < retry_count) : (i += 1) delay_ms *= 2;
+            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
+
+            try stdout_writer.print("\n{s}Connection error ({}), retrying in {}ms ({d}/{d})...{s}\n", .{ ansi.dim, err, delay_ms, retry_count, cfg.max_retries, ansi.reset });
+            try stdout_writer.flush();
+            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+        }
+    }
+
+    if (accumulator.hasToolCalls()) {
+        const assistant_content = accumulator.assistantContent().?;
+        try messages.append(.{ .assistant = assistant_content });
+
+        for (accumulator.tool_calls.items) |tc| {
+            const result = try executeTool(arena, tc);
+            try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
+        }
+
+        return false;
+    }
+
+    if (accumulator.content.items.len > 0) {
+        try messages.append(.{ .assistant = .{ .content = accumulator.content.items } });
+    }
+
+    try stdout_writer.print("\n", .{});
+    try stdout_writer.flush();
+    return true;
+}
+
+fn executeTool(arena: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8 {
+    const tool = tools.dispatch(tool_call.function.name) orelse {
+        return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
+    };
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, arena, tool_call.function.arguments, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    return tool.execute(arena, parsed.value) catch |err| {
+        return std.fmt.allocPrint(arena, "Tool {s} failed: {}", .{ tool_call.function.name, err });
+    };
 }
