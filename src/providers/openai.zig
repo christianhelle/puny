@@ -206,10 +206,23 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
     try req.connection.?.flush();
 
     var response = try req.receiveHead(&.{});
-    if (response.head.status.class() != .success) return error.ResponseError;
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const reader = response.reader(&transfer_buffer);
+
+    if (response.head.status.class() != .success) {
+        var body_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer body_alloc.deinit();
+        _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        std.debug.print("OpenAI chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
+            url,
+            @intFromEnum(response.head.status),
+            payload,
+            body_alloc.written(),
+        });
+        return error.ResponseError;
+    }
 
     var sse = SseCallback{
         .allocator = allocator,
