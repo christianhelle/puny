@@ -49,7 +49,6 @@ pub const StreamCallback = struct {
                 try self.stdout.flush();
             } else if (std.mem.eql(u8, event_type.string, "message.delta")) {
                 if (!self.has_header) {
-                    try self.stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi.dim, ansi.reset });
                     self.has_header = true;
                 }
                 const content = root.object.get("content") orelse return;
@@ -169,7 +168,6 @@ pub const OpenAiAccumulator = struct {
             .content => |text| {
                 if (self.stdout) |stdout| {
                     if (!self.has_header) {
-                        try stdout.print("\n\n{s}─── Response ───{s}\n", .{ ansi.dim, ansi.reset });
                         self.has_header = true;
                     }
                     try stdout.print("{s}{s}{s}", .{ ansi.bright, text, ansi.reset });
