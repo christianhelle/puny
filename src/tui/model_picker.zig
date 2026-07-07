@@ -28,6 +28,10 @@ pub const Widget = struct {
         return .none;
     }
 
+    pub fn deinit(self: *Widget) void {
+        self.list.deinit();
+    }
+
     pub fn update(self: *Widget, msg: Msg, _: *zz.Context) zz.Cmd(Msg) {
         switch (msg) {
             .key => |k| {
