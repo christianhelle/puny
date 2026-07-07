@@ -37,8 +37,6 @@ pub const StreamCallback = struct {
                 if (!self.has_header) {
                     self.has_header = true;
                 }
-                try self.stdout.print("\n", .{});
-                try self.stdout.flush();
             } else if (std.mem.eql(u8, event_type.string, "reasoning.delta")) {
                 const content = root.object.get("content") orelse return;
                 if (content != .string) return;

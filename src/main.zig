@@ -71,7 +71,7 @@ pub fn main(init: std.process.Init) !void {
         var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
         const stdin_reader = &stdin_file_reader.interface;
 
-        try stdout_writer.print("\nEnter your message: ", .{});
+        try stdout_writer.print("\n\nPrompt: ", .{});
         try stdout_writer.flush();
 
         const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
@@ -88,18 +88,20 @@ pub fn main(init: std.process.Init) !void {
         if (user_message.len == 0) continue;
 
         if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
-            try stdout_writer.print("Goodbye.\n", .{});
+            try stdout_writer.print("\nGoodbye.\n", .{});
+            try stdout_writer.flush();
             return;
         }
 
         if (std.mem.eql(u8, user_message, "/reset")) {
             messages.clearRetainingCapacity();
             try messages.append(.{ .system = system_prompt });
-            try stdout_writer.print("Conversation reset.\n", .{});
+            try stdout_writer.print("\nConversation reset.", .{});
+            try stdout_writer.flush();
             continue;
         }
 
-        try stdout_writer.print("\nChatting with model: {s}\n", .{model_key});
+        try stdout_writer.print("\nChatting with model: {s}", .{model_key});
         try stdout_writer.flush();
 
         try messages.append(.{ .user = try arena.dupe(u8, user_message) });
@@ -178,8 +180,6 @@ fn runChatTurn(
         try messages.append(.{ .assistant = .{ .content = content } });
     }
 
-    try stdout_writer.print("\n", .{});
-    try stdout_writer.flush();
     return true;
 }
 
