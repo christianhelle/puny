@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
 const lmstudio = @import("providers/lmstudio.zig");
+const openai = @import("providers/openai.zig");
 
 fn parseStats(obj: std.json.ObjectMap) ?lmstudio.ChatStats {
     const stats_val = obj.get("stats") orelse return null;
@@ -86,3 +87,102 @@ pub fn printStats(writer: *std.Io.Writer, stats: lmstudio.ChatStats) !void {
     }
     try writer.flush();
 }
+
+const PartialToolCall = struct {
+    id: []const u8,
+    name: []const u8,
+    args: std.ArrayList(u8),
+};
+
+pub const OpenAiAccumulator = struct {
+    allocator: std.mem.Allocator,
+    content: std.ArrayList(u8),
+    partial_calls: std.AutoArrayHashMap(usize, PartialToolCall),
+    tool_calls: std.ArrayList(openai.ToolCall),
+    finish_reason: ?[]const u8,
+
+    pub fn init(allocator: std.mem.Allocator) OpenAiAccumulator {
+        return .{
+            .allocator = allocator,
+            .content = std.ArrayList(u8).init(allocator),
+            .partial_calls = std.AutoArrayHashMap(usize, PartialToolCall).init(allocator),
+            .tool_calls = std.ArrayList(openai.ToolCall).init(allocator),
+            .finish_reason = null,
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.content.deinit();
+        var it = self.partial_calls.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.args.deinit();
+        }
+        self.partial_calls.deinit();
+        self.tool_calls.deinit();
+    }
+
+    pub fn hasToolCalls(self: *const @This()) bool {
+        return self.tool_calls.items.len > 0;
+    }
+
+    pub fn assistantContent(self: *const @This()) ?openai.AssistantContent {
+        if (self.content.items.len == 0 and !self.hasToolCalls()) return null;
+        return .{
+            .content = if (self.content.items.len > 0) self.content.items else null,
+            .tool_calls = if (self.tool_calls.items.len > 0) self.tool_calls.items else null,
+        };
+    }
+
+    pub fn onEvent(self: *@This(), ev: openai.StreamEvent) !void {
+        switch (ev) {
+            .content => |text| try self.content.appendSlice(text),
+            .tool_call_start => |tc| {
+                const gop = try self.partial_calls.getOrPut(tc.index);
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = .{
+                        .id = try self.allocator.dupe(u8, tc.id),
+                        .name = try self.allocator.dupe(u8, tc.name),
+                        .args = std.ArrayList(u8).init(self.allocator),
+                    };
+                }
+            },
+            .tool_call_delta => |tc| {
+                if (self.partial_calls.getPtr(tc.index)) |partial| {
+                    try partial.args.appendSlice(tc.arguments);
+                }
+            },
+            .finish => |reason| {
+                self.finish_reason = reason;
+                try self.finalizeToolCalls();
+            },
+        }
+    }
+
+    fn finalizeToolCalls(self: *@This()) !void {
+        var it = self.partial_calls.iterator();
+        while (it.next()) |entry| {
+            try self.tool_calls.append(.{
+                .id = entry.value_ptr.id,
+                .function = .{
+                    .name = entry.value_ptr.name,
+                    .arguments = try entry.value_ptr.args.toOwnedSlice(),
+                },
+            });
+        }
+        self.partial_calls.clearRetainingCapacity();
+    }
+
+    pub fn streamCallback(self: *@This()) openai.StreamCallback {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .event = struct {
+                    pub fn event(ctx: *anyopaque, ev: openai.StreamEvent) !void {
+                        const acc: *OpenAiAccumulator = @ptrCast(@alignCast(ctx));
+                        try acc.onEvent(ev);
+                    }
+                }.event,
+            },
+        };
+    }
+};
