@@ -138,6 +138,23 @@ The table below compares the features of LM Studio's `/api/v1/chat` endpoint wit
   </tbody>
 </table>
 
+## Tool calling in Puny
+
+Puny implements custom tool calling by sending requests to LM Studio's OpenAI-compatible endpoint `/v1/chat/completions`. The native `/api/v1/chat` endpoint does not support custom tools (see the comparison table above), so tool-mode chat uses the OpenAI request/response format with a client-side message history.
+
+Built-in tools:
+
+- `read_file` — read a file's contents
+- `write_file` — write/overwrite a file
+- `list_directory` — list directory entries
+- `execute_shell` — run a shell command
+- `grep_search` — search files with ripgrep
+- `git_status` — run `git status --short --branch`
+- `git_diff` — run `git diff`
+- `web_fetch` — fetch a URL over HTTP
+
+**Safety note:** Puny executes all tool calls automatically without asking for confirmation. This includes `write_file` and `execute_shell`, which can modify or delete data. Use at your own risk.
+
 ---
 
 Please report bugs by opening an issue on [Github](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues).
