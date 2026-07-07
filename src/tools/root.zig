@@ -40,6 +40,7 @@ pub fn dispatch(name: []const u8) ?Tool {
 
 const filesystem = @import("filesystem.zig");
 const shell = @import("shell.zig");
+const search = @import("search.zig");
 
 pub const registry = blk: {
     @setEvalBranchQuota(10000);
@@ -48,5 +49,6 @@ pub const registry = blk: {
         filesystem.write_file,
         filesystem.list_directory,
         shell.execute_shell,
+        search.grep_search,
     };
 };
