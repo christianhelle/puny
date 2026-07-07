@@ -75,11 +75,7 @@ pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u
             try func.put(allocator, "name", .{ .string = name });
             try func.put(allocator, "description", .{ .string = description });
             try func.put(allocator, "parameters", parameters);
-
-            var obj = try newObject(allocator);
-            try obj.put(allocator, "type", .{ .string = "function" });
-            try obj.put(allocator, "function", .{ .object = func });
-            return .{ .object = obj };
+            return .{ .object = func };
         }
     };
 }
@@ -97,10 +93,9 @@ test "schema generation" {
     const schema_value = try Schema.schema(std.testing.allocator);
     defer freeSchema(std.testing.allocator, schema_value);
 
-    try std.testing.expectEqualStrings("function", schema_value.object.get("type").?.string);
-    const func = schema_value.object.get("function").?.object;
-    try std.testing.expectEqualStrings("test_tool", func.get("name").?.string);
-    const params = func.get("parameters").?.object;
+    try std.testing.expectEqualStrings("test_tool", schema_value.object.get("name").?.string);
+    try std.testing.expectEqualStrings("A test tool.", schema_value.object.get("description").?.string);
+    const params = schema_value.object.get("parameters").?.object;
     const props = params.get("properties").?.object;
     try std.testing.expectEqualStrings("string", props.get("path").?.object.get("type").?.string);
     try std.testing.expectEqualStrings("boolean", props.get("recursive").?.object.get("type").?.string);
