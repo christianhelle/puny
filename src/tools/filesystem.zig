@@ -62,3 +62,28 @@ pub const list_directory = tools.defineTool(
     ListDirectoryParams,
     listDirectory,
 );
+
+test "write and read file" {
+    const allocator = std.testing.allocator;
+    const path = ".puny_test_file.txt";
+    const content = "hello from puny";
+
+    const write_result = try write_file.execute(allocator, .{
+        .object = try std.json.ObjectMap.init(allocator, &.{
+            .{ "path", .{ .string = path } },
+            .{ "content", .{ .string = content } },
+        }, &.{}),
+    });
+    defer allocator.free(write_result);
+    try std.testing.expectEqualStrings("File written successfully.", write_result);
+
+    const read_result = try read_file.execute(allocator, .{
+        .object = try std.json.ObjectMap.init(allocator, &.{
+            .{ "path", .{ .string = path } },
+        }, &.{}),
+    });
+    defer allocator.free(read_result);
+    try std.testing.expectEqualStrings(content, read_result);
+
+    try std.fs.cwd().deleteFile(path);
+}

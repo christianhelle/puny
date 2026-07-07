@@ -57,3 +57,15 @@ pub const registry = blk: {
         web.web_fetch,
     };
 };
+
+test "dispatch returns known tools" {
+    try std.testing.expect(dispatch("read_file") != null);
+    try std.testing.expect(dispatch("write_file") != null);
+    try std.testing.expect(dispatch("list_directory") != null);
+    try std.testing.expect(dispatch("execute_shell") != null);
+    try std.testing.expect(dispatch("grep_search") != null);
+    try std.testing.expect(dispatch("git_status") != null);
+    try std.testing.expect(dispatch("git_diff") != null);
+    try std.testing.expect(dispatch("web_fetch") != null);
+    try std.testing.expect(dispatch("unknown_tool") == null);
+}

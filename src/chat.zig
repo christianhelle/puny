@@ -200,3 +200,31 @@ pub const OpenAiAccumulator = struct {
         };
     }
 };
+
+test "OpenAiAccumulator assembles content" {
+    var acc = OpenAiAccumulator.init(std.testing.allocator, null);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "Hello" });
+    try acc.onEvent(.{ .content = " world" });
+    try acc.onEvent(.{ .finish = null });
+
+    try std.testing.expectEqualStrings("Hello world", acc.content.items);
+    try std.testing.expect(!acc.hasToolCalls());
+}
+
+test "OpenAiAccumulator assembles tool call" {
+    var acc = OpenAiAccumulator.init(std.testing.allocator, null);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"path\": \"" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "src/main.zig\"}" } });
+    try acc.onEvent(.{ .finish = "tool_calls" });
+
+    try std.testing.expect(acc.hasToolCalls());
+    try std.testing.expectEqual(@as(usize, 1), acc.tool_calls.items.len);
+    try std.testing.expectEqualStrings("call_1", acc.tool_calls.items[0].id);
+    try std.testing.expectEqualStrings("read_file", acc.tool_calls.items[0].function.name);
+    try std.testing.expectEqualStrings("{\"path\": \"src/main.zig\"}", acc.tool_calls.items[0].function.arguments);
+}
