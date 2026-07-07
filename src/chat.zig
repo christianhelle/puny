@@ -2,6 +2,7 @@ const std = @import("std");
 const ansi = @import("ansi.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const openai = @import("providers/openai.zig");
+const tools = @import("tools");
 
 fn parseStats(obj: std.json.ObjectMap) ?lmstudio.ChatStats {
     const stats_val = obj.get("stats") orelse return null;
@@ -137,6 +138,32 @@ pub const OpenAiAccumulator = struct {
         };
     }
 
+    pub fn cloneAssistantContent(self: *const @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!?openai.AssistantContent {
+        if (self.content.items.len == 0 and !self.hasToolCalls()) return null;
+        const content = if (self.content.items.len > 0)
+            try tools.dupeString(allocator, self.content.items)
+        else
+            null;
+        const tool_calls = if (self.tool_calls.items.len > 0) blk: {
+            const arr = try allocator.alloc(openai.ToolCall, self.tool_calls.items.len);
+            errdefer allocator.free(arr);
+            for (self.tool_calls.items, 0..) |tc, i| {
+                arr[i] = .{
+                    .id = try tools.dupeString(allocator, tc.id),
+                    .function = .{
+                        .name = try tools.dupeString(allocator, tc.function.name),
+                        .arguments = try tools.dupeString(allocator, tc.function.arguments),
+                    },
+                };
+            }
+            break :blk arr;
+        } else null;
+        return .{
+            .content = content,
+            .tool_calls = tool_calls,
+        };
+    }
+
     pub fn onEvent(self: *@This(), ev: openai.StreamEvent) !void {
         switch (ev) {
             .content => |text| {
@@ -179,7 +206,7 @@ pub const OpenAiAccumulator = struct {
                 .id = entry.value_ptr.id,
                 .function = .{
                     .name = entry.value_ptr.name,
-                    .arguments = try entry.value_ptr.args.toOwnedSlice(),
+                    .arguments = try tools.ownedSliceOrEmpty(&entry.value_ptr.args),
                 },
             });
         }
