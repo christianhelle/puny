@@ -1,5 +1,9 @@
 const std = @import("std");
 
+fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
+    return try std.json.ObjectMap.init(allocator, &.{}, &.{});
+}
+
 pub fn schemaForType(allocator: std.mem.Allocator, comptime T: type, comptime field_name: []const u8) !std.json.Value {
     switch (@typeInfo(T)) {
         .bool => return propertyObject(allocator, "boolean", field_name),
@@ -11,13 +15,11 @@ pub fn schemaForType(allocator: std.mem.Allocator, comptime T: type, comptime fi
             if (ptr.size == .slice) {
                 const child_info = @typeInfo(ptr.child);
                 if (child_info == .pointer and child_info.pointer.size == .slice and child_info.pointer.child == u8) {
-                    var obj = try std.json.ObjectMap.init(allocator, &.{
-                        .{ "type", .{ .string = "array" } },
-                        .{ "description", .{ .string = field_name } },
-                    }, &.{});
-                    const items = try std.json.ObjectMap.init(allocator, &.{
-                        .{ "type", .{ .string = "string" } },
-                    }, &.{});
+                    var obj = try newObject(allocator);
+                    try obj.put(allocator, "type", .{ .string = "array" });
+                    try obj.put(allocator, "description", .{ .string = field_name });
+                    const items = try newObject(allocator);
+                    try items.put(allocator, "type", .{ .string = "string" });
                     try obj.put(allocator, "items", .{ .object = items });
                     return .{ .object = obj };
                 }
@@ -25,25 +27,23 @@ pub fn schemaForType(allocator: std.mem.Allocator, comptime T: type, comptime fi
         },
         else => {},
     }
-    return .{ .object = try std.json.ObjectMap.init(allocator, &.{}, &.{}) };
+    return .{ .object = try newObject(allocator) };
 }
 
 fn propertyObject(allocator: std.mem.Allocator, type_name: []const u8, description: []const u8) !std.json.Value {
-    return .{
-        .object = try std.json.ObjectMap.init(allocator, &.{
-            .{ "type", .{ .string = type_name } },
-            .{ "description", .{ .string = description } },
-        }, &.{}),
-    };
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "type", .{ .string = type_name });
+    try obj.put(allocator, "description", .{ .string = description });
+    return .{ .object = obj };
 }
 
 pub fn fromStruct(allocator: std.mem.Allocator, comptime T: type) !std.json.Value {
     const info = @typeInfo(T);
     if (info != .@"struct") {
-        return .{ .object = try std.json.ObjectMap.init(allocator, &.{}, &.{}) };
+        return .{ .object = try newObject(allocator) };
     }
 
-    var properties = try std.json.ObjectMap.init(allocator, &.{}, &.{});
+    var properties = try newObject(allocator);
     var required = try std.json.Array.initCapacity(allocator, info.@"struct".fields.len);
 
     inline for (info.@"struct".fields) |field| {
@@ -52,13 +52,11 @@ pub fn fromStruct(allocator: std.mem.Allocator, comptime T: type) !std.json.Valu
         try required.append(.{ .string = field.name });
     }
 
-    return .{
-        .object = try std.json.ObjectMap.init(allocator, &.{
-            .{ "type", .{ .string = "object" } },
-            .{ "properties", .{ .object = properties } },
-            .{ "required", .{ .array = required } },
-        }, &.{}),
-    };
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "type", .{ .string = "object" });
+    try obj.put(allocator, "properties", .{ .object = properties });
+    try obj.put(allocator, "required", .{ .array = required });
+    return .{ .object = obj };
 }
 
 pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u8, comptime Params: type) type {
@@ -69,21 +67,16 @@ pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u
 
         pub fn schema(allocator: std.mem.Allocator) !std.json.Value {
             const parameters = try fromStruct(allocator, Params);
-            return .{
-                .object = try std.json.ObjectMap.init(allocator, &.{
-                    .{ "type", .{ .string = "function" } },
-                    .{
-                        "function",
-                        .{
-                            .object = try std.json.ObjectMap.init(allocator, &.{
-                                .{ "name", .{ .string = name } },
-                                .{ "description", .{ .string = description } },
-                                .{ "parameters", parameters },
-                            }, &.{}),
-                        },
-                    },
-                }, &.{}),
-            };
+
+            var func = try newObject(allocator);
+            try func.put(allocator, "name", .{ .string = name });
+            try func.put(allocator, "description", .{ .string = description });
+            try func.put(allocator, "parameters", parameters);
+
+            var obj = try newObject(allocator);
+            try obj.put(allocator, "type", .{ .string = "function" });
+            try obj.put(allocator, "function", .{ .object = func });
+            return .{ .object = obj };
         }
     };
 }
