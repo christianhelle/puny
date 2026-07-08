@@ -2,6 +2,7 @@ const std = @import("std");
 const ansi = @import("ansi.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const openai = @import("providers/openai.zig");
+const zz = @import("zigzag");
 const tools = @import("tools");
 
 fn parseStats(obj: std.json.ObjectMap) ?lmstudio.ChatStats {
@@ -219,6 +220,22 @@ pub const OpenAiAccumulator = struct {
             });
         }
         self.partial_calls.clearRetainingCapacity();
+    }
+
+    pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !void {
+        if (self.lines_printed == 0 or self.content.items.len == 0) return;
+
+        try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
+        try stdout.flush();
+
+        var md = zz.Markdown.init();
+        const rendered = try md.render(self.allocator, self.content.items);
+        defer self.allocator.free(rendered);
+
+        try stdout.print("{s}\n", .{rendered});
+        try stdout.flush();
+
+        self.lines_printed = 0;
     }
 
     pub fn streamCallback(self: *@This()) openai.StreamCallback {
