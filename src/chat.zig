@@ -74,6 +74,14 @@ pub const StreamCallback = struct {
     }
 };
 
+fn countNewlines(text: []const u8) usize {
+    var count: usize = 0;
+    for (text) |c| {
+        if (c == '\n') count += 1;
+    }
+    return count;
+}
+
 pub fn printStats(writer: *std.Io.Writer, stats: lmstudio.ChatStats) !void {
     try writer.print("\n\n{s}─── Stats ───{s}\n", .{ ansi.dim, ansi.reset });
     try writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
@@ -96,6 +104,7 @@ pub const OpenAiAccumulator = struct {
     allocator: std.mem.Allocator,
     stdout: ?*std.Io.Writer,
     has_header: bool,
+    lines_printed: usize,
     content: std.array_list.Managed(u8),
     partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
     tool_calls: std.array_list.Managed(openai.ToolCall),
@@ -106,6 +115,7 @@ pub const OpenAiAccumulator = struct {
             .allocator = allocator,
             .stdout = stdout,
             .has_header = false,
+            .lines_printed = 0,
             .content = std.array_list.Managed(u8).init(allocator),
             .partial_calls = .{},
             .tool_calls = std.array_list.Managed(openai.ToolCall).init(allocator),
@@ -167,10 +177,12 @@ pub const OpenAiAccumulator = struct {
                 if (self.stdout) |stdout| {
                     if (!self.has_header) {
                         self.has_header = true;
+                        try stdout.print("\n", .{});
                     }
-                    try stdout.print("{s}{s}{s}", .{ ansi.bright, text, ansi.reset });
+                    try stdout.print("{s}{s}{s}", .{ ansi.dim, text, ansi.reset });
                     try stdout.flush();
                 }
+                self.lines_printed += countNewlines(text);
                 try self.content.appendSlice(text);
             },
             .tool_call_start => |tc| {
