@@ -8,12 +8,16 @@ const model_picker = @import("tui/model_picker.zig");
 const retry = @import("retry.zig");
 const tools = @import("tools");
 const prompts = @import("prompts.zig");
+const cli = @import("cli.zig");
 
 const ModelPicker = model_picker.Widget;
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
+
+    const args_slice = try init.minimal.args.toSlice(arena);
+    const parsed = cli.parseArgs(io, args_slice);
 
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -23,28 +27,56 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     var client = lmstudio.Client.init(arena, io, "");
-    client.withBaseUrl("http://127.0.0.1:1234");
+    client.withBaseUrl(parsed.url);
     defer client.deinit();
 
-    var models = try lmstudio.listModels(&client);
-    model_picker.setModels(models.value().models);
-
-    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
-    try program.run();
-
-    const selected_model = program.model.selected orelse {
+    const model_key = if (parsed.model) |model_id| blk: {
+        if (!std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234")) {
+            break :blk try arena.dupe(u8, model_id);
+        }
+        var models = try lmstudio.listModels(&client);
+        defer models.deinit();
+        const found = for (models.value().models) |m| {
+            if (std.mem.eql(u8, m.key, model_id)) break true;
+        } else false;
+        if (found) {
+            break :blk try arena.dupe(u8, model_id);
+        }
+        try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
+        model_picker.setModels(models.value().models);
+        var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
+        try program.run();
+        const picked = program.model.selected orelse {
+            program.deinit();
+            try stdout_writer.print("No model selected.\n", .{});
+            return;
+        };
+        const key = try arena.dupe(u8, picked);
         program.deinit();
-        models.deinit();
-        try stdout_writer.print("No model selected.\n", .{});
-        return;
+        break :blk key;
+    } else blk: {
+        var models = try lmstudio.listModels(&client);
+        defer models.deinit();
+        model_picker.setModels(models.value().models);
+        var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
+        try program.run();
+        const picked = program.model.selected orelse {
+            program.deinit();
+            try stdout_writer.print("No model selected.\n", .{});
+            return;
+        };
+        const key = try arena.dupe(u8, picked);
+        program.deinit();
+        break :blk key;
     };
-    const model_key = try arena.dupe(u8, selected_model);
-    program.deinit();
-    models.deinit();
 
     var messages = std.array_list.Managed(openai.Message).init(arena);
     defer messages.deinit();
     try messages.append(.{ .system = prompts.system });
+
+    if (parsed.prompt) |prompt| {
+        try messages.append(.{ .user = try arena.dupe(u8, prompt) });
+    }
 
     var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
     defer full_tool_definitions.deinit();
