@@ -7,26 +7,9 @@ const chat = @import("chat.zig");
 const model_picker = @import("tui/model_picker.zig");
 const retry = @import("retry.zig");
 const tools = @import("tools");
+const prompts = @import("prompts.zig");
 
 const ModelPicker = model_picker.Widget;
-
-const system_prompt =
-    \\You are Puny, a local AI coding assistant powered by LM Studio.
-    \\You have access to file-system, shell, search, git, and web tools.
-    \\All tools execute automatically without asking the user for confirmation.
-    \\Prefer read_file and grep_search before editing files.
-    \\When you have enough information, produce a concise final text answer.
-;
-
-const planning_prompt =
-    \\You are now in PLANNING MODE.
-    \\You MUST NOT write files, run shell commands, or make any changes.
-    \\You are a product manager. Before producing a PRD, interview the user:
-    \\- Probe requirements, assumptions, and edge cases
-    \\- Challenge vague requests and ask for specifics
-    \\- Explore constraints, dependencies, and trade-offs
-    \\Only produce a structured PRD when the user confirms they are ready.
-;
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
@@ -61,7 +44,7 @@ pub fn main(init: std.process.Init) !void {
 
     var messages = std.array_list.Managed(openai.Message).init(arena);
     defer messages.deinit();
-    try messages.append(.{ .system = system_prompt });
+    try messages.append(.{ .system = prompts.system });
 
     var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
     defer full_tool_definitions.deinit();
@@ -115,7 +98,7 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, user_message, "/reset")) {
             messages.clearRetainingCapacity();
             planning_mode = false;
-            try messages.append(.{ .system = system_prompt });
+            try messages.append(.{ .system = prompts.system });
             try stdout_writer.print("\nConversation reset.", .{});
             try stdout_writer.flush();
             continue;
@@ -123,7 +106,7 @@ pub fn main(init: std.process.Init) !void {
 
         if (std.mem.eql(u8, user_message, "/plan")) {
             planning_mode = true;
-            try messages.append(.{ .system = planning_prompt });
+            try messages.append(.{ .system = prompts.planning });
             try stdout_writer.print("\n{s}Entering planning mode. I'll interview you about requirements.{s}\n", .{ ansi.bright, ansi.reset });
             try stdout_writer.flush();
             continue;
