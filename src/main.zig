@@ -112,6 +112,14 @@ pub fn main(init: std.process.Init) !void {
             continue;
         }
 
+        if (std.mem.eql(u8, user_message, "/build")) {
+            planning_mode = false;
+            try messages.append(.{ .user = "Now implement the plan. Write all necessary code." });
+            try stdout_writer.print("\n{s}Switching to build mode. Implementing the plan.{s}\n", .{ ansi.bright, ansi.reset });
+            try stdout_writer.flush();
+            continue;
+        }
+
         try stdout_writer.print("\nChatting with model: {s}", .{model_key});
         try stdout_writer.flush();
 
