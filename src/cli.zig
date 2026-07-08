@@ -51,9 +51,8 @@ pub fn parseArgs(io: std.Io, args: []const [:0]const u8) Options {
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
     }
-    if (opts.oneshot) {
-        if (opts.prompt == null) fatal(io, "--oneshot requires --prompt\n\n", .{});
-        if (opts.model == null) fatal(io, "--oneshot requires --model\n\n", .{});
+    if (opts.oneshot and opts.prompt == null) {
+        fatal(io, "--oneshot requires --prompt\n\n", .{});
     }
     return opts;
 }
@@ -66,7 +65,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -u, --url <url>        LM Studio endpoint URL (default: http://127.0.0.1:1234)
         \\  -m, --model <id>       Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>    Pre-fill prompt as first user message
-        \\  -1, --oneshot, --one-shot  Exit after processing the prompt (requires --prompt and --model)
+        \\  -1, --oneshot, --one-shot  Exit after processing the prompt (requires --prompt)
         \\  -h, --help             Show this help text
         \\  -V, --version          Print version
         \\
