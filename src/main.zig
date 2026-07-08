@@ -104,18 +104,28 @@ pub fn main(init: std.process.Init) !void {
             continue;
         }
 
-        if (std.mem.eql(u8, user_message, "/plan")) {
+        if (std.mem.eql(u8, user_message, "/plan") or std.mem.startsWith(u8, user_message, "/plan ")) {
             planning_mode = true;
             try messages.append(.{ .system = prompts.planning });
-            try stdout_writer.print("\n{s}Entering planning mode. I'll interview you about requirements.{s}\n", .{ ansi.bright, ansi.reset });
+            if (user_message.len > 5) {
+                const rest = user_message["/plan ".len..];
+                try messages.append(.{ .user = try arena.dupe(u8, rest) });
+                try stdout_writer.print("\n{s}Entering planning mode: {s}{s}\n", .{ ansi.bright, rest, ansi.reset });
+            } else {
+                try stdout_writer.print("\n{s}Entering planning mode.{s}\n", .{ ansi.bright, ansi.reset });
+            }
             try stdout_writer.flush();
             continue;
         }
 
-        if (std.mem.eql(u8, user_message, "/build")) {
+        if (std.mem.eql(u8, user_message, "/build") or std.mem.startsWith(u8, user_message, "/build ")) {
             planning_mode = false;
             try messages.append(.{ .user = "Now implement the plan. Write all necessary code." });
-            try stdout_writer.print("\n{s}Switching to build mode. Implementing the plan.{s}\n", .{ ansi.bright, ansi.reset });
+            if (user_message.len > 6) {
+                const rest = user_message["/build ".len..];
+                try messages.append(.{ .user = try arena.dupe(u8, rest) });
+            }
+            try stdout_writer.print("\n{s}Switching to build mode.{s}\n", .{ ansi.bright, ansi.reset });
             try stdout_writer.flush();
             continue;
         }
