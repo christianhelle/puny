@@ -70,14 +70,6 @@ pub fn main(init: std.process.Init) !void {
         break :blk key;
     };
 
-    var messages = std.array_list.Managed(openai.Message).init(arena);
-    defer messages.deinit();
-    try messages.append(.{ .system = prompts.system });
-
-    if (parsed.prompt) |prompt| {
-        try messages.append(.{ .user = try arena.dupe(u8, prompt) });
-    }
-
     var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
     defer full_tool_definitions.deinit();
     for (tools.registry) |tool| {
@@ -96,29 +88,41 @@ pub fn main(init: std.process.Init) !void {
 
     var planning_mode = false;
 
+    var messages = std.array_list.Managed(openai.Message).init(arena);
+    defer messages.deinit();
+    try messages.append(.{ .system = prompts.system });
+
+    var pending_prompt = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
+
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
 
     while (true) {
-        line_alloc.clearRetainingCapacity();
+        const user_message = if (pending_prompt) |p| blk: {
+            pending_prompt = null;
+            break :blk p;
+        } else blk: {
+            line_alloc.clearRetainingCapacity();
 
-        var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
-        const stdin_reader = &stdin_file_reader.interface;
+            var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
+            const stdin_reader = &stdin_file_reader.interface;
 
-        try stdout_writer.print("\n\nPrompt: ", .{});
-        try stdout_writer.flush();
+            try stdout_writer.print("\n\nPrompt: ", .{});
+            try stdout_writer.flush();
 
-        const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
-            error.StreamTooLong => {
-                try stdout_writer.print("\nInput too long (max {d} bytes).\n", .{stdin_buffer.len});
-                continue;
-            },
-            else => return err,
+            const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
+                error.StreamTooLong => {
+                    try stdout_writer.print("\nInput too long (max {d} bytes).\n", .{stdin_buffer.len});
+                    continue;
+                },
+                else => return err,
+            };
+            if (bytes_read == 0) return;
+
+            const raw_message = line_alloc.written();
+            const result: []const u8 = if (raw_message.len > 0 and raw_message[raw_message.len - 1] == '\r') raw_message[0 .. raw_message.len - 1] else raw_message;
+            break :blk result;
         };
-        if (bytes_read == 0) return;
-
-        const raw_message = line_alloc.written();
-        const user_message = if (raw_message.len > 0 and raw_message[raw_message.len - 1] == '\r') raw_message[0 .. raw_message.len - 1] else raw_message;
         if (user_message.len == 0) continue;
 
         if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
