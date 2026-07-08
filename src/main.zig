@@ -180,6 +180,11 @@ pub fn main(init: std.process.Init) !void {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
             turn_complete = try runChatTurn(&client, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
         }
+
+        if (parsed.oneshot) {
+            try stdout_writer.print("\n", .{});
+            return;
+        }
     }
 }
 

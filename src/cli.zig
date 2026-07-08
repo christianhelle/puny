@@ -6,6 +6,7 @@ pub const Options = struct {
     url: []const u8 = "http://127.0.0.1:1234",
     model: ?[]const u8 = null,
     prompt: ?[]const u8 = null,
+    oneshot: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -40,6 +41,8 @@ pub fn parseArgs(io: std.Io, args: []const [:0]const u8) Options {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.model = args[i];
+        } else if (std.mem.eql(u8, arg, "--oneshot") or std.mem.eql(u8, arg, "-1")) {
+            opts.oneshot = true;
         } else if (std.mem.eql(u8, arg, "--prompt") or std.mem.eql(u8, arg, "-p")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -59,6 +62,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -u, --url <url>        LM Studio endpoint URL (default: http://127.0.0.1:1234)
         \\  -m, --model <id>       Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>    Pre-fill prompt as first user message
+        \\  -1, --oneshot          Exit after processing the prompt (requires --prompt)
         \\  -h, --help             Show this help text
         \\  -V, --version          Print version
         \\
