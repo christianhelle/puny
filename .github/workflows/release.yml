@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-linux
+            artifact_name: puny-x86_64-linux
+            binary_name: "puny"
+
+          - os: ubuntu-latest
+            target: aarch64-linux
+            artifact_name: puny-aarch64-linux
+            binary_name: "puny"
+
+          - os: macos-latest
+            target: x86_64-darwin
+            artifact_name: puny-x86_64-darwin
+            binary_name: "puny"
+
+          - os: macos-14 # M1 runner
+            target: aarch64-darwin
+            artifact_name: puny-aarch64-darwin
+            binary_name: "puny"
+
+          - os: windows-latest
+            target: x86_64-windows-gnu
+            artifact_name: puny-x86_64-windows
+            binary_name: "puny.exe"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Zig setup
+      - name: Set up Zig 0.16.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          zig-version: 0.16.0
+
+      # Install cross-compilation deps for aarch64-linux
+      - name: Install Linux aarch64 deps (cross)
+        if: matrix.target == 'aarch64-linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      # Build for target
+      - name: Build (${{ matrix.target }})
+        shell: bash
+        env:
+          ZIG_TARGET: ${{ matrix.target }}
+        run: zig build --release=safe -Dtarget=$ZIG_TARGET
+
+      # Upload built binary
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: zig-out/bin/${{ matrix.binary_name }}
+
+  publish-release:
+    needs: build
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Get version from tag (strip leading "v")
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      # Download all build artifacts into ./artifacts/
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      # Debug: list downloaded files
+      - name: List assets
+        run: find ./artifacts -type f | sort
+
+      # Generate a changelog from commits since the previous tag
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          printf "# puny v%s\n\n## What's Changed\n\n" "${{ steps.version.outputs.VERSION }}" > CHANGELOG.md
+
+          # Find most recent tag (other than this one)
+          PREV=""
+          for tag in $(git log --tags --pretty="%H %s" -n 100 \
+            | awk '{print $2}' | grep '^v'); do
+            if [ "$tag" != "${GITHUB_REF_NAME}" ]; then
+              PREV="$tag"
+              break
+            fi
+          done
+
+          LOG=""
+          if [ -z "$PREV" ]; then
+            LOG=$(git log --oneline -n 50)
+          else
+            LOG=$(git log --oneline ${PREV}..HEAD)
+          fi
+
+          if [ -z "$LOG" ]; then
+            echo "(no changes since last release)" >> CHANGELOG.md
+          else
+            while IFS= read -r line; do
+              echo "- $line" >> CHANGELOG.md
+            done <<< "$LOG"
+          fi
+
+      # Collect asset paths for the release (artifacts/<name>/<binary>)
+      - name: Prepare assets list
+        id: assets
+        shell: bash
+        run: |
+          ASSETS=""
+          for dir in ./artifacts/*/; do
+            artifact_name=$(basename "$dir")
+            binary_path=$(find "${artifact_name}" -type f | head -1)
+            if [ -n "$binary_path" ]; then
+              # Format: local/path -> display-name (renamed on upload)
+              ASSETS="${ASSETS}${binary_path}#${artifact_name}\n"
+            fi
+          done
+          printf "%b" "$ASSETS" > /tmp/assets.txt
+          cat /tmp/assets.txt
+
+      - name: Create Release and Upload Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          name: puny v${{ steps.version.outputs.VERSION }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
