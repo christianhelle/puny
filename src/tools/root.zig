@@ -62,6 +62,18 @@ pub const registry = blk: {
     };
 };
 
+pub const planning_registry = blk: {
+    @setEvalBranchQuota(10000);
+    break :blk &[_]Tool{
+        filesystem.read_file,
+        filesystem.list_directory,
+        search.grep_search,
+        web.web_fetch,
+        git.git_status,
+        git.git_diff,
+    };
+};
+
 test "dispatch returns known tools" {
     try std.testing.expect(dispatch("read_file") != null);
     try std.testing.expect(dispatch("write_file") != null);
