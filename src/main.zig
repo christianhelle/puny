@@ -161,6 +161,10 @@ fn runChatTurn(
         }
     }
 
+    if (accumulator.content.items.len > 0) {
+        try accumulator.replaceWithRendered(stdout_writer);
+    }
+
     if (accumulator.hasToolCalls()) {
         const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return true;
         try messages.append(.{ .assistant = assistant_content });
