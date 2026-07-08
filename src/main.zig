@@ -18,6 +18,16 @@ const system_prompt =
     \\When you have enough information, produce a concise final text answer.
 ;
 
+const planning_prompt =
+    \\You are now in PLANNING MODE.
+    \\You MUST NOT write files, run shell commands, or make any changes.
+    \\You are a product manager. Before producing a PRD, interview the user:
+    \\- Probe requirements, assumptions, and edge cases
+    \\- Challenge vague requests and ask for specifics
+    \\- Explore constraints, dependencies, and trade-offs
+    \\Only produce a structured PRD when the user confirms they are ready.
+;
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
@@ -53,14 +63,23 @@ pub fn main(init: std.process.Init) !void {
     defer messages.deinit();
     try messages.append(.{ .system = system_prompt });
 
-    var tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
-    defer tool_definitions.deinit();
+    var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
+    defer full_tool_definitions.deinit();
     for (tools.registry) |tool| {
         const schema = try tool.schema(arena);
-        try tool_definitions.append(.{ .function = schema });
+        try full_tool_definitions.append(.{ .function = schema });
+    }
+
+    var planning_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
+    defer planning_tool_definitions.deinit();
+    for (tools.planning_registry) |tool| {
+        const schema = try tool.schema(arena);
+        try planning_tool_definitions.append(.{ .function = schema });
     }
 
     var stdin_buffer: [4096]u8 = undefined;
+
+    var planning_mode = false;
 
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
@@ -95,8 +114,17 @@ pub fn main(init: std.process.Init) !void {
 
         if (std.mem.eql(u8, user_message, "/reset")) {
             messages.clearRetainingCapacity();
+            planning_mode = false;
             try messages.append(.{ .system = system_prompt });
             try stdout_writer.print("\nConversation reset.", .{});
+            try stdout_writer.flush();
+            continue;
+        }
+
+        if (std.mem.eql(u8, user_message, "/plan")) {
+            planning_mode = true;
+            try messages.append(.{ .system = planning_prompt });
+            try stdout_writer.print("\n{s}Entering planning mode. I'll interview you about requirements.{s}\n", .{ ansi.bright, ansi.reset });
             try stdout_writer.flush();
             continue;
         }
@@ -108,7 +136,8 @@ pub fn main(init: std.process.Init) !void {
 
         var turn_complete = false;
         while (!turn_complete) {
-            turn_complete = try runChatTurn(&client, arena, io, stdout_writer, random, model_key, &messages, tool_definitions.items);
+            const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
+            turn_complete = try runChatTurn(&client, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
         }
     }
 }
