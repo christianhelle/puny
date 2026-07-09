@@ -195,6 +195,43 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
+fn selectModel(
+    prov: *provider.Provider,
+    model_id: ?[]const u8,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    init: std.process.Init,
+    skip_validation: bool,
+) !?[]const u8 {
+    if (model_id) |id| {
+        if (skip_validation) {
+            return try arena.dupe(u8, id);
+        }
+        var models = try prov.listModels();
+        defer models.deinit();
+        const found = for (models.value().models) |m| {
+            if (std.mem.eql(u8, m.key, id)) break true;
+        } else false;
+        if (found) {
+            return try arena.dupe(u8, id);
+        }
+        return null;
+    }
+    var models = try prov.listModels();
+    defer models.deinit();
+    model_picker.setModels(models.value().models);
+    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
+    try program.run();
+    const picked = program.model.selected orelse {
+        program.deinit();
+        return null;
+    };
+    const key = try arena.dupe(u8, picked);
+    program.deinit();
+    return key;
+}
+
 fn runChatTurn(
     prov: *provider.Provider,
     arena: std.mem.Allocator,
