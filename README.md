@@ -40,6 +40,18 @@ Or run the built binary directly:
 ./zig-out/bin/puny
 ```
 
+Point to a different LM Studio instance:
+
+```bash
+zig build run -- --url http://192.168.1.42:1234
+```
+
+Run a single prompt and exit (useful for scripting):
+
+```bash
+zig build run -- --prompt "List all .zig files" --oneshot
+```
+
 ### Mock mode (no LM Studio required)
 
 Start without a running AI backend:
@@ -48,9 +60,38 @@ Start without a running AI backend:
 zig build run -- --mock
 ```
 
-The mock provider returns canned responses and simulates tool calls based on keywords in your prompt (e.g. "read file" triggers a tool call, "error" simulates a failure). See `src/providers/mock.zig` for the full keyword map.
+The mock provider returns canned responses and simulates tool calls based on keywords in your prompt:
 
-## Commands
+| Prompt contains | Mock response |
+|---|---|
+| `read`, `file`, `code` | Calls `read_file` tool |
+| `search`, `grep`, `find` | Calls `grep_search` tool |
+| `shell`, `run`, `execute` | Calls `execute_shell` tool |
+| `error`, `timeout`, `fail` | Simulates a network error |
+| _(after a tool result)_ | Returns a completion acknowledging the result |
+| _(anything else)_ | Returns a canned text response |
+
+Use `--model` to skip the model picker in mock mode:
+
+```bash
+zig build run -- --mock --model mock-model --prompt "search for something" --oneshot
+```
+
+## CLI options
+
+| Flag | Description |
+|---|---|
+| `-u`, `--url <url>` | LM Studio endpoint URL (default: `http://127.0.0.1:1234`) |
+| `-m`, `--model <id>` | Model identifier (skips picker if found in running models) |
+| `-p`, `--prompt <text>` | Pre-fill prompt as first user message |
+| `-1`, `--oneshot` | Exit after processing the prompt (requires `--prompt`) |
+| `-M`, `--mock` | Use mock provider (no LM Studio required) |
+| `-h`, `--help` | Show help text |
+| `-V`, `--version` | Print version |
+
+## Interactive commands
+
+While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
 - `/reset` — clear the conversation history
