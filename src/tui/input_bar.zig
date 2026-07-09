@@ -85,6 +85,14 @@ pub fn readInput(
     const header_row = rows -| 2;
     const input_row = rows -| 1;
 
+    // Drain any pending input from the terminal buffer
+    // Prevents stale key events (e.g., from model picker) from triggering actions
+    var drain_buf: [256]u8 = undefined;
+    while (true) {
+        const n = terminal.readInput(&drain_buf, 0) catch break;
+        if (n == 0) break;
+    }
+
     var text_area = zz.TextArea.init(persistent);
     defer text_area.deinit();
     text_area.setSize(cols, 1);
@@ -96,11 +104,8 @@ pub fn readInput(
     var first_esc_ts: ?std.Io.Clock.Timestamp = null;
 
     while (true) {
-        const n = terminal.readInput(&input_buf, -1) catch |err| switch (err) {
-            error.ProcessFdQuotaExceeded, error.SystemResources, error.Unexpected => return .quit,
-            else => return .quit,
-        };
-        if (n == 0) return .quit;
+        const n = terminal.readInput(&input_buf, -1) catch continue;
+        if (n == 0) continue;
 
         const events = zz.input.keyboard.parseAll(arena, input_buf[0..n]) catch continue;
 
@@ -207,10 +212,7 @@ fn clearPromptArea(terminal: *zz.Terminal, rows: u16) !void {
     try terminal.moveTo(input_row, 0);
     try w.print("\x1b[2K", .{});
 
-    // Move cursor to just above the prompt area so response output isn't hidden
-    try terminal.moveTo(rows -| 3, 0);
-    // Print a newline to ensure cursor is 1 line above the prompt area
-    try w.print("\n", .{});
-
+    // Move cursor to the separator row so response output appears there
+    try terminal.moveTo(sep_row, 0);
     try terminal.flush();
 }
