@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
     };
     defer prov.deinit();
 
-    const model_key = if (parsed.model) |model_id| blk: {
+    var model_key = if (parsed.model) |model_id| blk: {
         if (!std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock) {
             break :blk try arena.dupe(u8, model_id);
         }
