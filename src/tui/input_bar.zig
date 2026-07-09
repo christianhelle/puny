@@ -81,7 +81,6 @@ const prompt_rows: u16 = 6;
 pub fn readInput(
     persistent: std.mem.Allocator,
     arena: std.mem.Allocator,
-    io: std.Io,
     terminal: *zz.Terminal,
     cols: u16,
     rows: u16,
@@ -111,7 +110,6 @@ pub fn readInput(
     renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch return .quit;
 
     var input_buf: [256]u8 = undefined;
-    var first_esc_ts: ?std.Io.Clock.Timestamp = null;
 
     while (true) {
         const n = terminal.readInput(&input_buf, -1) catch continue;
@@ -124,25 +122,12 @@ pub fn readInput(
             if (n >= 2 and input_buf[1] == '[') {
                 // CSI sequence — let the parser handle it
             } else {
-                // Standalone or double Escape
-                if (n >= 2 and input_buf[1] == 0x1b) {
-                    return .quit;
-                }
-                const now = std.Io.Clock.Timestamp.now(io, .awake);
-                if (first_esc_ts) |first| {
-                    const elapsed = first.durationTo(now).raw.nanoseconds;
-                    if (elapsed >= 0 and elapsed <= 500 * std.time.ns_per_ms) {
-                        return .quit;
-                    }
-                }
-                first_esc_ts = now;
+                // Escape → cancel/clear the prompt, never quit
                 text_area.setValue("") catch {};
-                renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch return .quit;
+                renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch {};
                 continue;
             }
         }
-        first_esc_ts = null;
-
         const events = zz.input.keyboard.parseAll(arena, input_buf[0..n]) catch continue;
 
         for (events) |event| {
@@ -157,22 +142,12 @@ pub fn readInput(
                         return .cancelled;
                     }
 
-                    // Escape handling
+                    // Escape → cancel/clear the prompt
                     if (k.key == .escape) {
-                        const now = std.Io.Clock.Timestamp.now(io, .awake);
-                        if (first_esc_ts) |first| {
-                            const elapsed = first.durationTo(now).raw.nanoseconds;
-                            if (elapsed >= 0 and elapsed <= 500 * std.time.ns_per_ms) {
-                                return .quit;
-                            }
-                        }
-                        first_esc_ts = now;
-                        // Single escape: clear input
                         text_area.setValue("") catch {};
-                        renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch return .quit;
+                        renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch {};
                         continue;
                     }
-                    first_esc_ts = null;
 
                     // Enter (no shift) → submit
                     if (k.key == .enter and !k.modifiers.shift) {

@@ -117,7 +117,7 @@ pub fn main(init: std.process.Init) !void {
                 const size = term.getSize() catch s: {
                     break :s zz.terminal.Size{ .rows = 24, .cols = 80 };
                 };
-                switch (input_bar.readInput(arena, arena, io, term, size.cols, size.rows)) {
+                switch (input_bar.readInput(arena, arena, term, size.cols, size.rows)) {
                     .submitted => |text| break :blk text,
                     .cancelled => continue,
                     .quit => {
