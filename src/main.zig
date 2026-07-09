@@ -234,7 +234,7 @@ pub fn main(init: std.process.Init) !void {
             continue;
         }
 
-        try stdout_writer.print("\nChatting with model: {s}", .{model_key});
+        try stdout_writer.print("Chatting with model: {s}", .{model_key});
         try stdout_writer.flush();
 
         try messages.append(.{ .user = try arena.dupe(u8, user_message) });
@@ -258,6 +258,13 @@ pub fn main(init: std.process.Init) !void {
             try stdout_writer.print("\n", .{});
             return;
         }
+
+        // Push conversation above the prompt area for next input
+        var i: u32 = 0;
+        while (i < 6) : (i += 1) {
+            try stdout_writer.print("\n", .{});
+        }
+        try stdout_writer.flush();
     }
 }
 
