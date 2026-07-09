@@ -7,6 +7,7 @@ pub const Options = struct {
     model: ?[]const u8 = null,
     prompt: ?[]const u8 = null,
     oneshot: bool = false,
+    mock: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -41,6 +42,8 @@ pub fn parseArgs(io: std.Io, args: []const [:0]const u8) Options {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.model = args[i];
+        } else if (std.mem.eql(u8, arg, "--mock") or std.mem.eql(u8, arg, "-M")) {
+            opts.mock = true;
         } else if (std.mem.eql(u8, arg, "--oneshot") or std.mem.eql(u8, arg, "--one-shot") or std.mem.eql(u8, arg, "-1")) {
             opts.oneshot = true;
         } else if (std.mem.eql(u8, arg, "--prompt") or std.mem.eql(u8, arg, "-p")) {
@@ -66,6 +69,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -m, --model <id>       Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>    Pre-fill prompt as first user message
         \\  -1, --oneshot, --one-shot  Exit after processing the prompt (requires --prompt)
+        \\  -M, --mock             Use mock provider (no LM Studio required)
         \\  -h, --help             Show this help text
         \\  -V, --version          Print version
         \\
