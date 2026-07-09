@@ -20,6 +20,14 @@ pub const ToolResult = struct {
     content: []const u8,
 };
 
+pub const TurnUsage = struct {
+    input_tokens: i64,
+    output_tokens: i64,
+    reasoning_output_tokens: ?i64 = null,
+    tokens_per_second: ?f64 = null,
+    time_to_first_token_seconds: ?f64 = null,
+};
+
 pub const Message = union(enum) {
     system: []const u8,
     user: []const u8,
@@ -105,6 +113,7 @@ pub const StreamEvent = union(enum) {
         arguments: []const u8,
     },
     finish: ?[]const u8,
+    usage: TurnUsage,
 };
 
 pub const StreamCallback = struct {
@@ -138,8 +147,17 @@ const DeltaChoice = struct {
     finish_reason: ?[]const u8 = null,
 };
 
+const UsageJson = struct {
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    reasoning_output_tokens: ?i64 = null,
+    tokens_per_second: ?f64 = null,
+    time_to_first_token_seconds: ?f64 = null,
+};
+
 const StreamChunk = struct {
     choices: []const DeltaChoice,
+    usage: ?UsageJson = null,
 };
 
 const SseCallback = struct {
@@ -174,6 +192,16 @@ const SseCallback = struct {
             if (choice.finish_reason) |reason| {
                 try self.callback.emit(.{ .finish = if (reason.len == 0) null else reason });
             }
+        }
+
+        if (parsed.value.usage) |usage| {
+            try self.callback.emit(.{ .usage = .{
+                .input_tokens = usage.prompt_tokens,
+                .output_tokens = usage.completion_tokens,
+                .reasoning_output_tokens = usage.reasoning_output_tokens,
+                .tokens_per_second = usage.tokens_per_second,
+                .time_to_first_token_seconds = usage.time_to_first_token_seconds,
+            } });
         }
     }
 };
