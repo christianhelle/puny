@@ -117,6 +117,12 @@ pub fn readInput(
         const n = terminal.readInput(&input_buf, -1) catch continue;
         if (n == 0) continue;
 
+        // Detect double-escape at byte level before keyboard parsing
+        // because two quick Escapes (0x1b 0x1b) get parsed as Alt+Escape, not two events
+        if (n >= 2 and input_buf[0] == 0x1b and input_buf[1] == 0x1b) {
+            return .quit;
+        }
+
         const events = zz.input.keyboard.parseAll(arena, input_buf[0..n]) catch continue;
 
         for (events) |event| {
