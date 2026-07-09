@@ -38,11 +38,11 @@ pub fn main(init: std.process.Init) !void {
     defer prov.deinit();
 
     const skip_validation = !std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
-    var model_key = (try selectModel(&prov, parsed.model, arena, io, stdout_writer, init, skip_validation)) orelse blk: {
+    var model_key = (try selectModel(&prov, parsed.model, arena, io, init, skip_validation)) orelse blk: {
         if (parsed.model) |model_id| {
             try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
         }
-        break :blk (try selectModel(&prov, null, arena, io, stdout_writer, init, false)) orelse {
+        break :blk (try selectModel(&prov, null, arena, io, init, false)) orelse {
             try stdout_writer.print("No model selected.\n", .{});
             return;
         };
@@ -155,8 +155,8 @@ pub fn main(init: std.process.Init) !void {
                 continue;
             }
             const model_id: ?[]const u8 = if (user_message.len > 7) user_message["/model ".len..] else null;
-            const skip_validation = parsed.mock;
-            const new_key = (try selectModel(&prov, model_id, arena, io, stdout_writer, init, skip_validation)) orelse {
+            const model_skip_validation = parsed.mock;
+            const new_key = (try selectModel(&prov, model_id, arena, io, init, model_skip_validation)) orelse {
                 if (model_id != null) {
                     try stdout_writer.print("\nModel not found.\n", .{});
                     try stdout_writer.flush();
@@ -176,8 +176,9 @@ pub fn main(init: std.process.Init) !void {
             var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
             const stdin_reader = &stdin_file_reader.interface;
             _ = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch {};
-            const raw = std.mem.trimRight(u8, line_alloc.written(), "\r");
-            if (raw.len > 0 and (raw[0] == 'y' or raw[0] == 'Y')) {
+            const raw = line_alloc.written();
+            const answer = if (raw.len > 0 and raw[raw.len - 1] == '\r') raw[0 .. raw.len - 1] else raw;
+            if (answer.len > 0 and (answer[0] == 'y' or answer[0] == 'Y')) {
                 messages.clearRetainingCapacity();
                 planning_mode = false;
                 try messages.append(.{ .system = prompts.system });
@@ -211,7 +212,6 @@ fn selectModel(
     model_id: ?[]const u8,
     arena: std.mem.Allocator,
     io: std.Io,
-    stdout_writer: *std.Io.Writer,
     init: std.process.Init,
     skip_validation: bool,
 ) !?[]const u8 {
