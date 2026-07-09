@@ -95,6 +95,60 @@ pub fn printStats(writer: *std.Io.Writer, stats: lmstudio.ChatStats) !void {
     try writer.flush();
 }
 
+pub const SessionStats = struct {
+    turn_count: usize = 0,
+    input_tokens: i64 = 0,
+    output_tokens: i64 = 0,
+    reasoning_output_tokens: i64 = 0,
+    ttft_sum: f64 = 0,
+    ttft_count: usize = 0,
+    tps_sum: f64 = 0,
+    tps_count: usize = 0,
+    start_time: i128,
+
+    pub fn init() SessionStats {
+        return .{
+            .start_time = std.time.nanoTimestamp(),
+        };
+    }
+
+    pub fn addTurn(self: *@This(), usage: openai.TurnUsage) void {
+        self.turn_count += 1;
+        self.input_tokens += usage.input_tokens;
+        self.output_tokens += usage.output_tokens;
+        if (usage.reasoning_output_tokens) |r| {
+            self.reasoning_output_tokens += r;
+        }
+        if (usage.time_to_first_token_seconds) |t| {
+            self.ttft_sum += t;
+            self.ttft_count += 1;
+        }
+        if (usage.tokens_per_second) |t| {
+            self.tps_sum += t;
+            self.tps_count += 1;
+        }
+    }
+
+    pub fn print(self: *const @This(), writer: *std.Io.Writer) !void {
+        const now = std.time.nanoTimestamp();
+        const elapsed_s = @as(f64, @floatFromInt(now - self.start_time)) / std.time.ns_per_s;
+
+        try writer.print("\n{s}─── Session Stats ───{s}\n", .{ ansi.dim, ansi.reset });
+        try writer.print("  Turns:               {d}\n", .{self.turn_count});
+        try writer.print("  Input tokens:        {d}\n", .{self.input_tokens});
+        try writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ self.output_tokens, self.reasoning_output_tokens });
+        try writer.print("  Total tokens:        {d}\n", .{self.input_tokens + self.output_tokens});
+        try writer.print("  Session duration:    {d:.1}s\n", .{elapsed_s});
+        if (self.tps_count > 0) {
+            try writer.print("  Avg tokens/sec:      {d:.1}\n", .{self.tps_sum / @as(f64, @floatFromInt(self.tps_count))});
+        }
+        if (self.ttft_count > 0) {
+            try writer.print("  Avg TTFT:            {d:.2}s\n", .{self.ttft_sum / @as(f64, @floatFromInt(self.ttft_count))});
+        }
+        try writer.flush();
+    }
+};
+
 const PartialToolCall = struct {
     id: []const u8,
     name: []const u8,
