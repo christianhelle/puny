@@ -276,7 +276,16 @@ fn selectModel(
     var models = try prov.listModels();
     defer models.deinit();
     model_picker.setModels(models.value().models);
-    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
+
+    // Ensure cancel module is stopped before running the TUI to avoid
+    // console mode conflicts on Windows (ConPTY pipe disconnection).
+    cancel.stop();
+
+    var program = zz.Program(ModelPicker).initWithOptions(init.gpa, io, init.environ_map, .{
+        .alt_screen = false,
+        .bracketed_paste = false,
+        .mouse = false,
+    });
     try program.run();
     const picked = program.model.selected orelse {
         program.deinit();
