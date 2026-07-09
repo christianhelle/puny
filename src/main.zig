@@ -9,6 +9,8 @@ const retry = @import("retry.zig");
 const tools = @import("tools");
 const prompts = @import("prompts.zig");
 const cli = @import("cli.zig");
+const provider = @import("providers/provider.zig");
+const mock = @import("providers/mock.zig");
 
 const ModelPicker = model_picker.Widget;
 
@@ -26,15 +28,20 @@ pub fn main(init: std.process.Init) !void {
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
-    var client = lmstudio.Client.init(arena, io, "");
-    client.withBaseUrl(parsed.url);
-    defer client.deinit();
+    var prov: provider.Provider = if (parsed.mock)
+        .{ .mock = mock.MockClient.init(arena, io) }
+    else blk: {
+        var c = lmstudio.Client.init(arena, io, "");
+        c.withBaseUrl(parsed.url);
+        break :blk .{ .lmstudio = c };
+    };
+    defer prov.deinit();
 
     const model_key = if (parsed.model) |model_id| blk: {
-        if (!std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot) {
+        if (!std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock) {
             break :blk try arena.dupe(u8, model_id);
         }
-        var models = try lmstudio.listModels(&client);
+        var models = try prov.listModels();
         defer models.deinit();
         const found = for (models.value().models) |m| {
             if (std.mem.eql(u8, m.key, model_id)) break true;
@@ -55,7 +62,7 @@ pub fn main(init: std.process.Init) !void {
         program.deinit();
         break :blk key;
     } else blk: {
-        var models = try lmstudio.listModels(&client);
+        var models = try prov.listModels();
         defer models.deinit();
         model_picker.setModels(models.value().models);
         var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
@@ -178,7 +185,7 @@ pub fn main(init: std.process.Init) !void {
         var turn_complete = false;
         while (!turn_complete) {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
-            turn_complete = try runChatTurn(&client, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
+            turn_complete = try runChatTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
         }
 
         if (parsed.oneshot) {
@@ -189,7 +196,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn runChatTurn(
-    client: *lmstudio.Client,
+    prov: *provider.Provider,
     arena: std.mem.Allocator,
     io: std.Io,
     stdout_writer: *std.Io.Writer,
@@ -213,7 +220,7 @@ fn runChatTurn(
     const cfg = retry.default_config;
 
     while (true) {
-        if (openai.chatStreaming(client, request, callback)) |_| break else |err| {
+        if (prov.chatStreaming(request, callback)) |_| break else |err| {
             if (!retry.isTransientError(err)) {
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
                 return true;
