@@ -233,7 +233,8 @@ pub fn main(init: std.process.Init) !void {
             const result = runChatTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions) catch |err| switch (err) {
                 error.Canceled => {
                     try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
-                    continue;
+                    _ = messages.pop();
+                    break;
                 },
                 else => return err,
             };
