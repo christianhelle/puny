@@ -112,20 +112,22 @@ pub const SessionStats = struct {
         };
     }
 
-    pub fn addTurn(self: *@This(), usage: openai.TurnUsage) void {
-        self.turn_count += 1;
-        self.input_tokens += usage.input_tokens;
-        self.output_tokens += usage.output_tokens;
-        if (usage.reasoning_output_tokens) |r| {
-            self.reasoning_output_tokens += r;
-        }
-        if (usage.time_to_first_token_seconds) |t| {
-            self.ttft_sum += t;
-            self.ttft_count += 1;
-        }
-        if (usage.tokens_per_second) |t| {
-            self.tps_sum += t;
-            self.tps_count += 1;
+    pub fn addTurn(self: *@This(), usage: ?openai.TurnUsage, is_final: bool) void {
+        if (is_final) self.turn_count += 1;
+        if (usage) |u| {
+            self.input_tokens += u.input_tokens;
+            self.output_tokens += u.output_tokens;
+            if (u.reasoning_output_tokens) |r| {
+                self.reasoning_output_tokens += r;
+            }
+            if (u.time_to_first_token_seconds) |t| {
+                self.ttft_sum += t;
+                self.ttft_count += 1;
+            }
+            if (u.tokens_per_second) |t| {
+                self.tps_sum += t;
+                self.tps_count += 1;
+            }
         }
     }
 

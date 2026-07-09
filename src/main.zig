@@ -205,7 +205,7 @@ pub fn main(init: std.process.Init) !void {
         while (!turn_complete) {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
             const result = try runChatTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
-            if (result.usage) |usage| session_stats.addTurn(usage);
+            session_stats.addTurn(result.usage, result.turn_complete);
             turn_complete = result.turn_complete;
         }
 
