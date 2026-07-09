@@ -12,6 +12,8 @@ pub fn isTransientError(err: anyerror) bool {
         error.TlsFailure,
         error.SslUpgradeFailed,
         error.EndOfStream,
+        // Windows: STATUS_LOCAL_DISCONNECT from stale HTTP connection pool entries
+        error.Unexpected,
         => true,
         else => false,
     };

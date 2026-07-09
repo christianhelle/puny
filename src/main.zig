@@ -263,7 +263,7 @@ fn selectModel(
         if (skip_validation) {
             return try arena.dupe(u8, id);
         }
-        var models = try prov.listModels();
+        var models = try listModelsWithRetry(prov, io, 0);
         defer models.deinit();
         const found = for (models.value().models) |m| {
             if (std.mem.eql(u8, m.key, id)) break true;
@@ -273,7 +273,7 @@ fn selectModel(
         }
         return null;
     }
-    var models = try prov.listModels();
+    var models = try listModelsWithRetry(prov, io, 1);
     defer models.deinit();
     model_picker.setModels(models.value().models);
 
@@ -287,21 +287,7 @@ fn selectModel(
         .bracketed_paste = false,
         .mouse = false,
     });
-    if (program.run()) {
-        // success
-    } else |_| {
-        program.deinit();
-        // Retry once: transient console state (STATUS_LOCAL_DISCONNECT on Windows)
-        // can cause the first TUI run to fail. Restore console and try again.
-        cancel.restoreConsole();
-        var program2 = zz.Program(ModelPicker).initWithOptions(init.gpa, io, init.environ_map, .{
-            .alt_screen = false,
-            .bracketed_paste = false,
-            .mouse = false,
-        });
-        try program2.run();
-        program = program2;
-    }
+    try program.run();
     const picked = program.model.selected orelse {
         program.deinit();
         return null;
@@ -309,6 +295,20 @@ fn selectModel(
     const key = try arena.dupe(u8, picked);
     program.deinit();
     return key;
+}
+
+/// Call prov.listModels() with retry for transient HTTP errors.
+/// Connection pool stale connections on Windows can produce STATUS_LOCAL_DISCONNECT
+/// (mapped to error.Unexpected). Retry once after a short delay.
+fn listModelsWithRetry(prov: *provider.Provider, io: std.Io, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+    var retry_count: usize = 0;
+    while (true) {
+        if (prov.listModels()) |models| return models else |err| {
+            retry_count += 1;
+            if (retry_count > retries or !retry.isTransientError(err)) return err;
+            io.sleep(.{ .nanoseconds = @as(i96, @intCast(200 * retry_count * std.time.ns_per_ms)) }, .awake) catch {};
+        }
+    }
 }
 
 fn runChatTurn(
