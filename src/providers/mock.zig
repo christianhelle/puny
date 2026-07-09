@@ -68,7 +68,7 @@ pub const MockClient = struct {
         const last_content = findLastUserMessage(request.messages);
 
         if (isToolResultMessage(request.messages)) {
-            return respondWithCompletion(&callback, last_content);
+            return respondWithCompletion(callback, last_content);
         }
 
         if (containsWord(last_content, "error") or containsWord(last_content, "timeout") or containsWord(last_content, "fail")) {
@@ -102,7 +102,7 @@ pub const MockClient = struct {
             return;
         }
 
-        return respondWithContent(&callback, last_content);
+        return respondWithContent(callback, last_content);
     }
 };
 
@@ -130,20 +130,16 @@ fn containsWord(text: []const u8, word: []const u8) bool {
     if (text.len < word.len) return false;
     var i: usize = 0;
     while (i <= text.len - word.len) : (i += 1) {
-        if (std.ascii.toLower(text[i]) == std.ascii.toLower(word[0])) {
-            if (std.ascii.toLower(text[i + word.len - 1]) == std.ascii.toLower(word[word.len - 1])) {
-                if (std.mem.eql(u8, std.ascii.lowerString(text[i .. i + word.len], text[i .. i + word.len]), word)) {
-                    const before_ok = i == 0 or !std.ascii.isAlphanumeric(text[i - 1]);
-                    const after_ok = i + word.len >= text.len or !std.ascii.isAlphanumeric(text[i + word.len]);
-                    if (before_ok and after_ok) return true;
-                }
-            }
+        if (std.ascii.eqlIgnoreCase(text[i .. i + word.len], word)) {
+            const before_ok = i == 0 or !std.ascii.isAlphanumeric(text[i - 1]);
+            const after_ok = i + word.len >= text.len or !std.ascii.isAlphanumeric(text[i + word.len]);
+            if (before_ok and after_ok) return true;
         }
     }
     return false;
 }
 
-fn respondWithContent(callback: *const openai.StreamCallback, user_message: []const u8) !void {
+fn respondWithContent(callback: openai.StreamCallback, user_message: []const u8) !void {
     try callback.emit(.{ .content = "This is a **mock response**.\n\n" });
     try callback.emit(.{ .content = "You said: " });
     try callback.emit(.{ .content = user_message });
@@ -151,7 +147,7 @@ fn respondWithContent(callback: *const openai.StreamCallback, user_message: []co
     try callback.emit(.{ .finish = "stop" });
 }
 
-fn respondWithCompletion(callback: *const openai.StreamCallback, user_message: []const u8) !void {
+fn respondWithCompletion(callback: openai.StreamCallback, user_message: []const u8) !void {
     _ = user_message;
     try callback.emit(.{ .content = "Tool executed successfully. Here's the result:\n\n" });
     try callback.emit(.{ .content = "The operation completed. I'm running in mock mode, so the result is simulated.\n" });
