@@ -2,16 +2,6 @@ const std = @import("std");
 const lmstudio = @import("lmstudio.zig");
 const openai = @import("openai.zig");
 
-const MockModel = struct {
-    key: []const u8,
-    display_name: []const u8,
-};
-
-const mock_models = [_]MockModel{
-    .{ .key = "mock-model", .display_name = "Mock Model (GPT-4 level)" },
-    .{ .key = "mock-model-fast", .display_name = "Mock Model Fast" },
-};
-
 pub const MockClient = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -25,30 +15,13 @@ pub const MockClient = struct {
     }
 
     pub fn listModels(self: *MockClient) !lmstudio.Owned(lmstudio.ListModelsResponse) {
-        const fake_models = [_]lmstudio.ModelInfo{
-            .{
-                .publisher = "mock",
-                .key = mock_models[0].key,
-                .format = "gguf",
-                .display_name = mock_models[0].display_name,
-                .size_bytes = 0,
-                .max_context_length = 128000,
-                .loaded_instances = &.{},
-                .@"type" = "llm",
-            },
-            .{
-                .publisher = "mock",
-                .key = mock_models[1].key,
-                .format = "gguf",
-                .display_name = mock_models[1].display_name,
-                .size_bytes = 0,
-                .max_context_length = 32000,
-                .loaded_instances = &.{},
-                .@"type" = "llm",
-            },
-        };
-        const response = lmstudio.ListModelsResponse{ .models = &fake_models };
-        const json_bytes = try std.json.stringifyAlloc(self.allocator, response, .{});
+        const json =
+            \\{"models":[
+            \\  {"key":"mock-model","display_name":"Mock Model (GPT-4 level)","publisher":"mock","format":"gguf","size_bytes":0,"max_context_length":128000,"loaded_instances":[],"type":"llm"},
+            \\  {"key":"mock-model-fast","display_name":"Mock Model Fast","publisher":"mock","format":"gguf","size_bytes":0,"max_context_length":32000,"loaded_instances":[],"type":"llm"}
+            \\]}
+        ;
+        const json_bytes = try self.allocator.dupe(u8, json);
         errdefer self.allocator.free(json_bytes);
         const parsed = try std.json.parseFromSlice(
             lmstudio.ListModelsResponse,
