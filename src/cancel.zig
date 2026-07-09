@@ -1,20 +1,22 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const is_windows = builtin.os.tag == .windows;
+const Io = std.Io;
 
 /// Atomic flags shared between monitor thread and main thread.
 var cancelled: std.atomic.Value(bool) = .{ .raw = false };
 var first_esc_seen: std.atomic.Value(bool) = .{ .raw = false };
 var running: std.atomic.Value(bool) = .{ .raw = false };
-
-/// Platform-specific saved terminal state.
-var saved_termios: if (is_windows) void else std.posix.termios = .{};
-var saved_console_mode: if (is_windows) u32 else void = undefined;
-
-/// Handle to the monitor thread, if running.
 var monitor_thread: ?std.Thread = null;
 
-const double_tap_window_ns: u64 = 500 * std.time.ns_per_ms;
+/// Saved terminal state for restoration.
+var saved_termios: if (is_windows) void else std.posix.termios = undefined;
+var saved_console_mode: if (is_windows) u32 else void = undefined;
+
+/// Io handle for timestamps and sleeps. Set once before spawning the thread.
+var global_io: Io = undefined;
+
+const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
 /// Returns true if a double-Escape cancellation has been triggered.
 pub fn isCancelled() bool {
@@ -26,16 +28,23 @@ pub fn isFirstEscSeen() bool {
     return first_esc_seen.load(.monotonic);
 }
 
+/// Clears the first-Escape-seen flag after printing the hint.
+pub fn clearFirstEscSeen() void {
+    first_esc_seen.store(false, .monotonic);
+}
+
 /// Resets cancellation flags. Call before starting a new turn.
 pub fn reset() void {
     cancelled.store(false, .monotonic);
     first_esc_seen.store(false, .monotonic);
 }
 
-/// Start monitoring stdin for double-Escape. Saves terminal state,
-/// switches to raw mode, and spawns a monitor thread.
-pub fn start() !void {
+/// Start monitoring stdin for double-Escape. Takes an `io` handle for
+/// timestamps and sleeps. Saves terminal state, switches to raw mode,
+/// and spawns a monitor thread.
+pub fn start(io: Io) !void {
     if (running.load(.monotonic)) return;
+    global_io = io;
     cancelled.store(false, .monotonic);
     first_esc_seen.store(false, .monotonic);
     running.store(true, .monotonic);
@@ -69,17 +78,27 @@ fn setRawMode(enable: bool) !void {
 fn setRawModePosix(enable: bool) !void {
     const posix = std.posix;
     if (enable) {
-        var raw: posix.termios = undefined;
-        try posix.tcgetattr(0, &raw);
+        var raw = try posix.tcgetattr(0);
         saved_termios = raw;
-        // cfmakeraw equivalent
-        raw.iflag &= ~@as(std.os.linux.IFLAG, @bitCast(@as(u31, @bitCast(std.posix.IGNBRK | std.posix.BRKINT | std.posix.PARMRK | std.posix.ISTRIP | std.posix.INLCR | std.posix.IGNCR | std.posix.ICRNL | std.posix.IXON))));
-        raw.oflag &= ~@as(std.os.linux.OFLAG, @bitCast(@as(u31, @bitCast(std.posix.OPOST))));
-        raw.lflag &= ~@as(std.os.linux.LFLAG, @bitCast(@as(u31, @bitCast(std.posix.ECHO | std.posix.ECHONL | std.posix.ICANON | std.posix.ISIG | std.posix.IEXTEN))));
-        raw.cflag &= ~@as(std.os.linux.CFLAG, @bitCast(@as(u31, @bitCast(std.posix.CSIZE | std.posix.PARENB))));
-        raw.cflag |= @as(std.os.linux.CFLAG, @bitCast(@as(u31, @bitCast(std.posix.CS8))));
-        raw.cc[posix.VMIN] = 1;
-        raw.cc[posix.VTIME] = 0;
+        // cfmakeraw(3): put terminal into raw mode
+        raw.iflag.IGNBRK = true;
+        raw.iflag.BRKINT = false;
+        raw.iflag.PARMRK = false;
+        raw.iflag.ISTRIP = false;
+        raw.iflag.INLCR = false;
+        raw.iflag.IGNCR = false;
+        raw.iflag.ICRNL = false;
+        raw.iflag.IXON = false;
+        raw.oflag.OPOST = false;
+        raw.lflag.ECHO = false;
+        raw.lflag.ECHONL = false;
+        raw.lflag.ICANON = false;
+        raw.lflag.ISIG = false;
+        raw.lflag.IEXTEN = false;
+        raw.cflag.CSIZE = .CS8;
+        raw.cflag.PARENB = false;
+        raw.cc[@intFromEnum(posix.V.MIN)] = 1;
+        raw.cc[@intFromEnum(posix.V.TIME)] = 0;
         try posix.tcsetattr(0, .NOW, &raw);
     } else {
         posix.tcsetattr(0, .NOW, &saved_termios) catch {};
@@ -87,19 +106,16 @@ fn setRawModePosix(enable: bool) !void {
 }
 
 fn setRawModeWindows(enable: bool) !void {
-    const windows = std.os.windows;
-    const hStdin = windows.GetStdHandle(windows.STD_INPUT_HANDLE);
-    if (hStdin == windows.INVALID_HANDLE_VALUE) return error.InvalidHandle;
+    const hStdin = getStdinHandle();
     if (enable) {
         var mode: windows.DWORD = undefined;
-        if (windows.GetConsoleMode(hStdin, &mode) == 0) return error.Unexpected;
+        if (windows.GetConsoleMode(hStdin, &mode) == .FALSE) return error.Unexpected;
         saved_console_mode = mode;
-        // Disable line input, echo, processed input — enable window input
-        mode &= ~@as(windows.DWORD, windows.ENABLE_LINE_INPUT | windows.ENABLE_ECHO_INPUT | windows.ENABLE_PROCESSED_INPUT);
-        mode |= windows.ENABLE_WINDOW_INPUT;
-        if (windows.SetConsoleMode(hStdin, mode) == 0) return error.Unexpected;
+        mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+        mode |= ENABLE_WINDOW_INPUT;
+        if (windows.SetConsoleMode(hStdin, mode) == .FALSE) return error.Unexpected;
     } else {
-        if (windows.SetConsoleMode(hStdin, saved_console_mode) == 0) {}
+        if (windows.SetConsoleMode(hStdin, saved_console_mode) == .FALSE) {}
     }
 }
 
@@ -116,7 +132,7 @@ fn monitorThread() void {
 fn monitorThreadPosix() void {
     const posix = std.posix;
     var buf: [1]u8 = undefined;
-    var first_esc_ts: ?u64 = null;
+    var first_esc_ts: ?Io.Timestamp = null;
 
     while (running.load(.monotonic)) {
         var pfd = [1]posix.pollfd{
@@ -125,7 +141,7 @@ fn monitorThreadPosix() void {
         const rc = posix.poll(&pfd, 50) catch |err| switch (err) {
             error.InvalidDesc, error.Unsupported => break,
         };
-        if (rc == 0) continue; // timeout
+        if (rc == 0) continue;
         if (pfd[0].revents & posix.POLL.IN == 0) continue;
 
         const n = posix.read(0, &buf, 1) catch break;
@@ -133,41 +149,40 @@ fn monitorThreadPosix() void {
 
         handleKeyByte(buf[0], &first_esc_ts);
     }
-    _ = posix.write(2, "\n" ++ ansi_hint_clear) catch {};
 }
 
 fn monitorThreadWindows() void {
-    const windows = std.os.windows;
-    const hStdin = windows.GetStdHandle(windows.STD_INPUT_HANDLE);
-    var first_esc_ts: ?u64 = null;
+    const hStdin = getStdinHandle();
+    var first_esc_ts: ?Io.Timestamp = null;
 
     while (running.load(.monotonic)) {
         var events_avail: windows.DWORD = 0;
-        if (windows.PeekConsoleInputW(hStdin, null, 0, &events_avail) == 0) break;
+        if (windows.PeekConsoleInputW(hStdin, null, 0, &events_avail) == .FALSE) break;
 
         if (events_avail > 0) {
             var record: windows.INPUT_RECORD = undefined;
             var events_read: windows.DWORD = 0;
-            if (windows.ReadConsoleInputW(hStdin, &record, 1, &events_read) == 0) break;
+            if (windows.ReadConsoleInputW(hStdin, &record, 1, &events_read) == .FALSE) break;
             if (events_read > 0 and
                 record.EventType == windows.KEY_EVENT and
-                record.Event.KeyEvent.bKeyDown)
+                record.Event.KeyEvent.bKeyDown != .FALSE)
             {
                 if (record.Event.KeyEvent.wVirtualKeyCode == windows.VK_ESCAPE) {
                     handleFirstEscape(&first_esc_ts);
                 } else {
                     first_esc_ts = null;
+                    first_esc_seen.store(false, .monotonic);
                 }
             }
         } else {
-            std.Thread.sleep(50 * std.time.ns_per_ms);
+            global_io.sleep(.{ .nanoseconds = @as(i96, @intCast(50 * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
 }
 
 // ── Escape detection logic ───────────────────────────────────────────
 
-fn handleKeyByte(byte: u8, first_esc_ts: *?u64) void {
+fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
     if (byte == 0x1b) {
         handleFirstEscape(first_esc_ts);
     } else {
@@ -176,34 +191,83 @@ fn handleKeyByte(byte: u8, first_esc_ts: *?u64) void {
     }
 }
 
-fn handleFirstEscape(first_esc_ts: *?u64) void {
-    const now = std.time.nanoTimestamp();
-    const abs_now: u64 = @intCast(@as(u64, @bitCast(now)));
+fn handleFirstEscape(first_esc_ts: *?Io.Timestamp) void {
+    const now = Io.Timestamp.now(global_io, .awake);
 
     if (first_esc_ts.*) |first| {
-        if (abs_now -% first <= double_tap_window_ns) {
+        const elapsed = first.durationTo(now).nanoseconds;
+        if (elapsed >= 0 and elapsed <= double_tap_window_ns) {
             cancelled.store(true, .monotonic);
-            printStderr(ansi_cancelled);
             return;
         }
     }
-    first_esc_ts.* = abs_now;
+    first_esc_ts.* = now;
     first_esc_seen.store(true, .monotonic);
-    printStderr(ansi_hint);
 }
 
-fn printStderr(msg: []const u8) void {
-    if (is_windows) {
-        const windows = std.os.windows;
-        const hStderr = windows.GetStdHandle(windows.STD_ERROR_HANDLE);
-        if (hStderr == windows.INVALID_HANDLE_VALUE) return;
-        var written: windows.DWORD = 0;
-        _ = windows.WriteFile(hStderr, msg.ptr, @intCast(msg.len), &written, null);
-    } else {
-        _ = std.posix.write(2, msg) catch {};
-    }
+// ── Windows extern declarations ──────────────────────────────────────
+
+const windows = if (is_windows) struct {
+    pub const BOOL = std.os.windows.BOOL;
+    pub const DWORD = std.os.windows.DWORD;
+    pub const HANDLE = std.os.windows.HANDLE;
+
+    pub const KEY_EVENT = 0x0001;
+    pub const VK_ESCAPE = 0x1B;
+
+    pub const KEY_EVENT_RECORD = extern struct {
+        bKeyDown: BOOL,
+        wRepeatCount: u16,
+        wVirtualKeyCode: u16,
+        wVirtualScanCode: u16,
+        uChar: extern union {
+            UnicodeChar: u16,
+            AsciiChar: u8,
+        },
+        dwControlKeyState: DWORD,
+    };
+
+    pub const INPUT_RECORD = extern struct {
+        EventType: u16,
+        Event: extern union {
+            KeyEvent: KEY_EVENT_RECORD,
+            MouseEvent: extern struct {
+                dwMousePosition: extern struct {
+                    X: i16,
+                    Y: i16,
+                },
+                dwButtonState: DWORD,
+                dwControlKeyState: DWORD,
+                dwEventFlags: DWORD,
+            },
+            WindowBufferSizeEvent: extern struct {
+                dwSize: extern struct {
+                    X: i16,
+                    Y: i16,
+                },
+            },
+            MenuEvent: extern struct {
+                dwCommandId: u32,
+            },
+            FocusEvent: extern struct {
+                bSetFocus: BOOL,
+            },
+        },
+    };
+
+    pub extern "kernel32" fn GetStdHandle(dwStdHandle: DWORD) callconv(.winapi) HANDLE;
+    pub extern "kernel32" fn GetConsoleMode(hConsoleHandle: HANDLE, lpMode: *DWORD) callconv(.winapi) BOOL;
+    pub extern "kernel32" fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) callconv(.winapi) BOOL;
+    pub extern "kernel32" fn PeekConsoleInputW(hConsoleInput: HANDLE, lpBuffer: ?*INPUT_RECORD, nLength: DWORD, lpNumberOfEventsRead: *DWORD) callconv(.winapi) BOOL;
+    pub extern "kernel32" fn ReadConsoleInputW(hConsoleInput: HANDLE, lpBuffer: *INPUT_RECORD, nLength: DWORD, lpNumberOfEventsRead: *DWORD) callconv(.winapi) BOOL;
+} else void {};
+
+fn getStdinHandle() windows.HANDLE {
+    const STD_INPUT_HANDLE: u32 = @bitCast(@as(i32, -10));
+    return windows.GetStdHandle(STD_INPUT_HANDLE);
 }
 
-const ansi_hint = "\x1b[2m(press Esc again to cancel)\x1b[0m\n";
-const ansi_cancelled = "\x1b[2mCancelled.\x1b[0m\n";
-const ansi_hint_clear = "\x1b[1A\x1b[K";
+const ENABLE_LINE_INPUT: u32 = 0x0002;
+const ENABLE_ECHO_INPUT: u32 = 0x0004;
+const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
+const ENABLE_WINDOW_INPUT: u32 = 0x0008;

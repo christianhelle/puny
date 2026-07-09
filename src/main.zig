@@ -13,6 +13,7 @@ const provider = @import("providers/provider.zig");
 const mock = @import("providers/mock.zig");
 const usage = @import("usage.zig");
 const sigint = @import("sigint.zig");
+const cancel = @import("cancel.zig");
 
 const ModelPicker = model_picker.Widget;
 
@@ -229,7 +230,13 @@ pub fn main(init: std.process.Init) !void {
         var turn_complete = false;
         while (!turn_complete) {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
-            const result = try runChatTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
+            const result = runChatTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions) catch |err| switch (err) {
+                error.Canceled => {
+                    try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+                    continue;
+                },
+                else => return err,
+            };
             session_stats.addTurn(result.usage, result.turn_complete);
             turn_complete = result.turn_complete;
         }
@@ -302,7 +309,17 @@ fn runChatTurn(
     const cfg = retry.default_config;
 
     while (true) {
-        if (prov.chatStreaming(request, callback)) |_| break else |err| {
+        cancel.reset();
+        cancel.start(io) catch {};    
+
+        if (prov.chatStreaming(request, callback)) |_| {
+            cancel.stop();
+            break;
+        } else |err| {
+            cancel.stop();
+
+            if (err == error.Canceled) return error.Canceled;
+
             if (!retry.isTransientError(err)) {
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
                 return .{ .turn_complete = true, .usage = accumulator.usage };

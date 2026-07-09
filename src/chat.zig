@@ -4,6 +4,7 @@ const lmstudio = @import("providers/lmstudio.zig");
 const openai = @import("providers/openai.zig");
 const zz = @import("zigzag");
 const tools = @import("tools");
+const cancel = @import("cancel.zig");
 
 fn parseStats(obj: std.json.ObjectMap) ?lmstudio.ChatStats {
     const stats_val = obj.get("stats") orelse return null;
@@ -162,6 +163,7 @@ pub const OpenAiAccumulator = struct {
     allocator: std.mem.Allocator,
     stdout: ?*std.Io.Writer,
     has_header: bool,
+    hint_printed: bool,
     lines_printed: usize,
     content: std.array_list.Managed(u8),
     partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
@@ -174,6 +176,7 @@ pub const OpenAiAccumulator = struct {
             .allocator = allocator,
             .stdout = stdout,
             .has_header = false,
+            .hint_printed = false,
             .lines_printed = 0,
             .content = std.array_list.Managed(u8).init(allocator),
             .partial_calls = .{},
@@ -232,6 +235,18 @@ pub const OpenAiAccumulator = struct {
     }
 
     pub fn onEvent(self: *@This(), ev: openai.StreamEvent) !void {
+        if (cancel.isCancelled()) {
+            self.content.clearRetainingCapacity();
+            self.tool_calls.clearRetainingCapacity();
+            self.finish_reason = null;
+            return error.Canceled;
+        }
+        if (!self.hint_printed and cancel.isFirstEscSeen()) {
+            self.hint_printed = true;
+            if (self.stdout) |stdout| {
+                stdout.print("{s}(press Esc again to cancel){s}\n", .{ ansi.dim, ansi.reset }) catch {};
+            }
+        }
         switch (ev) {
             .content => |text| {
                 if (self.stdout) |stdout| {
