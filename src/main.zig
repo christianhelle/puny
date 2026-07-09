@@ -300,12 +300,35 @@ fn runChatTurn(
         }
     }
 
+    const usage = if (accumulator.usage) |u| u else blk: {
+        var input_chars: usize = 0;
+        for (messages.items) |msg| {
+            switch (msg) {
+                .system => |c| input_chars += c.len,
+                .user => |c| input_chars += c.len,
+                .assistant => |a| {
+                    if (a.content) |c| input_chars += c.len;
+                    if (a.tool_calls) |tcs| {
+                        for (tcs) |tc| {
+                            input_chars += tc.function.name.len + tc.function.arguments.len;
+                        }
+                    }
+                },
+                .tool => |t| input_chars += t.content.len,
+            }
+        }
+        break :blk openai.TurnUsage{
+            .input_tokens = @intCast(@divFloor(input_chars, 4)),
+            .output_tokens = @intCast(@divFloor(accumulator.content.items.len, 4)),
+        };
+    };
+
     if (accumulator.content.items.len > 0) {
         try accumulator.replaceWithRendered(stdout_writer);
     }
 
     if (accumulator.hasToolCalls()) {
-        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = accumulator.usage };
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = usage };
         try messages.append(.{ .assistant = assistant_content });
 
         for (assistant_content.tool_calls.?) |tc| {
@@ -315,7 +338,7 @@ fn runChatTurn(
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
-        return .{ .turn_complete = false, .usage = accumulator.usage };
+        return .{ .turn_complete = false, .usage = usage };
     }
 
     if (accumulator.content.items.len > 0) {
@@ -323,7 +346,7 @@ fn runChatTurn(
         try messages.append(.{ .assistant = .{ .content = content } });
     }
 
-    return .{ .turn_complete = true, .usage = accumulator.usage };
+    return .{ .turn_complete = true, .usage = usage };
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
