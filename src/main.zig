@@ -148,6 +148,46 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
+        if (std.mem.eql(u8, user_message, "/model") or std.mem.startsWith(u8, user_message, "/model ")) {
+            if (parsed.oneshot) {
+                try stdout_writer.print("\n/model not available in oneshot mode.\n", .{});
+                try stdout_writer.flush();
+                continue;
+            }
+            const model_id: ?[]const u8 = if (user_message.len > 7) user_message["/model ".len..] else null;
+            const skip_validation = parsed.mock;
+            const new_key = (try selectModel(&prov, model_id, arena, io, stdout_writer, init, skip_validation)) orelse {
+                if (model_id != null) {
+                    try stdout_writer.print("\nModel not found.\n", .{});
+                    try stdout_writer.flush();
+                }
+                continue;
+            };
+            if (std.mem.eql(u8, new_key, model_key)) {
+                try stdout_writer.print("\nAlready using model {s}.\n", .{new_key});
+                try stdout_writer.flush();
+                continue;
+            }
+            try stdout_writer.print("\nSwitched to model {s}.\n", .{new_key});
+            try stdout_writer.flush();
+            try stdout_writer.print("Reset conversation? [y/N] ", .{});
+            try stdout_writer.flush();
+            line_alloc.clearRetainingCapacity();
+            var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
+            const stdin_reader = &stdin_file_reader.interface;
+            _ = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch {};
+            const raw = std.mem.trimRight(u8, line_alloc.written(), "\r");
+            if (raw.len > 0 and (raw[0] == 'y' or raw[0] == 'Y')) {
+                messages.clearRetainingCapacity();
+                planning_mode = false;
+                try messages.append(.{ .system = prompts.system });
+                try stdout_writer.print("Conversation reset.\n", .{});
+                try stdout_writer.flush();
+            }
+            model_key = new_key;
+            continue;
+        }
+
         try stdout_writer.print("\nChatting with model: {s}", .{model_key});
         try stdout_writer.flush();
 
