@@ -256,12 +256,14 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
 
-        // Push conversation above the prompt area for next input
-        var i: u32 = 0;
-        while (i < 6) : (i += 1) {
-            try stdout_writer.print("\n", .{});
+        // Refresh status bar so model info stays visible during streaming
+        if (terminal) |*term| {
+            const size = term.getSize() catch {
+                // Terminal unavailable — fall through to next prompt
+                continue;
+            };
+            input_bar.renderStatusBar(term, size.cols, size.rows) catch {};
         }
-        try stdout_writer.flush();
     }
 }
 

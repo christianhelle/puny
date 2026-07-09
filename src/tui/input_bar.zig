@@ -177,8 +177,8 @@ pub fn readInput(
                     // Enter (no shift) → submit
                     if (k.key == .enter and !k.modifiers.shift) {
                         const text = text_area.getValue(persistent) catch "";
-                        // Clear all prompt rows and move cursor above them
-                        clearPromptArea(terminal, rows) catch {};
+                        // Replace full input bar with compact status bar during streaming
+                        renderStatusBar(terminal, cols, rows) catch {};
                         return .{ .submitted = text };
                     }
                     // All other keys → TextArea
@@ -255,29 +255,31 @@ fn renderPrompt(
     try terminal.flush();
 }
 
-fn clearPromptArea(terminal: *zz.Terminal, rows: u16) !void {
+/// Render a compact status bar at the bottom (separator + header line).
+/// Used during streaming to keep model info visible.
+/// Cursor is positioned above the bar so subsequent output appears above it.
+pub fn renderStatusBar(terminal: *zz.Terminal, cols: u16, rows: u16) !void {
     const w = terminal.writer();
-    const gap_row = rows -| 6;
-    const sep_row = rows -| 5;
-    const header_row = rows -| 4;
-    const input_row_1 = rows -| 3;
-    const input_row_2 = rows -| 2;
-    const input_row_3 = rows -| 1;
+    const sep_row = rows -| 2;
+    const header_row = rows -| 1;
+    const cursor_row = rows -| 3;
 
-    // Clear all 6 prompt rows
-    try terminal.moveTo(gap_row, 0);
+    var hdr_buf: [256]u8 = undefined;
+    const header = buildHeader(&hdr_buf);
+
+    // Clear any old input rows above
+    try terminal.moveTo(cursor_row, 0);
     try w.print("\x1b[2K", .{});
+
+    // Separator
     try terminal.moveTo(sep_row, 0);
-    try w.print("\x1b[2K", .{});
-    try terminal.moveTo(header_row, 0);
-    try w.print("\x1b[2K", .{});
-    try terminal.moveTo(input_row_1, 0);
-    try w.print("\x1b[2K", .{});
-    try terminal.moveTo(input_row_2, 0);
-    try w.print("\x1b[2K", .{});
-    try terminal.moveTo(input_row_3, 0);
-    try w.print("\x1b[2K", .{});
+    try renderSeparator(w, cols);
 
-    // Leave cursor at the bottom — main loop adds spacing before the response
+    // Header
+    try terminal.moveTo(header_row, 0);
+    try w.print("\x1b[2K{s}", .{header});
+
+    // Put cursor above the bar so subsequent streaming output appears above it
+    try terminal.moveTo(cursor_row, 0);
     try terminal.flush();
 }
