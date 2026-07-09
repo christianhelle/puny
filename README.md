@@ -7,6 +7,7 @@ Puny lets you chat with a local LLM and gives it a curated set of coding tools s
 ## Features
 
 - Local-first: talks to LM Studio running on `http://127.0.0.1:1234`.
+- Mock mode (`--mock`): run without a real AI backend for UI/testing work.
 - Interactive model picker on startup.
 - Multi-turn chat with client-side message history.
 - Tool calling via LM Studio's OpenAI-compatible `/v1/chat/completions` endpoint.
@@ -39,6 +40,16 @@ Or run the built binary directly:
 ./zig-out/bin/puny
 ```
 
+### Mock mode (no LM Studio required)
+
+Start without a running AI backend:
+
+```bash
+zig build run -- --mock
+```
+
+The mock provider returns canned responses and simulates tool calls based on keywords in your prompt (e.g. "read file" triggers a tool call, "error" simulates a failure). See `src/providers/mock.zig` for the full keyword map.
+
 ## Commands
 
 - `/quit` or `/exit` — exit Puny
@@ -56,8 +67,10 @@ Tools execute **automatically without confirmation**. This includes `write_file`
 
 - `src/main.zig` — terminal loop, message history, tool execution loop
 - `src/chat.zig` — stream accumulator for OpenAI-compatible SSE deltas
+- `src/providers/provider.zig` — provider union (LM Studio or mock)
 - `src/providers/openai.zig` — `/v1/chat/completions` client
 - `src/providers/lmstudio.zig` — generated LM Studio REST client (models, load, etc.)
+- `src/providers/mock.zig` — mock provider for testing without a backend
 - `src/tools/` — tool definitions, schemas, and handlers
 - `src/tui/` — interactive model picker
 
