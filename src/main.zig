@@ -37,44 +37,15 @@ pub fn main(init: std.process.Init) !void {
     };
     defer prov.deinit();
 
-    var model_key = if (parsed.model) |model_id| blk: {
-        if (!std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock) {
-            break :blk try arena.dupe(u8, model_id);
+    const skip_validation = !std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
+    var model_key = (try selectModel(&prov, parsed.model, arena, io, stdout_writer, init, skip_validation)) orelse blk: {
+        if (parsed.model) |model_id| {
+            try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
         }
-        var models = try prov.listModels();
-        defer models.deinit();
-        const found = for (models.value().models) |m| {
-            if (std.mem.eql(u8, m.key, model_id)) break true;
-        } else false;
-        if (found) {
-            break :blk try arena.dupe(u8, model_id);
-        }
-        try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
-        model_picker.setModels(models.value().models);
-        var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
-        try program.run();
-        const picked = program.model.selected orelse {
-            program.deinit();
+        break :blk (try selectModel(&prov, null, arena, io, stdout_writer, init, false)) orelse {
             try stdout_writer.print("No model selected.\n", .{});
             return;
         };
-        const key = try arena.dupe(u8, picked);
-        program.deinit();
-        break :blk key;
-    } else blk: {
-        var models = try prov.listModels();
-        defer models.deinit();
-        model_picker.setModels(models.value().models);
-        var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
-        try program.run();
-        const picked = program.model.selected orelse {
-            program.deinit();
-            try stdout_writer.print("No model selected.\n", .{});
-            return;
-        };
-        const key = try arena.dupe(u8, picked);
-        program.deinit();
-        break :blk key;
     };
 
     var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
