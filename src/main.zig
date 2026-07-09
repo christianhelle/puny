@@ -4,7 +4,7 @@ const openai = @import("providers/openai.zig");
 const zz = @import("zigzag");
 const ansi = @import("ansi.zig");
 const chat = @import("chat.zig");
-const prompt_input = @import("tui/prompt_input.zig");
+const input_bar = @import("tui/input_bar.zig");
 const model_picker = @import("tui/model_picker.zig");
 const retry = @import("retry.zig");
 const tools = @import("tools");
@@ -16,7 +16,6 @@ const usage = @import("usage.zig");
 const sigint = @import("sigint.zig");
 const cancel = @import("cancel.zig");
 
-const PromptInput = prompt_input.Widget;
 const ModelPicker = model_picker.Widget;
 
 pub fn main(init: std.process.Init) !void {
@@ -87,6 +86,15 @@ pub fn main(init: std.process.Init) !void {
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
 
+    // Initialize terminal for raw-mode input (may fail with piped stdin)
+    var env = zz.Environment.fromEnvMap(init.environ_map);
+    var terminal = zz.Terminal.init(io, &env, .{
+        .alt_screen = false,
+        .hide_cursor = false,
+        .bracketed_paste = false,
+    }) catch null;
+    defer if (terminal) |*t| t.deinit();
+
     while (true) {
         if (sigint.isTriggered()) {
             try session_stats.print(io, stdout_writer);
@@ -100,22 +108,28 @@ pub fn main(init: std.process.Init) !void {
             break :blk p;
         } else blk: {
             const branch = getGitBranch(arena, io);
-            prompt_input.setModelName(model_key);
-            prompt_input.setWorkingDir(cwd);
-            prompt_input.setGitBranch(branch);
-            prompt_input.setSessionStats(&session_stats);
+            input_bar.setModelName(model_key);
+            input_bar.setWorkingDir(cwd);
+            input_bar.setGitBranch(branch);
+            input_bar.setSessionStats(&session_stats);
 
-            var program = zz.Program(PromptInput).init(init.gpa, io, init.environ_map);
-            defer program.deinit();
-
-            if (program.run()) {
-                if (program.model.submitted) |text| {
-                    break :blk text;
+            if (terminal) |*term| {
+                const size = term.getSize() catch s: {
+                    break :s zz.terminal.Size{ .rows = 24, .cols = 80 };
+                };
+                switch (input_bar.readInput(arena, arena, io, term, size.cols, size.rows)) {
+                    .submitted => |text| break :blk text,
+                    .cancelled => continue,
+                    .quit => {
+                        try session_stats.print(io, stdout_writer);
+                        try stdout_writer.print("\nGoodbye.\n", .{});
+                        try stdout_writer.flush();
+                        return;
+                    },
                 }
-                break :blk "";
-            } else |_| {}
+            }
 
-            // TUI unavailable (e.g., piped stdin) — fall back to single-line prompt
+            // Terminal unavailable (piped stdin) — fall back to single-line prompt
             try stdout_writer.print("\nPrompt: ", .{});
             try stdout_writer.flush();
             line_alloc.clearRetainingCapacity();
