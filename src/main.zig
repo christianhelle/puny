@@ -105,6 +105,7 @@ pub fn main(init: std.process.Init) !void {
         if (user_message.len == 0) continue;
 
         if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
+            try session_stats.print(io, stdout_writer);
             try stdout_writer.print("\nGoodbye.\n", .{});
             try stdout_writer.flush();
             return;
