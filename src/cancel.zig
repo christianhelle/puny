@@ -11,6 +11,7 @@ var monitor_thread: ?std.Thread = null;
 
 /// Saved terminal state for restoration.
 var saved_termios: if (is_windows) void else std.posix.termios = undefined;
+var saved_termios_valid: if (is_windows) void else bool = false;
 var saved_console_mode: if (is_windows) u32 else void = undefined;
 var saved_console_mode_valid: if (is_windows) bool else void = false;
 
@@ -57,9 +58,28 @@ pub fn stop() void {
         t.join();
         monitor_thread = null;
     }
-    setRawMode(false) catch {};
+    restoreConsole();
     cancelled.store(false, .monotonic);
     first_esc_seen.store(false, .monotonic);
+}
+
+/// Restore console mode unconditionally, even if cancel is not running.
+/// This ensures clean console state before launching the model picker,
+/// recovering from cases where a previous `stop()` restore failed silently.
+/// Windows-only: ConPTY pipe disconnection race with zigzag terminal setup.
+pub fn restoreConsole() void {
+    if (is_windows) {
+        if (saved_console_mode_valid) {
+            const hStdin = getStdinHandle();
+            if (windows.SetConsoleMode(hStdin, saved_console_mode) != .FALSE) {
+                saved_console_mode_valid = false;
+            }
+        }
+    } else {
+        if (saved_termios_valid) {
+            setRawMode(false) catch {};
+        }
+    }
 }
 
 // ── Platform-specific: raw mode ──────────────────────────────────────
@@ -77,6 +97,7 @@ fn setRawModePosix(enable: bool) !void {
     if (enable) {
         var raw = try posix.tcgetattr(0);
         saved_termios = raw;
+        saved_termios_valid = true;
         // cfmakeraw(3): put terminal into raw mode
         raw.iflag.IGNBRK = true;
         raw.iflag.BRKINT = false;

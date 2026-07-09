@@ -277,9 +277,10 @@ fn selectModel(
     defer models.deinit();
     model_picker.setModels(models.value().models);
 
-    // Ensure cancel module is stopped before running the TUI to avoid
+    // Restore console mode unconditionally before running the TUI to avoid
     // console mode conflicts on Windows (ConPTY pipe disconnection).
-    cancel.stop();
+    // This recovers from cases where a previous cancel stop silently failed.
+    cancel.restoreConsole();
 
     var program = zz.Program(ModelPicker).initWithOptions(init.gpa, io, init.environ_map, .{
         .alt_screen = false,
