@@ -12,6 +12,7 @@ const cli = @import("cli.zig");
 const provider = @import("providers/provider.zig");
 const mock = @import("providers/mock.zig");
 const usage = @import("usage.zig");
+const sigint = @import("sigint.zig");
 
 const ModelPicker = model_picker.Widget;
 
@@ -73,11 +74,19 @@ pub fn main(init: std.process.Init) !void {
 
     var pending_prompt = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
     var session_stats = chat.SessionStats.init(io);
+    sigint.register() catch {};
 
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
 
     while (true) {
+        if (sigint.isTriggered()) {
+            try session_stats.print(io, stdout_writer);
+            try stdout_writer.print("\nGoodbye.\n", .{});
+            try stdout_writer.flush();
+            return;
+        }
+
         const user_message = if (pending_prompt) |p| blk: {
             pending_prompt = null;
             break :blk p;
@@ -95,9 +104,24 @@ pub fn main(init: std.process.Init) !void {
                     try stdout_writer.print("\nInput too long (max {d} bytes).\n", .{stdin_buffer.len});
                     continue;
                 },
-                else => return err,
+                else => {
+                    if (sigint.isTriggered()) {
+                        try session_stats.print(io, stdout_writer);
+                        try stdout_writer.print("\nGoodbye.\n", .{});
+                        try stdout_writer.flush();
+                        return;
+                    }
+                    return err;
+                },
             };
-            if (bytes_read == 0) return;
+            if (bytes_read == 0) {
+                if (sigint.isTriggered()) {
+                    try session_stats.print(io, stdout_writer);
+                    try stdout_writer.print("\nGoodbye.\n", .{});
+                    try stdout_writer.flush();
+                }
+                return;
+            }
 
             const raw_message = line_alloc.written();
             const result: []const u8 = if (raw_message.len > 0 and raw_message[raw_message.len - 1] == '\r') raw_message[0 .. raw_message.len - 1] else raw_message;
