@@ -206,7 +206,8 @@ fn handleFirstEscape(first_esc_ts: *?Io.Timestamp) void {
     }
     first_esc_ts.* = now;
     first_esc_seen.store(true, .monotonic);
-    global_stderr.print("\x1b[2m(press Esc again to cancel)\x1b[0m\n", .{}) catch {};
+    global_stderr.print("\x1b[2m\n\n(Press Esc again to cancel)\n\x1b[0m\n", .{}) catch {};
+    global_stderr.flush() catch {};
 }
 
 // ── Windows extern declarations ──────────────────────────────────────
@@ -243,7 +244,7 @@ const windows = if (is_windows) struct {
     pub extern "kernel32" fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) callconv(.winapi) BOOL;
     pub extern "kernel32" fn GetNumberOfConsoleInputEvents(hConsoleInput: HANDLE, lpNumberOfEvents: *DWORD) callconv(.winapi) BOOL;
     pub extern "kernel32" fn ReadConsoleInputW(hConsoleInput: HANDLE, lpBuffer: *INPUT_RECORD, nLength: DWORD, lpNumberOfEventsRead: *DWORD) callconv(.winapi) BOOL;
-} else void {};
+} else void{};
 
 fn getStdinHandle() windows.HANDLE {
     const STD_INPUT_HANDLE: u32 = @bitCast(@as(i32, -10));
