@@ -252,7 +252,7 @@ fn clearPromptArea(terminal: *zz.Terminal, rows: u16) !void {
     try terminal.moveTo(input_row_3, 0);
     try w.print("\x1b[2K", .{});
 
-    // Move cursor to gap row so response output starts with breathing room
-    try terminal.moveTo(gap_row, 0);
+    // Move cursor above the entire prompt area so even 1-line responses are visible
+    try terminal.moveTo(rows -| 7, 0);
     try terminal.flush();
 }
