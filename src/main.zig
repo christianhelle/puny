@@ -71,6 +71,7 @@ pub fn main(init: std.process.Init) !void {
     try messages.append(.{ .system = prompts.system });
 
     var pending_prompt = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
+    var session_stats = chat.SessionStats.init(io);
 
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
@@ -115,6 +116,11 @@ pub fn main(init: std.process.Init) !void {
             try messages.append(.{ .system = prompts.system });
             try stdout_writer.print("\nConversation reset.", .{});
             try stdout_writer.flush();
+            continue;
+        }
+
+        if (std.mem.eql(u8, user_message, "/stats")) {
+            try session_stats.print(io, stdout_writer);
             continue;
         }
 
@@ -197,7 +203,9 @@ pub fn main(init: std.process.Init) !void {
         var turn_complete = false;
         while (!turn_complete) {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
-            turn_complete = try runChatTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
+            const result = try runChatTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions);
+            if (result.usage) |usage| session_stats.addTurn(usage);
+            turn_complete = result.turn_complete;
         }
 
         if (parsed.oneshot) {
@@ -252,7 +260,7 @@ fn runChatTurn(
     model_key: []const u8,
     messages: *std.array_list.Managed(openai.Message),
     tool_definitions: []const openai.ToolDefinition,
-) !bool {
+) !struct { turn_complete: bool, usage: ?openai.TurnUsage } {
     const request = openai.ChatRequest{
         .model = model_key,
         .messages = messages.items,
@@ -271,13 +279,13 @@ fn runChatTurn(
         if (prov.chatStreaming(request, callback)) |_| break else |err| {
             if (!retry.isTransientError(err)) {
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
-                return true;
+                return .{ .turn_complete = true, .usage = accumulator.usage };
             }
 
             retry_count += 1;
             if (retry_count >= cfg.max_retries) {
                 try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
-                return true;
+                return .{ .turn_complete = true, .usage = accumulator.usage };
             }
 
             var delay_ms: u64 = cfg.base_delay_ms;
@@ -296,7 +304,7 @@ fn runChatTurn(
     }
 
     if (accumulator.hasToolCalls()) {
-        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return true;
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = accumulator.usage };
         try messages.append(.{ .assistant = assistant_content });
 
         for (assistant_content.tool_calls.?) |tc| {
@@ -306,7 +314,7 @@ fn runChatTurn(
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
-        return false;
+        return .{ .turn_complete = false, .usage = accumulator.usage };
     }
 
     if (accumulator.content.items.len > 0) {
@@ -314,7 +322,7 @@ fn runChatTurn(
         try messages.append(.{ .assistant = .{ .content = content } });
     }
 
-    return true;
+    return .{ .turn_complete = true, .usage = accumulator.usage };
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
