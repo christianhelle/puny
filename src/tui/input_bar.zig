@@ -117,11 +117,31 @@ pub fn readInput(
         const n = terminal.readInput(&input_buf, -1) catch continue;
         if (n == 0) continue;
 
-        // Detect double-escape at byte level before keyboard parsing
-        // because two quick Escapes (0x1b 0x1b) get parsed as Alt+Escape, not two events
-        if (n >= 2 and input_buf[0] == 0x1b and input_buf[1] == 0x1b) {
-            return .quit;
+        // Handle Escape at byte level — Windows console may send Escape differently
+        // than expected by the keyboard parser (e.g., as part of a sequence)
+        if (n >= 1 and input_buf[0] == 0x1b) {
+            // If it's a CSI sequence (\x1b[), delegate to the keyboard parser
+            if (n >= 2 and input_buf[1] == '[') {
+                // CSI sequence — let the parser handle it
+            } else {
+                // Standalone or double Escape
+                if (n >= 2 and input_buf[1] == 0x1b) {
+                    return .quit;
+                }
+                const now = std.Io.Clock.Timestamp.now(io, .awake);
+                if (first_esc_ts) |first| {
+                    const elapsed = first.durationTo(now).raw.nanoseconds;
+                    if (elapsed >= 0 and elapsed <= 500 * std.time.ns_per_ms) {
+                        return .quit;
+                    }
+                }
+                first_esc_ts = now;
+                text_area.setValue("") catch {};
+                renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch return .quit;
+                continue;
+            }
         }
+        first_esc_ts = null;
 
         const events = zz.input.keyboard.parseAll(arena, input_buf[0..n]) catch continue;
 
