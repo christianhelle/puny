@@ -110,6 +110,7 @@ pub const OpenAiAccumulator = struct {
     partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
     tool_calls: std.array_list.Managed(openai.ToolCall),
     finish_reason: ?[]const u8,
+    usage: ?openai.TurnUsage,
 
     pub fn init(allocator: std.mem.Allocator, stdout: ?*std.Io.Writer) OpenAiAccumulator {
         return .{
@@ -121,6 +122,7 @@ pub const OpenAiAccumulator = struct {
             .partial_calls = .{},
             .tool_calls = std.array_list.Managed(openai.ToolCall).init(allocator),
             .finish_reason = null,
+            .usage = null,
         };
     }
 
@@ -204,6 +206,9 @@ pub const OpenAiAccumulator = struct {
             .finish => |reason| {
                 self.finish_reason = reason;
                 try self.finalizeToolCalls();
+            },
+            .usage => |u| {
+                self.usage = u;
             },
         }
     }
