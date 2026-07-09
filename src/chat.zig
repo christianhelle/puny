@@ -104,11 +104,11 @@ pub const SessionStats = struct {
     ttft_count: usize = 0,
     tps_sum: f64 = 0,
     tps_count: usize = 0,
-    start_time: i128,
+    start_time: std.Io.Clock.Timestamp,
 
-    pub fn init() SessionStats {
+    pub fn init(io: std.Io) SessionStats {
         return .{
-            .start_time = std.time.nanoTimestamp(),
+            .start_time = std.Io.Clock.Timestamp.now(io, .awake),
         };
     }
 
@@ -129,9 +129,10 @@ pub const SessionStats = struct {
         }
     }
 
-    pub fn print(self: *const @This(), writer: *std.Io.Writer) !void {
-        const now = std.time.nanoTimestamp();
-        const elapsed_s = @as(f64, @floatFromInt(now - self.start_time)) / std.time.ns_per_s;
+    pub fn print(self: *const @This(), io: std.Io, writer: *std.Io.Writer) !void {
+        const now = std.Io.Clock.Timestamp.now(io, .awake);
+        const elapsed_ns = self.start_time.raw.durationTo(now.raw).nanoseconds;
+        const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s;
 
         try writer.print("\n{s}─── Session Stats ───{s}\n", .{ ansi.dim, ansi.reset });
         try writer.print("  Turns:               {d}\n", .{self.turn_count});
