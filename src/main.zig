@@ -230,21 +230,6 @@ pub fn main(init: std.process.Init) !void {
             }
             try stdout_writer.print("\nSwitched to model {s}.\n", .{new_key});
             try stdout_writer.flush();
-            try stdout_writer.print("Reset conversation? [y/N] ", .{});
-            try stdout_writer.flush();
-            line_alloc.clearRetainingCapacity();
-            var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
-            const stdin_reader = &stdin_file_reader.interface;
-            _ = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch {};
-            const raw = line_alloc.written();
-            const answer = if (raw.len > 0 and raw[raw.len - 1] == '\r') raw[0 .. raw.len - 1] else raw;
-            if (answer.len > 0 and (answer[0] == 'y' or answer[0] == 'Y')) {
-                messages.clearRetainingCapacity();
-                planning_mode = false;
-                try messages.append(.{ .system = prompts.system });
-                try stdout_writer.print("Conversation reset.\n", .{});
-                try stdout_writer.flush();
-            }
             model_key = new_key;
             continue;
         }
