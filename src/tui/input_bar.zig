@@ -77,9 +77,11 @@ pub fn readInput(
     cols: u16,
     rows: u16,
 ) InputResult {
-    // Layout: 2 rows at bottom for prompt
-    //   row (rows-2): header line
+    // Layout:
+    //   row (rows-3): separator line (───)
+    //   row (rows-2): header line (Model: ... | ↑X ↓Y)
     //   row (rows-1): text input line
+    const sep_row = rows -| 3;
     const header_row = rows -| 2;
     const input_row = rows -| 1;
 
@@ -88,7 +90,7 @@ pub fn readInput(
     text_area.setSize(cols, 1);
 
     // Render initial prompt area
-    renderPrompt(terminal, &text_area, arena, cols, header_row, input_row) catch return .quit;
+    renderPrompt(terminal, &text_area, arena, cols, sep_row, header_row, input_row) catch return .quit;
 
     var input_buf: [256]u8 = undefined;
     var first_esc_ts: ?std.Io.Clock.Timestamp = null;
@@ -126,7 +128,7 @@ pub fn readInput(
                         first_esc_ts = now;
                         // Single escape: clear input
                         text_area.setValue("") catch {};
-                        renderPrompt(terminal, &text_area, arena, cols, header_row, input_row) catch return .quit;
+                        renderPrompt(terminal, &text_area, arena, cols, sep_row, header_row, input_row) catch return .quit;
                         continue;
                     }
                     first_esc_ts = null;
@@ -134,13 +136,13 @@ pub fn readInput(
                     // Enter (no shift) → submit
                     if (k.key == .enter and !k.modifiers.shift) {
                         const text = text_area.getValue(persistent) catch "";
-                        // Clear prompt area
+                        // Clear all prompt rows and move cursor above them
                         clearPromptArea(terminal, rows) catch {};
                         return .{ .submitted = text };
                     }
                     // All other keys → TextArea
                     text_area.handleKey(k);
-                    renderPrompt(terminal, &text_area, arena, cols, header_row, input_row) catch return .quit;
+                    renderPrompt(terminal, &text_area, arena, cols, sep_row, header_row, input_row) catch return .quit;
                 },
                 .mouse => {},
                 .none => {},
@@ -149,18 +151,33 @@ pub fn readInput(
     }
 }
 
+fn renderSeparator(w: *std.Io.Writer, cols: u16) !void {
+    const sep: []const u8 = "\u{2500}";
+    var sep_buf: [512]u8 = undefined;
+    var pos: usize = 0;
+    while (pos < cols and pos + sep.len <= sep_buf.len) {
+        @memcpy(sep_buf[pos..][0..sep.len], sep);
+        pos += sep.len;
+    }
+    try w.print("\x1b[2K{s}", .{sep_buf[0..pos]});
+}
+
 fn renderPrompt(
     terminal: *zz.Terminal,
     text_area: *const zz.TextArea,
     arena: std.mem.Allocator,
     cols: u16,
+    sep_row: u16,
     header_row: u16,
     input_row: u16,
 ) !void {
-    _ = cols;
     var hdr_buf: [256]u8 = undefined;
     const header = buildHeader(&hdr_buf);
     const w = terminal.writer();
+
+    // Separator line
+    try terminal.moveTo(sep_row, 0);
+    try renderSeparator(w, cols);
 
     // Header line
     try terminal.moveTo(header_row, 0);
@@ -178,12 +195,22 @@ fn renderPrompt(
 
 fn clearPromptArea(terminal: *zz.Terminal, rows: u16) !void {
     const w = terminal.writer();
+    const sep_row = rows -| 3;
     const header_row = rows -| 2;
     const input_row = rows -| 1;
 
+    // Clear the 3 prompt rows
+    try terminal.moveTo(sep_row, 0);
+    try w.print("\x1b[2K", .{});
     try terminal.moveTo(header_row, 0);
     try w.print("\x1b[2K", .{});
     try terminal.moveTo(input_row, 0);
     try w.print("\x1b[2K", .{});
+
+    // Move cursor to just above the prompt area so response output isn't hidden
+    try terminal.moveTo(rows -| 3, 0);
+    // Print a newline to ensure cursor is 1 line above the prompt area
+    try w.print("\n", .{});
+
     try terminal.flush();
 }
