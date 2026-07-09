@@ -66,9 +66,18 @@ pub const InputResult = union(enum) {
     quit,
 };
 
+/// Number of rows reserved for the prompt input area at the bottom.
+const prompt_rows: u16 = 6;
+
 /// Read a multi-line prompt from the user.
 /// The prompt bar is rendered at the bottom of the terminal.
-/// Uses raw mode for key-by-key input.
+/// Layout (from bottom up):
+///   input line 3    (rows-1)
+///   input line 2    (rows-2)
+///   input line 1    (rows-3)
+///   header          (rows-4): Model: ... | ↑X ↓Y
+///   separator       (rows-5): ───────────────
+///   blank gap       (rows-6): (space between conversation and prompt bar)
 pub fn readInput(
     persistent: std.mem.Allocator,
     arena: std.mem.Allocator,
@@ -77,13 +86,14 @@ pub fn readInput(
     cols: u16,
     rows: u16,
 ) InputResult {
-    // Layout:
-    //   row (rows-3): separator line (───)
-    //   row (rows-2): header line (Model: ... | ↑X ↓Y)
-    //   row (rows-1): text input line
-    const sep_row = rows -| 3;
-    const header_row = rows -| 2;
-    const input_row = rows -| 1;
+    if (rows < prompt_rows + 1) return .cancelled;
+
+    const gap_row = rows -| 6;
+    const sep_row = rows -| 5;
+    const header_row = rows -| 4;
+    const input_row_1 = rows -| 3;
+    const input_row_2 = rows -| 2;
+    const input_row_3 = rows -| 1;
 
     // Drain any pending input from the terminal buffer
     // Prevents stale key events (e.g., from model picker) from triggering actions
@@ -95,10 +105,10 @@ pub fn readInput(
 
     var text_area = zz.TextArea.init(persistent);
     defer text_area.deinit();
-    text_area.setSize(cols, 1);
+    text_area.setSize(cols, 3);
 
     // Render initial prompt area
-    renderPrompt(terminal, &text_area, arena, cols, sep_row, header_row, input_row) catch return .quit;
+    renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch return .quit;
 
     var input_buf: [256]u8 = undefined;
     var first_esc_ts: ?std.Io.Clock.Timestamp = null;
@@ -133,7 +143,7 @@ pub fn readInput(
                         first_esc_ts = now;
                         // Single escape: clear input
                         text_area.setValue("") catch {};
-                        renderPrompt(terminal, &text_area, arena, cols, sep_row, header_row, input_row) catch return .quit;
+                        renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch return .quit;
                         continue;
                     }
                     first_esc_ts = null;
@@ -147,7 +157,7 @@ pub fn readInput(
                     }
                     // All other keys → TextArea
                     text_area.handleKey(k);
-                    renderPrompt(terminal, &text_area, arena, cols, sep_row, header_row, input_row) catch return .quit;
+                    renderPrompt(terminal, &text_area, arena, cols, gap_row, sep_row, header_row, input_row_1, input_row_2, input_row_3) catch return .quit;
                 },
                 .mouse => {},
                 .none => {},
@@ -172,13 +182,20 @@ fn renderPrompt(
     text_area: *const zz.TextArea,
     arena: std.mem.Allocator,
     cols: u16,
+    gap_row: u16,
     sep_row: u16,
     header_row: u16,
-    input_row: u16,
+    input_row_1: u16,
+    input_row_2: u16,
+    input_row_3: u16,
 ) !void {
     var hdr_buf: [256]u8 = undefined;
     const header = buildHeader(&hdr_buf);
     const w = terminal.writer();
+
+    // Gap line (blank, just clear it)
+    try terminal.moveTo(gap_row, 0);
+    try w.print("\x1b[2K", .{});
 
     // Separator line
     try terminal.moveTo(sep_row, 0);
@@ -188,31 +205,54 @@ fn renderPrompt(
     try terminal.moveTo(header_row, 0);
     try w.print("\x1b[2K{s}", .{header});
 
-    // Input line
+    // Input lines — TextArea.view renders all 3 lines
     const text_view = text_area.view(arena) catch "";
-    try terminal.moveTo(input_row, 0);
-    try w.print("\x1b[2K{s}", .{text_view});
+    var line_iter = std.mem.splitScalar(u8, text_view, '\n');
 
-    // Cursor at input position
-    try terminal.moveTo(input_row, 0);
+    // Line 1
+    try terminal.moveTo(input_row_1, 0);
+    const line1 = line_iter.next() orelse "";
+    try w.print("\x1b[2K{s}", .{line1});
+
+    // Line 2
+    try terminal.moveTo(input_row_2, 0);
+    const line2 = line_iter.next() orelse "";
+    try w.print("\x1b[2K{s}", .{line2});
+
+    // Line 3
+    try terminal.moveTo(input_row_3, 0);
+    const line3 = line_iter.next() orelse "";
+    try w.print("\x1b[2K{s}", .{line3});
+
+    // Cursor at the first input line
+    try terminal.moveTo(input_row_1, 0);
     try terminal.flush();
 }
 
 fn clearPromptArea(terminal: *zz.Terminal, rows: u16) !void {
     const w = terminal.writer();
-    const sep_row = rows -| 3;
-    const header_row = rows -| 2;
-    const input_row = rows -| 1;
+    const gap_row = rows -| 6;
+    const sep_row = rows -| 5;
+    const header_row = rows -| 4;
+    const input_row_1 = rows -| 3;
+    const input_row_2 = rows -| 2;
+    const input_row_3 = rows -| 1;
 
-    // Clear the 3 prompt rows
+    // Clear all 6 prompt rows
+    try terminal.moveTo(gap_row, 0);
+    try w.print("\x1b[2K", .{});
     try terminal.moveTo(sep_row, 0);
     try w.print("\x1b[2K", .{});
     try terminal.moveTo(header_row, 0);
     try w.print("\x1b[2K", .{});
-    try terminal.moveTo(input_row, 0);
+    try terminal.moveTo(input_row_1, 0);
+    try w.print("\x1b[2K", .{});
+    try terminal.moveTo(input_row_2, 0);
+    try w.print("\x1b[2K", .{});
+    try terminal.moveTo(input_row_3, 0);
     try w.print("\x1b[2K", .{});
 
-    // Move cursor to the separator row so response output appears there
-    try terminal.moveTo(sep_row, 0);
+    // Move cursor to gap row so response output starts with breathing room
+    try terminal.moveTo(gap_row, 0);
     try terminal.flush();
 }
