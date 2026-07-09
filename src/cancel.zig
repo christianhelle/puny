@@ -112,7 +112,6 @@ fn setRawModeWindows(enable: bool) !void {
         if (windows.GetConsoleMode(hStdin, &mode) == .FALSE) return error.Unexpected;
         saved_console_mode = mode;
         mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
-        mode |= ENABLE_WINDOW_INPUT;
         if (windows.SetConsoleMode(hStdin, mode) == .FALSE) return error.Unexpected;
     } else {
         if (windows.SetConsoleMode(hStdin, saved_console_mode) == .FALSE) {}
@@ -154,28 +153,20 @@ fn monitorThreadPosix() void {
 fn monitorThreadWindows() void {
     const hStdin = getStdinHandle();
     var first_esc_ts: ?Io.Timestamp = null;
+    var buf: [1]u8 = undefined;
 
     while (running.load(.monotonic)) {
-        var events_avail: windows.DWORD = 0;
-        if (windows.PeekConsoleInputW(hStdin, null, 0, &events_avail) == .FALSE) break;
-
-        if (events_avail > 0) {
-            var record: windows.INPUT_RECORD = undefined;
-            var events_read: windows.DWORD = 0;
-            if (windows.ReadConsoleInputW(hStdin, &record, 1, &events_read) == .FALSE) break;
-            if (events_read > 0 and
-                record.EventType == windows.KEY_EVENT and
-                record.Event.KeyEvent.bKeyDown != .FALSE)
-            {
-                if (record.Event.KeyEvent.wVirtualKeyCode == windows.VK_ESCAPE) {
-                    handleFirstEscape(&first_esc_ts);
-                } else {
-                    first_esc_ts = null;
-                    first_esc_seen.store(false, .monotonic);
-                }
-            }
-        } else {
-            global_io.sleep(.{ .nanoseconds = @as(i96, @intCast(50 * std.time.ns_per_ms)) }, .awake) catch {};
+        // Wait for input with 50ms timeout so we can check running flag
+        const wait_result = windows.WaitForSingleObject(hStdin, 50);
+        switch (wait_result) {
+            windows.WAIT_OBJECT_0 => {
+                var bytes_read: windows.DWORD = 0;
+                if (windows.ReadFile(hStdin, &buf, 1, &bytes_read, null) == .FALSE) break;
+                if (bytes_read == 0) break;
+                handleKeyByte(buf[0], &first_esc_ts);
+            },
+            windows.WAIT_TIMEOUT => continue,
+            else => break,
         }
     }
 }
@@ -212,54 +203,14 @@ const windows = if (is_windows) struct {
     pub const DWORD = std.os.windows.DWORD;
     pub const HANDLE = std.os.windows.HANDLE;
 
-    pub const KEY_EVENT = 0x0001;
-    pub const VK_ESCAPE = 0x1B;
-
-    pub const KEY_EVENT_RECORD = extern struct {
-        bKeyDown: BOOL,
-        wRepeatCount: u16,
-        wVirtualKeyCode: u16,
-        wVirtualScanCode: u16,
-        uChar: extern union {
-            UnicodeChar: u16,
-            AsciiChar: u8,
-        },
-        dwControlKeyState: DWORD,
-    };
-
-    pub const INPUT_RECORD = extern struct {
-        EventType: u16,
-        Event: extern union {
-            KeyEvent: KEY_EVENT_RECORD,
-            MouseEvent: extern struct {
-                dwMousePosition: extern struct {
-                    X: i16,
-                    Y: i16,
-                },
-                dwButtonState: DWORD,
-                dwControlKeyState: DWORD,
-                dwEventFlags: DWORD,
-            },
-            WindowBufferSizeEvent: extern struct {
-                dwSize: extern struct {
-                    X: i16,
-                    Y: i16,
-                },
-            },
-            MenuEvent: extern struct {
-                dwCommandId: u32,
-            },
-            FocusEvent: extern struct {
-                bSetFocus: BOOL,
-            },
-        },
-    };
+    pub const WAIT_OBJECT_0: DWORD = 0;
+    pub const WAIT_TIMEOUT: DWORD = 0x00000102;
 
     pub extern "kernel32" fn GetStdHandle(dwStdHandle: DWORD) callconv(.winapi) HANDLE;
     pub extern "kernel32" fn GetConsoleMode(hConsoleHandle: HANDLE, lpMode: *DWORD) callconv(.winapi) BOOL;
     pub extern "kernel32" fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) callconv(.winapi) BOOL;
-    pub extern "kernel32" fn PeekConsoleInputW(hConsoleInput: HANDLE, lpBuffer: ?*INPUT_RECORD, nLength: DWORD, lpNumberOfEventsRead: *DWORD) callconv(.winapi) BOOL;
-    pub extern "kernel32" fn ReadConsoleInputW(hConsoleInput: HANDLE, lpBuffer: *INPUT_RECORD, nLength: DWORD, lpNumberOfEventsRead: *DWORD) callconv(.winapi) BOOL;
+    pub extern "kernel32" fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) callconv(.winapi) DWORD;
+    pub extern "kernel32" fn ReadFile(hFile: HANDLE, lpBuffer: [*]u8, nNumberOfBytesToRead: DWORD, lpNumberOfBytesRead: *DWORD, lpOverlapped: ?*anyopaque) callconv(.winapi) BOOL;
 } else void {};
 
 fn getStdinHandle() windows.HANDLE {
@@ -270,4 +221,3 @@ fn getStdinHandle() windows.HANDLE {
 const ENABLE_LINE_INPUT: u32 = 0x0002;
 const ENABLE_ECHO_INPUT: u32 = 0x0004;
 const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
-const ENABLE_WINDOW_INPUT: u32 = 0x0008;
