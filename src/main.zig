@@ -11,6 +11,7 @@ const prompts = @import("prompts.zig");
 const cli = @import("cli.zig");
 const provider = @import("providers/provider.zig");
 const mock = @import("providers/mock.zig");
+const tokens = @import("tokens.zig");
 
 const ModelPicker = model_picker.Widget;
 
@@ -300,28 +301,7 @@ fn runChatTurn(
         }
     }
 
-    const usage = if (accumulator.usage) |u| u else blk: {
-        var input_chars: usize = 0;
-        for (messages.items) |msg| {
-            switch (msg) {
-                .system => |c| input_chars += c.len,
-                .user => |c| input_chars += c.len,
-                .assistant => |a| {
-                    if (a.content) |c| input_chars += c.len;
-                    if (a.tool_calls) |tcs| {
-                        for (tcs) |tc| {
-                            input_chars += tc.function.name.len + tc.function.arguments.len;
-                        }
-                    }
-                },
-                .tool => |t| input_chars += t.content.len,
-            }
-        }
-        break :blk openai.TurnUsage{
-            .input_tokens = @intCast(@divFloor(input_chars, 4)),
-            .output_tokens = @intCast(@divFloor(accumulator.content.items.len, 4)),
-        };
-    };
+    const usage = if (accumulator.usage) |u| u else tokens.estimateUsage(messages.items, accumulator.content.items.len);
 
     if (accumulator.content.items.len > 0) {
         try accumulator.replaceWithRendered(stdout_writer);
