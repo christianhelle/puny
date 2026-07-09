@@ -11,7 +11,7 @@ const prompts = @import("prompts.zig");
 const cli = @import("cli.zig");
 const provider = @import("providers/provider.zig");
 const mock = @import("providers/mock.zig");
-const tokens = @import("tokens.zig");
+const usage = @import("usage.zig");
 
 const ModelPicker = model_picker.Widget;
 
@@ -301,14 +301,14 @@ fn runChatTurn(
         }
     }
 
-    const usage = if (accumulator.usage) |u| u else tokens.estimateUsage(messages.items, accumulator.content.items.len);
+    const turn_usage = if (accumulator.usage) |u| u else usage.estimateUsage(messages.items, accumulator.content.items.len);
 
     if (accumulator.content.items.len > 0) {
         try accumulator.replaceWithRendered(stdout_writer);
     }
 
     if (accumulator.hasToolCalls()) {
-        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = usage };
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
         try messages.append(.{ .assistant = assistant_content });
 
         for (assistant_content.tool_calls.?) |tc| {
@@ -318,7 +318,7 @@ fn runChatTurn(
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
-        return .{ .turn_complete = false, .usage = usage };
+        return .{ .turn_complete = false, .usage = turn_usage };
     }
 
     if (accumulator.content.items.len > 0) {
@@ -326,7 +326,7 @@ fn runChatTurn(
         try messages.append(.{ .assistant = .{ .content = content } });
     }
 
-    return .{ .turn_complete = true, .usage = usage };
+    return .{ .turn_complete = true, .usage = turn_usage };
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
