@@ -4,6 +4,7 @@ const openai = @import("providers/openai.zig");
 const zz = @import("zigzag");
 const ansi = @import("ansi.zig");
 const chat = @import("chat.zig");
+const prompt_input = @import("tui/prompt_input.zig");
 const model_picker = @import("tui/model_picker.zig");
 const retry = @import("retry.zig");
 const tools = @import("tools");
@@ -15,11 +16,17 @@ const usage = @import("usage.zig");
 const sigint = @import("sigint.zig");
 const cancel = @import("cancel.zig");
 
+const PromptInput = prompt_input.Widget;
 const ModelPicker = model_picker.Widget;
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
+
+    // Capture working directory on startup
+    var cwd_buf: [4096]u8 = undefined;
+    const cwd_len = std.process.currentPath(io, &cwd_buf) catch 0;
+    const cwd = if (cwd_len > 0) cwd_buf[0..cwd_len] else ".";
 
     const args_slice = try init.minimal.args.toSlice(arena);
     const parsed = cli.parseArgs(io, args_slice);
@@ -92,43 +99,49 @@ pub fn main(init: std.process.Init) !void {
             pending_prompt = null;
             break :blk p;
         } else blk: {
-            line_alloc.clearRetainingCapacity();
+            const branch = getGitBranch(arena, io);
+            prompt_input.setModelName(model_key);
+            prompt_input.setWorkingDir(cwd);
+            prompt_input.setGitBranch(branch);
+            prompt_input.setSessionStats(&session_stats);
 
+            var program = zz.Program(PromptInput).init(init.gpa, io, init.environ_map);
+            defer program.deinit();
+
+            if (program.run()) {
+                if (program.model.submitted) |text| {
+                    break :blk text;
+                }
+                break :blk "";
+            } else |_| {}
+
+            // TUI unavailable (e.g., piped stdin) — fall back to single-line prompt
+            try stdout_writer.print("\nPrompt: ", .{});
+            try stdout_writer.flush();
+            line_alloc.clearRetainingCapacity();
             var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
             const stdin_reader = &stdin_file_reader.interface;
-
-            try stdout_writer.print("\n\nPrompt: ", .{});
-            try stdout_writer.flush();
-
-            const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
+            const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |read_err| switch (read_err) {
                 error.StreamTooLong => {
                     try stdout_writer.print("\nInput too long (max {d} bytes).\n", .{stdin_buffer.len});
                     continue;
                 },
-                else => {
-                    if (sigint.isTriggered()) {
-                        try session_stats.print(io, stdout_writer);
-                        try stdout_writer.print("\nGoodbye.\n", .{});
-                        try stdout_writer.flush();
-                        return;
-                    }
-                    return err;
-                },
+                else => return read_err,
             };
-            if (bytes_read == 0) {
-                if (sigint.isTriggered()) {
-                    try session_stats.print(io, stdout_writer);
-                    try stdout_writer.print("\nGoodbye.\n", .{});
-                    try stdout_writer.flush();
-                }
-                return;
-            }
-
+            if (bytes_read == 0) return;
             const raw_message = line_alloc.written();
             const result: []const u8 = if (raw_message.len > 0 and raw_message[raw_message.len - 1] == '\r') raw_message[0 .. raw_message.len - 1] else raw_message;
             break :blk result;
         };
-        if (user_message.len == 0) continue;
+        if (user_message.len == 0) {
+            if (sigint.isTriggered()) {
+                try session_stats.print(io, stdout_writer);
+                try stdout_writer.print("\nGoodbye.\n", .{});
+                try stdout_writer.flush();
+                return;
+            }
+            continue;
+        }
 
         if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
             try session_stats.print(io, stdout_writer);
@@ -247,6 +260,37 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
+}
+
+fn getGitBranch(arena: std.mem.Allocator, io: std.Io) []const u8 {
+    var child = std.process.spawn(io, .{
+        .argv = &[_][]const u8{ "git", "rev-parse", "--abbrev-ref", "HEAD" },
+        .stdout = .pipe,
+        .stderr = .ignore,
+    }) catch return "";
+
+    if (child.stdout) |file| {
+        var buf: [256]u8 = undefined;
+        var reader = file.reader(io, &buf);
+        const n = reader.interface.readSliceShort(&buf) catch {
+            _ = child.wait(io) catch {};
+            return "";
+        };
+
+        const term = child.wait(io) catch return "";
+        switch (term) {
+            .exited => |code| {
+                if (code != 0) return "";
+            },
+            else => return "",
+        }
+
+        const trimmed = std.mem.trimEnd(u8, buf[0..n], &[_]u8{ '\n', '\r', ' ' });
+        return arena.dupe(u8, trimmed) catch "";
+    }
+
+    _ = child.wait(io) catch {};
+    return "";
 }
 
 fn selectModel(
