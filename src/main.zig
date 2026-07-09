@@ -287,7 +287,21 @@ fn selectModel(
         .bracketed_paste = false,
         .mouse = false,
     });
-    try program.run();
+    if (program.run()) {
+        // success
+    } else |_| {
+        program.deinit();
+        // Retry once: transient console state (STATUS_LOCAL_DISCONNECT on Windows)
+        // can cause the first TUI run to fail. Restore console and try again.
+        cancel.restoreConsole();
+        var program2 = zz.Program(ModelPicker).initWithOptions(init.gpa, io, init.environ_map, .{
+            .alt_screen = false,
+            .bracketed_paste = false,
+            .mouse = false,
+        });
+        try program2.run();
+        program = program2;
+    }
     const picked = program.model.selected orelse {
         program.deinit();
         return null;
