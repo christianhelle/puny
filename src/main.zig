@@ -28,6 +28,8 @@ pub fn main(init: std.process.Init) !void {
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
+
+
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
@@ -309,9 +311,13 @@ fn runChatTurn(
     var retry_count: usize = 0;
     const cfg = retry.default_config;
 
+    var cancel_stderr_buf: [128]u8 = undefined;
+    var cancel_stderr_fw: std.Io.File.Writer = .init(.stderr(), io, &cancel_stderr_buf);
+    const cancel_stderr = &cancel_stderr_fw.interface;
+
     while (true) {
         cancel.reset();
-        cancel.start(io) catch {};    
+        cancel.start(io, cancel_stderr) catch {};
 
         if (prov.chatStreaming(request, callback)) |_| {
             cancel.stop();

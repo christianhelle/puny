@@ -16,22 +16,15 @@ var saved_console_mode_valid: if (is_windows) bool else void = false;
 
 /// Io handle for timestamps and sleeps. Set once before spawning the thread.
 var global_io: Io = undefined;
+/// Stderr writer from the caller, for printing hints that shouldn't
+/// interleave with the AI stream on stdout.
+var global_stderr: *Io.Writer = undefined;
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
 /// Returns true if a double-Escape cancellation has been triggered.
 pub fn isCancelled() bool {
     return cancelled.load(.monotonic);
-}
-
-/// Returns true if the first Escape of a potential double-tap was seen.
-pub fn isFirstEscSeen() bool {
-    return first_esc_seen.load(.monotonic);
-}
-
-/// Clears the first-Escape-seen flag after printing the hint.
-pub fn clearFirstEscSeen() void {
-    first_esc_seen.store(false, .monotonic);
 }
 
 /// Resets cancellation flags. Call before starting a new turn.
@@ -41,11 +34,13 @@ pub fn reset() void {
 }
 
 /// Start monitoring stdin for double-Escape. Takes an `io` handle for
-/// timestamps and sleeps. Saves terminal state, switches to raw mode,
-/// and spawns a monitor thread.
-pub fn start(io: Io) !void {
+/// timestamps and sleeps, plus a stderr writer for printing hints that
+/// won't interleave with AI output on stdout. Saves terminal state,
+/// switches to raw mode, and spawns a monitor thread.
+pub fn start(io: Io, stderr_writer: *Io.Writer) !void {
     if (running.load(.monotonic)) return;
     global_io = io;
+    global_stderr = stderr_writer;
     cancelled.store(false, .monotonic);
     first_esc_seen.store(false, .monotonic);
     running.store(true, .monotonic);
@@ -211,6 +206,7 @@ fn handleFirstEscape(first_esc_ts: *?Io.Timestamp) void {
     }
     first_esc_ts.* = now;
     first_esc_seen.store(true, .monotonic);
+    global_stderr.print("\x1b[2m(press Esc again to cancel)\x1b[0m\n", .{}) catch {};
 }
 
 // ── Windows extern declarations ──────────────────────────────────────
