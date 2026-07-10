@@ -16,6 +16,7 @@ pub fn select(
     init: std.process.Init,
     skip_validation: bool,
     cfg: ?*config.Config,
+    environ_map: *const std.process.Environ.Map,
 ) !?[]const u8 {
     if (model_id) |id| {
         if (skip_validation) {
@@ -45,7 +46,7 @@ pub fn select(
 
     if (cfg) |c| {
         c.model = key;
-        config.save(arena, io, c.*) catch |err| {
+        config.save(arena, io, c.*, environ_map) catch |err| {
             var stderr_buffer: [1024]u8 = undefined;
             var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
             const stderr_writer = &stderr_file_writer.interface;
@@ -67,8 +68,9 @@ pub fn switchModel(
     skip_validation: bool,
     stdout_writer: *std.Io.Writer,
     cfg: ?*config.Config,
+    environ_map: *const std.process.Environ.Map,
 ) !?[]const u8 {
-    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg)) orelse {
+    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg, environ_map)) orelse {
         if (model_id != null) {
             try stdout_writer.print("\nModel not found.\n", .{});
             try stdout_writer.flush();

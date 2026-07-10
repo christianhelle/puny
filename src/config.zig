@@ -87,11 +87,12 @@ pub const LoadResult = struct {
     }
 };
 
-pub fn load(allocator: std.mem.Allocator, io: std.Io) !LoadResult {
-    const path = try configPath(allocator);
+pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !LoadResult {
+    const path = try configPath(allocator, environ_map);
     defer allocator.free(path);
 
-    const data = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+    const cwd = std.Io.Dir.cwd();
+    const data = cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(1024 * 1024)) catch |err| switch (err) {
         error.FileNotFound => return .{ .config = Config.default() },
         else => |e| return e,
     };
@@ -113,49 +114,35 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io) !LoadResult {
     return .{ .config = try parsed.value.clone(allocator) };
 }
 
-pub fn save(allocator: std.mem.Allocator, io: std.Io, config: Config) !void {
-    _ = io;
-    const path = try configPath(allocator);
+pub fn save(allocator: std.mem.Allocator, io: std.Io, config: Config, environ_map: *const std.process.Environ.Map) !void {
+    const path = try configPath(allocator, environ_map);
     defer allocator.free(path);
 
     const dir = std.fs.path.dirname(path) orelse return error.BadPath;
-    try std.fs.cwd().makePath(dir);
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, dir);
 
     const buffer = try std.json.Stringify.valueAlloc(allocator, config, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
 
-    var file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(buffer);
-    try file.writeAll("\n");
+    var file = try cwd.createFile(io, path, .{});
+    defer file.close(io);
+    _ = try file.writeStreaming(io, buffer, &.{}, 0);
+    _ = try file.writeStreaming(io, "\n", &.{}, 0);
 }
 
-pub fn configPath(allocator: std.mem.Allocator) ![]const u8 {
-    const base = try configDir(allocator);
-    defer allocator.free(base);
-    return std.fs.path.join(allocator, &.{ base, "puny", "config.json" });
-}
-
-fn configDir(allocator: std.mem.Allocator) ![]const u8 {
+pub fn configPath(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
     if (builtin.os.tag == .windows) {
-        if (std.process.getEnvVarOwned(allocator, "APPDATA")) |value| {
-            return value;
-        } else |_| {}
-        const home = std.process.getEnvVarOwned(allocator, "USERPROFILE") catch {
-            return error.NoConfigDir;
-        };
-        return home;
+        const base = environ_map.get("APPDATA") orelse environ_map.get("USERPROFILE") orelse return error.NoConfigDir;
+        return std.fs.path.join(allocator, &.{ base, "puny", "config.json" });
     }
 
-    if (std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME")) |value| {
-        return value;
-    } else |_| {}
+    if (environ_map.get("XDG_CONFIG_HOME")) |base| {
+        return std.fs.path.join(allocator, &.{ base, "puny", "config.json" });
+    }
 
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch {
-        return error.NoConfigDir;
-    };
-    defer allocator.free(home);
-    return std.fs.path.join(allocator, &.{ home, ".config" });
+    const home = environ_map.get("HOME") orelse return error.NoConfigDir;
+    return std.fs.path.join(allocator, &.{ home, ".config", "puny", "config.json" });
 }
 
 test "round-trip default config via JSON" {

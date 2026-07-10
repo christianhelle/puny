@@ -24,7 +24,7 @@ fn fatal(io: std.Io, comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-pub fn parseArgs(allocator: std.mem.Allocator, io: std.Io, args: []const [:0]const u8) Options {
+pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: []const [:0]const u8) Options {
     var opts = Options{};
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -62,20 +62,19 @@ pub fn parseArgs(allocator: std.mem.Allocator, io: std.Io, args: []const [:0]con
     }
 
     if (opts.url == null) {
-        if (std.process.getEnvVarOwned(allocator, "PUNY_PROVIDER_URL")) |value| {
+        if (environ_map.get("PUNY_PROVIDER_URL")) |value| {
             opts.url = value;
-        } else |_| {}
+        }
     }
     if (opts.model == null) {
-        if (std.process.getEnvVarOwned(allocator, "PUNY_MODEL")) |value| {
+        if (environ_map.get("PUNY_MODEL")) |value| {
             opts.model = value;
-        } else |_| {}
+        }
     }
     if (!opts.mock) {
-        if (std.process.getEnvVarOwned(allocator, "PUNY_MOCK")) |value| {
+        if (environ_map.get("PUNY_MOCK")) |value| {
             opts.mock = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
-            if (!opts.mock) allocator.free(value);
-        } else |_| {}
+        }
     }
 
     return opts;
