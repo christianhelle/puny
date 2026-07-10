@@ -222,9 +222,6 @@ pub fn main(init: std.process.Init) !void {
             continue;
         }
 
-        try stdout_writer.print("\nChatting with model: {s}", .{model_key});
-        try stdout_writer.flush();
-
         try messages.append(.{ .user = try arena.dupe(u8, user_message) });
 
         var turn_complete = false;
