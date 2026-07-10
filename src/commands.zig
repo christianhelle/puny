@@ -1,7 +1,10 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
+const config = @import("config.zig");
 const openai = @import("providers/openai.zig");
 const prompts = @import("prompts.zig");
+
+const default_cfg = config.Config.default();
 
 pub const Command = union(enum) {
     quit,
@@ -27,6 +30,7 @@ pub const Context = struct {
     messages: *std.array_list.Managed(openai.Message),
     planning_mode: *bool,
     oneshot: bool,
+    cfg: *const config.Config,
 };
 
 pub fn parse(user_message: []const u8) Command {
@@ -70,7 +74,8 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         .reset => {
             ctx.messages.clearRetainingCapacity();
             ctx.planning_mode.* = false;
-            try ctx.messages.append(.{ .system = prompts.system });
+            const system_prompt = try ctx.cfg.resolvePrompt(ctx.arena, "system", prompts.system);
+            try ctx.messages.append(.{ .system = system_prompt });
             try ctx.stdout_writer.print("\nConversation reset.", .{});
             try ctx.stdout_writer.flush();
             return .continue_;
@@ -80,7 +85,8 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
 
         .plan => |text| {
             ctx.planning_mode.* = true;
-            try ctx.messages.append(.{ .system = prompts.planning });
+            const planning_prompt = try ctx.cfg.resolvePrompt(ctx.arena, "planning", prompts.planning);
+            try ctx.messages.append(.{ .system = planning_prompt });
             if (text) |t| {
                 try ctx.messages.append(.{ .user = try ctx.arena.dupe(u8, t) });
                 try ctx.stdout_writer.print("\n{s}Entering planning mode: {s}{s}\n", .{ ansi.bright, t, ansi.reset });
@@ -153,6 +159,7 @@ test "dispatch quit returns exit" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.exit, action);
@@ -172,6 +179,7 @@ test "dispatch reset clears messages and resets planning mode" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.continue_, action);
@@ -193,6 +201,7 @@ test "dispatch stats returns print_stats" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.print_stats, action);
@@ -211,6 +220,7 @@ test "dispatch plan without text enters planning mode and continues" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.continue_, action);
@@ -232,6 +242,7 @@ test "dispatch plan with text enters planning mode and runs chat turn" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.run_chat_turn, action);
@@ -254,6 +265,7 @@ test "dispatch build without text switches to build mode and continues" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.continue_, action);
@@ -275,6 +287,7 @@ test "dispatch build with text switches to build mode and runs chat turn" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.run_chat_turn, action);
@@ -297,6 +310,7 @@ test "dispatch model in oneshot mode rejects" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = true,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.continue_, action);
@@ -315,6 +329,7 @@ test "dispatch model returns switch model" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqualDeep(Action{ .switch_model = "llama" }, action);
@@ -333,6 +348,7 @@ test "dispatch prompt appends user message and runs chat turn" {
         .messages = &messages,
         .planning_mode = &planning_mode,
         .oneshot = false,
+        .cfg = &default_cfg,
     });
 
     try std.testing.expectEqual(Action.run_chat_turn, action);

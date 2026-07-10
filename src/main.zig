@@ -74,7 +74,8 @@ pub fn main(init: std.process.Init) !void {
 
     var messages = std.array_list.Managed(openai.Message).init(arena);
     defer messages.deinit();
-    try messages.append(.{ .system = prompts.system });
+    const system_prompt = try cfg.resolvePrompt(arena, "system", prompts.system);
+    try messages.append(.{ .system = system_prompt });
 
     var pending_prompt = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
     var session_stats = chat.SessionStats.init(io);
@@ -123,6 +124,7 @@ pub fn main(init: std.process.Init) !void {
             .messages = &messages,
             .planning_mode = &planning_mode,
             .oneshot = parsed.oneshot,
+            .cfg = cfg,
         });
 
         switch (action) {
