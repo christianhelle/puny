@@ -2,9 +2,12 @@ const std = @import("std");
 const ansi = @import("ansi.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const openai = @import("providers/openai.zig");
-const zz = @import("zigzag");
+const provider = @import("providers/provider.zig");
+const retry = @import("retry.zig");
 const tools = @import("tools");
+const usage_estimator = @import("usage.zig");
 const cancel = @import("cancel.zig");
+const zz = @import("zigzag");
 
 fn parseStats(obj: std.json.ObjectMap) ?lmstudio.ChatStats {
     const stats_val = obj.get("stats") orelse return null;
@@ -321,6 +324,114 @@ pub const OpenAiAccumulator = struct {
         };
     }
 };
+
+pub const TurnResult = struct {
+    turn_complete: bool,
+    usage: ?openai.TurnUsage,
+};
+
+pub fn runTurn(
+    prov: *provider.Provider,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    random: std.Random,
+    model_key: []const u8,
+    messages: *std.array_list.Managed(openai.Message),
+    tool_definitions: []const openai.ToolDefinition,
+) !TurnResult {
+    const request = openai.ChatRequest{
+        .model = model_key,
+        .messages = messages.items,
+        .tools = tool_definitions,
+        .stream = true,
+    };
+
+    var accumulator = OpenAiAccumulator.init(arena, stdout_writer);
+    defer accumulator.deinit();
+    const callback = accumulator.streamCallback();
+
+    var retry_count: usize = 0;
+    const cfg = retry.default_config;
+
+    var cancel_stderr_buf: [128]u8 = undefined;
+    var cancel_stderr_fw: std.Io.File.Writer = .init(.stderr(), io, &cancel_stderr_buf);
+    const cancel_stderr = &cancel_stderr_fw.interface;
+
+    while (true) {
+        cancel.reset();
+        cancel.start(io, cancel_stderr) catch {};
+
+        if (prov.chatStreaming(request, callback)) |_| {
+            cancel.stop();
+            break;
+        } else |err| {
+            cancel.stop();
+
+            if (err == error.Canceled) return error.Canceled;
+
+            if (!retry.isTransientError(err)) {
+                try stdout_writer.print("\nChat failed: {}\n", .{err});
+                return .{ .turn_complete = true, .usage = accumulator.usage };
+            }
+
+            retry_count += 1;
+            if (retry_count >= cfg.max_retries) {
+                try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
+                return .{ .turn_complete = true, .usage = accumulator.usage };
+            }
+
+            var delay_ms: u64 = cfg.base_delay_ms;
+            var i: usize = 1;
+            while (i < retry_count) : (i += 1) delay_ms *= 2;
+            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
+
+            try stdout_writer.print("\n{s}Connection error ({}), retrying in {}ms ({d}/{d})...{s}\n", .{ ansi.dim, err, delay_ms, retry_count, cfg.max_retries, ansi.reset });
+            try stdout_writer.flush();
+            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+        }
+    }
+
+    const turn_usage = if (accumulator.usage) |u| u else usage_estimator.estimateUsage(messages.items, accumulator.content.items.len);
+
+    if (accumulator.content.items.len > 0) {
+        try accumulator.replaceWithRendered(stdout_writer);
+    }
+
+    if (accumulator.hasToolCalls()) {
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
+        try messages.append(.{ .assistant = assistant_content });
+
+        for (assistant_content.tool_calls.?) |tc| {
+            try stdout_writer.print("\n{s}🔧 {s} {s}{s}", .{ ansi.dim, tc.function.name, tc.function.arguments, ansi.reset });
+            try stdout_writer.flush();
+            const result = try executeTool(arena, io, tc);
+            try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
+        }
+
+        return .{ .turn_complete = false, .usage = turn_usage };
+    }
+
+    if (accumulator.content.items.len > 0) {
+        const content = try tools.dupeString(arena, accumulator.content.items);
+        try messages.append(.{ .assistant = .{ .content = content } });
+    }
+
+    return .{ .turn_complete = true, .usage = turn_usage };
+}
+
+fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
+    const tool = tools.dispatch(tool_call.function.name) orelse {
+        return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
+    };
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, arena, tool_call.function.arguments, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    return tool.execute(arena, io, parsed.value) catch |err| {
+        return std.fmt.allocPrint(arena, "Tool {s} failed: {}", .{ tool_call.function.name, err });
+    };
+}
 
 test "OpenAiAccumulator assembles content" {
     var acc = OpenAiAccumulator.init(std.testing.allocator, null);
