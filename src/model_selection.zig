@@ -1,4 +1,5 @@
 const std = @import("std");
+const config = @import("config.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const model_picker = @import("tui/model_picker.zig");
 const provider = @import("providers/provider.zig");
@@ -14,6 +15,7 @@ pub fn select(
     io: std.Io,
     init: std.process.Init,
     skip_validation: bool,
+    cfg: ?*config.Config,
 ) !?[]const u8 {
     if (model_id) |id| {
         if (skip_validation) {
@@ -40,6 +42,18 @@ pub fn select(
     };
     const key = try arena.dupe(u8, picked);
     program.deinit();
+
+    if (cfg) |c| {
+        c.model = key;
+        config.save(arena, io, c.*) catch |err| {
+            var stderr_buffer: [1024]u8 = undefined;
+            var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+            const stderr_writer = &stderr_file_writer.interface;
+            stderr_writer.print("Warning: failed to save selected model to config: {s}\n", .{@errorName(err)}) catch {};
+            stderr_writer.flush() catch {};
+        };
+    }
+
     return key;
 }
 
@@ -52,8 +66,9 @@ pub fn switchModel(
     init: std.process.Init,
     skip_validation: bool,
     stdout_writer: *std.Io.Writer,
+    cfg: ?*config.Config,
 ) !?[]const u8 {
-    const new_key = (try select(prov, model_id, arena, io, init, skip_validation)) orelse {
+    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg)) orelse {
         if (model_id != null) {
             try stdout_writer.print("\nModel not found.\n", .{});
             try stdout_writer.flush();

@@ -21,8 +21,8 @@ pub fn main(init: std.process.Init) !void {
     const args_slice = try init.minimal.args.toSlice(arena);
     const parsed = cli.parseArgs(arena, io, args_slice);
 
-    const cfg_result = try config.load(arena, io);
-    const cfg = cfg_result.config;
+    var cfg_result = try config.load(arena, io);
+    const cfg = &cfg_result.config;
 
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -44,11 +44,11 @@ pub fn main(init: std.process.Init) !void {
     defer prov.deinit();
 
     const skip_validation = !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
-    var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation)) orelse blk: {
+    var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation, cfg)) orelse blk: {
         if (configured_model) |model_id| {
             try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
         }
-        break :blk (try model_selection.select(&prov, null, arena, io, init, false)) orelse {
+        break :blk (try model_selection.select(&prov, null, arena, io, init, false, cfg)) orelse {
             try stdout_writer.print("No model selected.\n", .{});
             return;
         };
@@ -137,7 +137,7 @@ pub fn main(init: std.process.Init) !void {
             },
             .switch_model => |model_id| {
                 const model_skip_validation = parsed.mock;
-                if (try model_selection.switchModel(&prov, model_id, model_key, arena, io, init, model_skip_validation, stdout_writer)) |new_key| {
+                if (try model_selection.switchModel(&prov, model_id, model_key, arena, io, init, model_skip_validation, stdout_writer, cfg)) |new_key| {
                     model_key = new_key;
                 }
                 continue;
