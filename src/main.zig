@@ -1,11 +1,10 @@
 const std = @import("std");
 const commands = @import("commands.zig");
+const model_selection = @import("model_selection.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const openai = @import("providers/openai.zig");
-const zz = @import("zigzag");
 const ansi = @import("ansi.zig");
 const chat = @import("chat.zig");
-const model_picker = @import("tui/model_picker.zig");
 const retry = @import("retry.zig");
 const tools = @import("tools");
 const prompts = @import("prompts.zig");
@@ -15,8 +14,6 @@ const mock = @import("providers/mock.zig");
 const usage = @import("usage.zig");
 const sigint = @import("sigint.zig");
 const cancel = @import("cancel.zig");
-
-const ModelPicker = model_picker.Widget;
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
@@ -42,11 +39,11 @@ pub fn main(init: std.process.Init) !void {
     defer prov.deinit();
 
     const skip_validation = !std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
-    var model_key = (try selectModel(&prov, parsed.model, arena, io, init, skip_validation)) orelse blk: {
+    var model_key = (try model_selection.select(&prov, parsed.model, arena, io, init, skip_validation)) orelse blk: {
         if (parsed.model) |model_id| {
             try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
         }
-        break :blk (try selectModel(&prov, null, arena, io, init, false)) orelse {
+        break :blk (try model_selection.select(&prov, null, arena, io, init, false)) orelse {
             try stdout_writer.print("No model selected.\n", .{});
             return;
         };
@@ -146,7 +143,7 @@ pub fn main(init: std.process.Init) !void {
             },
             .switch_model => |model_id| {
                 const model_skip_validation = parsed.mock;
-                const new_key = (try selectModel(&prov, model_id, arena, io, init, model_skip_validation)) orelse {
+                const new_key = (try model_selection.select(&prov, model_id, arena, io, init, model_skip_validation)) orelse {
                     if (model_id != null) {
                         try stdout_writer.print("\nModel not found.\n", .{});
                         try stdout_writer.flush();
@@ -196,53 +193,6 @@ fn printExit(
     try session_stats.print(io, stdout_writer);
     try stdout_writer.print("\nGoodbye.\n", .{});
     try stdout_writer.flush();
-}
-
-fn selectModel(
-    prov: *provider.Provider,
-    model_id: ?[]const u8,
-    arena: std.mem.Allocator,
-    io: std.Io,
-    init: std.process.Init,
-    skip_validation: bool,
-) !?[]const u8 {
-    if (model_id) |id| {
-        if (skip_validation) {
-            return try arena.dupe(u8, id);
-        }
-        var models = try listModelsWithRetry(prov, io, 0);
-        defer models.deinit();
-        const found = for (models.value().models) |m| {
-            if (std.mem.eql(u8, m.key, id)) break true;
-        } else false;
-        if (found) {
-            return try arena.dupe(u8, id);
-        }
-        return null;
-    }
-    var models = try listModelsWithRetry(prov, io, 1);
-    defer models.deinit();
-    model_picker.setModels(models.value().models);
-    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
-    try program.run();
-    const picked = program.model.selected orelse {
-        program.deinit();
-        return null;
-    };
-    const key = try arena.dupe(u8, picked);
-    program.deinit();
-    return key;
-}
-
-fn listModelsWithRetry(prov: *provider.Provider, io: std.Io, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
-    var retry_count: usize = 0;
-    while (true) {
-        if (prov.listModels()) |models| return models else |err| {
-            retry_count += 1;
-            if (retry_count > retries or !retry.isTransientError(err)) return err;
-            io.sleep(.{ .nanoseconds = @as(i96, @intCast(200 * retry_count * std.time.ns_per_ms)) }, .awake) catch {};
-        }
-    }
 }
 
 fn runChatTurn(
