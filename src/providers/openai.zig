@@ -265,6 +265,12 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
     });
     defer req.deinit();
 
+    if (req.connection) |conn| {
+        conn.timeout = .{
+            .duration = .{ .nanoseconds = @as(i96, @intCast(client.timeouts.request_ms)) * std.time.ns_per_ms },
+        };
+    }
+
     req.transfer_encoding = .{ .content_length = payload.len };
     var body = try req.sendBodyUnflushed(&.{});
     try body.writer.writeAll(payload);
