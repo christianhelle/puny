@@ -28,11 +28,32 @@ pub fn main(init: std.process.Init) !void {
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
+    if (parsed.reconfigure) {
+        var reconfigure_line_alloc: std.Io.Writer.Allocating = .init(arena);
+        defer reconfigure_line_alloc.deinit();
+        var reconfigure_stdin_buffer: [4096]u8 = undefined;
+
+        try stdout_writer.print("\nReconfiguring Puny.\n", .{});
+        try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
+        try stdout_writer.print("Enter new provider URL (or press Enter to keep current): ", .{});
+        try stdout_writer.flush();
+
+        if (try input.readLine(io, stdout_writer, &reconfigure_line_alloc, &reconfigure_stdin_buffer)) |new_url| {
+            if (new_url.len > 0) {
+                cfg.providerUrl = try arena.dupe(u8, new_url);
+                try config.save(arena, io, cfg.*);
+                try stdout_writer.print("Updated provider URL to {s}.\n", .{cfg.providerUrl});
+                try stdout_writer.flush();
+            }
+        }
+    }
+
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
     const provider_url = parsed.url orelse cfg.providerUrl;
-    const configured_model = parsed.model orelse cfg.model;
+    const reconfigure_force_picker = parsed.reconfigure and parsed.model == null;
+    const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
 
     var prov: provider.Provider = if (parsed.mock)
         .{ .mock = mock.MockClient.init(arena, io) }
