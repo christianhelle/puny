@@ -7,6 +7,10 @@ pub fn isTriggered() bool {
     return @atomicLoad(bool, &triggered, .monotonic);
 }
 
+pub fn trigger() void {
+    @atomicStore(bool, &triggered, true, .monotonic);
+}
+
 pub fn register() !void {
     if (builtin.os.tag == .windows) {
         return registerWindows();
