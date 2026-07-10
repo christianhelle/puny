@@ -5,16 +5,34 @@ param(
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $Binary = Join-Path $ProjectRoot "zig-out" "bin" "puny"
 
-function Build-Project {
-    Write-Host "Building..." -ForegroundColor Cyan
-    Push-Location $ProjectRoot
-    $buildOutput = & zig build 2>&1
-    $buildOk = $LASTEXITCODE -eq 0
-    Pop-Location
-    if (-not $buildOk) {
-        Write-Host "Build failed" -ForegroundColor Red
-        exit 1
+function Invoke-Build {
+    param([string]$Target = "")
+
+    $label = if ($Target) { "Building for $Target..." } else { "Building (native)..." }
+    Write-Host "  $label" -ForegroundColor Cyan
+
+    $zigArgs = @("build")
+    if ($Target) {
+        $zigArgs += "-Dtarget=$Target"
     }
+
+    Push-Location $ProjectRoot
+    $buildOutput = & zig @zigArgs 2>&1
+    $ok = $LASTEXITCODE -eq 0
+    Pop-Location
+
+    if (-not $ok) {
+        Write-Host "    FAILED" -ForegroundColor Red
+    } else {
+        Write-Host "    OK" -ForegroundColor Green
+    }
+
+    return $ok
+}
+
+function Build-Project {
+    $ok = Invoke-Build
+    if (-not $ok) { exit 1 }
 }
 
 function Run-Test {
