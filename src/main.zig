@@ -1,4 +1,5 @@
 const std = @import("std");
+const commands = @import("commands.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const openai = @import("providers/openai.zig");
 const zz = @import("zigzag");
@@ -124,82 +125,44 @@ pub fn main(init: std.process.Init) !void {
         };
         if (user_message.len == 0) continue;
 
-        if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
-            printExit(session_stats, io, stdout_writer) catch {};
-            return;
-        }
+        const command = commands.parse(user_message);
+        const action = try commands.dispatch(command, .{
+            .arena = arena,
+            .io = io,
+            .stdout_writer = stdout_writer,
+            .messages = &messages,
+            .planning_mode = &planning_mode,
+            .oneshot = parsed.oneshot,
+            .session_stats = &session_stats,
+        });
 
-        if (std.mem.eql(u8, user_message, "/reset")) {
-            messages.clearRetainingCapacity();
-            planning_mode = false;
-            try messages.append(.{ .system = prompts.system });
-            try stdout_writer.print("\nConversation reset.", .{});
-            try stdout_writer.flush();
-            continue;
-        }
-
-        if (std.mem.eql(u8, user_message, "/stats")) {
-            try session_stats.print(io, stdout_writer);
-            continue;
-        }
-
-        if (std.mem.eql(u8, user_message, "/plan") or std.mem.startsWith(u8, user_message, "/plan ")) {
-            planning_mode = true;
-            try messages.append(.{ .system = prompts.planning });
-            if (user_message.len > 5) {
-                const rest = user_message["/plan ".len..];
-                try messages.append(.{ .user = try arena.dupe(u8, rest) });
-                try stdout_writer.print("\n{s}Entering planning mode: {s}{s}\n", .{ ansi.bright, rest, ansi.reset });
-                try stdout_writer.flush();
-            } else {
-                try stdout_writer.print("\n{s}Entering planning mode.{s}\n", .{ ansi.bright, ansi.reset });
-                try stdout_writer.flush();
-                continue;
-            }
-        }
-
-        if (std.mem.eql(u8, user_message, "/build") or std.mem.startsWith(u8, user_message, "/build ")) {
-            planning_mode = false;
-            try messages.append(.{ .user = "Now implement the plan. Write all necessary code." });
-            if (user_message.len > 6) {
-                const rest = user_message["/build ".len..];
-                try messages.append(.{ .user = try arena.dupe(u8, rest) });
-                try stdout_writer.print("\n{s}Switching to build mode: {s}{s}\n", .{ ansi.bright, rest, ansi.reset });
-                try stdout_writer.flush();
-            } else {
-                try stdout_writer.print("\n{s}Switching to build mode.{s}\n", .{ ansi.bright, ansi.reset });
-                try stdout_writer.flush();
-                continue;
-            }
-        }
-
-        if (std.mem.eql(u8, user_message, "/model") or std.mem.startsWith(u8, user_message, "/model ")) {
-            if (parsed.oneshot) {
-                try stdout_writer.print("\n/model not available in oneshot mode.\n", .{});
-                try stdout_writer.flush();
-                continue;
-            }
-            const model_id: ?[]const u8 = if (user_message.len > 7) user_message["/model ".len..] else null;
-            const model_skip_validation = parsed.mock;
-            const new_key = (try selectModel(&prov, model_id, arena, io, init, model_skip_validation)) orelse {
-                if (model_id != null) {
-                    try stdout_writer.print("\nModel not found.\n", .{});
+        switch (action) {
+            .exit => {
+                printExit(session_stats, io, stdout_writer) catch {};
+                return;
+            },
+            .continue_ => continue,
+            .switch_model => |model_id| {
+                const model_skip_validation = parsed.mock;
+                const new_key = (try selectModel(&prov, model_id, arena, io, init, model_skip_validation)) orelse {
+                    if (model_id != null) {
+                        try stdout_writer.print("\nModel not found.\n", .{});
+                        try stdout_writer.flush();
+                    }
+                    continue;
+                };
+                if (std.mem.eql(u8, new_key, model_key)) {
+                    try stdout_writer.print("\nAlready using model {s}.\n", .{new_key});
                     try stdout_writer.flush();
+                    continue;
                 }
-                continue;
-            };
-            if (std.mem.eql(u8, new_key, model_key)) {
-                try stdout_writer.print("\nAlready using model {s}.\n", .{new_key});
+                try stdout_writer.print("\nSwitched to model {s}.\n", .{new_key});
                 try stdout_writer.flush();
+                model_key = new_key;
                 continue;
-            }
-            try stdout_writer.print("\nSwitched to model {s}.\n", .{new_key});
-            try stdout_writer.flush();
-            model_key = new_key;
-            continue;
+            },
+            .run_chat_turn => {},
         }
-
-        try messages.append(.{ .user = try arena.dupe(u8, user_message) });
 
         var turn_complete = false;
         while (!turn_complete) {
