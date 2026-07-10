@@ -372,12 +372,14 @@ pub fn runTurn(
 
             if (!retry.isTransientError(err)) {
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
+                try stdout_writer.flush();
                 return .{ .turn_complete = true, .usage = accumulator.usage };
             }
 
             retry_count += 1;
             if (retry_count >= cfg.max_retries) {
                 try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
+                try stdout_writer.flush();
                 return .{ .turn_complete = true, .usage = accumulator.usage };
             }
 
