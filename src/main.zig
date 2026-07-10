@@ -1,16 +1,17 @@
 const std = @import("std");
-const commands = @import("commands.zig");
-const model_selection = @import("model_selection.zig");
-const lmstudio = @import("providers/lmstudio.zig");
-const openai = @import("providers/openai.zig");
 const ansi = @import("ansi.zig");
 const chat = @import("chat.zig");
-const tools = @import("tools");
-const prompts = @import("prompts.zig");
 const cli = @import("cli.zig");
-const provider = @import("providers/provider.zig");
+const commands = @import("commands.zig");
+const input = @import("input.zig");
+const lmstudio = @import("providers/lmstudio.zig");
 const mock = @import("providers/mock.zig");
+const model_selection = @import("model_selection.zig");
+const openai = @import("providers/openai.zig");
+const prompts = @import("prompts.zig");
+const provider = @import("providers/provider.zig");
 const sigint = @import("sigint.zig");
+const tools = @import("tools");
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
@@ -85,37 +86,19 @@ pub fn main(init: std.process.Init) !void {
             pending_prompt = null;
             break :blk p;
         } else blk: {
-            line_alloc.clearRetainingCapacity();
-
-            var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
-            const stdin_reader = &stdin_file_reader.interface;
-
-            try stdout_writer.print("\n\nPrompt: ", .{});
-            try stdout_writer.flush();
-
-            const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
-                error.StreamTooLong => {
-                    try stdout_writer.print("\nInput too long (max {d} bytes).\n", .{stdin_buffer.len});
-                    continue;
-                },
-                else => {
-                    if (sigint.isTriggered()) {
-                        printExit(session_stats, io, stdout_writer) catch {};
-                        return;
-                    }
-                    return err;
-                },
+            const maybe_input = input.readLine(io, stdout_writer, &line_alloc, &stdin_buffer) catch |err| {
+                if (sigint.isTriggered()) {
+                    printExit(session_stats, io, stdout_writer) catch {};
+                    return;
+                }
+                return err;
             };
-            if (bytes_read == 0) {
+            break :blk maybe_input orelse {
                 if (sigint.isTriggered()) {
                     printExit(session_stats, io, stdout_writer) catch {};
                 }
                 return;
-            }
-
-            const raw_message = line_alloc.written();
-            const result: []const u8 = if (raw_message.len > 0 and raw_message[raw_message.len - 1] == '\r') raw_message[0 .. raw_message.len - 1] else raw_message;
-            break :blk result;
+            };
         };
         if (user_message.len == 0) continue;
 
@@ -140,21 +123,9 @@ pub fn main(init: std.process.Init) !void {
             },
             .switch_model => |model_id| {
                 const model_skip_validation = parsed.mock;
-                const new_key = (try model_selection.select(&prov, model_id, arena, io, init, model_skip_validation)) orelse {
-                    if (model_id != null) {
-                        try stdout_writer.print("\nModel not found.\n", .{});
-                        try stdout_writer.flush();
-                    }
-                    continue;
-                };
-                if (std.mem.eql(u8, new_key, model_key)) {
-                    try stdout_writer.print("\nAlready using model {s}.\n", .{new_key});
-                    try stdout_writer.flush();
-                    continue;
+                if (try model_selection.switchModel(&prov, model_id, model_key, arena, io, init, model_skip_validation, stdout_writer)) |new_key| {
+                    model_key = new_key;
                 }
-                try stdout_writer.print("\nSwitched to model {s}.\n", .{new_key});
-                try stdout_writer.flush();
-                model_key = new_key;
                 continue;
             },
             .run_chat_turn => {},

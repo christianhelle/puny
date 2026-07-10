@@ -43,6 +43,33 @@ pub fn select(
     return key;
 }
 
+pub fn switchModel(
+    prov: *provider.Provider,
+    model_id: ?[]const u8,
+    current_key: []const u8,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init,
+    skip_validation: bool,
+    stdout_writer: *std.Io.Writer,
+) !?[]const u8 {
+    const new_key = (try select(prov, model_id, arena, io, init, skip_validation)) orelse {
+        if (model_id != null) {
+            try stdout_writer.print("\nModel not found.\n", .{});
+            try stdout_writer.flush();
+        }
+        return null;
+    };
+    if (std.mem.eql(u8, new_key, current_key)) {
+        try stdout_writer.print("\nAlready using model {s}.\n", .{new_key});
+        try stdout_writer.flush();
+        return null;
+    }
+    try stdout_writer.print("\nSwitched to model {s}.\n", .{new_key});
+    try stdout_writer.flush();
+    return new_key;
+}
+
 pub fn listModelsWithRetry(prov: anytype, io: std.Io, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
     var retry_count: usize = 0;
     while (true) {
