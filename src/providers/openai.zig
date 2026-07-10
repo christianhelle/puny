@@ -1,4 +1,5 @@
 const std = @import("std");
+const cancel = @import("../cancel.zig");
 const lmstudio = @import("lmstudio.zig");
 
 pub const ToolCall = struct {
@@ -163,6 +164,11 @@ const StreamChunk = struct {
 const SseCallback = struct {
     allocator: std.mem.Allocator,
     callback: StreamCallback,
+
+    pub fn shouldCancel(self: *@This()) bool {
+        _ = self;
+        return cancel.isCancelled();
+    }
 
     pub fn event(self: *@This(), data: []const u8) !void {
         const parsed = try std.json.parseFromSlice(StreamChunk, self.allocator, data, .{ .ignore_unknown_fields = true });

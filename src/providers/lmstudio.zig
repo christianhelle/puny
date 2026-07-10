@@ -417,29 +417,39 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
     var event_data: std.Io.Writer.Allocating = .init(allocator);
     defer event_data.deinit();
 
-    while (true) {
+    const callback_has_cancel = @hasDecl(@TypeOf(callback.*), "shouldCancel");
+
+    var eof = false;
+    while (!eof) {
         line_buf.clearRetainingCapacity();
 
-        _ = reader.streamDelimiterLimit(&line_buf.writer, '\n', .limited(max_sse_line_size)) catch |err| switch (err) {
-            error.StreamTooLong => return error.SseLineTooLong,
-            error.ReadFailed => return err,
-            error.WriteFailed => return err,
-        };
+        // Read one line byte-by-byte so cancellation is checked frequently
+        // between tokens, even when the model stalls mid-line.
+        while (true) {
+            if (callback_has_cancel and callback.shouldCancel()) return error.Canceled;
 
-        const ended_with_delimiter = blk: {
-            const byte = reader.peekByte() catch |err| switch (err) {
-                error.EndOfStream => break :blk false,
+            var byte_buf: [1]u8 = undefined;
+            const n = reader.readSliceShort(&byte_buf) catch |err| switch (err) {
                 error.ReadFailed => return err,
+                error.EndOfStream => {
+                    eof = true;
+                    break;
+                },
             };
-            if (byte == '\n') {
-                _ = try reader.takeByte();
-                break :blk true;
+            if (n == 0) {
+                eof = true;
+                break;
             }
-            break :blk false;
-        };
 
-        if (try processSseLine(&event_data, line_buf.written(), callback)) return;
-        if (!ended_with_delimiter) break;
+            const byte = byte_buf[0];
+            if (byte == '\n') break;
+            if (line_buf.written().len >= max_sse_line_size) return error.SseLineTooLong;
+            try line_buf.writer.writeByte(byte);
+        }
+
+        const raw_line = line_buf.written();
+        const line = std.mem.trimEnd(u8, raw_line, "\r");
+        if (try processSseLine(&event_data, line, callback)) return;
     }
 
     _ = try dispatchSseEvent(&event_data, callback);
