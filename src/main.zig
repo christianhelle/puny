@@ -93,11 +93,18 @@ pub fn main(init: std.process.Init) !void {
                 }
                 return err;
             };
-            break :blk maybe_input orelse {
-                if (sigint.isTriggered()) {
-                    printExit(session_stats, io, stdout_writer) catch {};
-                }
-                return;
+            break :blk switch (maybe_input) {
+                .submitted => |text| text,
+                .cancelled => {
+                    try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+                    continue;
+                },
+                .interrupted, .eof => {
+                    if (sigint.isTriggered()) {
+                        printExit(session_stats, io, stdout_writer) catch {};
+                    }
+                    return;
+                },
             };
         };
         if (user_message.len == 0) continue;
