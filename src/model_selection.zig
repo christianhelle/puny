@@ -43,7 +43,7 @@ pub fn select(
     return key;
 }
 
-pub fn listModelsWithRetry(prov: *provider.Provider, io: std.Io, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+pub fn listModelsWithRetry(prov: anytype, io: std.Io, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
     var retry_count: usize = 0;
     while (true) {
         if (prov.listModels()) |models| return models else |err| {
@@ -52,4 +52,59 @@ pub fn listModelsWithRetry(prov: *provider.Provider, io: std.Io, comptime retrie
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(200 * retry_count * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
+}
+
+fn emptyListModelsResponse(allocator: std.mem.Allocator) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+    const json = "{\"models\":[]}";
+    const body = try allocator.dupe(u8, json);
+    errdefer allocator.free(body);
+    const parsed = try std.json.parseFromSlice(lmstudio.ListModelsResponse, allocator, body, .{ .ignore_unknown_fields = true });
+    return .{
+        .allocator = allocator,
+        .body = body,
+        .parsed = parsed,
+    };
+}
+
+const TestProvider = struct {
+    allocator: std.mem.Allocator,
+    calls: usize = 0,
+    fail_count: usize = 0,
+    err: anyerror = error.ConnectionRefused,
+
+    pub fn listModels(self: *@This()) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+        self.calls += 1;
+        if (self.calls <= self.fail_count) return self.err;
+        return emptyListModelsResponse(self.allocator);
+    }
+};
+
+test "listModelsWithRetry succeeds on first call" {
+    var prov = TestProvider{ .allocator = std.testing.allocator };
+    var result = try listModelsWithRetry(&prov, undefined, 0);
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), prov.calls);
+    try std.testing.expectEqual(@as(usize, 0), result.value().models.len);
+}
+
+test "listModelsWithRetry fails fast on non-transient error" {
+    var prov = TestProvider{
+        .allocator = std.testing.allocator,
+        .fail_count = 1,
+        .err = error.OutOfMemory,
+    };
+    const result = listModelsWithRetry(&prov, undefined, 0);
+    try std.testing.expectError(error.OutOfMemory, result);
+    try std.testing.expectEqual(@as(usize, 1), prov.calls);
+}
+
+test "listModelsWithRetry gives up when retries exhausted" {
+    var prov = TestProvider{
+        .allocator = std.testing.allocator,
+        .fail_count = 2,
+        .err = error.ConnectionRefused,
+    };
+    const result = listModelsWithRetry(&prov, undefined, 0);
+    try std.testing.expectError(error.ConnectionRefused, result);
+    try std.testing.expectEqual(@as(usize, 1), prov.calls);
 }
