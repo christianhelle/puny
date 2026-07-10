@@ -147,4 +147,5 @@ if ($failed -eq 0) {
 }
 Write-Host ""
 
-exit $failed
+$totalFailed = $buildFailed + $failed
+exit $totalFailed
