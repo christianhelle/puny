@@ -96,9 +96,9 @@ fn setRawModePosix(enable: bool) !void {
         raw.cflag.PARENB = false;
         raw.cc[@intFromEnum(posix.V.MIN)] = 1;
         raw.cc[@intFromEnum(posix.V.TIME)] = 0;
-        try posix.tcsetattr(0, .NOW, &raw);
+        try posix.tcsetattr(0, .NOW, raw);
     } else {
-        posix.tcsetattr(0, .NOW, &saved_termios) catch {};
+        posix.tcsetattr(0, .NOW, saved_termios) catch {};
     }
 }
 
@@ -138,13 +138,11 @@ fn monitorThreadPosix() void {
         var pfd = [1]posix.pollfd{
             .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
         };
-        const rc = posix.poll(&pfd, 50) catch |err| switch (err) {
-            error.InvalidDesc, error.Unsupported => break,
-        };
+        const rc = posix.poll(&pfd, 50) catch break;
         if (rc == 0) continue;
         if (pfd[0].revents & posix.POLL.IN == 0) continue;
 
-        const n = posix.read(0, &buf, 1) catch break;
+        const n = posix.read(0, buf[0..]) catch break;
         if (n == 0) break;
 
         handleKeyByte(buf[0], &first_esc_ts);
