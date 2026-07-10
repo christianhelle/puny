@@ -3,11 +3,12 @@ const std = @import("std");
 pub const version = "0.1.0";
 
 pub const Options = struct {
-    url: []const u8 = "http://127.0.0.1:1234",
+    url: ?[]const u8 = null,
     model: ?[]const u8 = null,
     prompt: ?[]const u8 = null,
     oneshot: bool = false,
     mock: bool = false,
+    reconfigure: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -23,7 +24,7 @@ fn fatal(io: std.Io, comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-pub fn parseArgs(io: std.Io, args: []const [:0]const u8) Options {
+pub fn parseArgs(allocator: std.mem.Allocator, io: std.Io, args: []const [:0]const u8) Options {
     var opts = Options{};
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -50,6 +51,8 @@ pub fn parseArgs(io: std.Io, args: []const [:0]const u8) Options {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.prompt = args[i];
+        } else if (std.mem.eql(u8, arg, "--reconfigure")) {
+            opts.reconfigure = true;
         } else {
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
@@ -57,6 +60,24 @@ pub fn parseArgs(io: std.Io, args: []const [:0]const u8) Options {
     if (opts.oneshot and opts.prompt == null) {
         fatal(io, "--oneshot requires --prompt\n\n", .{});
     }
+
+    if (opts.url == null) {
+        if (std.process.getEnvVarOwned(allocator, "PUNY_PROVIDER_URL")) |value| {
+            opts.url = value;
+        } else |_| {}
+    }
+    if (opts.model == null) {
+        if (std.process.getEnvVarOwned(allocator, "PUNY_MODEL")) |value| {
+            opts.model = value;
+        } else |_| {}
+    }
+    if (!opts.mock) {
+        if (std.process.getEnvVarOwned(allocator, "PUNY_MOCK")) |value| {
+            opts.mock = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
+            if (!opts.mock) allocator.free(value);
+        } else |_| {}
+    }
+
     return opts;
 }
 
@@ -65,11 +86,12 @@ pub fn printHelp(io: std.Io) void {
         \\Usage: puny [options]
         \\
         \\Options:
-        \\  -u, --url <url>        LM Studio endpoint URL (default: http://127.0.0.1:1234)
+        \\  -u, --url <url>        LM Studio endpoint URL (config/env/CLI precedence)
         \\  -m, --model <id>       Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>    Pre-fill prompt as first user message
         \\  -1, --oneshot, --one-shot  Exit after processing the prompt (requires --prompt)
         \\  -M, --mock             Use mock provider (no LM Studio required)
+        \\      --reconfigure      Re-run first-run setup and update config
         \\  -h, --help             Show this help text
         \\  -V, --version          Print version
         \\

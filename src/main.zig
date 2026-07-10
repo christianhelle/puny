@@ -3,6 +3,7 @@ const ansi = @import("ansi.zig");
 const chat = @import("chat.zig");
 const cli = @import("cli.zig");
 const commands = @import("commands.zig");
+const config = @import("config.zig");
 const input = @import("input.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const mock = @import("providers/mock.zig");
@@ -18,7 +19,10 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
     const args_slice = try init.minimal.args.toSlice(arena);
-    const parsed = cli.parseArgs(io, args_slice);
+    const parsed = cli.parseArgs(arena, io, args_slice);
+
+    const cfg_result = try config.load(arena, io);
+    const cfg = cfg_result.config;
 
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -27,18 +31,21 @@ pub fn main(init: std.process.Init) !void {
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
+    const provider_url = parsed.url orelse cfg.providerUrl;
+    const configured_model = parsed.model orelse cfg.model;
+
     var prov: provider.Provider = if (parsed.mock)
         .{ .mock = mock.MockClient.init(arena, io) }
     else blk: {
         var c = lmstudio.Client.init(arena, io, "");
-        c.withBaseUrl(parsed.url);
+        c.withBaseUrl(provider_url);
         break :blk .{ .lmstudio = c };
     };
     defer prov.deinit();
 
-    const skip_validation = !std.mem.eql(u8, parsed.url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
-    var model_key = (try model_selection.select(&prov, parsed.model, arena, io, init, skip_validation)) orelse blk: {
-        if (parsed.model) |model_id| {
+    const skip_validation = !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
+    var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation)) orelse blk: {
+        if (configured_model) |model_id| {
             try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
         }
         break :blk (try model_selection.select(&prov, null, arena, io, init, false)) orelse {
