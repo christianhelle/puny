@@ -16,17 +16,17 @@ pub fn register() !void {
 
 fn registerPosix() !void {
     const handler = struct {
-        fn handler(sig: c_int) callconv(.c) void {
+        fn handler(sig: std.posix.SIG) callconv(.c) void {
             _ = sig;
             @atomicStore(bool, &triggered, true, .monotonic);
         }
     }.handler;
     const act = std.posix.Sigaction{
         .handler = .{ .handler = handler },
-        .mask = std.posix.empty_sigset,
+        .mask = std.posix.sigemptyset(),
         .flags = 0,
     };
-    try std.posix.sigaction(.INT, &act, null);
+    std.posix.sigaction(.INT, &act, null);
 }
 
 fn registerWindows() !void {
