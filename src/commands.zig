@@ -1,6 +1,5 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
-const chat = @import("chat.zig");
 const openai = @import("providers/openai.zig");
 const prompts = @import("prompts.zig");
 
@@ -18,17 +17,16 @@ pub const Action = union(enum) {
     exit,
     continue_,
     run_chat_turn,
+    print_stats,
     switch_model: ?[]const u8,
 };
 
 pub const Context = struct {
     arena: std.mem.Allocator,
-    io: std.Io,
     stdout_writer: *std.Io.Writer,
     messages: *std.array_list.Managed(openai.Message),
     planning_mode: *bool,
     oneshot: bool,
-    session_stats: *chat.SessionStats,
 };
 
 pub fn parse(user_message: []const u8) Command {
@@ -78,10 +76,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             return .continue_;
         },
 
-        .stats => {
-            try ctx.session_stats.print(ctx.io, ctx.stdout_writer);
-            return .continue_;
-        },
+        .stats => return .print_stats,
 
         .plan => |text| {
             ctx.planning_mode.* = true;
@@ -125,4 +120,222 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             return .run_chat_turn;
         },
     }
+}
+
+test "parse recognizes all slash commands" {
+    try std.testing.expectEqual(Command.quit, parse("/quit"));
+    try std.testing.expectEqual(Command.quit, parse("/exit"));
+    try std.testing.expectEqual(Command.reset, parse("/reset"));
+    try std.testing.expectEqual(Command.stats, parse("/stats"));
+
+    try std.testing.expectEqualDeep(Command{ .plan = null }, parse("/plan"));
+    try std.testing.expectEqualDeep(Command{ .plan = "do thing" }, parse("/plan do thing"));
+
+    try std.testing.expectEqualDeep(Command{ .build = null }, parse("/build"));
+    try std.testing.expectEqualDeep(Command{ .build = "code it" }, parse("/build code it"));
+
+    try std.testing.expectEqualDeep(Command{ .model = null }, parse("/model"));
+    try std.testing.expectEqualDeep(Command{ .model = "llama" }, parse("/model llama"));
+
+    try std.testing.expectEqualDeep(Command{ .prompt = "hello" }, parse("hello"));
+}
+
+test "dispatch quit returns exit" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.quit, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.exit, action);
+}
+
+test "dispatch reset clears messages and resets planning mode" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    try messages.append(.{ .user = "previous" });
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = true;
+
+    const action = try dispatch(.reset, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+    try std.testing.expect(!planning_mode);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqual(openai.Message.system, messages.items[0]);
+}
+
+test "dispatch stats returns print_stats" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.stats, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.print_stats, action);
+}
+
+test "dispatch plan without text enters planning mode and continues" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .plan = null }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+    try std.testing.expect(planning_mode);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqual(openai.Message.system, messages.items[0]);
+}
+
+test "dispatch plan with text enters planning mode and runs chat turn" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .plan = "do thing" }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.run_chat_turn, action);
+    try std.testing.expect(planning_mode);
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expectEqual(openai.Message.system, messages.items[0]);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "do thing" }, messages.items[1]);
+}
+
+test "dispatch build without text switches to build mode and continues" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = true;
+
+    const action = try dispatch(Command{ .build = null }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+    try std.testing.expect(!planning_mode);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "Now implement the plan. Write all necessary code." }, messages.items[0]);
+}
+
+test "dispatch build with text switches to build mode and runs chat turn" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = true;
+
+    const action = try dispatch(Command{ .build = "now" }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.run_chat_turn, action);
+    try std.testing.expect(!planning_mode);
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "Now implement the plan. Write all necessary code." }, messages.items[0]);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "now" }, messages.items[1]);
+}
+
+test "dispatch model in oneshot mode rejects" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .model = "x" }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = true,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+}
+
+test "dispatch model returns switch model" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .model = "llama" }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .switch_model = "llama" }, action);
+}
+
+test "dispatch prompt appends user message and runs chat turn" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .prompt = "hello" }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+    });
+
+    try std.testing.expectEqual(Action.run_chat_turn, action);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "hello" }, messages.items[0]);
 }

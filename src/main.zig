@@ -128,12 +128,10 @@ pub fn main(init: std.process.Init) !void {
         const command = commands.parse(user_message);
         const action = try commands.dispatch(command, .{
             .arena = arena,
-            .io = io,
             .stdout_writer = stdout_writer,
             .messages = &messages,
             .planning_mode = &planning_mode,
             .oneshot = parsed.oneshot,
-            .session_stats = &session_stats,
         });
 
         switch (action) {
@@ -142,6 +140,10 @@ pub fn main(init: std.process.Init) !void {
                 return;
             },
             .continue_ => continue,
+            .print_stats => {
+                try session_stats.print(io, stdout_writer);
+                continue;
+            },
             .switch_model => |model_id| {
                 const model_skip_validation = parsed.mock;
                 const new_key = (try selectModel(&prov, model_id, arena, io, init, model_skip_validation)) orelse {
