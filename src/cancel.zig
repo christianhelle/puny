@@ -64,7 +64,7 @@ pub fn stop() void {
 
 // ── Platform-specific: raw mode ──────────────────────────────────────
 
-fn setRawMode(enable: bool) !void {
+pub fn setRawMode(enable: bool) !void {
     if (is_windows) {
         return setRawModeWindows(enable);
     } else {
