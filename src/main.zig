@@ -82,9 +82,7 @@ pub fn main(init: std.process.Init) !void {
 
     while (true) {
         if (sigint.isTriggered()) {
-            try session_stats.print(io, stdout_writer);
-            try stdout_writer.print("\nGoodbye.\n", .{});
-            try stdout_writer.flush();
+            printExit(session_stats, io, stdout_writer) catch {};
             return;
         }
 
@@ -107,9 +105,7 @@ pub fn main(init: std.process.Init) !void {
                 },
                 else => {
                     if (sigint.isTriggered()) {
-                        try session_stats.print(io, stdout_writer);
-                        try stdout_writer.print("\nGoodbye.\n", .{});
-                        try stdout_writer.flush();
+                        printExit(session_stats, io, stdout_writer) catch {};
                         return;
                     }
                     return err;
@@ -117,9 +113,7 @@ pub fn main(init: std.process.Init) !void {
             };
             if (bytes_read == 0) {
                 if (sigint.isTriggered()) {
-                    try session_stats.print(io, stdout_writer);
-                    try stdout_writer.print("\nGoodbye.\n", .{});
-                    try stdout_writer.flush();
+                    printExit(session_stats, io, stdout_writer) catch {};
                 }
                 return;
             }
@@ -131,9 +125,7 @@ pub fn main(init: std.process.Init) !void {
         if (user_message.len == 0) continue;
 
         if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit")) {
-            try session_stats.print(io, stdout_writer);
-            try stdout_writer.print("\nGoodbye.\n", .{});
-            try stdout_writer.flush();
+            printExit(session_stats, io, stdout_writer) catch {};
             return;
         }
 
@@ -229,6 +221,16 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
+}
+
+fn printExit(
+    session_stats: chat.SessionStats,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+) !void {
+    try session_stats.print(io, stdout_writer);
+    try stdout_writer.print("\nGoodbye.\n", .{});
+    try stdout_writer.flush();
 }
 
 fn selectModel(
