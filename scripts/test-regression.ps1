@@ -5,6 +5,14 @@ param(
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $Binary = Join-Path $ProjectRoot "zig-out" "bin" "puny"
 
+$SupportedTargets = @(
+    "x86_64-linux",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "aarch64-darwin",
+    "x86_64-windows-gnu"
+)
+
 function Invoke-Build {
     param([string]$Target = "")
 
@@ -73,11 +81,40 @@ function Run-Test {
     return $true
 }
 
+$buildPassed = 0
+$buildFailed = 0
+
 if (-not $NoBuild) {
-    Build-Project
+    Write-Host ""
+    Write-Host "Cross-platform build verification" -ForegroundColor Cyan
+    Write-Host ("=" * 50) -ForegroundColor Cyan
+    Write-Host ""
+
+    foreach ($target in $SupportedTargets) {
+        $ok = Invoke-Build -Target $target
+        if ($ok) { $buildPassed++ } else { $buildFailed++ }
+    }
+
+    Write-Host ""
+    Write-Host "Building native binary for tests..." -ForegroundColor Cyan
+    $nativeOk = Invoke-Build
+    if (-not $nativeOk) { exit 1 }
+    Write-Host ""
 }
 
 Write-Host ""
+
+if (-not $NoBuild) {
+    Write-Host "Build results" -ForegroundColor Cyan
+    Write-Host ("=" * 50) -ForegroundColor Cyan
+    if ($buildFailed -eq 0) {
+        Write-Host ("All $($SupportedTargets.Count) cross-platform builds passed") -ForegroundColor Green
+    } else {
+        Write-Host ("$buildPassed passed, $buildFailed failed (of $($SupportedTargets.Count) cross-platform builds)") -ForegroundColor Red
+    }
+    Write-Host ""
+}
+
 Write-Host "Regression tests (mock mode)" -ForegroundColor Cyan
 Write-Host ("=" * 50) -ForegroundColor Cyan
 Write-Host ""
