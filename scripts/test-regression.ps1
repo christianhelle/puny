@@ -3,7 +3,8 @@ param(
 )
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$Binary = Join-Path $ProjectRoot "zig-out" "bin" "puny"
+$BinaryName = if ($IsWindows -or ($Env:OS -eq "Windows_NT")) { "puny.exe" } else { "puny" }
+$Binary = Join-Path $ProjectRoot "zig-out" "bin" $BinaryName
 
 $SupportedTargets = @(
     "x86_64-linux",
@@ -128,7 +129,7 @@ $tests = @(
     @{Name="Tool call: read_file"; Args=@("--mock","--model","mock-model","--prompt","read the code","--oneshot"); Expect=@("read_file","Tool executed")}
     @{Name="Tool call: grep_search"; Args=@("--mock","--model","mock-model","--prompt","search for pattern","--oneshot"); Expect=@("grep_search","Tool executed")}
     @{Name="Tool call: execute_shell"; Args=@("--mock","--model","mock-model","--prompt","run a command","--oneshot"); Expect=@("execute_shell","Tool executed")}
-    @{Name="Error does not produce content"; Args=@("--mock","--model","mock-model","--prompt","trigger an error","--oneshot"); Expect=@("Chatting with model"); NotExpect=@("mock response")}
+    @{Name="Error does not produce content"; Args=@("--mock","--model","mock-model","--prompt","trigger an error","--oneshot"); Expect=@("Chat failed"); NotExpect=@("mock response")}
 )
 
 $total = $tests.Count
