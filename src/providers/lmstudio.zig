@@ -431,10 +431,6 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
             var byte_buf: [1]u8 = undefined;
             const n = reader.readSliceShort(&byte_buf) catch |err| switch (err) {
                 error.ReadFailed => return err,
-                error.EndOfStream => {
-                    eof = true;
-                    break;
-                },
             };
             if (n == 0) {
                 eof = true;
