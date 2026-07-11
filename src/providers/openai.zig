@@ -165,11 +165,6 @@ const SseCallback = struct {
     allocator: std.mem.Allocator,
     callback: StreamCallback,
 
-    pub fn shouldCancel(self: *@This()) bool {
-        _ = self;
-        return cancel.isCancelled();
-    }
-
     pub fn event(self: *@This(), data: []const u8) !void {
         const parsed = try std.json.parseFromSlice(StreamChunk, self.allocator, data, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
@@ -212,6 +207,43 @@ const SseCallback = struct {
     }
 };
 
+/// Wraps a Reader so that every read first checks whether the user has
+/// triggered a double-Escape cancellation. Keeps the cancellation logic out
+/// of the generated lmstudio.zig SSE parser.
+///
+/// For the check to run between individual SSE bytes, initialize the wrapped
+/// `std.Io.Reader` with a one-byte buffer so each byte read reaches the
+/// vtable `stream` implementation below.
+const CancelableReader = struct {
+    inner: *std.Io.Reader,
+    reader: std.Io.Reader,
+
+    pub fn init(inner: *std.Io.Reader, buffer: []u8) CancelableReader {
+        return .{
+            .inner = inner,
+            .reader = .{
+                .buffer = buffer,
+                .seek = 0,
+                .end = 0,
+                .vtable = &vtable,
+            },
+        };
+    }
+
+    const vtable: std.Io.Reader.VTable = .{
+        .stream = stream,
+        .discard = std.Io.Reader.defaultDiscard,
+        .readVec = std.Io.Reader.defaultReadVec,
+        .rebase = std.Io.Reader.defaultRebase,
+    };
+
+    fn stream(ctx: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+        const self: *CancelableReader = @fieldParentPtr("reader", ctx);
+        if (cancel.isCancelled()) return error.ReadFailed;
+        return self.inner.stream(w, limit);
+    }
+};
+
 pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: StreamCallback) !void {
     const allocator = client.allocator;
     const payload = try requestPayload(allocator, request);
@@ -242,7 +274,14 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
     var response = try req.receiveHead(&.{});
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
-    const reader = response.reader(&transfer_buffer);
+    const response_reader = response.reader(&transfer_buffer);
+
+    // Use a single-byte wrapper buffer so the generated SSE parser calls our
+    // vtable stream for every byte, letting us check the cancel flag between
+    // tokens instead of only at multi-kilobyte buffer boundaries.
+    var cancelable_reader_buffer: [1]u8 = undefined;
+    var cancelable_reader = CancelableReader.init(response_reader, &cancelable_reader_buffer);
+    const reader = &cancelable_reader.reader;
 
     if (response.head.status.class() != .success) {
         var body_alloc: std.Io.Writer.Allocating = .init(allocator);
@@ -263,7 +302,13 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
         .callback = callback,
     };
 
-    try lmstudio.parseSseReader(allocator, reader, &sse);
+    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+        error.ReadFailed => {
+            if (cancel.isCancelled()) return error.Canceled;
+            return err;
+        },
+        else => return err,
+    };
 }
 
 fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
