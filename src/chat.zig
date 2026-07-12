@@ -110,29 +110,83 @@ pub const SessionStats = struct {
     tps_count: usize = 0,
     start_time: std.Io.Clock.Timestamp,
 
+    // Per-turn streaming state used to reconcile estimates with final usage.
+    current_turn_input: i64 = 0,
+    current_turn_output: i64 = 0,
+    current_turn_reasoning: i64 = 0,
+    current_turn_ttft: ?f64 = null,
+    current_turn_tps: ?f64 = null,
+
     pub fn init(io: std.Io) SessionStats {
         return .{
             .start_time = std.Io.Clock.Timestamp.now(io, .awake),
         };
     }
 
-    pub fn addTurn(self: *@This(), usage: ?openai.TurnUsage, is_final: bool) void {
-        if (is_final) self.turn_count += 1;
+    /// Begin tracking a new model call. Input tokens are known up front and are
+    /// added to the running total immediately so cancellation still records them.
+    pub fn beginTurn(self: *@This(), input_tokens: i64) void {
+        self.current_turn_input = input_tokens;
+        self.current_turn_output = 0;
+        self.current_turn_reasoning = 0;
+        self.current_turn_ttft = null;
+        self.current_turn_tps = null;
+        self.input_tokens += input_tokens;
+    }
+
+    /// Add output tokens as they stream in. The caller is responsible for
+    /// estimating from content deltas; finalizeTurn reconciles with provider
+    /// usage when the turn ends.
+    pub fn addStreamingOutput(self: *@This(), output_tokens: i64, reasoning_output_tokens: ?i64) void {
+        self.output_tokens += output_tokens;
+        self.current_turn_output += output_tokens;
+        if (reasoning_output_tokens) |r| {
+            self.reasoning_output_tokens += r;
+            self.current_turn_reasoning += r;
+        }
+    }
+
+    /// Record time-to-first-token for the current turn. Safe to call multiple
+    /// times; only the first value is kept.
+    pub fn addFirstTokenTiming(self: *@This(), ttft_seconds: f64) void {
+        if (self.current_turn_ttft != null) return;
+        self.ttft_sum += ttft_seconds;
+        self.ttft_count += 1;
+        self.current_turn_ttft = ttft_seconds;
+    }
+
+    /// Reconcile the streamed estimates with authoritative provider usage and,
+    /// if the turn loop iteration is complete, increment the turn counter.
+    pub fn finalizeTurn(self: *@This(), usage: ?openai.TurnUsage, turn_complete: bool) void {
         if (usage) |u| {
-            self.input_tokens += u.input_tokens;
-            self.output_tokens += u.output_tokens;
+            self.input_tokens += u.input_tokens - self.current_turn_input;
+            self.output_tokens += u.output_tokens - self.current_turn_output;
+
             if (u.reasoning_output_tokens) |r| {
-                self.reasoning_output_tokens += r;
+                self.reasoning_output_tokens += r - self.current_turn_reasoning;
+                self.current_turn_reasoning = r;
             }
-            if (u.time_to_first_token_seconds) |t| {
-                self.ttft_sum += t;
-                self.ttft_count += 1;
-            }
+
             if (u.tokens_per_second) |t| {
-                self.tps_sum += t;
-                self.tps_count += 1;
+                if (self.current_turn_tps) |prev| {
+                    self.tps_sum += t - prev;
+                } else {
+                    self.tps_sum += t;
+                    self.tps_count += 1;
+                }
+                self.current_turn_tps = t;
+            }
+
+            if (u.time_to_first_token_seconds) |t| {
+                if (self.current_turn_ttft == null) {
+                    self.ttft_sum += t;
+                    self.ttft_count += 1;
+                    self.current_turn_ttft = t;
+                }
             }
         }
+
+        if (turn_complete) self.turn_count += 1;
     }
 
     pub fn print(self: *const @This(), io: std.Io, writer: *std.Io.Writer) !void {
@@ -461,4 +515,63 @@ test "OpenAiAccumulator assembles tool call" {
     try std.testing.expectEqualStrings("call_1", acc.tool_calls.items[0].id);
     try std.testing.expectEqualStrings("read_file", acc.tool_calls.items[0].function.name);
     try std.testing.expectEqualStrings("{\"path\": \"src/main.zig\"}", acc.tool_calls.items[0].function.arguments);
+}
+
+test "SessionStats begins turn with input tokens" {
+    var stats = SessionStats.init(std.testing.io);
+    stats.beginTurn(100);
+    try std.testing.expectEqual(@as(i64, 100), stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 0), stats.output_tokens);
+    try std.testing.expectEqual(@as(usize, 0), stats.turn_count);
+}
+
+test "SessionStats accumulates streaming output" {
+    var stats = SessionStats.init(std.testing.io);
+    stats.beginTurn(10);
+    stats.addStreamingOutput(5, null);
+    stats.addStreamingOutput(3, 2);
+    try std.testing.expectEqual(@as(i64, 10), stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 8), stats.output_tokens);
+    try std.testing.expectEqual(@as(i64, 2), stats.reasoning_output_tokens);
+}
+
+test "SessionStats records TTFT once" {
+    var stats = SessionStats.init(std.testing.io);
+    stats.beginTurn(10);
+    stats.addFirstTokenTiming(0.5);
+    stats.addFirstTokenTiming(0.7);
+    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.5), stats.ttft_sum, 0.001);
+}
+
+test "SessionStats finalizes turn and reconciles usage" {
+    var stats = SessionStats.init(std.testing.io);
+    stats.beginTurn(10);
+    stats.addStreamingOutput(5, null);
+    stats.addFirstTokenTiming(0.5);
+    stats.finalizeTurn(.{
+        .input_tokens = 12,
+        .output_tokens = 8,
+        .reasoning_output_tokens = 1,
+        .tokens_per_second = 10.0,
+        .time_to_first_token_seconds = 0.4,
+    }, true);
+
+    try std.testing.expectEqual(@as(usize, 1), stats.turn_count);
+    try std.testing.expectEqual(@as(i64, 12), stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 8), stats.output_tokens);
+    try std.testing.expectEqual(@as(i64, 1), stats.reasoning_output_tokens);
+    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
+    try std.testing.expectEqual(@as(usize, 1), stats.tps_count);
+}
+
+test "SessionStats keeps partial tokens on cancelled turn" {
+    var stats = SessionStats.init(std.testing.io);
+    stats.beginTurn(20);
+    stats.addStreamingOutput(7, null);
+    stats.finalizeTurn(null, false);
+
+    try std.testing.expectEqual(@as(usize, 0), stats.turn_count);
+    try std.testing.expectEqual(@as(i64, 20), stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 7), stats.output_tokens);
 }
