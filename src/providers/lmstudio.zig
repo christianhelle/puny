@@ -271,12 +271,6 @@ pub fn ApiResult(comptime T: type) type {
     };
 }
 
-pub const Timeouts = struct {
-    request_ms: u32 = 120_000,
-    header_ms: u32 = 30_000,
-    chunk_ms: u32 = 15_000,
-};
-
 pub const Client = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -286,7 +280,6 @@ pub const Client = struct {
     organization: ?[]const u8 = null,
     project: ?[]const u8 = null,
     default_headers: []const std.http.Header = &.{},
-    timeouts: Timeouts = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8) Client {
         return .{
