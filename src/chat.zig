@@ -454,14 +454,18 @@ pub fn runTurn(
 
             const provider_ttft = if (accumulator.usage) |u| u.time_to_first_token_seconds else null;
             const has_content = accumulator.content.items.len > 0;
+            const indicator_offset = if (has_content) blk: {
+                const trailing = accumulator.content.items[accumulator.content.items.len - 1] == '\n';
+                break :blk accumulator.lines_printed + 2 + @intFromBool(trailing);
+            } else 0;
 
             if (err == error.Canceled) {
-                if (indicator_opt) |i| try i.finish(io, stdout_writer, 0, has_content, .cancelled, provider_ttft);
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, has_content, .cancelled, provider_ttft);
                 return .{ .turn_complete = true, .usage = accumulator.usage, .was_cancelled = true };
             }
 
             if (!retry.isTransientError(err)) {
-                if (indicator_opt) |i| try i.finish(io, stdout_writer, 0, has_content, .error_, provider_ttft);
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, has_content, .error_, provider_ttft);
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
                 try stdout_writer.flush();
                 return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
@@ -469,7 +473,7 @@ pub fn runTurn(
 
             retry_count += 1;
             if (retry_count >= cfg.max_retries) {
-                if (indicator_opt) |i| try i.finish(io, stdout_writer, 0, has_content, .error_, provider_ttft);
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, has_content, .error_, provider_ttft);
                 try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
                 try stdout_writer.flush();
                 return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
