@@ -1,5 +1,6 @@
 const std = @import("std");
 const config = @import("config.zig");
+const input = @import("input.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const model_picker = @import("tui/model_picker.zig");
 const provider = @import("providers/provider.zig");
@@ -34,15 +35,7 @@ pub fn select(
     }
     var models = try listModelsWithRetry(prov, io, 1);
     defer models.deinit();
-    model_picker.setModels(models.value().models);
-    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
-    try program.run();
-    const picked = program.model.selected orelse {
-        program.deinit();
-        return null;
-    };
-    const key = try arena.dupe(u8, picked);
-    program.deinit();
+    const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
 
     if (cfg) |c| {
         c.model = key;
@@ -56,6 +49,69 @@ pub fn select(
     }
 
     return key;
+}
+
+fn selectModelInteractive(
+    models: []const lmstudio.ModelInfo,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init,
+) !?[]const u8 {
+    model_picker.setModels(models);
+    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
+
+    program.run() catch |err| {
+        program.deinit();
+
+        var stderr_buffer: [1024]u8 = undefined;
+        var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+        const stderr_writer = &stderr_file_writer.interface;
+        stderr_writer.print("\nCould not open the interactive model picker ({s}). Falling back to text selection.\n", .{@errorName(err)}) catch {};
+        stderr_writer.flush() catch {};
+
+        return try selectModelText(models, arena, io);
+    };
+
+    const picked = program.model.selected orelse {
+        program.deinit();
+        return null;
+    };
+    const key = try arena.dupe(u8, picked);
+    program.deinit();
+    return key;
+}
+
+fn selectModelText(
+    models: []const lmstudio.ModelInfo,
+    arena: std.mem.Allocator,
+    io: std.Io,
+) !?[]const u8 {
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    const stdout_writer = &stdout_file_writer.interface;
+
+    try stdout_writer.print("\nAvailable models:\n", .{});
+    for (models, 0..) |m, i| {
+        try stdout_writer.print("  {d}. {s} — {s}\n", .{ i + 1, m.key, m.display_name });
+    }
+    try stdout_writer.print("\nEnter model number or key: ", .{});
+    try stdout_writer.flush();
+
+    var line_alloc: std.Io.Writer.Allocating = .init(arena);
+    defer line_alloc.deinit();
+    var stdin_buffer: [4096]u8 = undefined;
+    const line = try input.readLineSimple(io, &line_alloc, &stdin_buffer) orelse return null;
+    if (line.len == 0) return null;
+
+    const idx = std.fmt.parseInt(usize, line, 10) catch null;
+    if (idx) |i| {
+        if (i > 0 and i <= models.len) return try arena.dupe(u8, models[i - 1].key);
+        try stdout_writer.print("Invalid model number.\n", .{});
+        try stdout_writer.flush();
+        return null;
+    }
+
+    return try arena.dupe(u8, line);
 }
 
 pub fn switchModel(
