@@ -5,6 +5,7 @@ pub const version = "0.1.0";
 pub const Options = struct {
     url: ?[]const u8 = null,
     model: ?[]const u8 = null,
+    model_explicit: bool = false,
     prompt: ?[]const u8 = null,
     oneshot: bool = false,
     mock: bool = false,
@@ -43,6 +44,7 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.model = args[i];
+            opts.model_explicit = true;
         } else if (std.mem.eql(u8, arg, "--mock") or std.mem.eql(u8, arg, "-M")) {
             opts.mock = true;
         } else if (std.mem.eql(u8, arg, "--oneshot") or std.mem.eql(u8, arg, "--one-shot") or std.mem.eql(u8, arg, "-1")) {

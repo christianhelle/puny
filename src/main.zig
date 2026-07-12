@@ -64,7 +64,7 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     const provider_url = parsed.url orelse cfg.providerUrl;
-    const reconfigure_force_picker = parsed.reconfigure and parsed.model == null;
+    const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
     const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
 
     var prov: provider.Provider = if (parsed.mock)
