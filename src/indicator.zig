@@ -60,7 +60,7 @@ pub const ThinkingIndicator = struct {
         } else {
             try writer.writeAll(terminal.move_to_line_start);
             try writer.writeAll(terminal.clear_to_end_of_line);
-            try writer.print("{s}{s}{s}", .{ ansi.dim, message, ansi.reset });
+            try writer.print("{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
         }
 
         try writer.flush();
