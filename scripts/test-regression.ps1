@@ -44,6 +44,24 @@ function Build-Project {
     if (-not $ok) { exit 1 }
 }
 
+function Invoke-UnitTests {
+    Write-Host "  Running unit tests..." -ForegroundColor Cyan
+
+    Push-Location $ProjectRoot
+    $testOutput = & zig build test 2>&1
+    $ok = $LASTEXITCODE -eq 0
+    Pop-Location
+
+    if (-not $ok) {
+        Write-Host "    FAILED" -ForegroundColor Red
+        Write-Host ($testOutput -join "`n") -ForegroundColor DarkGray
+    } else {
+        Write-Host "    OK" -ForegroundColor Green
+    }
+
+    return $ok
+}
+
 function Run-Test {
     param(
         [string]$Name,
@@ -100,6 +118,12 @@ if (-not $NoBuild) {
     Write-Host "Building native binary for tests..." -ForegroundColor Cyan
     $nativeOk = Invoke-Build
     if (-not $nativeOk) { exit 1 }
+
+    Write-Host ""
+    Write-Host "Running unit tests..." -ForegroundColor Cyan
+    $unitTestOk = Invoke-UnitTests
+    if (-not $unitTestOk) { exit 1 }
+
     Write-Host ""
 }
 
