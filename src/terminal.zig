@@ -47,6 +47,18 @@ pub const escape_sequence_timeout_ms = 50;
 /// Characters sent to the terminal to erase the last displayed character.
 pub const backspace_echo = "\x08 \x08";
 
+/// Move the cursor to the start of the current line (CSI G).
+pub const move_to_line_start = "\x1b[G";
+
+/// Move the cursor up `n` lines without changing column (CSI A).
+pub const cursor_up = "\x1b[{d}A";
+
+/// Move the cursor down `n` lines without changing column (CSI B).
+pub const cursor_down = "\x1b[{d}B";
+
+/// Clear from the cursor to the end of the current line (CSI K).
+pub const clear_to_end_of_line = "\x1b[K";
+
 /// Returns true for C0 control characters that the prompt input loop ignores.
 pub fn isIgnoredControlByte(byte: u8) bool {
     return switch (byte) {
