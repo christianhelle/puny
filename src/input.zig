@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const cancel = @import("cancel.zig");
 const sigint = @import("sigint.zig");
+const terminal = @import("terminal.zig");
 
 pub const ReadLineResult = union(enum) {
     submitted: []const u8,
@@ -11,16 +12,6 @@ pub const ReadLineResult = union(enum) {
 };
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
-
-// POSIX terminal input byte constants.
-const backspace_byte = 0x08;
-const delete_byte = 0x7f;
-const ctrl_c_byte = 0x03;
-const ctrl_d_byte = 0x04;
-const escape_byte = 0x1b;
-const csi_leader_byte = '[';
-const escape_sequence_timeout_ms = 50;
-const backspace_echo_sequence = "\x08 \x08";
 
 pub fn readLine(
     io: std.Io,
@@ -92,27 +83,27 @@ fn readLinePosix(
                 first_esc_ts = null;
                 return .{ .submitted = line_alloc.written() };
             },
-            backspace_byte, delete_byte => {
+            terminal.control.bs, terminal.control.del => {
                 first_esc_ts = null;
                 try backspace(line_alloc, stdout_writer);
             },
-            ctrl_c_byte => {
+            terminal.control.etx => {
                 sigint.trigger();
                 return .interrupted;
             },
-            ctrl_d_byte => {
+            terminal.control.eot => {
                 first_esc_ts = null;
                 return .cancelled;
             },
-            escape_byte => {
+            terminal.control.esc => {
                 // Try to interpret an escape sequence (arrow keys, etc.).
                 // If nothing follows within a short window, treat as Esc.
-                if (try readByteWithTimeout(escape_sequence_timeout_ms)) |next| {
+                if (try readByteWithTimeout(terminal.escape_sequence_timeout_ms)) |next| {
                     first_esc_ts = null;
-                    if (next == csi_leader_byte) {
+                    if (next == terminal.csi_leader) {
                         // CSI sequence: consume parameter bytes and the final byte.
                         while (true) {
-                            const param = try readByteWithTimeout(escape_sequence_timeout_ms) orelse break;
+                            const param = try readByteWithTimeout(terminal.escape_sequence_timeout_ms) orelse break;
                             if (!std.ascii.isDigit(param) and param != ';') break;
                         }
                         continue;
@@ -129,7 +120,7 @@ fn readLinePosix(
                 }
                 first_esc_ts = now;
             },
-            else => if (isIgnoredControlByte(byte)) {
+            else => if (terminal.isIgnoredControlByte(byte)) {
                 first_esc_ts = null;
             } else {
                 first_esc_ts = null;
@@ -137,15 +128,6 @@ fn readLinePosix(
             },
         }
     }
-}
-
-/// C0 control characters that have no effect in the prompt input loop.
-fn isIgnoredControlByte(byte: u8) bool {
-    return switch (byte) {
-        // NUL..STX, ENQ..BEL, HT, VT..FF, SO..SUB, FS..US
-        0x00...0x02, 0x05...0x07, 0x09, 0x0b...0x0c, 0x0e...0x1a, 0x1c...0x1f => true,
-        else => false,
-    };
 }
 
 fn readByteWithTimeout(timeout_ms: i32) !?u8 {
@@ -227,7 +209,7 @@ fn backspace(line_alloc: *std.Io.Writer.Allocating, stdout_writer: *std.Io.Write
     const written = line_alloc.written();
     if (written.len == 0) return;
     line_alloc.shrinkRetainingCapacity(written.len - 1);
-    try stdout_writer.writeAll(backspace_echo_sequence);
+    try stdout_writer.writeAll(terminal.backspace_echo);
     try stdout_writer.flush();
 }
 
