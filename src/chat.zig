@@ -403,6 +403,8 @@ pub const OpenAiAccumulator = struct {
 pub const TurnResult = struct {
     turn_complete: bool,
     usage: ?openai.TurnUsage,
+    lines_printed: usize,
+    has_streamed_content: bool,
 };
 
 pub fn runTurn(
@@ -452,14 +454,24 @@ pub fn runTurn(
             if (!retry.isTransientError(err)) {
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
                 try stdout_writer.flush();
-                return .{ .turn_complete = true, .usage = accumulator.usage };
+                return .{
+                    .turn_complete = true,
+                    .usage = accumulator.usage,
+                    .lines_printed = accumulator.lines_printed,
+                    .has_streamed_content = accumulator.content.items.len > 0,
+                };
             }
 
             retry_count += 1;
             if (retry_count >= cfg.max_retries) {
                 try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
                 try stdout_writer.flush();
-                return .{ .turn_complete = true, .usage = accumulator.usage };
+                return .{
+                    .turn_complete = true,
+                    .usage = accumulator.usage,
+                    .lines_printed = accumulator.lines_printed,
+                    .has_streamed_content = accumulator.content.items.len > 0,
+                };
             }
 
             var delay_ms: u64 = cfg.base_delay_ms;
@@ -480,7 +492,12 @@ pub fn runTurn(
     }
 
     if (accumulator.hasToolCalls()) {
-        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{
+            .turn_complete = true,
+            .usage = turn_usage,
+            .lines_printed = accumulator.lines_printed,
+            .has_streamed_content = accumulator.content.items.len > 0,
+        };
         try messages.append(.{ .assistant = assistant_content });
 
         for (assistant_content.tool_calls.?) |tc| {
@@ -490,7 +507,12 @@ pub fn runTurn(
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
-        return .{ .turn_complete = false, .usage = turn_usage };
+        return .{
+            .turn_complete = false,
+            .usage = turn_usage,
+            .lines_printed = accumulator.lines_printed,
+            .has_streamed_content = accumulator.content.items.len > 0,
+        };
     }
 
     if (accumulator.content.items.len > 0) {
@@ -498,7 +520,12 @@ pub fn runTurn(
         try messages.append(.{ .assistant = .{ .content = content } });
     }
 
-    return .{ .turn_complete = true, .usage = turn_usage };
+    return .{
+        .turn_complete = true,
+        .usage = turn_usage,
+        .lines_printed = accumulator.lines_printed,
+        .has_streamed_content = accumulator.content.items.len > 0,
+    };
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
