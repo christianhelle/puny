@@ -38,13 +38,25 @@ pub fn main(init: std.process.Init) !void {
         try stdout_writer.print("Enter new provider URL (or press Enter to keep current): ", .{});
         try stdout_writer.flush();
 
-        if (try input.readLine(io, stdout_writer, &reconfigure_line_alloc, &reconfigure_stdin_buffer)) |new_url| {
-            if (new_url.len > 0) {
-                cfg.providerUrl = try arena.dupe(u8, new_url);
-                try config.save(arena, io, cfg.*, init.environ_map);
-                try stdout_writer.print("Updated provider URL to {s}.\n", .{cfg.providerUrl});
+        const reconfigure_input = input.readLine(io, stdout_writer, &reconfigure_line_alloc, &reconfigure_stdin_buffer) catch |err| {
+            if (sigint.isTriggered()) return;
+            return err;
+        };
+        switch (reconfigure_input) {
+            .submitted => |new_url| {
+                if (new_url.len > 0) {
+                    cfg.providerUrl = try arena.dupe(u8, new_url);
+                    try config.save(arena, io, cfg.*, init.environ_map);
+                    try stdout_writer.print("Updated provider URL to {s}.\n", .{cfg.providerUrl});
+                    try stdout_writer.flush();
+                }
+            },
+            .cancelled => {
+                try stdout_writer.print("\n{s}Reconfigure cancelled.{s}\n", .{ ansi.dim, ansi.reset });
                 try stdout_writer.flush();
-            }
+                return;
+            },
+            .interrupted, .eof => return,
         }
     }
 
