@@ -518,8 +518,7 @@ pub fn runTurn(
 
         var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
-            const rendered_tool_call = try tool_display.renderToolCall(arena, tc);
-            try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
+            try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
@@ -541,6 +540,15 @@ pub fn runTurn(
     return .{ .turn_complete = true, .usage = turn_usage };
 }
 
+fn printToolCall(
+    arena: std.mem.Allocator,
+    stdout_writer: *std.Io.Writer,
+    tool_call: openai.ToolCall,
+) !void {
+    const rendered_tool_call = try tool_display.renderToolCall(arena, tool_call);
+    try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
+}
+
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
     const tool = tools.dispatch(tool_call.function.name) orelse {
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
@@ -552,6 +560,28 @@ fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall)
     return tool.execute(arena, io, parsed.value) catch |err| {
         return std.fmt.allocPrint(arena, "Tool {s} failed: {}", .{ tool_call.function.name, err });
     };
+}
+
+test "prints human-friendly tool call output" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printToolCall(
+        std.testing.allocator,
+        &output.writer,
+        .{
+            .id = "call_1",
+            .function = .{
+                .name = "read_file",
+                .arguments = "{\"path\":\"src/main.zig\"}",
+            },
+        },
+    );
+
+    try std.testing.expectEqualStrings(
+        "\n\x1b[2m🔧 Reading \"src/main.zig\"\x1b[0m",
+        output.written(),
+    );
 }
 
 test "OpenAiAccumulator assembles content" {
