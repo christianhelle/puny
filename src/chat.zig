@@ -6,6 +6,7 @@ const openai = @import("providers/openai.zig");
 const provider = @import("providers/provider.zig");
 const retry = @import("retry.zig");
 const tools = @import("tools");
+const tool_display = @import("tool_display.zig");
 const usage_estimator = @import("usage.zig");
 const cancel = @import("cancel.zig");
 const zz = @import("zigzag");
@@ -517,7 +518,8 @@ pub fn runTurn(
 
         var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
-            try stdout_writer.print("\n{s}🔧 {s} {s}{s}", .{ ansi.dim, tc.function.name, tc.function.arguments, ansi.reset });
+            const rendered_tool_call = try tool_display.renderToolCall(arena, tc);
+            try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
             try stdout_writer.flush();
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
