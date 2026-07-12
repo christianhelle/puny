@@ -43,7 +43,10 @@ pub const ThinkingIndicator = struct {
 
         var buf: [64]u8 = undefined;
         const message = switch (status) {
-            .done => try std.fmt.bufPrint(&buf, "Thought for {d:.2}s", .{elapsed_seconds}),
+            .done => if (elapsed_seconds < 0.01)
+                "Thought for <0.01s"
+            else
+                try std.fmt.bufPrint(&buf, "Thought for {d:.2}s", .{elapsed_seconds}),
             .cancelled => "Cancelled.",
             .interrupted => "Interrupted.",
             .error_ => "Error.",
