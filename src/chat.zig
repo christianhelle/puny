@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
+const indicator = @import("indicator.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const openai = @import("providers/openai.zig");
 const provider = @import("providers/provider.zig");
@@ -369,8 +370,8 @@ pub const OpenAiAccumulator = struct {
         self.partial_calls.clearRetainingCapacity();
     }
 
-    pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !void {
-        if (self.lines_printed == 0 or self.content.items.len == 0) return;
+    pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !usize {
+        if (self.lines_printed == 0 or self.content.items.len == 0) return 0;
 
         try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
         try stdout.flush();
@@ -383,6 +384,7 @@ pub const OpenAiAccumulator = struct {
         try stdout.flush();
 
         self.lines_printed = 0;
+        return countNewlines(rendered) + 1;
     }
 
     pub fn streamCallback(self: *@This()) openai.StreamCallback {
@@ -403,8 +405,6 @@ pub const OpenAiAccumulator = struct {
 pub const TurnResult = struct {
     turn_complete: bool,
     usage: ?openai.TurnUsage,
-    lines_printed: usize,
-    has_streamed_content: bool,
     was_cancelled: bool = false,
     had_error: bool = false,
 };
@@ -419,6 +419,7 @@ pub fn runTurn(
     model_key: []const u8,
     messages: *std.array_list.Managed(openai.Message),
     tool_definitions: []const openai.ToolDefinition,
+    indicator_opt: ?*indicator.ThinkingIndicator,
 ) !TurnResult {
     const request = openai.ChatRequest{
         .model = model_key,
@@ -451,39 +452,27 @@ pub fn runTurn(
         } else |err| {
             cancel.stop();
 
+            const provider_ttft = if (accumulator.usage) |u| u.time_to_first_token_seconds else null;
+            const has_content = accumulator.content.items.len > 0;
+
             if (err == error.Canceled) {
-                return .{
-                    .turn_complete = true,
-                    .usage = accumulator.usage,
-                    .lines_printed = accumulator.lines_printed,
-                    .has_streamed_content = accumulator.content.items.len > 0,
-                    .was_cancelled = true,
-                };
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, 0, has_content, .cancelled, provider_ttft);
+                return .{ .turn_complete = true, .usage = accumulator.usage, .was_cancelled = true };
             }
 
             if (!retry.isTransientError(err)) {
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, 0, has_content, .error_, provider_ttft);
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
                 try stdout_writer.flush();
-                return .{
-                    .turn_complete = true,
-                    .usage = accumulator.usage,
-                    .lines_printed = accumulator.lines_printed,
-                    .has_streamed_content = accumulator.content.items.len > 0,
-                    .had_error = true,
-                };
+                return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
             }
 
             retry_count += 1;
             if (retry_count >= cfg.max_retries) {
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, 0, has_content, .error_, provider_ttft);
                 try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
                 try stdout_writer.flush();
-                return .{
-                    .turn_complete = true,
-                    .usage = accumulator.usage,
-                    .lines_printed = accumulator.lines_printed,
-                    .has_streamed_content = accumulator.content.items.len > 0,
-                    .had_error = true,
-                };
+                return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
             }
 
             var delay_ms: u64 = cfg.base_delay_ms;
@@ -499,17 +488,17 @@ pub fn runTurn(
 
     const turn_usage = if (accumulator.usage) |u| u else usage_estimator.estimateUsage(messages.items, accumulator.content.items.len);
 
+    var final_lines_printed: usize = 0;
     if (accumulator.content.items.len > 0) {
-        try accumulator.replaceWithRendered(stdout_writer);
+        final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
     }
 
+    const provider_ttft = if (accumulator.usage) |u| u.time_to_first_token_seconds else null;
+    const has_content = accumulator.content.items.len > 0;
+    if (indicator_opt) |i| try i.finish(io, stdout_writer, final_lines_printed + 2, has_content, .done, provider_ttft);
+
     if (accumulator.hasToolCalls()) {
-        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{
-            .turn_complete = true,
-            .usage = turn_usage,
-            .lines_printed = accumulator.lines_printed,
-            .has_streamed_content = accumulator.content.items.len > 0,
-        };
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
         try messages.append(.{ .assistant = assistant_content });
 
         for (assistant_content.tool_calls.?) |tc| {
@@ -519,12 +508,7 @@ pub fn runTurn(
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
-        return .{
-            .turn_complete = false,
-            .usage = turn_usage,
-            .lines_printed = accumulator.lines_printed,
-            .has_streamed_content = accumulator.content.items.len > 0,
-        };
+        return .{ .turn_complete = false, .usage = turn_usage };
     }
 
     if (accumulator.content.items.len > 0) {
@@ -532,12 +516,7 @@ pub fn runTurn(
         try messages.append(.{ .assistant = .{ .content = content } });
     }
 
-    return .{
-        .turn_complete = true,
-        .usage = turn_usage,
-        .lines_printed = accumulator.lines_printed,
-        .has_streamed_content = accumulator.content.items.len > 0,
-    };
+    return .{ .turn_complete = true, .usage = turn_usage };
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
