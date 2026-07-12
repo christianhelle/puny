@@ -64,6 +64,34 @@ fn readLineCanonical(
     return .{ .submitted = result };
 }
 
+/// Reads a single line from stdin in canonical mode without printing a prompt.
+/// Returns the trimmed line, or null on EOF/empty input.
+pub fn readLineSimple(
+    io: std.Io,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdin_buffer: []u8,
+) !?[]const u8 {
+    line_alloc.clearRetainingCapacity();
+
+    var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, stdin_buffer);
+    const stdin_reader = &stdin_file_reader.interface;
+
+    const bytes_read = stdin_reader.streamDelimiterLimit(&line_alloc.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
+        error.StreamTooLong => {
+            return line_alloc.written();
+        },
+        else => return err,
+    };
+    if (bytes_read == 0) return null;
+
+    const raw_message = line_alloc.written();
+    const result = if (raw_message.len > 0 and raw_message[raw_message.len - 1] == '\r')
+        raw_message[0 .. raw_message.len - 1]
+    else
+        raw_message;
+    return result;
+}
+
 fn readLinePosix(
     io: std.Io,
     stdout_writer: *std.Io.Writer,
