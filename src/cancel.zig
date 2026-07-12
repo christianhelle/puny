@@ -33,6 +33,12 @@ pub fn reset() void {
     first_esc_seen.store(false, .monotonic);
 }
 
+/// Marks the current operation as cancelled. Intended for tests and for
+/// callers that need to trigger cancellation programmatically.
+pub fn setCancelled() void {
+    cancelled.store(true, .monotonic);
+}
+
 /// Start monitoring stdin for double-Escape. Takes an `io` handle for
 /// timestamps and sleeps, plus a stderr writer for printing hints that
 /// won't interleave with AI output on stdout. Saves terminal state,
