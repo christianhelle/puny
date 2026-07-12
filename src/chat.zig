@@ -231,6 +231,7 @@ pub const OpenAiAccumulator = struct {
     usage: ?openai.TurnUsage,
     turn_start: std.Io.Clock.Timestamp,
     first_token_recorded: bool,
+    has_streamed_output: bool,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats) OpenAiAccumulator {
         return .{
@@ -247,6 +248,7 @@ pub const OpenAiAccumulator = struct {
             .usage = null,
             .turn_start = std.Io.Clock.Timestamp.now(io, .awake),
             .first_token_recorded = false,
+            .has_streamed_output = false,
         };
     }
 
@@ -316,6 +318,7 @@ pub const OpenAiAccumulator = struct {
         }
         switch (ev) {
             .content => |text| {
+                self.has_streamed_output = true;
                 self.recordFirstToken();
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(text.len, 4)), null);
                 if (self.stdout) |stdout| {
@@ -340,6 +343,7 @@ pub const OpenAiAccumulator = struct {
                 }
             },
             .tool_call_delta => |tc| {
+                self.has_streamed_output = true;
                 self.recordFirstToken();
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(tc.arguments.len, 4)), null);
                 if (self.partial_calls.getPtr(tc.index)) |partial| {
@@ -453,19 +457,16 @@ pub fn runTurn(
             cancel.stop();
 
             const provider_ttft = if (accumulator.usage) |u| u.time_to_first_token_seconds else null;
-            const has_streamed_content = accumulator.lines_printed > 0;
-            const indicator_offset = if (has_streamed_content) blk: {
-                const trailing = accumulator.content.items.len > 0 and accumulator.content.items[accumulator.content.items.len - 1] == '\n';
-                break :blk accumulator.lines_printed + 2 + @intFromBool(trailing);
-            } else 0;
+            const has_streamed_content = accumulator.has_streamed_output or accumulator.hasToolCalls();
+            const indicator_offset = 0;
 
             if (err == error.Canceled) {
-                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, has_streamed_content, .cancelled, provider_ttft);
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, false, has_streamed_content, .cancelled, provider_ttft);
                 return .{ .turn_complete = true, .usage = accumulator.usage, .was_cancelled = true };
             }
 
             if (!retry.isTransientError(err)) {
-                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, has_streamed_content, .error_, provider_ttft);
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, false, has_streamed_content, .error_, provider_ttft);
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
                 try stdout_writer.flush();
                 return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
@@ -473,7 +474,7 @@ pub fn runTurn(
 
             retry_count += 1;
             if (retry_count >= cfg.max_retries) {
-                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, has_streamed_content, .error_, provider_ttft);
+                if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, false, has_streamed_content, .error_, provider_ttft);
                 try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
                 try stdout_writer.flush();
                 return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
@@ -492,30 +493,45 @@ pub fn runTurn(
 
     const turn_usage = if (accumulator.usage) |u| u else usage_estimator.estimateUsage(messages.items, accumulator.content.items.len);
 
-    var final_lines_printed: usize = 0;
-    if (accumulator.content.items.len > 0) {
-        final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
-    }
-
     const provider_ttft = if (accumulator.usage) |u| u.time_to_first_token_seconds else null;
     const has_content = accumulator.content.items.len > 0;
-    if (indicator_opt) |i| try i.finish(io, stdout_writer, final_lines_printed + 2, has_content, .done, provider_ttft);
+    const has_streamed_content = accumulator.has_streamed_output or accumulator.hasToolCalls() or has_content;
+
+    var content_cursor_offset: usize = 0;
+    var content_ends_with_newline = false;
+    var final_lines_printed: usize = 0;
+    if (has_content) {
+        if (accumulator.lines_printed > 0) {
+            final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
+            content_cursor_offset = final_lines_printed;
+            content_ends_with_newline = true;
+        } else {
+            content_cursor_offset = 1;
+            content_ends_with_newline = false;
+        }
+    }
 
     if (accumulator.hasToolCalls()) {
         const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
         try messages.append(.{ .assistant = assistant_content });
 
+        var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
             try stdout_writer.print("\n{s}🔧 {s} {s}{s}", .{ ansi.dim, tc.function.name, tc.function.arguments, ansi.reset });
             try stdout_writer.flush();
+            tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
             try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
+        const cursor_offset = content_cursor_offset + tool_output_lines;
+        if (indicator_opt) |i| try i.finish(io, stdout_writer, cursor_offset, false, has_streamed_content, .done, provider_ttft);
         return .{ .turn_complete = false, .usage = turn_usage };
     }
 
-    if (accumulator.content.items.len > 0) {
+    if (indicator_opt) |i| try i.finish(io, stdout_writer, content_cursor_offset, content_ends_with_newline, has_streamed_content, .done, provider_ttft);
+
+    if (has_content) {
         const content = try tools.dupeString(arena, accumulator.content.items);
         try messages.append(.{ .assistant = .{ .content = content } });
     }

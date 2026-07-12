@@ -28,7 +28,8 @@ pub const ThinkingIndicator = struct {
         self: *const @This(),
         io: std.Io,
         writer: *std.Io.Writer,
-        lines_printed: usize,
+        cursor_offset: usize,
+        output_ends_with_newline: bool,
         has_streamed_content: bool,
         status: Status,
         provider_ttft_seconds: ?f64,
@@ -57,13 +58,16 @@ pub const ThinkingIndicator = struct {
         }
 
         if (status == .done and has_streamed_content) {
-            const offset = lines_printed + 1;
-            try writer.print(terminal.cursor_up, .{offset});
+            try writer.print(terminal.cursor_up, .{cursor_offset});
             try writer.writeAll(terminal.move_to_line_start);
             try writer.writeAll(terminal.clear_to_end_of_line);
-            try writer.print("{s}{s}{s}", .{ ansi.dim, message, ansi.reset });
-            try writer.print(terminal.cursor_down, .{offset});
+            try writer.print(terminal.cursor_down, .{cursor_offset});
             try writer.writeAll(terminal.move_to_line_start);
+            if (output_ends_with_newline) {
+                try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
+            } else {
+                try writer.print("\n\n{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
+            }
         } else {
             try writer.writeAll(terminal.move_to_line_start);
             try writer.writeAll(terminal.clear_to_end_of_line);

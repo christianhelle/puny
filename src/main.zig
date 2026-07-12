@@ -183,7 +183,7 @@ pub fn main(init: std.process.Init) !void {
             try thinking_indicator.show(stdout_writer);
 
             const result = chat.runTurn(&prov, arena, io, stdout_writer, &session_stats, random, model_key, &messages, active_tool_definitions, &thinking_indicator) catch |err| {
-                try thinking_indicator.finish(io, stdout_writer, 0, false, .error_, null);
+                try thinking_indicator.finish(io, stdout_writer, 0, false, false, .error_, null);
                 return err;
             };
 
