@@ -181,6 +181,7 @@ pub fn main(init: std.process.Init) !void {
                 error.Canceled => {
                     try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
                     _ = messages.pop();
+                    session_stats.finalizeTurn(null, false);
                     break;
                 },
                 else => return err,
