@@ -405,6 +405,8 @@ pub const TurnResult = struct {
     usage: ?openai.TurnUsage,
     lines_printed: usize,
     has_streamed_content: bool,
+    was_cancelled: bool = false,
+    had_error: bool = false,
 };
 
 pub fn runTurn(
@@ -449,7 +451,15 @@ pub fn runTurn(
         } else |err| {
             cancel.stop();
 
-            if (err == error.Canceled) return error.Canceled;
+            if (err == error.Canceled) {
+                return .{
+                    .turn_complete = true,
+                    .usage = accumulator.usage,
+                    .lines_printed = accumulator.lines_printed,
+                    .has_streamed_content = accumulator.content.items.len > 0,
+                    .was_cancelled = true,
+                };
+            }
 
             if (!retry.isTransientError(err)) {
                 try stdout_writer.print("\nChat failed: {}\n", .{err});
@@ -459,6 +469,7 @@ pub fn runTurn(
                     .usage = accumulator.usage,
                     .lines_printed = accumulator.lines_printed,
                     .has_streamed_content = accumulator.content.items.len > 0,
+                    .had_error = true,
                 };
             }
 
@@ -471,6 +482,7 @@ pub fn runTurn(
                     .usage = accumulator.usage,
                     .lines_printed = accumulator.lines_printed,
                     .has_streamed_content = accumulator.content.items.len > 0,
+                    .had_error = true,
                 };
             }
 

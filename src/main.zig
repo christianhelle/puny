@@ -4,6 +4,7 @@ const chat = @import("chat.zig");
 const cli = @import("cli.zig");
 const commands = @import("commands.zig");
 const config = @import("config.zig");
+const indicator = @import("indicator.zig");
 const input = @import("input.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const mock = @import("providers/mock.zig");
@@ -177,15 +178,37 @@ pub fn main(init: std.process.Init) !void {
         var turn_complete = false;
         while (!turn_complete) {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
-            const result = chat.runTurn(&prov, arena, io, stdout_writer, &session_stats, random, model_key, &messages, active_tool_definitions) catch |err| switch (err) {
-                error.Canceled => {
-                    try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
-                    _ = messages.pop();
-                    session_stats.finalizeTurn(null, false);
-                    break;
-                },
-                else => return err,
+
+            var thinking_indicator = indicator.ThinkingIndicator.init(io);
+            try thinking_indicator.show(stdout_writer);
+
+            const result = chat.runTurn(&prov, arena, io, stdout_writer, &session_stats, random, model_key, &messages, active_tool_definitions) catch |err| {
+                try thinking_indicator.finish(io, stdout_writer, 0, false, .error_, null);
+                return err;
             };
+
+            const provider_ttft = if (result.usage) |u| u.time_to_first_token_seconds else null;
+            const status: indicator.Status = if (result.was_cancelled)
+                .cancelled
+            else if (result.had_error)
+                .error_
+            else
+                .done;
+            try thinking_indicator.finish(
+                io,
+                stdout_writer,
+                result.lines_printed,
+                result.has_streamed_content,
+                status,
+                provider_ttft,
+            );
+
+            if (result.was_cancelled) {
+                _ = messages.pop();
+                session_stats.finalizeTurn(null, false);
+                break;
+            }
+
             session_stats.finalizeTurn(result.usage, result.turn_complete);
             turn_complete = result.turn_complete;
         }
