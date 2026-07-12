@@ -88,25 +88,6 @@ fn countNewlines(text: []const u8) usize {
     return count;
 }
 
-fn stripAnsi(allocator: std.mem.Allocator, text: []const u8) std.mem.Allocator.Error![]u8 {
-    var result = std.array_list.Managed(u8).init(allocator);
-    errdefer result.deinit();
-    var i: usize = 0;
-    while (i < text.len) {
-        if (text[i] == 0x1b and i + 1 < text.len and text[i + 1] == '[') {
-            i += 2;
-            while (i < text.len and !(text[i] >= 0x40 and text[i] <= 0x7E)) {
-                i += 1;
-            }
-            if (i < text.len) i += 1;
-            continue;
-        }
-        try result.append(text[i]);
-        i += 1;
-    }
-    return result.toOwnedSlice();
-}
-
 pub fn printStats(writer: *std.Io.Writer, stats: lmstudio.ChatStats) !void {
     try writer.print("\n\n{s}─── Stats ───{s}\n", .{ ansi.dim, ansi.reset });
     try writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
@@ -251,9 +232,8 @@ pub const OpenAiAccumulator = struct {
     turn_start: std.Io.Clock.Timestamp,
     first_token_recorded: bool,
     has_streamed_output: bool,
-    ansi_enabled: bool,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats, ansi_enabled: bool) OpenAiAccumulator {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats) OpenAiAccumulator {
         return .{
             .allocator = allocator,
             .io = io,
@@ -269,7 +249,6 @@ pub const OpenAiAccumulator = struct {
             .turn_start = std.Io.Clock.Timestamp.now(io, .awake),
             .first_token_recorded = false,
             .has_streamed_output = false,
-            .ansi_enabled = ansi_enabled,
         };
     }
 
@@ -343,14 +322,12 @@ pub const OpenAiAccumulator = struct {
                 self.recordFirstToken();
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(text.len, 4)), null);
                 if (self.stdout) |stdout| {
-                    if (self.ansi_enabled) {
-                        if (!self.has_header) {
-                            self.has_header = true;
-                            try stdout.print("\n", .{});
-                        }
-                        try stdout.print("{s}{s}{s}", .{ ansi.dim, text, ansi.reset });
-                        try stdout.flush();
+                    if (!self.has_header) {
+                        self.has_header = true;
+                        try stdout.print("\n", .{});
                     }
+                    try stdout.print("{s}{s}{s}", .{ ansi.dim, text, ansi.reset });
+                    try stdout.flush();
                 }
                 self.lines_printed += countNewlines(text);
                 try self.content.appendSlice(text);
@@ -400,20 +377,12 @@ pub const OpenAiAccumulator = struct {
     pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !usize {
         if (self.lines_printed == 0 or self.content.items.len == 0) return 0;
 
+        try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
+        try stdout.flush();
+
         var md = zz.Markdown.init();
-        const rendered_with_ansi = try md.render(self.allocator, self.content.items);
-        defer self.allocator.free(rendered_with_ansi);
-
-        const rendered = if (self.ansi_enabled)
-            rendered_with_ansi
-        else
-            try stripAnsi(self.allocator, rendered_with_ansi);
-        defer if (!self.ansi_enabled) self.allocator.free(rendered);
-
-        if (self.ansi_enabled) {
-            try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
-            try stdout.flush();
-        }
+        const rendered = try md.render(self.allocator, self.content.items);
+        defer self.allocator.free(rendered);
 
         try stdout.print("{s}\n", .{rendered});
         try stdout.flush();
@@ -455,7 +424,6 @@ pub fn runTurn(
     messages: *std.array_list.Managed(openai.Message),
     tool_definitions: []const openai.ToolDefinition,
     indicator_opt: ?*indicator.ThinkingIndicator,
-    ansi_enabled: bool,
 ) !TurnResult {
     const request = openai.ChatRequest{
         .model = model_key,
@@ -467,12 +435,9 @@ pub fn runTurn(
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
     session_stats.beginTurn(input_estimate);
 
-    var accumulator = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats, ansi_enabled);
+    var accumulator = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
     defer accumulator.deinit();
     const callback = accumulator.streamCallback();
-
-    const dim = if (ansi_enabled) ansi.dim else "";
-    const reset = if (ansi_enabled) ansi.reset else "";
 
     var retry_count: usize = 0;
     const cfg = retry.default_config;
@@ -520,7 +485,7 @@ pub fn runTurn(
             while (i < retry_count) : (i += 1) delay_ms *= 2;
             delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
 
-            try stdout_writer.print("\n{s}Connection error ({}), retrying in {}ms ({d}/{d})...{s}\n", .{ dim, err, delay_ms, retry_count, cfg.max_retries, reset });
+            try stdout_writer.print("\n{s}Connection error ({}), retrying in {}ms ({d}/{d})...{s}\n", .{ ansi.dim, err, delay_ms, retry_count, cfg.max_retries, ansi.reset });
             try stdout_writer.flush();
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
         }
@@ -541,10 +506,6 @@ pub fn runTurn(
             content_cursor_offset = final_lines_printed;
             content_ends_with_newline = true;
         } else {
-            if (!ansi_enabled) {
-                try stdout_writer.print("{s}\n", .{accumulator.content.items});
-                try stdout_writer.flush();
-            }
             content_cursor_offset = 1;
             content_ends_with_newline = false;
         }
@@ -556,7 +517,7 @@ pub fn runTurn(
 
         var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
-            try stdout_writer.print("\n{s}🔧 {s} {s}{s}", .{ dim, tc.function.name, tc.function.arguments, reset });
+            try stdout_writer.print("\n{s}🔧 {s} {s}{s}", .{ ansi.dim, tc.function.name, tc.function.arguments, ansi.reset });
             try stdout_writer.flush();
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
@@ -593,7 +554,7 @@ fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall)
 
 test "OpenAiAccumulator assembles content" {
     var stats = SessionStats.init(std.testing.io);
-    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats, true);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
     try acc.onEvent(.{ .content = "Hello" });
@@ -607,7 +568,7 @@ test "OpenAiAccumulator assembles content" {
 test "OpenAiAccumulator updates SessionStats while streaming" {
     var stats = SessionStats.init(std.testing.io);
     stats.beginTurn(10);
-    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats, true);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
     try acc.onEvent(.{ .content = "Hello" });
@@ -622,7 +583,7 @@ test "OpenAiAccumulator updates SessionStats while streaming" {
 test "OpenAiAccumulator keeps partial stats on cancellation" {
     var stats = SessionStats.init(std.testing.io);
     stats.beginTurn(16);
-    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats, true);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
     try acc.onEvent(.{ .content = "Partial" });
@@ -640,7 +601,7 @@ test "OpenAiAccumulator keeps partial stats on cancellation" {
 
 test "OpenAiAccumulator assembles tool call" {
     var stats = SessionStats.init(std.testing.io);
-    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats, true);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
     try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });

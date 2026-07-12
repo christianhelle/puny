@@ -28,8 +28,6 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
-    const stdout_is_tty = std.Io.File.stdout().isTty(io) catch false;
-    const ansi_enabled = stdout_is_tty;
 
     if (parsed.reconfigure) {
         var reconfigure_line_alloc: std.Io.Writer.Allocating = .init(arena);
@@ -182,10 +180,10 @@ pub fn main(init: std.process.Init) !void {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
 
             var thinking_indicator = indicator.ThinkingIndicator.init(io);
-            if (ansi_enabled) try thinking_indicator.show(stdout_writer);
+            try thinking_indicator.show(stdout_writer);
 
-            const result = chat.runTurn(&prov, arena, io, stdout_writer, &session_stats, random, model_key, &messages, active_tool_definitions, if (ansi_enabled) &thinking_indicator else null, ansi_enabled) catch |err| {
-                if (ansi_enabled) try thinking_indicator.finish(io, stdout_writer, 0, false, false, .error_, null);
+            const result = chat.runTurn(&prov, arena, io, stdout_writer, &session_stats, random, model_key, &messages, active_tool_definitions, &thinking_indicator) catch |err| {
+                try thinking_indicator.finish(io, stdout_writer, 0, false, false, .error_, null);
                 return err;
             };
 
