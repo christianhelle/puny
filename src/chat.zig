@@ -542,6 +542,25 @@ test "OpenAiAccumulator updates SessionStats while streaming" {
     try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
 }
 
+test "OpenAiAccumulator keeps partial stats on cancellation" {
+    var stats = SessionStats.init(std.testing.io);
+    stats.beginTurn(16);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "Partial" });
+    try acc.onEvent(.{ .content = " output" });
+
+    cancel.reset();
+    cancel.setCancelled();
+    const result = acc.onEvent(.{ .content = " ignored" });
+    try std.testing.expectError(error.Canceled, result);
+
+    try std.testing.expectEqual(@as(i64, 16), stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 3), stats.output_tokens);
+    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
+}
+
 test "OpenAiAccumulator assembles tool call" {
     var stats = SessionStats.init(std.testing.io);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
