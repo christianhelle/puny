@@ -218,7 +218,9 @@ const PartialToolCall = struct {
 
 pub const OpenAiAccumulator = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     stdout: ?*std.Io.Writer,
+    session_stats: *SessionStats,
     has_header: bool,
     lines_printed: usize,
     content: std.array_list.Managed(u8),
@@ -226,11 +228,15 @@ pub const OpenAiAccumulator = struct {
     tool_calls: std.array_list.Managed(openai.ToolCall),
     finish_reason: ?[]const u8,
     usage: ?openai.TurnUsage,
+    turn_start: std.Io.Clock.Timestamp,
+    first_token_recorded: bool,
 
-    pub fn init(allocator: std.mem.Allocator, stdout: ?*std.Io.Writer) OpenAiAccumulator {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats) OpenAiAccumulator {
         return .{
             .allocator = allocator,
+            .io = io,
             .stdout = stdout,
+            .session_stats = session_stats,
             .has_header = false,
             .lines_printed = 0,
             .content = std.array_list.Managed(u8).init(allocator),
@@ -238,6 +244,8 @@ pub const OpenAiAccumulator = struct {
             .tool_calls = std.array_list.Managed(openai.ToolCall).init(allocator),
             .finish_reason = null,
             .usage = null,
+            .turn_start = std.Io.Clock.Timestamp.now(io, .awake),
+            .first_token_recorded = false,
         };
     }
 
@@ -289,6 +297,15 @@ pub const OpenAiAccumulator = struct {
         };
     }
 
+    fn recordFirstToken(self: *@This()) void {
+        if (self.first_token_recorded) return;
+        self.first_token_recorded = true;
+        const now = std.Io.Clock.Timestamp.now(self.io, .awake);
+        const elapsed_ns = self.turn_start.raw.durationTo(now.raw).nanoseconds;
+        const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s;
+        self.session_stats.addFirstTokenTiming(elapsed_s);
+    }
+
     pub fn onEvent(self: *@This(), ev: openai.StreamEvent) !void {
         if (cancel.isCancelled()) {
             self.content.clearRetainingCapacity();
@@ -298,6 +315,8 @@ pub const OpenAiAccumulator = struct {
         }
         switch (ev) {
             .content => |text| {
+                self.recordFirstToken();
+                self.session_stats.addStreamingOutput(@intCast(@divFloor(text.len, 4)), null);
                 if (self.stdout) |stdout| {
                     if (!self.has_header) {
                         self.has_header = true;
@@ -320,6 +339,8 @@ pub const OpenAiAccumulator = struct {
                 }
             },
             .tool_call_delta => |tc| {
+                self.recordFirstToken();
+                self.session_stats.addStreamingOutput(@intCast(@divFloor(tc.arguments.len, 4)), null);
                 if (self.partial_calls.getPtr(tc.index)) |partial| {
                     try partial.args.appendSlice(tc.arguments);
                 }
@@ -389,6 +410,7 @@ pub fn runTurn(
     arena: std.mem.Allocator,
     io: std.Io,
     stdout_writer: *std.Io.Writer,
+    session_stats: *SessionStats,
     random: std.Random,
     model_key: []const u8,
     messages: *std.array_list.Managed(openai.Message),
@@ -401,7 +423,10 @@ pub fn runTurn(
         .stream = true,
     };
 
-    var accumulator = OpenAiAccumulator.init(arena, stdout_writer);
+    const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
+    session_stats.beginTurn(input_estimate);
+
+    var accumulator = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
     defer accumulator.deinit();
     const callback = accumulator.streamCallback();
 
@@ -490,7 +515,8 @@ fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall)
 }
 
 test "OpenAiAccumulator assembles content" {
-    var acc = OpenAiAccumulator.init(std.testing.allocator, null);
+    var stats = SessionStats.init(std.testing.io);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
     try acc.onEvent(.{ .content = "Hello" });
@@ -501,8 +527,24 @@ test "OpenAiAccumulator assembles content" {
     try std.testing.expect(!acc.hasToolCalls());
 }
 
+test "OpenAiAccumulator updates SessionStats while streaming" {
+    var stats = SessionStats.init(std.testing.io);
+    stats.beginTurn(10);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "Hello" });
+    try acc.onEvent(.{ .content = " world" });
+    try acc.onEvent(.{ .finish = "stop" });
+
+    try std.testing.expectEqual(@as(i64, 10), stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 2), stats.output_tokens);
+    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
+}
+
 test "OpenAiAccumulator assembles tool call" {
-    var acc = OpenAiAccumulator.init(std.testing.allocator, null);
+    var stats = SessionStats.init(std.testing.io);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
     try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });

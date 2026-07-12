@@ -177,7 +177,7 @@ pub fn main(init: std.process.Init) !void {
         var turn_complete = false;
         while (!turn_complete) {
             const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
-            const result = chat.runTurn(&prov, arena, io, stdout_writer, random, model_key, &messages, active_tool_definitions) catch |err| switch (err) {
+            const result = chat.runTurn(&prov, arena, io, stdout_writer, &session_stats, random, model_key, &messages, active_tool_definitions) catch |err| switch (err) {
                 error.Canceled => {
                     try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
                     _ = messages.pop();
@@ -185,7 +185,7 @@ pub fn main(init: std.process.Init) !void {
                 },
                 else => return err,
             };
-            session_stats.addTurn(result.usage, result.turn_complete);
+            session_stats.finalizeTurn(result.usage, result.turn_complete);
             turn_complete = result.turn_complete;
         }
 
