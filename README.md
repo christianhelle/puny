@@ -100,6 +100,16 @@ While in a chat session:
 
 Puny sends a list of available tools to the model on every request. When the model decides to call a tool, Puny executes it automatically and feeds the result back into the conversation.
 
+Tool-call status lines use concise action-oriented summaries instead of raw JSON:
+
+```text
+🔧 Reading "src/main.zig"
+🔧 Running "zig test" in "src"
+🔧 Writing 12 lines (384 bytes) to "src/main.zig"
+```
+
+Large payloads, such as `write_file` content, are summarized rather than printed in full.
+
 ### ⚠️ Safety warning
 
 Tools execute **automatically without confirmation**. This includes `write_file` (which overwrites files) and `execute_shell` (which runs arbitrary commands). Only run Puny in directories where you are comfortable with the model making changes.
