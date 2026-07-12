@@ -49,7 +49,11 @@ pub const ThinkingIndicator = struct {
             .error_ => "Error.",
         };
 
-        if (has_streamed_content) {
+        if (status != .done and has_streamed_content) {
+            return;
+        }
+
+        if (status == .done and has_streamed_content) {
             const offset = lines_printed + 1;
             try writer.print(terminal.cursor_up, .{offset});
             try writer.writeAll(terminal.move_to_line_start);
