@@ -126,9 +126,9 @@ $total = 0
 
 $tests = @(
     @{Name="Basic text response"; Args=@("--mock","--model","mock-model","--prompt","hello world","--oneshot"); Expect=@("mock response","hello world")}
-    @{Name="Tool call: read_file"; Args=@("--mock","--model","mock-model","--prompt","read the code","--oneshot"); Expect=@("read_file","Tool executed")}
+    @{Name="Tool call: read_file"; Args=@("--mock","--model","mock-model","--prompt","read the code","--oneshot"); Expect=@("Reading","Tool executed")}
     @{Name="Tool call: grep_search"; Args=@("--mock","--model","mock-model","--prompt","search for pattern","--oneshot"); Expect=@("grep_search","Tool executed")}
-    @{Name="Tool call: execute_shell"; Args=@("--mock","--model","mock-model","--prompt","run a command","--oneshot"); Expect=@("execute_shell","Tool executed")}
+    @{Name="Tool call: execute_shell"; Args=@("--mock","--model","mock-model","--prompt","run a command","--oneshot"); Expect=@("Running","Tool executed")}
     @{Name="Error does not produce content"; Args=@("--mock","--model","mock-model","--prompt","trigger an error","--oneshot"); Expect=@("Chat failed"); NotExpect=@("mock response")}
 )
 
