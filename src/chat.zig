@@ -226,7 +226,7 @@ pub const SessionStats = struct {
         const elapsed_ns = self.start_time.raw.durationTo(now.raw).nanoseconds;
         const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s;
 
-        try writer.print("\n{s}─── Session Stats ───{s}\n", .{ ansi.dim, ansi.reset });
+        try writer.print("\n\n{s}─── Session Stats ───{s}\n", .{ ansi.dim, ansi.reset });
         try writer.print("  Turns:               {d}\n", .{self.totalTurns()});
         for (self.models.items) |entry| {
             const stats = entry.stats;
