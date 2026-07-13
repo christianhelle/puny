@@ -193,7 +193,6 @@ pub const OpenAiAccumulator = struct {
     content: std.array_list.Managed(u8),
     partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
     tool_calls: std.array_list.Managed(openai.ToolCall),
-    finish_reason: ?[]const u8,
     usage: ?openai.TurnUsage,
     turn_start: std.Io.Clock.Timestamp,
     first_token_recorded: bool,
@@ -210,7 +209,6 @@ pub const OpenAiAccumulator = struct {
             .content = std.array_list.Managed(u8).init(allocator),
             .partial_calls = .{},
             .tool_calls = std.array_list.Managed(openai.ToolCall).init(allocator),
-            .finish_reason = null,
             .usage = null,
             .turn_start = std.Io.Clock.Timestamp.now(io, .awake),
             .first_token_recorded = false,
@@ -279,7 +277,6 @@ pub const OpenAiAccumulator = struct {
         if (cancel.isCancelled()) {
             self.content.clearRetainingCapacity();
             self.tool_calls.clearRetainingCapacity();
-            self.finish_reason = null;
             return error.Canceled;
         }
         switch (ev) {
@@ -316,8 +313,7 @@ pub const OpenAiAccumulator = struct {
                     try partial.args.appendSlice(tc.arguments);
                 }
             },
-            .finish => |reason| {
-                self.finish_reason = reason;
+            .finish => {
                 try self.finalizeToolCalls();
             },
             .usage => |u| {
