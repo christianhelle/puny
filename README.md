@@ -62,7 +62,7 @@ The project has source files under src/, including main.c, utils.h, and a tests/
 Run a single prompt and exit. Useful for scripts or quick tasks:
 
 ```bash
-puny --prompt "List all .zig files" --oneshot
+puny --prompt "List all source files" --oneshot
 ```
 
 ### Connect to a remote LM Studio instance
