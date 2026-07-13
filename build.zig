@@ -38,11 +38,6 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
 
-    const zigzag = b.dependency("zigzag", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("zigzag", zigzag.module("zigzag"));
     exe.root_module.addImport("tools", b.createModule(.{
         .root_source_file = b.path("src/tools/root.zig"),
         .target = target,
