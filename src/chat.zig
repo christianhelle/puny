@@ -101,7 +101,7 @@ pub fn printStats(writer: *std.Io.Writer, stats: lmstudio.ChatStats) !void {
     try writer.flush();
 }
 
-pub const SessionStats = struct {
+pub const PerModelStats = struct {
     turn_count: usize = 0,
     input_tokens: i64 = 0,
     output_tokens: i64 = 0,
@@ -110,6 +110,17 @@ pub const SessionStats = struct {
     ttft_count: usize = 0,
     tps_sum: f64 = 0,
     tps_count: usize = 0,
+};
+
+pub const ModelEntry = struct {
+    model_key: []const u8,
+    stats: PerModelStats,
+};
+
+pub const SessionStats = struct {
+    allocator: std.mem.Allocator,
+    models: std.array_list.Managed(ModelEntry),
+    active_model_index: ?usize = null,
     start_time: std.Io.Clock.Timestamp,
 
     // Per-turn streaming state used to reconcile estimates with final usage.
@@ -119,31 +130,52 @@ pub const SessionStats = struct {
     current_turn_ttft: ?f64 = null,
     current_turn_tps: ?f64 = null,
 
-    pub fn init(io: std.Io) SessionStats {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) SessionStats {
         return .{
+            .allocator = allocator,
+            .models = std.array_list.Managed(ModelEntry).init(allocator),
             .start_time = std.Io.Clock.Timestamp.now(io, .awake),
         };
     }
 
+    pub fn deinit(self: *SessionStats) void {
+        self.models.deinit();
+    }
+
+    fn activeModelStats(self: *@This()) *PerModelStats {
+        return &self.models.items[self.active_model_index.?].stats;
+    }
+
     /// Begin tracking a new model call. Input tokens are known up front and are
     /// added to the running total immediately so cancellation still records them.
-    pub fn beginTurn(self: *@This(), input_tokens: i64) void {
+    pub fn beginTurn(self: *@This(), model_key: []const u8, input_tokens: i64) void {
+        for (self.models.items, 0..) |entry, i| {
+            if (std.mem.eql(u8, entry.model_key, model_key)) {
+                self.active_model_index = i;
+                break;
+            }
+        } else {
+            self.models.append(.{ .model_key = model_key, .stats = .{} }) catch unreachable;
+            self.active_model_index = self.models.items.len - 1;
+        }
+
         self.current_turn_input = input_tokens;
         self.current_turn_output = 0;
         self.current_turn_reasoning = 0;
         self.current_turn_ttft = null;
         self.current_turn_tps = null;
-        self.input_tokens += input_tokens;
+        self.activeModelStats().input_tokens += input_tokens;
     }
 
     /// Add output tokens as they stream in. The caller is responsible for
     /// estimating from content deltas; finalizeTurn reconciles with provider
     /// usage when the turn ends.
     pub fn addStreamingOutput(self: *@This(), output_tokens: i64, reasoning_output_tokens: ?i64) void {
-        self.output_tokens += output_tokens;
+        const stats = self.activeModelStats();
+        stats.output_tokens += output_tokens;
         self.current_turn_output += output_tokens;
         if (reasoning_output_tokens) |r| {
-            self.reasoning_output_tokens += r;
+            stats.reasoning_output_tokens += r;
             self.current_turn_reasoning += r;
         }
     }
@@ -152,43 +184,53 @@ pub const SessionStats = struct {
     /// times; only the first value is kept.
     pub fn addFirstTokenTiming(self: *@This(), ttft_seconds: f64) void {
         if (self.current_turn_ttft != null) return;
-        self.ttft_sum += ttft_seconds;
-        self.ttft_count += 1;
+        const stats = self.activeModelStats();
+        stats.ttft_sum += ttft_seconds;
+        stats.ttft_count += 1;
         self.current_turn_ttft = ttft_seconds;
     }
 
     /// Reconcile the streamed estimates with authoritative provider usage and,
     /// if the turn loop iteration is complete, increment the turn counter.
     pub fn finalizeTurn(self: *@This(), usage: ?openai.TurnUsage, turn_complete: bool) void {
+        const stats = self.activeModelStats();
         if (usage) |u| {
-            self.input_tokens += u.input_tokens - self.current_turn_input;
-            self.output_tokens += u.output_tokens - self.current_turn_output;
+            stats.input_tokens += u.input_tokens - self.current_turn_input;
+            stats.output_tokens += u.output_tokens - self.current_turn_output;
 
             if (u.reasoning_output_tokens) |r| {
-                self.reasoning_output_tokens += r - self.current_turn_reasoning;
+                stats.reasoning_output_tokens += r - self.current_turn_reasoning;
                 self.current_turn_reasoning = r;
             }
 
             if (u.tokens_per_second) |t| {
                 if (self.current_turn_tps) |prev| {
-                    self.tps_sum += t - prev;
+                    stats.tps_sum += t - prev;
                 } else {
-                    self.tps_sum += t;
-                    self.tps_count += 1;
+                    stats.tps_sum += t;
+                    stats.tps_count += 1;
                 }
                 self.current_turn_tps = t;
             }
 
             if (u.time_to_first_token_seconds) |t| {
                 if (self.current_turn_ttft == null) {
-                    self.ttft_sum += t;
-                    self.ttft_count += 1;
+                    stats.ttft_sum += t;
+                    stats.ttft_count += 1;
                     self.current_turn_ttft = t;
                 }
             }
         }
 
-        if (turn_complete) self.turn_count += 1;
+        if (turn_complete) stats.turn_count += 1;
+    }
+
+    fn totalTurns(self: *const @This()) usize {
+        var total: usize = 0;
+        for (self.models.items) |entry| {
+            total += entry.stats.turn_count;
+        }
+        return total;
     }
 
     pub fn print(self: *const @This(), io: std.Io, writer: *std.Io.Writer) !void {
@@ -197,17 +239,23 @@ pub const SessionStats = struct {
         const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s;
 
         try writer.print("\n{s}─── Session Stats ───{s}\n", .{ ansi.dim, ansi.reset });
-        try writer.print("  Turns:               {d}\n", .{self.turn_count});
-        try writer.print("  Input tokens:        {d}\n", .{self.input_tokens});
-        try writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ self.output_tokens, self.reasoning_output_tokens });
-        try writer.print("  Total tokens:        {d}\n", .{self.input_tokens + self.output_tokens});
-        try writer.print("  Session duration:    {d:.1}s\n", .{elapsed_s});
-        if (self.tps_count > 0) {
-            try writer.print("  Avg tokens/sec:      {d:.1}\n", .{self.tps_sum / @as(f64, @floatFromInt(self.tps_count))});
+        try writer.print("  Turns:               {d}\n", .{self.totalTurns()});
+        for (self.models.items) |entry| {
+            const stats = entry.stats;
+            if (stats.turn_count == 0) continue;
+            try writer.print("\n{s}─── {s} ───{s}\n", .{ ansi.dim, entry.model_key, ansi.reset });
+            try writer.print("  Turns:               {d}\n", .{stats.turn_count});
+            try writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
+            try writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.output_tokens, stats.reasoning_output_tokens });
+            try writer.print("  Total tokens:        {d}\n", .{stats.input_tokens + stats.output_tokens});
+            if (stats.tps_count > 0) {
+                try writer.print("  Avg tokens/sec:      {d:.1}\n", .{stats.tps_sum / @as(f64, @floatFromInt(stats.tps_count))});
+            }
+            if (stats.ttft_count > 0) {
+                try writer.print("  Avg TTFT:            {d:.2}s\n", .{stats.ttft_sum / @as(f64, @floatFromInt(stats.ttft_count))});
+            }
         }
-        if (self.ttft_count > 0) {
-            try writer.print("  Avg TTFT:            {d:.2}s\n", .{self.ttft_sum / @as(f64, @floatFromInt(self.ttft_count))});
-        }
+        try writer.print("\n  Session duration:    {d:.1}s\n", .{elapsed_s});
         try writer.flush();
     }
 };
@@ -434,7 +482,7 @@ pub fn runTurn(
     };
 
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
-    session_stats.beginTurn(input_estimate);
+    session_stats.beginTurn(model_key, input_estimate);
 
     var accumulator = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
     defer accumulator.deinit();
@@ -585,7 +633,9 @@ test "prints human-friendly tool call output" {
 }
 
 test "OpenAiAccumulator assembles content" {
-    var stats = SessionStats.init(std.testing.io);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
@@ -598,8 +648,9 @@ test "OpenAiAccumulator assembles content" {
 }
 
 test "OpenAiAccumulator updates SessionStats while streaming" {
-    var stats = SessionStats.init(std.testing.io);
-    stats.beginTurn(10);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 10);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
@@ -607,14 +658,16 @@ test "OpenAiAccumulator updates SessionStats while streaming" {
     try acc.onEvent(.{ .content = " world" });
     try acc.onEvent(.{ .finish = "stop" });
 
-    try std.testing.expectEqual(@as(i64, 10), stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 2), stats.output_tokens);
-    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(i64, 10), model_stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 2), model_stats.output_tokens);
+    try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
 }
 
 test "OpenAiAccumulator keeps partial stats on cancellation" {
-    var stats = SessionStats.init(std.testing.io);
-    stats.beginTurn(16);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 16);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
@@ -626,13 +679,16 @@ test "OpenAiAccumulator keeps partial stats on cancellation" {
     const result = acc.onEvent(.{ .content = " ignored" });
     try std.testing.expectError(error.Canceled, result);
 
-    try std.testing.expectEqual(@as(i64, 16), stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 3), stats.output_tokens);
-    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(i64, 16), model_stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 3), model_stats.output_tokens);
+    try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
 }
 
 test "OpenAiAccumulator assembles tool call" {
-    var stats = SessionStats.init(std.testing.io);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
     defer acc.deinit();
 
@@ -649,35 +705,42 @@ test "OpenAiAccumulator assembles tool call" {
 }
 
 test "SessionStats begins turn with input tokens" {
-    var stats = SessionStats.init(std.testing.io);
-    stats.beginTurn(100);
-    try std.testing.expectEqual(@as(i64, 100), stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 0), stats.output_tokens);
-    try std.testing.expectEqual(@as(usize, 0), stats.turn_count);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 100);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(i64, 100), model_stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 0), model_stats.output_tokens);
+    try std.testing.expectEqual(@as(usize, 0), model_stats.turn_count);
 }
 
 test "SessionStats accumulates streaming output" {
-    var stats = SessionStats.init(std.testing.io);
-    stats.beginTurn(10);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, null);
     stats.addStreamingOutput(3, 2);
-    try std.testing.expectEqual(@as(i64, 10), stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 8), stats.output_tokens);
-    try std.testing.expectEqual(@as(i64, 2), stats.reasoning_output_tokens);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(i64, 10), model_stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 8), model_stats.output_tokens);
+    try std.testing.expectEqual(@as(i64, 2), model_stats.reasoning_output_tokens);
 }
 
 test "SessionStats records TTFT once" {
-    var stats = SessionStats.init(std.testing.io);
-    stats.beginTurn(10);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 10);
     stats.addFirstTokenTiming(0.5);
     stats.addFirstTokenTiming(0.7);
-    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.5), stats.ttft_sum, 0.001);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.5), model_stats.ttft_sum, 0.001);
 }
 
 test "SessionStats finalizes turn and reconciles usage" {
-    var stats = SessionStats.init(std.testing.io);
-    stats.beginTurn(10);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, null);
     stats.addFirstTokenTiming(0.5);
     stats.finalizeTurn(.{
@@ -688,21 +751,84 @@ test "SessionStats finalizes turn and reconciles usage" {
         .time_to_first_token_seconds = 0.4,
     }, true);
 
-    try std.testing.expectEqual(@as(usize, 1), stats.turn_count);
-    try std.testing.expectEqual(@as(i64, 12), stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 8), stats.output_tokens);
-    try std.testing.expectEqual(@as(i64, 1), stats.reasoning_output_tokens);
-    try std.testing.expectEqual(@as(usize, 1), stats.ttft_count);
-    try std.testing.expectEqual(@as(usize, 1), stats.tps_count);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(usize, 1), model_stats.turn_count);
+    try std.testing.expectEqual(@as(i64, 12), model_stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 8), model_stats.output_tokens);
+    try std.testing.expectEqual(@as(i64, 1), model_stats.reasoning_output_tokens);
+    try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
+    try std.testing.expectEqual(@as(usize, 1), model_stats.tps_count);
 }
 
 test "SessionStats keeps partial tokens on cancelled turn" {
-    var stats = SessionStats.init(std.testing.io);
-    stats.beginTurn(20);
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 20);
     stats.addStreamingOutput(7, null);
     stats.finalizeTurn(null, false);
 
-    try std.testing.expectEqual(@as(usize, 0), stats.turn_count);
-    try std.testing.expectEqual(@as(i64, 20), stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 7), stats.output_tokens);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(usize, 0), model_stats.turn_count);
+    try std.testing.expectEqual(@as(i64, 20), model_stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 7), model_stats.output_tokens);
+}
+
+test "SessionStats attributes usage to correct model" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    stats.beginTurn("model-a", 10);
+    stats.addStreamingOutput(5, null);
+    stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8 }, true);
+
+    stats.beginTurn("model-b", 20);
+    stats.addStreamingOutput(4, null);
+    stats.finalizeTurn(.{ .input_tokens = 22, .output_tokens = 6 }, true);
+
+    try std.testing.expectEqual(@as(usize, 2), stats.models.items.len);
+    try std.testing.expectEqualStrings("model-a", stats.models.items[0].model_key);
+    try std.testing.expectEqualStrings("model-b", stats.models.items[1].model_key);
+
+    const model_a = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(usize, 1), model_a.turn_count);
+    try std.testing.expectEqual(@as(i64, 12), model_a.input_tokens);
+    try std.testing.expectEqual(@as(i64, 8), model_a.output_tokens);
+
+    const model_b = &stats.models.items[1].stats;
+    try std.testing.expectEqual(@as(usize, 1), model_b.turn_count);
+    try std.testing.expectEqual(@as(i64, 22), model_b.input_tokens);
+    try std.testing.expectEqual(@as(i64, 6), model_b.output_tokens);
+
+    try std.testing.expectEqual(@as(usize, 2), stats.totalTurns());
+}
+
+test "SessionStats reuses existing model entry" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    stats.beginTurn("model-a", 10);
+    stats.finalizeTurn(.{ .input_tokens = 10, .output_tokens = 5 }, true);
+
+    stats.beginTurn("model-a", 8);
+    stats.finalizeTurn(.{ .input_tokens = 8, .output_tokens = 4 }, true);
+
+    try std.testing.expectEqual(@as(usize, 1), stats.models.items.len);
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(usize, 2), model_stats.turn_count);
+    try std.testing.expectEqual(@as(i64, 18), model_stats.input_tokens);
+    try std.testing.expectEqual(@as(i64, 9), model_stats.output_tokens);
+}
+
+test "SessionStats skips models without finalized turns" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    stats.beginTurn("model-a", 10);
+    stats.finalizeTurn(.{ .input_tokens = 10, .output_tokens = 5 }, true);
+
+    stats.beginTurn("model-b", 8);
+    stats.finalizeTurn(null, false);
+
+    try std.testing.expectEqual(@as(usize, 2), stats.models.items.len);
+    try std.testing.expectEqual(@as(usize, 1), stats.totalTurns());
 }
