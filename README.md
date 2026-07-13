@@ -54,7 +54,7 @@ The model replies in the terminal. You can keep sending follow-up messages; Puny
 ```text
 > Now list the source files
 🔧 Listing directory "src"
-The project has source files under src/, including main.zig, chat.zig, and a tools/ folder.
+The project has source files under src/, including main.c, utils.h, and a tests/ folder.
 ```
 
 ### One-shot prompt
@@ -80,16 +80,16 @@ Puny sends a list of available tools to the model on every request. When the mod
 Tool-call status lines use concise action-oriented summaries instead of raw JSON:
 
 ```text
-🔧 Reading "src/main.zig"
-🔧 Running "zig test" in "src"
-🔧 Writing 12 lines (384 bytes) to "src/main.zig"
+🔧 Reading "src/main.c"
+🔧 Running "npm test" in "."
+🔧 Writing 12 lines (384 bytes) to "README.md"
 ```
 
-Large payloads, such as `write_file` content, are summarized rather than printed in full.
+Large payloads, such as file writes, are summarized rather than printed in full.
 
 ### ⚠️ Safety warning
 
-Tools execute **automatically without confirmation**. This includes `write_file` (which overwrites files) and `execute_shell` (which runs arbitrary commands). Only run Puny in directories where you are comfortable with the model making changes.
+Tools execute **automatically without confirmation**. This includes file writes (which overwrite files) and shell commands (which run arbitrary commands). Only run Puny in directories where you are comfortable with the model making changes.
 
 ## Reference
 
