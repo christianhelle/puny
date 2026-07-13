@@ -106,7 +106,8 @@ pub fn main(init: std.process.Init) !void {
     try messages.append(.{ .system = system_prompt });
 
     var pending_prompt = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
-    var session_stats = chat.SessionStats.init(io);
+    var session_stats = chat.SessionStats.init(arena, io);
+    defer session_stats.deinit();
     sigint.register() catch {};
 
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
@@ -114,7 +115,7 @@ pub fn main(init: std.process.Init) !void {
 
     while (true) {
         if (sigint.isTriggered()) {
-            printExit(session_stats, io, stdout_writer) catch {};
+            printExit(&session_stats, io, stdout_writer) catch {};
             return;
         }
 
@@ -124,7 +125,7 @@ pub fn main(init: std.process.Init) !void {
         } else blk: {
             const maybe_input = input.readLine(io, stdout_writer, &line_alloc, &stdin_buffer) catch |err| {
                 if (sigint.isTriggered()) {
-                    printExit(session_stats, io, stdout_writer) catch {};
+                    printExit(&session_stats, io, stdout_writer) catch {};
                     return;
                 }
                 return err;
@@ -137,7 +138,7 @@ pub fn main(init: std.process.Init) !void {
                 },
                 .interrupted, .eof => {
                     if (sigint.isTriggered()) {
-                        printExit(session_stats, io, stdout_writer) catch {};
+                        printExit(&session_stats, io, stdout_writer) catch {};
                     }
                     return;
                 },
@@ -157,7 +158,7 @@ pub fn main(init: std.process.Init) !void {
 
         switch (action) {
             .exit => {
-                printExit(session_stats, io, stdout_writer) catch {};
+                printExit(&session_stats, io, stdout_writer) catch {};
                 return;
             },
             .continue_ => continue,
@@ -206,7 +207,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn printExit(
-    session_stats: chat.SessionStats,
+    session_stats: *const chat.SessionStats,
     io: std.Io,
     stdout_writer: *std.Io.Writer,
 ) !void {
