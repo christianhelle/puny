@@ -14,6 +14,7 @@ const prompts = @import("prompts.zig");
 const provider = @import("providers/provider.zig");
 const sigint = @import("sigint.zig");
 const tools = @import("tools");
+const welcome = @import("welcome.zig");
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
@@ -81,6 +82,13 @@ pub fn main(init: std.process.Init) !void {
             return;
         };
     };
+
+    try welcome.print(stdout_writer, .{
+        .provider_name = if (parsed.mock) "Mock" else "LM Studio",
+        .provider_url = provider_url,
+        .model_key = model_key,
+        .oneshot = parsed.oneshot,
+    });
 
     var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
     defer full_tool_definitions.deinit();
