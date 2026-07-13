@@ -4,12 +4,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const is_small = optimize == .ReleaseSmall;
     const exe = b.addExecutable(.{
         .name = "puny",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = is_small,
+            .unwind_tables = if (is_small) .none else null,
+            .stack_check = if (is_small) false else null,
+            .stack_protector = if (is_small) false else null,
+            .error_tracing = if (is_small) false else null,
         }),
     });
 
