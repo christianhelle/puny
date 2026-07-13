@@ -130,6 +130,22 @@ Run the test suite:
 zig build test
 ```
 
+### Release builds
+
+On Windows, build a tiny ReleaseSmall binary:
+
+```bash
+zig build -Doptimize=ReleaseSmall
+```
+
+To produce packed release binaries for Windows, Linux, and macOS (Windows and Linux are compressed with UPX to stay well under 1 MB):
+
+```bash
+./scripts/build-release.ps1
+```
+
+Release binaries are written to `zig-out/release/`.
+
 ## Development / testing
 
 ### Mock mode (no LM Studio required)
