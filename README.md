@@ -33,53 +33,44 @@ zig build run
 
 ## Usage
 
-Start LM Studio and load a model with tool-calling support, then:
+Make sure LM Studio is running and a tool-capable model is loaded, then start Puny:
 
 ```bash
-zig build run
+puny
 ```
 
-Or run the built binary directly:
+Puny shows the model picker, connects to LM Studio, and drops you into a chat prompt.
 
-```bash
-./zig-out/bin/puny
+### Interactive chat
+
+Type your request and press Enter:
+
+```text
+> Explain what this project does
 ```
 
-Point to a different LM Studio instance:
+The model replies in the terminal. You can keep sending follow-up messages; Puny remembers the conversation.
 
-```bash
-zig build run -- --url http://192.168.1.42:1234
+```text
+> Now list the source files
+🔧 Listing directory "src"
+The project has source files under src/, including main.zig, chat.zig, and a tools/ folder.
 ```
 
-Run a single prompt and exit (useful for scripting):
+### One-shot prompt
+
+Run a single prompt and exit. Useful for scripts or quick tasks:
 
 ```bash
-zig build run -- --prompt "List all .zig files" --oneshot
+puny --prompt "List all .zig files" --oneshot
 ```
 
-### Mock mode (no LM Studio required)
+### Connect to a remote LM Studio instance
 
-Start without a running AI backend:
-
-```bash
-zig build run -- --mock
-```
-
-The mock provider returns canned responses and simulates tool calls based on keywords in your prompt:
-
-| Prompt contains | Mock response |
-|---|---|
-| `read`, `file`, `code` | Calls `read_file` tool |
-| `search`, `grep`, `find` | Calls `grep_search` tool |
-| `shell`, `run`, `execute` | Calls `execute_shell` tool |
-| `error`, `timeout`, `fail` | Simulates a network error |
-| _(after a tool result)_ | Returns a completion acknowledging the result |
-| _(anything else)_ | Returns a canned text response |
-
-Use `--model` to skip the model picker in mock mode:
+If LM Studio is running on another machine, point Puny at it:
 
 ```bash
-zig build run -- --mock --model mock-model --prompt "search for something" --oneshot
+puny --url http://192.168.1.42:1234
 ```
 
 ## Tool calling
