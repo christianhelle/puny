@@ -97,14 +97,15 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 ### CLI options
 
-|---|---|
-| `-u`, `--url <url>` | LM Studio endpoint URL (default: `http://127.0.0.1:1234`) |
-| `-m`, `--model <id>` | Model identifier (skips picker if found in running models) |
-| `-p`, `--prompt <text>` | Pre-fill prompt as first user message |
-| `-1`, `--oneshot` | Exit after processing the prompt (requires `--prompt`) |
-| `-M`, `--mock` | Use mock provider (no LM Studio required) |
-| `-h`, `--help` | Show help text |
-| `-V`, `--version` | Print version |
+| Flag                    | Description                                                |
+| ----------------------- | ---------------------------------------------------------- |
+| `-u`, `--url <url>`     | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
+| `-m`, `--model <id>`    | Model identifier (skips picker if found in running models) |
+| `-p`, `--prompt <text>` | Pre-fill prompt as first user message                      |
+| `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt`)     |
+| `-M`, `--mock`          | Use mock provider (no LM Studio required)                  |
+| `-h`, `--help`          | Show help text                                             |
+| `-V`, `--version`       | Print version                                              |
 
 ### Interactive commands
 
@@ -141,14 +142,14 @@ zig build run -- --mock
 
 The mock provider returns canned responses and simulates tool calls based on keywords in your prompt:
 
-| Prompt contains | Mock response |
-|---|---|
-| `read`, `file`, `code` | Calls `read_file` tool |
-| `search`, `grep`, `find` | Calls `grep_search` tool |
-| `shell`, `run`, `execute` | Calls `execute_shell` tool |
-| `error`, `timeout`, `fail` | Simulates a network error |
-| _(after a tool result)_ | Returns a completion acknowledging the result |
-| _(anything else)_ | Returns a canned text response |
+| Prompt contains            | Mock response                                 |
+| -------------------------- | --------------------------------------------- |
+| `read`, `file`, `code`     | Calls `read_file` tool                        |
+| `search`, `grep`, `find`   | Calls `grep_search` tool                      |
+| `shell`, `run`, `execute`  | Calls `execute_shell` tool                    |
+| `error`, `timeout`, `fail` | Simulates a network error                     |
+| _(after a tool result)_    | Returns a completion acknowledging the result |
+| _(anything else)_          | Returns a canned text response                |
 
 Use `--model` to skip the model picker in mock mode:
 
