@@ -46,14 +46,16 @@ Puny shows the model picker, connects to LM Studio, and drops you into a chat pr
 Type your request and press Enter:
 
 ```text
-> Explain what this project does
+Prompt: Explain what this project does
 ```
 
 The model replies in the terminal. You can keep sending follow-up messages; Puny remembers the conversation.
 
 ```text
-> Now list the source files
+Prompt: Now list the source files
+
 🔧 Listing directory "src"
+
 The project has source files under src/, including main.c, utils.h, and a tests/ folder.
 ```
 
@@ -80,8 +82,8 @@ Puny sends a list of available tools to the model on every request. When the mod
 Tool-call status lines use concise action-oriented summaries instead of raw JSON:
 
 ```text
-🔧 Reading "src/main.c"
-🔧 Running "npm test" in "."
+🔧 Reading "src/main.zig"
+🔧 Running "zig build test"
 🔧 Writing 12 lines (384 bytes) to "README.md"
 ```
 
@@ -95,7 +97,6 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 ### CLI options
 
-| Flag | Description |
 |---|---|
 | `-u`, `--url <url>` | LM Studio endpoint URL (default: `http://127.0.0.1:1234`) |
 | `-m`, `--model <id>` | Model identifier (skips picker if found in running models) |
