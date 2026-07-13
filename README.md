@@ -6,17 +6,16 @@ Puny lets you chat with a local LLM and gives it a curated set of coding tools s
 
 ## Features
 
-- Local-first: talks to LM Studio running on `http://127.0.0.1:1234`.
-- Mock mode (`--mock`): run without a real AI backend for UI/testing work.
-- Interactive model picker on startup.
-- Multi-turn chat with client-side message history.
-- Tool calling via LM Studio's OpenAI-compatible `/v1/chat/completions` endpoint.
-- Built-in tools:
-  - `read_file`, `write_file`, `list_directory`
-  - `execute_shell`
-  - `grep_search`
-  - `git_status`, `git_diff`
-  - `web_fetch`
+- **Local-first**: talks to LM Studio running on your own machine at `http://127.0.0.1:1234`.
+- **Interactive model picker**: choose the model to load when Puny starts.
+- **Multi-turn chat**: keeps the conversation history across messages.
+- **Tool calling**: the LLM can use built-in tools to work with your project.
+- **Built-in tools**:
+  - Read, write, and list files in your project
+  - Run shell commands
+  - Search your codebase
+  - Check git status and diff
+  - Fetch web pages
 
 ## Quick start
 
