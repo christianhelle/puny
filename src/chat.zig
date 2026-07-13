@@ -89,18 +89,6 @@ fn countNewlines(text: []const u8) usize {
     return count;
 }
 
-pub fn printStats(writer: *std.Io.Writer, stats: lmstudio.ChatStats) !void {
-    try writer.print("\n\n{s}─── Stats ───{s}\n", .{ ansi.dim, ansi.reset });
-    try writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
-    try writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.total_output_tokens, stats.reasoning_output_tokens });
-    try writer.print("  Tokens per second:   {d:.1}\n", .{stats.tokens_per_second});
-    try writer.print("  Time to first token: {d:.2}s\n", .{stats.time_to_first_token_seconds});
-    if (stats.model_load_time_seconds) |load_time| {
-        try writer.print("  Model load time:     {d:.2}s\n", .{load_time});
-    }
-    try writer.flush();
-}
-
 pub const PerModelStats = struct {
     turn_count: usize = 0,
     input_tokens: i64 = 0,
