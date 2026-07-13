@@ -5,7 +5,6 @@ const Io = std.Io;
 
 /// Atomic flags shared between monitor thread and main thread.
 var cancelled: std.atomic.Value(bool) = .{ .raw = false };
-var first_esc_seen: std.atomic.Value(bool) = .{ .raw = false };
 var running: std.atomic.Value(bool) = .{ .raw = false };
 var monitor_thread: ?std.Thread = null;
 
@@ -30,7 +29,6 @@ pub fn isCancelled() bool {
 /// Resets cancellation flags. Call before starting a new turn.
 pub fn reset() void {
     cancelled.store(false, .monotonic);
-    first_esc_seen.store(false, .monotonic);
 }
 
 /// Marks the current operation as cancelled. Intended for tests and for
@@ -48,7 +46,6 @@ pub fn start(io: Io, stderr_writer: *Io.Writer) !void {
     global_io = io;
     global_stderr = stderr_writer;
     cancelled.store(false, .monotonic);
-    first_esc_seen.store(false, .monotonic);
     running.store(true, .monotonic);
     errdefer running.store(false, .monotonic);
     try setRawMode(true);
@@ -65,7 +62,6 @@ pub fn stop() void {
     }
     setRawMode(false) catch {};
     cancelled.store(false, .monotonic);
-    first_esc_seen.store(false, .monotonic);
 }
 
 // ── Platform-specific: raw mode ──────────────────────────────────────
@@ -177,7 +173,6 @@ fn monitorThreadWindows() void {
                         handleFirstEscape(&first_esc_ts);
                     } else {
                         first_esc_ts = null;
-                        first_esc_seen.store(false, .monotonic);
                     }
                 }
             }
@@ -194,7 +189,6 @@ fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
         handleFirstEscape(first_esc_ts);
     } else {
         first_esc_ts.* = null;
-        first_esc_seen.store(false, .monotonic);
     }
 }
 
@@ -209,7 +203,6 @@ fn handleFirstEscape(first_esc_ts: *?Io.Timestamp) void {
         }
     }
     first_esc_ts.* = now;
-    first_esc_seen.store(true, .monotonic);
     global_stderr.print("\x1b[2m\n\n(Press Esc again to cancel)\n\x1b[0m\n", .{}) catch {};
     global_stderr.flush() catch {};
 }
