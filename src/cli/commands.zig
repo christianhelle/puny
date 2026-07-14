@@ -1,5 +1,5 @@
 const std = @import("std");
-const ansi = @import("../ui/ansi.zig");
+const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");

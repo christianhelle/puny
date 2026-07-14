@@ -1,5 +1,5 @@
 const std = @import("std");
-const ansi = @import("../ui/ansi.zig");
+const ansi = @import("ansi.zig");
 const terminal = @import("terminal.zig");
 
 pub const Status = enum {

@@ -1,5 +1,5 @@
 const std = @import("std");
-const ansi = @import("../ui/ansi.zig");
+const ansi = @import("ansi.zig");
 const cli = @import("../cli/args.zig");
 
 pub const Info = struct {
