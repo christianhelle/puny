@@ -4,7 +4,6 @@ const chat_retry = @import("chat_retry.zig");
 const indicator = @import("indicator.zig");
 const openai = @import("providers/openai.zig");
 const provider = @import("providers/provider.zig");
-const retry = @import("retry.zig");
 const tools = @import("tools");
 const tool_display = @import("tool_display.zig");
 const usage_estimator = @import("usage.zig");
