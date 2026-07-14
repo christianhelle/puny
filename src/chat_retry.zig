@@ -2,7 +2,7 @@ const std = @import("std");
 const ansi = @import("ansi.zig");
 const cancel = @import("cancel.zig");
 const openai = @import("providers/openai.zig");
-const retry = @import("retry.zig");
+const retry = @import("core/retry.zig");
 
 pub const ChatRetryOutcome = union(enum) {
     success,

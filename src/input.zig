@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const cancel = @import("cancel.zig");
 const prompt_history = @import("prompt_history.zig");
-const sigint = @import("sigint.zig");
+const sigint = @import("core/sigint.zig");
 const terminal = @import("terminal.zig");
 
 pub const ReadLineResult = union(enum) {

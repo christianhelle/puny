@@ -13,7 +13,7 @@ const openai = @import("providers/openai.zig");
 const prompt_history = @import("prompt_history.zig");
 const prompts = @import("prompts.zig");
 const provider = @import("providers/provider.zig");
-const sigint = @import("sigint.zig");
+const sigint = @import("core/sigint.zig");
 const tools = @import("tools");
 const welcome = @import("welcome.zig");
 
