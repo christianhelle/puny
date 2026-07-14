@@ -1,6 +1,6 @@
 const std = @import("std");
 const tools = @import("root.zig");
-const io_helpers = @import("io_helpers.zig");
+const helpers = @import("helpers.zig");
 
 const ExecuteShellParams = struct {
     command: []const u8,
@@ -13,7 +13,7 @@ fn executeShell(allocator: std.mem.Allocator, io: std.Io, params: ExecuteShellPa
     else
         &[_][]const u8{ "sh", "-c", params.command };
 
-    return io_helpers.runCommand(allocator, io, argv, params.working_directory);
+    return helpers.runCommand(allocator, io, argv, params.working_directory);
 }
 
 pub const execute_shell = tools.defineTool(

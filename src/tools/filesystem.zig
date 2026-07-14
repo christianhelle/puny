@@ -1,13 +1,13 @@
 const std = @import("std");
 const tools = @import("root.zig");
-const io_helpers = @import("io_helpers.zig");
+const helpers = @import("helpers.zig");
 
 const ReadFileParams = struct {
     path: []const u8,
 };
 
 fn readFile(allocator: std.mem.Allocator, io: std.Io, params: ReadFileParams) ![]const u8 {
-    return io_helpers.readFileAlloc(allocator, io, params.path, 1024 * 1024);
+    return helpers.readFileAlloc(allocator, io, params.path, 1024 * 1024);
 }
 
 const WriteFileParams = struct {
@@ -17,7 +17,7 @@ const WriteFileParams = struct {
 
 fn writeFile(allocator: std.mem.Allocator, io: std.Io, params: WriteFileParams) ![]const u8 {
     _ = allocator;
-    try io_helpers.writeFile(io, params.path, params.content);
+    try helpers.writeFile(io, params.path, params.content);
     return "File written successfully.";
 }
 
@@ -26,7 +26,7 @@ const ListDirectoryParams = struct {
 };
 
 fn listDirectory(allocator: std.mem.Allocator, io: std.Io, params: ListDirectoryParams) ![]const u8 {
-    return io_helpers.listDirectory(allocator, io, params.path);
+    return helpers.listDirectory(allocator, io, params.path);
 }
 
 pub const read_file = tools.defineTool(

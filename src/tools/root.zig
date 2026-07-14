@@ -1,10 +1,10 @@
 const std = @import("std");
 
 pub const schema = @import("schema.zig");
-const io_helpers = @import("io_helpers.zig");
+const helpers = @import("helpers.zig");
 
-pub const dupeString = io_helpers.dupeString;
-pub const ownedSliceOrEmpty = io_helpers.ownedSliceOrEmpty;
+pub const dupeString = helpers.dupeString;
+pub const ownedSliceOrEmpty = helpers.ownedSliceOrEmpty;
 
 pub const Tool = struct {
     name: []const u8,
