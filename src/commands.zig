@@ -1,6 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
-const config = @import("config.zig");
+const config = @import("config/config.zig");
 const openai = @import("providers/openai.zig");
 const prompts = @import("prompts.zig");
 
