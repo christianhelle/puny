@@ -237,3 +237,7 @@ fn printExit(
     try stdout_writer.flush();
 }
 
+test "include chat_retry tests" {
+    _ = @import("chat_retry.zig");
+}
+
