@@ -81,11 +81,11 @@ pub fn main(init: std.process.Init) !void {
     defer prov.deinit();
 
     const skip_validation = !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
-    var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation, cfg, init.environ_map)) orelse blk: {
+    var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation, cfg, init.environ_map, random)) orelse blk: {
         if (configured_model) |model_id| {
             try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
         }
-        break :blk (try model_selection.select(&prov, null, arena, io, init, false, cfg, init.environ_map)) orelse {
+        break :blk (try model_selection.select(&prov, null, arena, io, init, false, cfg, init.environ_map, random)) orelse {
             try stdout_writer.print("No model selected.\n", .{});
             return;
         };
@@ -189,7 +189,7 @@ pub fn main(init: std.process.Init) !void {
             },
             .switch_model => |model_id| {
                 const model_skip_validation = parsed.mock;
-                if (try model_selection.switchModel(&prov, model_id, model_key, arena, io, init, model_skip_validation, stdout_writer, cfg, init.environ_map)) |new_key| {
+                if (try model_selection.switchModel(&prov, model_id, model_key, arena, io, init, model_skip_validation, stdout_writer, cfg, init.environ_map, random)) |new_key| {
                     model_key = new_key;
                 }
                 continue;
