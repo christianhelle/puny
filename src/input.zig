@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const cancel = @import("cancel.zig");
+const prompt_history = @import("prompt_history.zig");
 const sigint = @import("sigint.zig");
 const terminal = @import("terminal.zig");
 
@@ -18,8 +19,10 @@ pub fn readLine(
     stdout_writer: *std.Io.Writer,
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: []u8,
+    history: ?*prompt_history.History,
 ) !ReadLineResult {
     line_alloc.clearRetainingCapacity();
+    if (history) |h| h.resetNavigation();
 
     try stdout_writer.print("\n\nPrompt: ", .{});
     try stdout_writer.flush();
@@ -32,9 +35,9 @@ pub fn readLine(
     defer cancel.setRawMode(false) catch {};
 
     if (builtin.os.tag == .windows) {
-        return try readLineWindows(io, stdout_writer, line_alloc);
+        return try readLineWindows(io, stdout_writer, line_alloc, history);
     } else {
-        return try readLinePosix(io, stdout_writer, line_alloc);
+        return try readLinePosix(io, stdout_writer, line_alloc, history);
     }
 }
 
@@ -96,6 +99,7 @@ fn readLinePosix(
     io: std.Io,
     stdout_writer: *std.Io.Writer,
     line_alloc: *std.Io.Writer.Allocating,
+    history: ?*prompt_history.History,
 ) !ReadLineResult {
     const posix = std.posix;
     var first_esc_ts: ?std.Io.Timestamp = null;
@@ -130,9 +134,18 @@ fn readLinePosix(
                     first_esc_ts = null;
                     if (next == terminal.csi_leader) {
                         // CSI sequence: consume parameter bytes and the final byte.
+                        var final_byte: u8 = 0;
                         while (true) {
                             const param = try readByteWithTimeout(terminal.escape_sequence_timeout_ms) orelse break;
-                            if (!std.ascii.isDigit(param) and param != ';') break;
+                            if (!std.ascii.isDigit(param) and param != ';') {
+                                final_byte = param;
+                                break;
+                            }
+                        }
+                        switch (final_byte) {
+                            'A' => try historyPrevious(line_alloc, stdout_writer, history),
+                            'B' => try historyNext(line_alloc, stdout_writer, history),
+                            else => {},
                         }
                         continue;
                     }
@@ -176,6 +189,7 @@ fn readLineWindows(
     io: std.Io,
     stdout_writer: *std.Io.Writer,
     line_alloc: *std.Io.Writer.Allocating,
+    history: ?*prompt_history.History,
 ) !ReadLineResult {
     if (comptime builtin.os.tag != .windows) unreachable;
 
@@ -211,6 +225,14 @@ fn readLineWindows(
                     if (elapsed >= 0 and elapsed <= double_tap_window_ns) return .cancelled;
                 }
                 first_esc_ts = now;
+            },
+            windows.VK_UP => {
+                first_esc_ts = null;
+                try historyPrevious(line_alloc, stdout_writer, history);
+            },
+            windows.VK_DOWN => {
+                first_esc_ts = null;
+                try historyNext(line_alloc, stdout_writer, history);
             },
             else => {
                 first_esc_ts = null;
@@ -249,6 +271,8 @@ const windows = if (builtin.os.tag == .windows) struct {
     pub const VK_RETURN: u16 = 0x0D;
     pub const VK_BACK: u16 = 0x08;
     pub const VK_ESCAPE: u16 = 0x1B;
+    pub const VK_UP: u16 = 0x26;
+    pub const VK_DOWN: u16 = 0x28;
     pub const KEY_EVENT: u16 = 0x0001;
     pub const LEFT_CTRL_PRESSED: DWORD = 0x0008;
     pub const RIGHT_CTRL_PRESSED: DWORD = 0x0004;
@@ -275,4 +299,78 @@ const windows = if (builtin.os.tag == .windows) struct {
     pub extern "kernel32" fn GetStdHandle(dwStdHandle: DWORD) callconv(.winapi) HANDLE;
     pub extern "kernel32" fn ReadConsoleInputW(hConsoleInput: HANDLE, lpBuffer: *INPUT_RECORD, nLength: DWORD, lpNumberOfEventsRead: *DWORD) callconv(.winapi) BOOL;
 } else void{};
+
+fn historyPrevious(
+    line_alloc: *std.Io.Writer.Allocating,
+    stdout_writer: *std.Io.Writer,
+    history: ?*prompt_history.History,
+) !void {
+    const h = history orelse return;
+    const current = line_alloc.written();
+    const replacement = h.previous(current) orelse h.currentDraft() orelse return;
+    try replaceLine(replacement, line_alloc, stdout_writer);
+}
+
+fn historyNext(
+    line_alloc: *std.Io.Writer.Allocating,
+    stdout_writer: *std.Io.Writer,
+    history: ?*prompt_history.History,
+) !void {
+    const h = history orelse return;
+    const replacement = h.next() orelse h.currentDraft() orelse return;
+    try replaceLine(replacement, line_alloc, stdout_writer);
+}
+
+fn replaceLine(
+    text: []const u8,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdout_writer: *std.Io.Writer,
+) !void {
+    line_alloc.clearRetainingCapacity();
+    try line_alloc.writer.writeAll(text);
+
+    try stdout_writer.writeAll(terminal.move_to_line_start);
+    try stdout_writer.writeAll(terminal.clear_to_end_of_line);
+    try stdout_writer.print("Prompt: {s}", .{text});
+    try stdout_writer.flush();
+}
+
+test "replaceLine updates line_alloc and redraws prompt" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try line_alloc.writer.writeAll("old");
+    try replaceLine("new", &line_alloc, &out.writer);
+
+    try std.testing.expectEqualStrings("new", line_alloc.written());
+    try std.testing.expectEqualStrings(
+        terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "Prompt: new",
+        out.written(),
+    );
+}
+
+test "historyPrevious and historyNext navigate entries" {
+    const allocator = std.testing.allocator;
+    var history = prompt_history.History.init(allocator, "");
+    defer history.deinit();
+    try history.add("first");
+    try history.add("second");
+
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try historyPrevious(&line_alloc, &out.writer, &history);
+    try std.testing.expectEqualStrings("second", line_alloc.written());
+
+    try historyPrevious(&line_alloc, &out.writer, &history);
+    try std.testing.expectEqualStrings("first", line_alloc.written());
+
+    try historyNext(&line_alloc, &out.writer, &history);
+    try std.testing.expectEqualStrings("second", line_alloc.written());
+}
 
