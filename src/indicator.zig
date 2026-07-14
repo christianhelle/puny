@@ -64,9 +64,9 @@ pub const ThinkingIndicator = struct {
             try writer.print(terminal.cursor_down, .{cursor_offset});
             try writer.writeAll(terminal.move_to_line_start);
             if (output_ends_with_newline) {
-                try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
+                try writer.print("{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
             } else {
-                try writer.print("\n\n{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
+                try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
             }
         } else {
             try writer.writeAll(terminal.move_to_line_start);
