@@ -21,7 +21,7 @@ pub fn readLine(
 ) !ReadLineResult {
     line_alloc.clearRetainingCapacity();
 
-    try stdout_writer.print("\n\nPrompt: ", .{});
+    try stdout_writer.print("\nPrompt: ", .{});
     try stdout_writer.flush();
 
     cancel.setRawMode(true) catch {
