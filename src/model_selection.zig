@@ -2,19 +2,14 @@ const std = @import("std");
 const config = @import("config.zig");
 const input = @import("input.zig");
 const lmstudio = @import("providers/lmstudio.zig");
-const model_picker = @import("tui/model_picker.zig");
 const provider = @import("providers/provider.zig");
 const retry = @import("retry.zig");
-const zz = @import("zigzag");
-
-const ModelPicker = model_picker.Widget;
 
 pub fn select(
     prov: *provider.Provider,
     model_id: ?[]const u8,
     arena: std.mem.Allocator,
     io: std.Io,
-    init: std.process.Init,
     skip_validation: bool,
     cfg: ?*config.Config,
     environ_map: *const std.process.Environ.Map,
@@ -35,7 +30,7 @@ pub fn select(
     }
     var models = try listModelsWithRetry(prov, io, 1);
     defer models.deinit();
-    const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
+    const key = (try selectModelText(models.value().models, arena, io)) orelse return null;
 
     if (cfg) |c| {
         c.model = key;
@@ -48,36 +43,6 @@ pub fn select(
         };
     }
 
-    return key;
-}
-
-fn selectModelInteractive(
-    models: []const lmstudio.ModelInfo,
-    arena: std.mem.Allocator,
-    io: std.Io,
-    init: std.process.Init,
-) !?[]const u8 {
-    model_picker.setModels(models);
-    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
-
-    program.run() catch |err| {
-        program.deinit();
-
-        var stderr_buffer: [1024]u8 = undefined;
-        var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-        const stderr_writer = &stderr_file_writer.interface;
-        stderr_writer.print("\nCould not open the interactive model picker ({s}). Falling back to text selection.\n", .{@errorName(err)}) catch {};
-        stderr_writer.flush() catch {};
-
-        return try selectModelText(models, arena, io);
-    };
-
-    const picked = program.model.selected orelse {
-        program.deinit();
-        return null;
-    };
-    const key = try arena.dupe(u8, picked);
-    program.deinit();
     return key;
 }
 
@@ -120,13 +85,12 @@ pub fn switchModel(
     current_key: []const u8,
     arena: std.mem.Allocator,
     io: std.Io,
-    init: std.process.Init,
     skip_validation: bool,
     stdout_writer: *std.Io.Writer,
     cfg: ?*config.Config,
     environ_map: *const std.process.Environ.Map,
 ) !?[]const u8 {
-    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg, environ_map)) orelse {
+    const new_key = (try select(prov, model_id, arena, io, skip_validation, cfg, environ_map)) orelse {
         if (model_id != null) {
             try stdout_writer.print("\nModel not found.\n", .{});
             try stdout_writer.flush();
