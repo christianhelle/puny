@@ -55,8 +55,6 @@ pub fn runChatWithRetry(
             while (i < retry_count) : (i += 1) delay_ms *= 2;
             delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
 
-            try stdout_writer.print("\n{s}Connection error ({}), retrying in {}ms ({d}/{d})...{s}\n", .{ ansi.dim, err, delay_ms, retry_count, cfg.max_retries, ansi.reset });
-            try stdout_writer.flush();
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
