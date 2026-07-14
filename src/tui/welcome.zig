@@ -1,6 +1,6 @@
 const std = @import("std");
-const ansi = @import("ui/ansi.zig");
-const cli = @import("cli/args.zig");
+const ansi = @import("../ui/ansi.zig");
+const cli = @import("../cli/args.zig");
 
 pub const Info = struct {
     version: []const u8 = cli.version,
