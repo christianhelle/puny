@@ -1,5 +1,5 @@
 const std = @import("std");
-const config = @import("config.zig");
+const config = @import("config/config.zig");
 const input = @import("input.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const model_picker = @import("tui/model_picker.zig");
