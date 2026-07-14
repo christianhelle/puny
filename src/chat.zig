@@ -1,5 +1,5 @@
 const std = @import("std");
-const ansi = @import("ansi.zig");
+const ansi = @import("ui/ansi.zig");
 const chat_retry = @import("chat_retry.zig");
 const indicator = @import("indicator.zig");
 const openai = @import("providers/openai.zig");

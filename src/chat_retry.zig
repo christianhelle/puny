@@ -1,5 +1,5 @@
 const std = @import("std");
-const ansi = @import("ansi.zig");
+const ansi = @import("ui/ansi.zig");
 const cancel = @import("cancel.zig");
 const openai = @import("providers/openai.zig");
 const retry = @import("core/retry.zig");
