@@ -8,7 +8,6 @@ const tools = @import("tools");
 const tool_display = @import("tool_display.zig");
 const usage_estimator = @import("usage.zig");
 const cancel = @import("cancel.zig");
-const zz = @import("zigzag");
 
 fn countNewlines(text: []const u8) usize {
     var count: usize = 0;
@@ -342,15 +341,11 @@ pub const OpenAiAccumulator = struct {
         try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
         try stdout.flush();
 
-        var md = zz.Markdown.init();
-        const rendered = try md.render(self.allocator, self.content.items);
-        defer self.allocator.free(rendered);
-
-        try stdout.print("{s}\n", .{rendered});
+        try stdout.print("{s}\n", .{self.content.items});
         try stdout.flush();
 
         self.lines_printed = 0;
-        return countNewlines(rendered) + 1;
+        return countNewlines(self.content.items) + 1;
     }
 
     pub fn streamCallback(self: *@This()) openai.StreamCallback {
