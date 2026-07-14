@@ -20,7 +20,7 @@ pub const ThinkingIndicator = struct {
 
     pub fn show(self: *const @This(), writer: *std.Io.Writer) !void {
         _ = self;
-        try writer.print("\n\n{s}Thinking...{s}", .{ ansi.dim, ansi.reset });
+        try writer.print("\n{s}Thinking...{s}", .{ ansi.dim, ansi.reset });
         try writer.flush();
     }
 
