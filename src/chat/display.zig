@@ -1,5 +1,5 @@
 const std = @import("std");
-const openai = @import("providers/openai.zig");
+const openai = @import("../providers/openai.zig");
 
 const max_value_length = 120;
 
