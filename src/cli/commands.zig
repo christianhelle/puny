@@ -1,8 +1,8 @@
 const std = @import("std");
-const ansi = @import("ansi.zig");
-const config = @import("config/config.zig");
-const openai = @import("providers/openai.zig");
-const prompts = @import("prompts/prompts.zig");
+const ansi = @import("../ansi.zig");
+const config = @import("../config/config.zig");
+const openai = @import("../providers/openai.zig");
+const prompts = @import("../prompts/prompts.zig");
 
 const default_cfg = config.Config.default();
 
