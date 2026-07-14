@@ -1,0 +1,19 @@
+{
+  "name": "Zig Dev Environment",
+  "image": "mcr.microsoft.com/devcontainers/cpp",
+  "features": {
+    "ghcr.io/devcontainers-extra/features/zig:1": {
+      "version": "0.16.0"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ziglang.vscode-zig"
+      ]
+    }
+  },
+  "postCreateCommand": "zig version && echo 'Dev container setup complete!'",
+  "forwardPorts": [],
+  "remoteUser": "vscode"
+}
