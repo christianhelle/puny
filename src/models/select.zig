@@ -1,10 +1,10 @@
 const std = @import("std");
-const config = @import("config/config.zig");
-const input = @import("input.zig");
-const lmstudio = @import("providers/lmstudio.zig");
-const model_picker = @import("tui/model_picker.zig");
-const provider = @import("providers/provider.zig");
-const retry = @import("core/retry.zig");
+const config = @import("../config/config.zig");
+const input = @import("../input.zig");
+const lmstudio = @import("../providers/lmstudio.zig");
+const model_picker = @import("../tui/model_picker.zig");
+const provider = @import("../providers/provider.zig");
+const retry = @import("../core/retry.zig");
 const zz = @import("zigzag");
 
 const ModelPicker = model_picker.Widget;
