@@ -18,12 +18,13 @@ pub fn select(
     skip_validation: bool,
     cfg: ?*config.Config,
     environ_map: *const std.process.Environ.Map,
+    random: std.Random,
 ) !?[]const u8 {
     if (model_id) |id| {
         if (skip_validation) {
             return try arena.dupe(u8, id);
         }
-        var models = try listModelsWithRetry(prov, io, 0);
+        var models = try listModelsWithRetry(prov, io, random, 0);
         defer models.deinit();
         const found = for (models.value().models) |m| {
             if (std.mem.eql(u8, m.key, id)) break true;
@@ -33,7 +34,7 @@ pub fn select(
         }
         return null;
     }
-    var models = try listModelsWithRetry(prov, io, 1);
+    var models = try listModelsWithRetry(prov, io, random, 1);
     defer models.deinit();
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
 
@@ -125,8 +126,9 @@ pub fn switchModel(
     stdout_writer: *std.Io.Writer,
     cfg: ?*config.Config,
     environ_map: *const std.process.Environ.Map,
+    random: std.Random,
 ) !?[]const u8 {
-    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg, environ_map)) orelse {
+    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg, environ_map, random)) orelse {
         if (model_id != null) {
             try stdout_writer.print("\nModel not found.\n", .{});
             try stdout_writer.flush();
@@ -143,13 +145,20 @@ pub fn switchModel(
     return new_key;
 }
 
-pub fn listModelsWithRetry(prov: anytype, io: std.Io, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
     var retry_count: usize = 0;
+    const cfg = retry.default_config;
     while (true) {
         if (prov.listModels()) |models| return models else |err| {
             retry_count += 1;
             if (retry_count > retries or !retry.isTransientError(err)) return err;
-            io.sleep(.{ .nanoseconds = @as(i96, @intCast(200 * retry_count * std.time.ns_per_ms)) }, .awake) catch {};
+
+            var delay_ms: u64 = cfg.base_delay_ms;
+            var i: usize = 1;
+            while (i < retry_count) : (i += 1) delay_ms *= 2;
+            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
+
+            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
 }
@@ -179,9 +188,14 @@ const TestProvider = struct {
     }
 };
 
+fn testRandom() std.Random {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    return random_source.interface();
+}
+
 test "listModelsWithRetry succeeds on first call" {
     var prov = TestProvider{ .allocator = std.testing.allocator };
-    var result = try listModelsWithRetry(&prov, undefined, 0);
+    var result = try listModelsWithRetry(&prov, undefined, testRandom(), 0);
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
     try std.testing.expectEqual(@as(usize, 0), result.value().models.len);
@@ -193,7 +207,7 @@ test "listModelsWithRetry fails fast on non-transient error" {
         .fail_count = 1,
         .err = error.OutOfMemory,
     };
-    const result = listModelsWithRetry(&prov, undefined, 0);
+    const result = listModelsWithRetry(&prov, undefined, testRandom(), 0);
     try std.testing.expectError(error.OutOfMemory, result);
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
 }
@@ -204,7 +218,7 @@ test "listModelsWithRetry gives up when retries exhausted" {
         .fail_count = 2,
         .err = error.ConnectionRefused,
     };
-    const result = listModelsWithRetry(&prov, undefined, 0);
+    const result = listModelsWithRetry(&prov, undefined, testRandom(), 0);
     try std.testing.expectError(error.ConnectionRefused, result);
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
 }
