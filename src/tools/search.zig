@@ -1,6 +1,6 @@
 const std = @import("std");
 const tools = @import("root.zig");
-const io_helpers = @import("io_helpers.zig");
+const helpers = @import("helpers.zig");
 
 const GrepSearchParams = struct {
     query: []const u8,
@@ -30,7 +30,7 @@ fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams
         try argv.append(".");
     }
 
-    return io_helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommand(allocator, io, argv.items, null);
 }
 
 pub const grep_search = tools.defineTool(
