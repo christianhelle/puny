@@ -1,6 +1,6 @@
 const std = @import("std");
 const config = @import("../config/config.zig");
-const input = @import("../input.zig");
+const input = @import("../tui/input.zig");
 const lmstudio = @import("../providers/lmstudio.zig");
 const model_picker = @import("../tui/model_picker.zig");
 const provider = @import("../providers/provider.zig");

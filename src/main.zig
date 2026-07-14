@@ -4,8 +4,8 @@ const chat = @import("chat.zig");
 const cli = @import("cli/args.zig");
 const commands = @import("cli/commands.zig");
 const config = @import("config/config.zig");
-const indicator = @import("indicator.zig");
-const input = @import("input.zig");
+const indicator = @import("tui/indicator.zig");
+const input = @import("tui/input.zig");
 const lmstudio = @import("providers/lmstudio.zig");
 const mock = @import("providers/mock.zig");
 const model_selection = @import("models/select.zig");
@@ -15,7 +15,7 @@ const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
 const sigint = @import("core/sigint.zig");
 const tools = @import("tools");
-const welcome = @import("welcome.zig");
+const welcome = @import("tui/welcome.zig");
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
