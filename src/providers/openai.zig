@@ -1,5 +1,5 @@
 const std = @import("std");
-const cancel = @import("../cancel.zig");
+const cancel = @import("../chat/cancel.zig");
 const lmstudio = @import("lmstudio.zig");
 
 pub const ToolCall = struct {

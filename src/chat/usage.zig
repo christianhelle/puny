@@ -1,5 +1,5 @@
 const std = @import("std");
-const openai = @import("providers/openai.zig");
+const openai = @import("../providers/openai.zig");
 
 pub fn estimateUsage(messages: []const openai.Message, output_chars: usize) openai.TurnUsage {
     var input_chars: usize = 0;

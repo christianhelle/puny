@@ -1,6 +1,6 @@
 const std = @import("std");
 const ansi = @import("ui/ansi.zig");
-const chat = @import("chat.zig");
+const chat = @import("chat/chat.zig");
 const cli = @import("cli/args.zig");
 const commands = @import("cli/commands.zig");
 const config = @import("config/config.zig");
@@ -237,7 +237,7 @@ fn printExit(
     try stdout_writer.flush();
 }
 
-test "include chat_retry tests" {
-    _ = @import("chat_retry.zig");
+test "include chat retry tests" {
+    _ = @import("chat/retry.zig");
 }
 
