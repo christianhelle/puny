@@ -1,5 +1,5 @@
 const std = @import("std");
-const ansi = @import("ui/ansi.zig");
+const ansi = @import("tui/ansi.zig");
 const chat = @import("chat/chat.zig");
 const cli = @import("cli/args.zig");
 const commands = @import("cli/commands.zig");
