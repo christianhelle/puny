@@ -10,6 +10,7 @@ const lmstudio = @import("providers/lmstudio.zig");
 const mock = @import("providers/mock.zig");
 const model_selection = @import("model_selection.zig");
 const openai = @import("providers/openai.zig");
+const prompt_history = @import("prompt_history.zig");
 const prompts = @import("prompts.zig");
 const provider = @import("providers/provider.zig");
 const sigint = @import("sigint.zig");
@@ -25,6 +26,13 @@ pub fn main(init: std.process.Init) !void {
 
     var cfg_result = try config.load(arena, io, init.environ_map);
     const cfg = &cfg_result.config;
+
+    const history_path = try prompt_history.historyPath(arena, init.environ_map);
+    var history = prompt_history.History.init(arena, history_path);
+    defer history.deinit();
+    history.load(io) catch |err| {
+        if (err != error.FileNotFound) return err;
+    };
 
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -131,7 +139,7 @@ pub fn main(init: std.process.Init) !void {
             pending_prompt = null;
             break :blk p;
         } else blk: {
-            const maybe_input = input.readLine(io, stdout_writer, &line_alloc, &stdin_buffer) catch |err| {
+            const maybe_input = input.readLine(io, stdout_writer, &line_alloc, &stdin_buffer, &history) catch |err| {
                 if (sigint.isTriggered()) {
                     printExit(&session_stats, io, stdout_writer) catch {};
                     return;
@@ -163,6 +171,11 @@ pub fn main(init: std.process.Init) !void {
             .oneshot = parsed.oneshot,
             .cfg = cfg,
         });
+
+        if (command == .prompt) {
+            try history.add(user_message);
+            try history.save(io);
+        }
 
         switch (action) {
             .exit => {
