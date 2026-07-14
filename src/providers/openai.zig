@@ -344,12 +344,12 @@ fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
 test "message JSON conversion" {
     const allocator = std.testing.allocator;
 
-    const system_msg = try (Message{ .system = "You are a helpful assistant." }).toJson(allocator);
+    var system_msg = try (Message{ .system = "You are a helpful assistant." }).toJson(allocator);
     try std.testing.expectEqualStrings("system", system_msg.object.get("role").?.string);
     try std.testing.expectEqualStrings("You are a helpful assistant.", system_msg.object.get("content").?.string);
     system_msg.object.deinit(allocator);
 
-    const tool_msg = try (Message{ .tool = .{ .tool_call_id = "call_1", .content = "result" } }).toJson(allocator);
+    var tool_msg = try (Message{ .tool = .{ .tool_call_id = "call_1", .content = "result" } }).toJson(allocator);
     try std.testing.expectEqualStrings("tool", tool_msg.object.get("role").?.string);
     try std.testing.expectEqualStrings("call_1", tool_msg.object.get("tool_call_id").?.string);
     tool_msg.object.deinit(allocator);
