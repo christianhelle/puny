@@ -1,12 +1,12 @@
 # Puny
 
-A minimal local-AI coding agent for the terminal, powered by [LM Studio](https://lmstudio.ai/).
+A minimal AI coding agent for the terminal, powered by [LM Studio](https://lmstudio.ai/) or [OpenCode Zen](https://opencode.ai/zen).
 
-Puny lets you chat with a local LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
+Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
 ## Features
 
-- **Local-first**: talks to LM Studio running on your own machine at `http://127.0.0.1:1234`.
+- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
@@ -19,6 +19,8 @@ Puny lets you chat with a local LLM and gives it a curated set of coding tools s
 
 ## Quick start
 
+### LM Studio
+
 Start LM Studio and load a model with tool-calling support, then:
 
 ```bash
@@ -30,6 +32,16 @@ Or, if you are running from the source tree:
 ```bash
 zig build run
 ```
+
+### OpenCode Zen
+
+Sign in to [OpenCode Zen](https://opencode.ai/zen), copy your API key, then:
+
+```bash
+puny --provider opencode --api-key YOUR_API_KEY
+```
+
+Puny connects to `https://opencode.ai/zen` and shows the model picker. Only models served over OpenCode Zen's `/v1/chat/completions` transport are listed (DeepSeek, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models). GPT, Claude, Gemini, and Qwen models use different transports and are not supported yet.
 
 ## Usage
 
@@ -67,6 +79,16 @@ Run a single prompt and exit. Useful for scripts or quick tasks:
 puny --prompt "List all source files" --oneshot
 ```
 
+### Select a provider
+
+Use `--provider` to switch between LM Studio (`lmstudio`, the default) and OpenCode Zen (`opencode`). You can also set `PUNY_PROVIDER` or the `provider` field in `config.json`.
+
+```bash
+puny --provider opencode --api-key YOUR_API_KEY
+```
+
+Precedence is: `--provider` > `PUNY_PROVIDER` > `config.json` > `lmstudio`.
+
 ### Connect to a remote LM Studio instance
 
 If LM Studio is running on another machine, point Puny at it:
@@ -75,9 +97,9 @@ If LM Studio is running on another machine, point Puny at it:
 puny --url http://192.168.1.42:1234
 ```
 
-### Authenticate with LM Studio
+### Authenticate
 
-If LM Studio requires an API token, provide it via CLI, environment variable, config file, or `--reconfigure`:
+If your provider requires an API token, provide it via CLI, environment variable, config file, or `--reconfigure`:
 
 ```bash
 # CLI flag (session only)
@@ -95,6 +117,8 @@ puny --reconfigure
 ```
 
 Precedence is: `--api-key` > `--api-key-file` > `PUNY_API_KEY` > `config.json`.
+
+OpenCode Zen requires an API key. Puny exits early with a hint if the key is missing.
 
 ## Tool calling
 
@@ -120,13 +144,14 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 | Flag                       | Description                                                |
 | -------------------------- | ---------------------------------------------------------- |
-| `-u`, `--url <url>`        | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
-| `-k`, `--api-key <key>`    | LM Studio API token (session only)                         |
-| `--api-key-file <path>`    | Read LM Studio API token from file (session only)          |
+| `--provider <name>`        | Provider: `lmstudio` or `opencode` (env/config/CLI precedence) |
+| `-u`, `--url <url>`        | Provider endpoint URL (provider-specific default)          |
+| `-k`, `--api-key <key>`    | Provider API token (session only)                          |
+| `--api-key-file <path>`    | Read provider API token from file (session only)           |
 | `-m`, `--model <id>`       | Model identifier (skips picker if found in running models) |
 | `-p`, `--prompt <text>`    | Pre-fill prompt as first user message                      |
 | `-1`, `--oneshot`          | Exit after processing the prompt (requires `--prompt`)     |
-| `-M`, `--mock`             | Use mock provider (no LM Studio required)                  |
+| `-M`, `--mock`             | Use mock provider (no backend required)                    |
 | `--reconfigure`            | Re-run first-run setup and update config                   |
 | `-h`, `--help`             | Show help text                                             |
 | `-V`, `--version`          | Print version                                              |
