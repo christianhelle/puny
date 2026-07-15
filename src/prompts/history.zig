@@ -63,8 +63,8 @@ pub const History = struct {
 
         var file = try cwd.createFile(io, self.path, .{});
         defer file.close(io);
-        _ = try file.writeStreaming(io, buffer, &.{}, 0);
-        _ = try file.writeStreaming(io, "\n", &.{}, 0);
+        try file.writeStreamingAll(io, buffer);
+        try file.writeStreamingAll(io, "\n");
     }
 
     pub fn add(self: *History, text: []const u8) !void {
