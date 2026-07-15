@@ -17,6 +17,66 @@ const sigint = @import("core/sigint.zig");
 const tools = @import("tools");
 const welcome = @import("tui/welcome.zig");
 
+const ReconfigurePrompt = struct {
+    changed: bool = false,
+    cancelled: bool = false,
+};
+
+fn promptReconfigure(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    cfg: *config.Config,
+) !ReconfigurePrompt {
+    var line_alloc: std.Io.Writer.Allocating = .init(arena);
+    defer line_alloc.deinit();
+    var stdin_buffer: [4096]u8 = undefined;
+
+    try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
+    try stdout_writer.print("Enter new provider URL (or press Enter to keep current): ", .{});
+    try stdout_writer.flush();
+
+    const new_url = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+        if (sigint.isTriggered()) return .{ .cancelled = true };
+        return err;
+    } orelse {
+        try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+        try stdout_writer.flush();
+        return .{ .cancelled = true };
+    };
+
+    var result = ReconfigurePrompt{};
+    if (new_url.len > 0) {
+        cfg.providerUrl = try arena.dupe(u8, new_url);
+        result.changed = true;
+    }
+
+    line_alloc.clearRetainingCapacity();
+    const key_status = if (cfg.apiKey.len > 0) "set" else "none";
+    try stdout_writer.print("Current API key: ({s})\n", .{key_status});
+    try stdout_writer.print("Enter new API key (press Enter to keep, '-' to clear): ", .{});
+    try stdout_writer.flush();
+
+    const new_key = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+        if (sigint.isTriggered()) return .{ .cancelled = true };
+        return err;
+    } orelse {
+        try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+        try stdout_writer.flush();
+        return .{ .cancelled = true };
+    };
+
+    if (std.mem.eql(u8, new_key, "-")) {
+        cfg.apiKey = "";
+        result.changed = true;
+    } else if (new_key.len > 0) {
+        cfg.apiKey = try arena.dupe(u8, new_key);
+        result.changed = true;
+    }
+
+    return result;
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
@@ -39,52 +99,10 @@ pub fn main(init: std.process.Init) !void {
     const stdout_writer = &stdout_file_writer.interface;
 
     if (parsed.reconfigure) {
-        var reconfigure_line_alloc: std.Io.Writer.Allocating = .init(arena);
-        defer reconfigure_line_alloc.deinit();
-        var reconfigure_stdin_buffer: [4096]u8 = undefined;
-
         try stdout_writer.print("\nReconfiguring Puny.\n", .{});
-        try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
-        try stdout_writer.print("Enter new provider URL (or press Enter to keep current): ", .{});
-        try stdout_writer.flush();
-
-        const new_url = input.readLineSimple(io, &reconfigure_line_alloc, &reconfigure_stdin_buffer) catch |err| {
-            if (sigint.isTriggered()) return;
-            return err;
-        } orelse {
-            try stdout_writer.print("\n{s}Reconfigure cancelled.{s}\n", .{ ansi.dim, ansi.reset });
-            try stdout_writer.flush();
-            return;
-        };
-        var changed = false;
-        if (new_url.len > 0) {
-            cfg.providerUrl = try arena.dupe(u8, new_url);
-            changed = true;
-        }
-
-        reconfigure_line_alloc.clearRetainingCapacity();
-        const key_status = if (cfg.apiKey.len > 0) "set" else "none";
-        try stdout_writer.print("Current API key: ({s})\n", .{key_status});
-        try stdout_writer.print("Enter new API key (press Enter to keep, '-' to clear): ", .{});
-        try stdout_writer.flush();
-
-        const new_key = input.readLineSimple(io, &reconfigure_line_alloc, &reconfigure_stdin_buffer) catch |err| {
-            if (sigint.isTriggered()) return;
-            return err;
-        } orelse {
-            try stdout_writer.print("\n{s}Reconfigure cancelled.{s}\n", .{ ansi.dim, ansi.reset });
-            try stdout_writer.flush();
-            return;
-        };
-        if (std.mem.eql(u8, new_key, "-")) {
-            cfg.apiKey = "";
-            changed = true;
-        } else if (new_key.len > 0) {
-            cfg.apiKey = try arena.dupe(u8, new_key);
-            changed = true;
-        }
-
-        if (changed) {
+        const result = try promptReconfigure(arena, io, stdout_writer, cfg);
+        if (result.cancelled) return;
+        if (result.changed) {
             try config.save(arena, io, cfg.*, init.environ_map);
             try stdout_writer.print("Configuration saved.\n", .{});
             try stdout_writer.flush();
@@ -213,6 +231,22 @@ pub fn main(init: std.process.Init) !void {
             .continue_ => continue,
             .print_stats => {
                 try session_stats.print(io, stdout_writer);
+                continue;
+            },
+            .reconfigure => {
+                if (parsed.oneshot) {
+                    try stdout_writer.print("\n/config not available in oneshot mode.\n", .{});
+                    try stdout_writer.flush();
+                    continue;
+                }
+                const result = try promptReconfigure(arena, io, stdout_writer, cfg);
+                if (result.cancelled) continue;
+                if (result.changed) {
+                    try config.save(arena, io, cfg.*, init.environ_map);
+                    prov.setUrlAndKey(cfg.providerUrl, cfg.apiKey);
+                    try stdout_writer.print("Configuration saved and provider updated.\n", .{});
+                    try stdout_writer.flush();
+                }
                 continue;
             },
             .switch_model => |model_id| {

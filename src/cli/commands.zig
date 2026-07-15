@@ -10,6 +10,7 @@ pub const Command = union(enum) {
     quit,
     reset,
     stats,
+    config,
     plan: ?[]const u8,
     build: ?[]const u8,
     model: ?[]const u8,
@@ -21,6 +22,7 @@ pub const Action = union(enum) {
     continue_,
     run_chat_turn,
     print_stats,
+    reconfigure,
     switch_model: ?[]const u8,
 };
 
@@ -42,6 +44,9 @@ pub fn parse(user_message: []const u8) Command {
 
     if (std.mem.eql(u8, user_message, "/stats"))
         return .stats;
+
+    if (std.mem.eql(u8, user_message, "/config"))
+        return .config;
 
     if (std.mem.eql(u8, user_message, "/plan") or std.mem.startsWith(u8, user_message, "/plan ")) {
         if (user_message.len > "/plan ".len) {
@@ -82,6 +87,8 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         },
 
         .stats => return .print_stats,
+
+        .config => return .reconfigure,
 
         .plan => |text| {
             ctx.planning_mode.* = true;
@@ -133,6 +140,7 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqual(Command.quit, parse("/exit"));
     try std.testing.expectEqual(Command.reset, parse("/reset"));
     try std.testing.expectEqual(Command.stats, parse("/stats"));
+    try std.testing.expectEqual(Command.config, parse("/config"));
 
     try std.testing.expectEqualDeep(Command{ .plan = null }, parse("/plan"));
     try std.testing.expectEqualDeep(Command{ .plan = "do thing" }, parse("/plan do thing"));
@@ -186,6 +194,25 @@ test "dispatch reset clears messages and resets planning mode" {
     try std.testing.expect(!planning_mode);
     try std.testing.expectEqual(@as(usize, 1), messages.items.len);
     try std.testing.expectEqual(openai.Message.system, messages.items[0]);
+}
+
+test "dispatch config returns reconfigure" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.config, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.reconfigure, action);
 }
 
 test "dispatch stats returns print_stats" {

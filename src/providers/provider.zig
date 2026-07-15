@@ -26,4 +26,14 @@ pub const Provider = union(enum) {
             .mock => |*c| c.chatStreaming(request, callback),
         };
     }
+
+    pub fn setUrlAndKey(self: *Provider, url: []const u8, key: []const u8) void {
+        switch (self.*) {
+            .lmstudio => |*c| {
+                c.withBaseUrl(url);
+                c.api_key = key;
+            },
+            .mock => {},
+        }
+    }
 };
