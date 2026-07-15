@@ -288,6 +288,10 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
         defer body_alloc.deinit();
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
 
+        if (response.head.status == .unauthorized or response.head.status == .forbidden) {
+            lmstudio.printAuthHint(client.io);
+        }
+
         std.debug.print("OpenAI chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
             url,
             @intFromEnum(response.head.status),
