@@ -4,6 +4,8 @@ pub const version = "0.1.0";
 
 pub const Options = struct {
     url: ?[]const u8 = null,
+    api_key: ?[]const u8 = null,
+    api_key_file: ?[]const u8 = null,
     model: ?[]const u8 = null,
     model_explicit: bool = false,
     prompt: ?[]const u8 = null,
@@ -40,6 +42,14 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.url = args[i];
+        } else if (std.mem.eql(u8, arg, "--api-key") or std.mem.eql(u8, arg, "-k")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.api_key = args[i];
+        } else if (std.mem.eql(u8, arg, "--api-key-file")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.api_key_file = args[i];
         } else if (std.mem.eql(u8, arg, "--model") or std.mem.eql(u8, arg, "-m")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -68,6 +78,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.url = value;
         }
     }
+    if (opts.api_key == null) {
+        if (environ_map.get("PUNY_API_KEY")) |value| {
+            opts.api_key = value;
+        }
+    }
     if (opts.model == null) {
         if (environ_map.get("PUNY_MODEL")) |value| {
             opts.model = value;
@@ -88,6 +103,8 @@ pub fn printHelp(io: std.Io) void {
         \\
         \\Options:
         \\  -u, --url <url>        LM Studio endpoint URL (config/env/CLI precedence)
+        \\  -k, --api-key <key>    LM Studio API token (env/CLI precedence, session only)
+        \\      --api-key-file <path>  Read API token from file
         \\  -m, --model <id>       Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>    Pre-fill prompt as first user message
         \\  -1, --oneshot, --one-shot  Exit after processing the prompt (requires --prompt)
