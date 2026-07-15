@@ -69,26 +69,34 @@ fn promptReconfigure(
         }
     }
 
-    line_alloc.clearRetainingCapacity();
-    try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
-    try stdout_writer.print("Enter new provider URL (default for {s}: {s}, press Enter to keep current): ", .{ provider_name, defaultProviderUrl(provider_name) });
-    try stdout_writer.flush();
-
-    const new_url = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
-        if (sigint.isTriggered()) return .{ .cancelled = true };
-        return err;
-    } orelse {
-        try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+    const provider_url_is_fixed = std.mem.eql(u8, provider_name, "opencode");
+    if (provider_url_is_fixed) {
+        cfg.providerUrl = try arena.dupe(u8, opencode.default_base_url);
+        result.changed = true;
+        try stdout_writer.print("Provider URL is fixed at {s}\n", .{opencode.default_base_url});
         try stdout_writer.flush();
-        return .{ .cancelled = true };
-    };
+    } else {
+        line_alloc.clearRetainingCapacity();
+        try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
+        try stdout_writer.print("Enter new provider URL (default for {s}: {s}, press Enter to keep current): ", .{ provider_name, defaultProviderUrl(provider_name) });
+        try stdout_writer.flush();
 
-    if (new_url.len > 0) {
-        cfg.providerUrl = try arena.dupe(u8, new_url);
-        result.changed = true;
-    } else if (result.changed and cfg.providerUrl.len == 0) {
-        cfg.providerUrl = try arena.dupe(u8, defaultProviderUrl(provider_name));
-        result.changed = true;
+        const new_url = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+            if (sigint.isTriggered()) return .{ .cancelled = true };
+            return err;
+        } orelse {
+            try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+            try stdout_writer.flush();
+            return .{ .cancelled = true };
+        };
+
+        if (new_url.len > 0) {
+            cfg.providerUrl = try arena.dupe(u8, new_url);
+            result.changed = true;
+        } else if (result.changed and cfg.providerUrl.len == 0) {
+            cfg.providerUrl = try arena.dupe(u8, defaultProviderUrl(provider_name));
+            result.changed = true;
+        }
     }
 
     line_alloc.clearRetainingCapacity();
@@ -365,11 +373,11 @@ fn effectiveProvider(parsed: cli.Options, cfg: config.Config) []const u8 {
 }
 
 fn baseUrlFor(provider_name: []const u8, parsed: cli.Options, cfg: config.Config) []const u8 {
+    if (std.mem.eql(u8, provider_name, "opencode")) return opencode.default_base_url;
     if (parsed.url) |url| return url;
     if (std.mem.eql(u8, cfg.provider, provider_name) and cfg.providerUrl.len > 0) {
         return cfg.providerUrl;
     }
-    if (std.mem.eql(u8, provider_name, "opencode")) return opencode.default_base_url;
     return "http://127.0.0.1:1234";
 }
 
@@ -490,17 +498,20 @@ test "effectiveProvider precedence" {
     try std.testing.expectEqualStrings("opencode", effectiveProvider(parsed_flag, config.Config{ .provider = "lmstudio" }));
 }
 
-test "baseUrlFor uses CLI url over defaults" {
+test "baseUrlFor uses CLI url for lmstudio only" {
     const cfg = config.Config{};
     const parsed = cli.Options{ .url = "http://cli.example" };
     try std.testing.expectEqualStrings("http://cli.example", baseUrlFor("lmstudio", parsed, cfg));
-    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor("opencode", parsed, cfg));
+    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", parsed, cfg));
 }
 
 test "baseUrlFor uses config url only when provider matches config" {
     const cfg_lmstudio = config.Config{ .provider = "lmstudio", .providerUrl = "http://config-lmstudio" };
     try std.testing.expectEqualStrings("http://config-lmstudio", baseUrlFor("lmstudio", .{}, cfg_lmstudio));
     try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg_lmstudio));
+
+    const cfg_opencode = config.Config{ .provider = "opencode", .providerUrl = "http://config-opencode" };
+    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg_opencode));
 }
 
 test "baseUrlFor returns provider defaults" {
