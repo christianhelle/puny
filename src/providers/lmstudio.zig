@@ -245,7 +245,7 @@ pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList
 
     var auth_header: ?[]u8 = null;
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
         try headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
     }
     if (client.organization) |organization| {
