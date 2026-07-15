@@ -68,13 +68,14 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     const provider_url = parsed.url orelse cfg.providerUrl;
+    const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map);
     const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
     const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
 
     var prov: provider.Provider = if (parsed.mock)
         .{ .mock = mock.MockClient.init(arena, io) }
     else blk: {
-        var c = lmstudio.Client.init(arena, io, "");
+        var c = lmstudio.Client.init(arena, io, api_key);
         c.withBaseUrl(provider_url);
         break :blk .{ .lmstudio = c };
     };
@@ -225,6 +226,26 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
+}
+
+fn resolveApiKey(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    parsed: cli.Options,
+    cfg: config.Config,
+    environ_map: *const std.process.Environ.Map,
+) ![]const u8 {
+    if (parsed.api_key) |key| return key;
+
+    if (parsed.api_key_file) |path| {
+        const cwd = std.Io.Dir.cwd();
+        const data = try cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(1024));
+        return std.mem.trim(u8, data, &std.ascii.whitespace);
+    }
+
+    if (environ_map.get("PUNY_API_KEY")) |key| return key;
+
+    return cfg.apiKey;
 }
 
 fn printExit(
