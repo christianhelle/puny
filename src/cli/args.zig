@@ -78,11 +78,6 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.url = value;
         }
     }
-    if (opts.api_key == null) {
-        if (environ_map.get("PUNY_API_KEY")) |value| {
-            opts.api_key = value;
-        }
-    }
     if (opts.model == null) {
         if (environ_map.get("PUNY_MODEL")) |value| {
             opts.model = value;
