@@ -272,6 +272,7 @@ pub fn listModels(client: *Client) !Owned(ListModelsResponse) {
     switch (result) {
         .ok => |ok| return ok,
         .api_error => |*err| {
+            if (isAuthFailure(err.status)) printAuthHint(client.io);
             err.deinit();
             return error.ResponseError;
         },
@@ -280,6 +281,17 @@ pub fn listModels(client: *Client) !Owned(ListModelsResponse) {
             return error.ResponseParseError;
         },
     }
+}
+
+fn isAuthFailure(status: std.http.Status) bool {
+    return status == .unauthorized or status == .forbidden;
+}
+
+pub fn printAuthHint(io: std.Io) void {
+    var buf: [256]u8 = undefined;
+    var fw: std.Io.File.Writer = .init(.stderr(), io, &buf);
+    fw.interface.print("Authentication failed. Configure an API key with --api-key, PUNY_API_KEY, or --reconfigure.\n", .{}) catch {};
+    fw.interface.flush() catch {};
 }
 
 pub fn listModelsRaw(client: *Client) !RawResponse {
