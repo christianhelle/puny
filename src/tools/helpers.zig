@@ -19,7 +19,7 @@ pub fn writeFile(io: std.Io, path: []const u8, content: []const u8) !void {
     const cwd = std.Io.Dir.cwd();
     const file = try cwd.createFile(io, path, .{});
     defer file.close(io);
-    _ = try file.writeStreaming(io, content, &.{}, 0);
+    try file.writeStreamingAll(io, content);
 }
 
 pub fn listDirectory(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
