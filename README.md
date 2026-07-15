@@ -75,6 +75,27 @@ If LM Studio is running on another machine, point Puny at it:
 puny --url http://192.168.1.42:1234
 ```
 
+### Authenticate with LM Studio
+
+If LM Studio requires an API token, provide it via CLI, environment variable, config file, or `--reconfigure`:
+
+```bash
+# CLI flag (session only)
+puny --api-key lmstudio-token-123
+
+# Environment variable (session only)
+export PUNY_API_KEY=lmstudio-token-123
+puny
+
+# Read from a file (session only)
+puny --api-key-file /run/secrets/lmstudio-key
+
+# Save to config interactively
+puny --reconfigure
+```
+
+Precedence is: `--api-key` > `--api-key-file` > `PUNY_API_KEY` > `config.json`.
+
 ## Tool calling
 
 Puny sends a list of available tools to the model on every request. When the model decides to call a tool, Puny executes it automatically and feeds the result back into the conversation.
@@ -97,15 +118,18 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 ### CLI options
 
-| Flag                    | Description                                                |
-| ----------------------- | ---------------------------------------------------------- |
-| `-u`, `--url <url>`     | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
-| `-m`, `--model <id>`    | Model identifier (skips picker if found in running models) |
-| `-p`, `--prompt <text>` | Pre-fill prompt as first user message                      |
-| `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt`)     |
-| `-M`, `--mock`          | Use mock provider (no LM Studio required)                  |
-| `-h`, `--help`          | Show help text                                             |
-| `-V`, `--version`       | Print version                                              |
+| Flag                       | Description                                                |
+| -------------------------- | ---------------------------------------------------------- |
+| `-u`, `--url <url>`        | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
+| `-k`, `--api-key <key>`    | LM Studio API token (session only)                         |
+| `--api-key-file <path>`    | Read LM Studio API token from file (session only)          |
+| `-m`, `--model <id>`       | Model identifier (skips picker if found in running models) |
+| `-p`, `--prompt <text>`    | Pre-fill prompt as first user message                      |
+| `-1`, `--oneshot`          | Exit after processing the prompt (requires `--prompt`)     |
+| `-M`, `--mock`             | Use mock provider (no LM Studio required)                  |
+| `--reconfigure`            | Re-run first-run setup and update config                   |
+| `-h`, `--help`             | Show help text                                             |
+| `-V`, `--version`          | Print version                                              |
 
 ### Interactive commands
 
@@ -113,6 +137,7 @@ While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
 - `/reset` — clear the conversation history
+- `/config` — reconfigure provider URL and API key
 
 ## Build from source
 

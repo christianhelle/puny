@@ -33,6 +33,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         try printCommand(writer, "/quit, /exit", "Exit Puny");
         try printCommand(writer, "/reset", "Clear the conversation");
         try printCommand(writer, "/stats", "Show session statistics");
+        try printCommand(writer, "/config", "Reconfigure URL and API key");
         try printCommand(writer, "/plan [task]", "Enter planning mode");
         try printCommand(writer, "/build [task]", "Switch to build mode");
         try printCommand(writer, "/model [id]", "Switch to another model");
@@ -60,6 +61,7 @@ test "print writes banner, provider, model, commands and hint" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "http://127.0.0.1:1234"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "test-model"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/config"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/plan"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
