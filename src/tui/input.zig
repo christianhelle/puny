@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const cancel = @import("../chat/cancel.zig");
+const cancel = @import("../core/cancel.zig");
 const prompt_history = @import("../prompts/history.zig");
 const sigint = @import("../core/sigint.zig");
 const terminal = @import("terminal.zig");

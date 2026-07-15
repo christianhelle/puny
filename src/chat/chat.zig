@@ -7,7 +7,7 @@ const provider = @import("../providers/provider.zig");
 const tools = @import("tools");
 const tool_display = @import("display.zig");
 const usage_estimator = @import("usage.zig");
-const cancel = @import("cancel.zig");
+const cancel = @import("../core/cancel.zig");
 const zz = @import("zigzag");
 
 fn countNewlines(text: []const u8) usize {
