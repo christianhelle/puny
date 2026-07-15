@@ -3,6 +3,7 @@ const std = @import("std");
 pub const version = "0.1.0";
 
 pub const Options = struct {
+    provider: ?[]const u8 = null,
     url: ?[]const u8 = null,
     api_key: ?[]const u8 = null,
     api_key_file: ?[]const u8 = null,
@@ -38,6 +39,10 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
             printVersion(io);
             std.process.exit(0);
+        } else if (std.mem.eql(u8, arg, "--provider")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.provider = args[i];
         } else if (std.mem.eql(u8, arg, "--url") or std.mem.eql(u8, arg, "-u")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -73,6 +78,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         fatal(io, "--oneshot requires --prompt\n\n", .{});
     }
 
+    if (opts.provider == null) {
+        if (environ_map.get("PUNY_PROVIDER")) |value| {
+            opts.provider = value;
+        }
+    }
     if (opts.url == null) {
         if (environ_map.get("PUNY_PROVIDER_URL")) |value| {
             opts.url = value;
@@ -97,8 +107,9 @@ pub fn printHelp(io: std.Io) void {
         \\Usage: puny [options]
         \\
         \\Options:
-        \\  -u, --url <url>        LM Studio endpoint URL (config/env/CLI precedence)
-        \\  -k, --api-key <key>    LM Studio API token (env/CLI precedence, session only)
+        \\      --provider <name>    Provider to use: lmstudio or opencode (env/config/CLI precedence)
+        \\  -u, --url <url>        Provider endpoint URL (config/env/CLI precedence)
+        \\  -k, --api-key <key>    Provider API token (env/CLI precedence, session only)
         \\      --api-key-file <path>  Read API token from file
         \\  -m, --model <id>       Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>    Pre-fill prompt as first user message
@@ -113,4 +124,45 @@ pub fn printHelp(io: std.Io) void {
 
 pub fn printVersion(io: std.Io) void {
     writeErr(io, "puny {s}\n", .{version});
+}
+
+test "parseArgs sets provider from flag" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--provider", "opencode" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqualStrings("opencode", opts.provider.?);
+}
+
+test "parseArgs falls back to PUNY_PROVIDER env" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_PROVIDER", "opencode");
+
+    const args = &[_][:0]const u8{"puny"};
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqualStrings("opencode", opts.provider.?);
+}
+
+test "parseArgs flag overrides PUNY_PROVIDER env" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_PROVIDER", "lmstudio");
+
+    const args = &[_][:0]const u8{ "puny", "--provider", "opencode" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqualStrings("opencode", opts.provider.?);
 }
