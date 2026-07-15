@@ -127,8 +127,8 @@ pub fn save(allocator: std.mem.Allocator, io: std.Io, config: Config, environ_ma
 
     var file = try cwd.createFile(io, path, .{});
     defer file.close(io);
-    _ = try file.writeStreaming(io, buffer, &.{}, 0);
-    _ = try file.writeStreaming(io, "\n", &.{}, 0);
+    try file.writeStreamingAll(io, buffer);
+    try file.writeStreamingAll(io, "\n");
 }
 
 pub fn configPath(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
