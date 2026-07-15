@@ -23,6 +23,15 @@ const ReconfigurePrompt = struct {
     cancelled: bool = false,
 };
 
+fn isValidProvider(name: []const u8) bool {
+    return std.mem.eql(u8, name, "lmstudio") or std.mem.eql(u8, name, "opencode");
+}
+
+fn defaultProviderUrl(provider_name: []const u8) []const u8 {
+    if (std.mem.eql(u8, provider_name, "opencode")) return opencode.default_base_url;
+    return "http://127.0.0.1:1234";
+}
+
 fn promptReconfigure(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -33,8 +42,36 @@ fn promptReconfigure(
     defer line_alloc.deinit();
     var stdin_buffer: [4096]u8 = undefined;
 
+    var result = ReconfigurePrompt{};
+
+    try stdout_writer.print("Current provider: {s}\n", .{cfg.provider});
+    try stdout_writer.print("Enter provider (lmstudio/opencode, or press Enter to keep current): ", .{});
+    try stdout_writer.flush();
+
+    const new_provider = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+        if (sigint.isTriggered()) return .{ .cancelled = true };
+        return err;
+    } orelse {
+        try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+        try stdout_writer.flush();
+        return .{ .cancelled = true };
+    };
+
+    var provider_name: []const u8 = cfg.provider;
+    if (new_provider.len > 0) {
+        if (!isValidProvider(new_provider)) {
+            try stdout_writer.print("Invalid provider '{s}'. Keeping {s}.\n", .{ new_provider, cfg.provider });
+            try stdout_writer.flush();
+        } else {
+            cfg.provider = try arena.dupe(u8, new_provider);
+            provider_name = cfg.provider;
+            result.changed = true;
+        }
+    }
+
+    line_alloc.clearRetainingCapacity();
     try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
-    try stdout_writer.print("Enter new provider URL (or press Enter to keep current): ", .{});
+    try stdout_writer.print("Enter new provider URL (default for {s}: {s}, press Enter to keep current): ", .{ provider_name, defaultProviderUrl(provider_name) });
     try stdout_writer.flush();
 
     const new_url = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
@@ -46,9 +83,11 @@ fn promptReconfigure(
         return .{ .cancelled = true };
     };
 
-    var result = ReconfigurePrompt{};
     if (new_url.len > 0) {
         cfg.providerUrl = try arena.dupe(u8, new_url);
+        result.changed = true;
+    } else if (result.changed and cfg.providerUrl.len == 0) {
+        cfg.providerUrl = try arena.dupe(u8, defaultProviderUrl(provider_name));
         result.changed = true;
     }
 
@@ -454,4 +493,17 @@ test "providerDisplayName maps known providers" {
     try std.testing.expectEqualStrings("LM Studio", providerDisplayName("lmstudio"));
     try std.testing.expectEqualStrings("OpenCode Zen", providerDisplayName("opencode"));
     try std.testing.expectEqualStrings("custom", providerDisplayName("custom"));
+}
+
+test "isValidProvider accepts lmstudio and opencode only" {
+    try std.testing.expect(isValidProvider("lmstudio"));
+    try std.testing.expect(isValidProvider("opencode"));
+    try std.testing.expect(!isValidProvider("openai"));
+    try std.testing.expect(!isValidProvider(""));
+}
+
+test "defaultProviderUrl returns provider-specific defaults" {
+    try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("lmstudio"));
+    try std.testing.expectEqualStrings(opencode.default_base_url, defaultProviderUrl("opencode"));
+    try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("unknown"));
 }
