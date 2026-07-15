@@ -20,7 +20,7 @@ fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u
 
 pub fn print(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("\n", .{});
-    try writer.print("{s}Welcome to Puny {s}{s} - {s}Your local AI coding assistant{s}\n", .{ ansi.cyan, info.version, ansi.reset, ansi.dim, ansi.reset });
+    try writer.print("{s}Welcome to Puny {s}{s} - {s}Your tiny AI coding assistant{s}\n", .{ ansi.cyan, info.version, ansi.reset, ansi.dim, ansi.reset });
     try writer.print("{s}AI makes mistakes - read the fucking code{s}\n", .{ ansi.dim, ansi.reset });
     try writer.print("\n", .{});
 
