@@ -56,10 +56,37 @@ pub fn main(init: std.process.Init) !void {
             try stdout_writer.flush();
             return;
         };
+        var changed = false;
         if (new_url.len > 0) {
             cfg.providerUrl = try arena.dupe(u8, new_url);
+            changed = true;
+        }
+
+        reconfigure_line_alloc.clearRetainingCapacity();
+        const key_status = if (cfg.apiKey.len > 0) "set" else "none";
+        try stdout_writer.print("Current API key: ({s})\n", .{key_status});
+        try stdout_writer.print("Enter new API key (press Enter to keep, '-' to clear): ", .{});
+        try stdout_writer.flush();
+
+        const new_key = input.readLineSimple(io, &reconfigure_line_alloc, &reconfigure_stdin_buffer) catch |err| {
+            if (sigint.isTriggered()) return;
+            return err;
+        } orelse {
+            try stdout_writer.print("\n{s}Reconfigure cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+            try stdout_writer.flush();
+            return;
+        };
+        if (std.mem.eql(u8, new_key, "-")) {
+            cfg.apiKey = "";
+            changed = true;
+        } else if (new_key.len > 0) {
+            cfg.apiKey = try arena.dupe(u8, new_key);
+            changed = true;
+        }
+
+        if (changed) {
             try config.save(arena, io, cfg.*, init.environ_map);
-            try stdout_writer.print("Updated provider URL to {s}.\n", .{cfg.providerUrl});
+            try stdout_writer.print("Configuration saved.\n", .{});
             try stdout_writer.flush();
         }
     }
