@@ -13,7 +13,7 @@ fn gitStatus(allocator: std.mem.Allocator, io: std.Io, params: GitStatusParams) 
     if (params.path) |path| {
         try argv.append(path);
     }
-        return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommand(allocator, io, argv.items, null);
 }
 
 const GitDiffParams = struct {
@@ -34,7 +34,7 @@ fn gitDiff(allocator: std.mem.Allocator, io: std.Io, params: GitDiffParams) ![]c
         try argv.append("--");
         try argv.append(path);
     }
-        return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommand(allocator, io, argv.items, null);
 }
 
 pub const git_status = tools.defineTool(

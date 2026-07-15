@@ -373,4 +373,3 @@ test "historyPrevious and historyNext navigate entries" {
     try historyNext(&line_alloc, &out.writer, &history);
     try std.testing.expectEqualStrings("second", line_alloc.written());
 }
-

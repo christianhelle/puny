@@ -243,4 +243,3 @@ test "history size is capped" {
     try std.testing.expectEqualStrings("c", history.entries.items[1]);
     try std.testing.expectEqualStrings("d", history.entries.items[2]);
 }
-
