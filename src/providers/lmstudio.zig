@@ -284,7 +284,7 @@ pub fn listModels(client: *Client) !Owned(ListModelsResponse) {
     }
 }
 
-fn isAuthFailure(status: std.http.Status) bool {
+pub fn isAuthFailure(status: std.http.Status) bool {
     return status == .unauthorized or status == .forbidden;
 }
 
