@@ -108,7 +108,7 @@ pub fn printHelp(io: std.Io) void {
         \\
         \\Options:
         \\      --provider <name>    Provider to use: lmstudio or opencode (env/config/CLI precedence)
-        \\  -u, --url <url>        Provider endpoint URL (config/env/CLI precedence)
+        \\  -u, --url <url>        LM Studio endpoint URL (config/env/CLI precedence)
         \\  -k, --api-key <key>    Provider API token (env/CLI precedence, session only)
         \\      --api-key-file <path>  Read API token from file
         \\  -m, --model <id>       Model identifier (skip picker if found in running models)

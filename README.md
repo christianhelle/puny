@@ -131,10 +131,12 @@ puny --reconfigure
 You will be prompted for:
 
 1. **Provider** — `lmstudio` or `opencode`.
-2. **Provider URL** — press Enter to use the provider's default.
+2. **Provider URL** — press Enter to use the provider's default. (OpenCode Zen's URL is fixed at `https://opencode.ai/zen`.)
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
 Once saved, Puny uses the stored provider and key on subsequent runs, so you only need to pass `--provider` or `--api-key` again if you want to override them for a single session. If an OpenCode Zen request fails with an authentication error, Puny prints an auth hint; use `--reconfigure` to update the key.
+
+`--url` and `PUNY_PROVIDER_URL` only affect LM Studio; OpenCode Zen always uses `https://opencode.ai/zen`.
 
 ## Tool calling
 
@@ -161,7 +163,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | Flag                       | Description                                                |
 | -------------------------- | ---------------------------------------------------------- |
 | `--provider <name>`        | Provider: `lmstudio` or `opencode` (env/config/CLI precedence) |
-| `-u`, `--url <url>`        | Provider endpoint URL (provider-specific default)          |
+| `-u`, `--url <url>`        | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
 | `-k`, `--api-key <key>`    | Provider API token (session only)                          |
 | `--api-key-file <path>`    | Read provider API token from file (session only)           |
 | `-m`, `--model <id>`       | Model identifier (skips picker if found in running models) |
