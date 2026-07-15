@@ -120,6 +120,22 @@ Precedence is: `--api-key` > `--api-key-file` > `PUNY_API_KEY` > `config.json`.
 
 OpenCode Zen requires an API key. Puny exits early with a hint if the key is missing.
 
+### Save provider and API key to config
+
+Run `--reconfigure` to choose a provider and save its URL and API key to `config.json`:
+
+```bash
+puny --reconfigure
+```
+
+You will be prompted for:
+
+1. **Provider** — `lmstudio` or `opencode`.
+2. **Provider URL** — press Enter to use the provider's default.
+3. **API key** — press Enter to keep the existing key, or `-` to clear it.
+
+Once saved, Puny uses the stored provider and key on subsequent runs, so you only need to pass `--provider` or `--api-key` again if you want to override them for a single session. If an OpenCode Zen request fails with an authentication error, Puny prints an auth hint; use `--reconfigure` to update the key.
+
 ## Tool calling
 
 Puny sends a list of available tools to the model on every request. When the model decides to call a tool, Puny executes it automatically and feeds the result back into the conversation.
@@ -162,7 +178,7 @@ While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
 - `/reset` — clear the conversation history
-- `/config` — reconfigure provider URL and API key
+- `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 
 ## Build from source
 
