@@ -245,7 +245,8 @@ pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList
 
     var auth_header: ?[]u8 = null;
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        const scheme = "Bearer";
+        auth_header = try std.fmt.allocPrint(allocator, "{s} {s}", .{ scheme, client.api_key });
         try headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
     }
     if (client.organization) |organization| {
@@ -308,7 +309,7 @@ pub fn listModelsResult(client: *Client) !ApiResult(ListModelsResponse) {
     return parseRawResponse(ListModelsResponse, try listModelsRaw(client));
 }
 
-test "appendClientHeaders sends Authorization header with raw api key" {
+test "appendClientHeaders sends Authorization header with scheme and key" {
     const allocator = std.testing.allocator;
     var client = Client{
         .allocator = allocator,
@@ -326,7 +327,9 @@ test "appendClientHeaders sends Authorization header with raw api key" {
     try std.testing.expectEqual(@as(usize, 3), headers.items.len);
     const auth = findHeader(headers.items, "Authorization");
     try std.testing.expect(auth != null);
-    try std.testing.expectEqualStrings("my-secret-key", auth.?.value);
+    const expected = try std.fmt.allocPrint(allocator, "{s} {s}", .{ "Bearer", "my-secret-key" });
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, auth.?.value);
 }
 
 test "appendClientHeaders omits Authorization header when api key is empty" {
