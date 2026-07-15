@@ -68,7 +68,7 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     const provider_url = parsed.url orelse cfg.providerUrl;
-    const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map);
+    const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
     const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
     const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
 
@@ -233,7 +233,7 @@ fn resolveApiKey(
     io: std.Io,
     parsed: cli.Options,
     cfg: config.Config,
-    environ_map: *const std.process.Environ.Map,
+    api_key_env: ?[]const u8,
 ) ![]const u8 {
     if (parsed.api_key) |key| return key;
 
@@ -243,7 +243,7 @@ fn resolveApiKey(
         return std.mem.trim(u8, data, &std.ascii.whitespace);
     }
 
-    if (environ_map.get("PUNY_API_KEY")) |key| return key;
+    if (api_key_env) |key| return key;
 
     return cfg.apiKey;
 }
@@ -260,4 +260,54 @@ fn printExit(
 
 test "include chat retry tests" {
     _ = @import("chat/retry.zig");
+}
+
+test "resolveApiKey uses CLI key over env and config" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const cfg = config.Config{ .apiKey = "config-key" };
+    const parsed = cli.Options{ .api_key = "cli-key" };
+    const key = try resolveApiKey(allocator, undefined, parsed, cfg, "env-key");
+    try std.testing.expectEqualStrings("cli-key", key);
+}
+
+test "resolveApiKey uses env key over config" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const cfg = config.Config{ .apiKey = "config-key" };
+    const parsed = cli.Options{};
+    const key = try resolveApiKey(allocator, undefined, parsed, cfg, "env-key");
+    try std.testing.expectEqualStrings("env-key", key);
+}
+
+test "resolveApiKey falls back to config key" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const cfg = config.Config{ .apiKey = "config-key" };
+    const parsed = cli.Options{};
+    const key = try resolveApiKey(allocator, undefined, parsed, cfg, null);
+    try std.testing.expectEqualStrings("config-key", key);
+}
+
+test "resolveApiKey reads and trims api key file" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "key.txt", .data = "file-key\n" });
+
+    const path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path, "key.txt" });
+
+    const cfg = config.Config{};
+    const parsed = cli.Options{ .api_key_file = path };
+    const key = try resolveApiKey(allocator, std.testing.io, parsed, cfg, "env-key");
+    try std.testing.expectEqualStrings("file-key", key);
 }
