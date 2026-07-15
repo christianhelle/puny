@@ -10,6 +10,7 @@ const lmstudio = @import("providers/lmstudio.zig");
 const mock = @import("providers/mock.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
+const opencode = @import("providers/opencode.zig");
 const prompt_history = @import("prompts/history.zig");
 const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
@@ -112,21 +113,36 @@ pub fn main(init: std.process.Init) !void {
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
-    const provider_url = parsed.url orelse cfg.providerUrl;
+    const provider_name = effectiveProvider(parsed, cfg.*);
+    const provider_url = if (parsed.mock) "-" else baseUrlFor(provider_name, parsed, cfg.*);
     const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
+
+    if (!parsed.mock and requiresApiKey(provider_name) and api_key.len == 0) {
+        var stderr_buffer: [1024]u8 = undefined;
+        var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+        const stderr_writer = &stderr_file_writer.interface;
+        stderr_writer.print("Provider '{s}' requires an API key. Set one with --api-key, PUNY_API_KEY, or --reconfigure.\n", .{providerDisplayName(provider_name)}) catch {};
+        stderr_writer.flush() catch {};
+        return error.MissingApiKey;
+    }
+
     const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
     const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
 
     var prov: provider.Provider = if (parsed.mock)
         .{ .mock = mock.MockClient.init(arena, io) }
-    else blk: {
+    else if (std.mem.eql(u8, provider_name, "opencode")) blk: {
+        var c = lmstudio.Client.init(arena, io, api_key);
+        c.withBaseUrl(provider_url);
+        break :blk .{ .opencode = c };
+    } else blk: {
         var c = lmstudio.Client.init(arena, io, api_key);
         c.withBaseUrl(provider_url);
         break :blk .{ .lmstudio = c };
     };
     defer prov.deinit();
 
-    const skip_validation = !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234") or parsed.oneshot or parsed.mock;
+    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234");
     var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation, cfg, init.environ_map, random)) orelse blk: {
         if (configured_model) |model_id| {
             try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
@@ -138,7 +154,7 @@ pub fn main(init: std.process.Init) !void {
     };
 
     try welcome.print(stdout_writer, .{
-        .provider_name = if (parsed.mock) "Mock" else "LM Studio",
+        .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name),
         .provider_url = provider_url,
         .model_key = model_key,
         .oneshot = parsed.oneshot,
@@ -289,6 +305,31 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
+fn effectiveProvider(parsed: cli.Options, cfg: config.Config) []const u8 {
+    if (parsed.provider) |p| return p;
+    if (cfg.provider.len > 0) return cfg.provider;
+    return "lmstudio";
+}
+
+fn baseUrlFor(provider_name: []const u8, parsed: cli.Options, cfg: config.Config) []const u8 {
+    if (parsed.url) |url| return url;
+    if (std.mem.eql(u8, cfg.provider, provider_name) and cfg.providerUrl.len > 0) {
+        return cfg.providerUrl;
+    }
+    if (std.mem.eql(u8, provider_name, "opencode")) return opencode.default_base_url;
+    return "http://127.0.0.1:1234";
+}
+
+fn requiresApiKey(provider_name: []const u8) bool {
+    return std.mem.eql(u8, provider_name, "opencode");
+}
+
+fn providerDisplayName(provider_name: []const u8) []const u8 {
+    if (std.mem.eql(u8, provider_name, "opencode")) return "OpenCode Zen";
+    if (std.mem.eql(u8, provider_name, "lmstudio")) return "LM Studio";
+    return provider_name;
+}
+
 fn resolveApiKey(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -371,4 +412,46 @@ test "resolveApiKey reads and trims api key file" {
     const parsed = cli.Options{ .api_key_file = path };
     const key = try resolveApiKey(allocator, std.testing.io, parsed, cfg, "env-key");
     try std.testing.expectEqualStrings("file-key", key);
+}
+
+test "effectiveProvider precedence" {
+    const cfg_default = config.Config{};
+    try std.testing.expectEqualStrings("lmstudio", effectiveProvider(.{}, cfg_default));
+
+    const cfg_opencode = config.Config{ .provider = "opencode" };
+    try std.testing.expectEqualStrings("opencode", effectiveProvider(.{}, cfg_opencode));
+
+    const parsed_flag = cli.Options{ .provider = "opencode" };
+    try std.testing.expectEqualStrings("opencode", effectiveProvider(parsed_flag, config.Config{ .provider = "lmstudio" }));
+}
+
+test "baseUrlFor uses CLI url over defaults" {
+    const cfg = config.Config{};
+    const parsed = cli.Options{ .url = "http://cli.example" };
+    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor("lmstudio", parsed, cfg));
+    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor("opencode", parsed, cfg));
+}
+
+test "baseUrlFor uses config url only when provider matches config" {
+    const cfg_lmstudio = config.Config{ .provider = "lmstudio", .providerUrl = "http://config-lmstudio" };
+    try std.testing.expectEqualStrings("http://config-lmstudio", baseUrlFor("lmstudio", .{}, cfg_lmstudio));
+    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg_lmstudio));
+}
+
+test "baseUrlFor returns provider defaults" {
+    const cfg = config.Config{};
+    try std.testing.expectEqualStrings("http://127.0.0.1:1234", baseUrlFor("lmstudio", .{}, cfg));
+    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg));
+}
+
+test "requiresApiKey only for opencode" {
+    try std.testing.expect(!requiresApiKey("lmstudio"));
+    try std.testing.expect(requiresApiKey("opencode"));
+    try std.testing.expect(!requiresApiKey("mock"));
+}
+
+test "providerDisplayName maps known providers" {
+    try std.testing.expectEqualStrings("LM Studio", providerDisplayName("lmstudio"));
+    try std.testing.expectEqualStrings("OpenCode Zen", providerDisplayName("opencode"));
+    try std.testing.expectEqualStrings("custom", providerDisplayName("custom"));
 }
