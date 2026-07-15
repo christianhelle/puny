@@ -240,4 +240,3 @@ fn printExit(
 test "include chat retry tests" {
     _ = @import("chat/retry.zig");
 }
-
