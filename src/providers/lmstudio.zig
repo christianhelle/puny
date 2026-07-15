@@ -295,3 +295,50 @@ pub fn listModelsRaw(client: *Client) !RawResponse {
 pub fn listModelsResult(client: *Client) !ApiResult(ListModelsResponse) {
     return parseRawResponse(ListModelsResponse, try listModelsRaw(client));
 }
+
+test "appendClientHeaders sends Authorization header with raw api key" {
+    const allocator = std.testing.allocator;
+    var client = Client{
+        .allocator = allocator,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "my-secret-key",
+    };
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth_header = try appendClientHeaders(allocator, &headers, &client, "application/json", "application/json");
+    defer if (auth_header) |value| allocator.free(value);
+
+    try std.testing.expectEqual(@as(usize, 3), headers.items.len);
+    const auth = findHeader(headers.items, "Authorization");
+    try std.testing.expect(auth != null);
+    try std.testing.expectEqualStrings("my-secret-key", auth.?.value);
+}
+
+test "appendClientHeaders omits Authorization header when api key is empty" {
+    const allocator = std.testing.allocator;
+    var client = Client{
+        .allocator = allocator,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "",
+    };
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth_header = try appendClientHeaders(allocator, &headers, &client, "application/json", "application/json");
+    defer if (auth_header) |value| allocator.free(value);
+
+    const auth = findHeader(headers.items, "Authorization");
+    try std.testing.expect(auth == null);
+}
+
+fn findHeader(headers: []const std.http.Header, name: []const u8) ?std.http.Header {
+    for (headers) |header| {
+        if (std.mem.eql(u8, header.name, name)) return header;
+    }
+    return null;
+}
