@@ -152,8 +152,8 @@ pub fn main(init: std.process.Init) !void {
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
-    const provider_name = effectiveProvider(parsed, cfg.*);
-    const provider_url = if (parsed.mock) "-" else baseUrlFor(provider_name, parsed, cfg.*);
+    var provider_name = effectiveProvider(parsed, cfg.*);
+    var provider_url = if (parsed.mock) "-" else baseUrlFor(provider_name, parsed, cfg.*);
     const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
 
     if (!parsed.mock and requiresApiKey(provider_name) and api_key.len == 0) {
@@ -168,17 +168,7 @@ pub fn main(init: std.process.Init) !void {
     const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
     const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
 
-    var prov: provider.Provider = if (parsed.mock)
-        .{ .mock = mock.MockClient.init(arena, io) }
-    else if (std.mem.eql(u8, provider_name, "opencode")) blk: {
-        var c = lmstudio.Client.init(arena, io, api_key);
-        c.withBaseUrl(provider_url);
-        break :blk .{ .opencode = c };
-    } else blk: {
-        var c = lmstudio.Client.init(arena, io, api_key);
-        c.withBaseUrl(provider_url);
-        break :blk .{ .lmstudio = c };
-    };
+    var prov = createProvider(parsed.mock, provider_name, provider_url, api_key, arena, io);
     defer prov.deinit();
 
     const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234");
@@ -294,11 +284,35 @@ pub fn main(init: std.process.Init) !void {
                     try stdout_writer.flush();
                     continue;
                 }
+                const old_provider_name = effectiveProvider(parsed, cfg.*);
                 const result = try promptReconfigure(arena, io, stdout_writer, cfg);
                 if (result.cancelled) continue;
                 if (result.changed) {
                     try config.save(arena, io, cfg.*, init.environ_map);
-                    prov.setUrlAndKey(cfg.providerUrl, cfg.apiKey);
+                    const new_provider_name = effectiveProvider(parsed, cfg.*);
+                    const new_provider_url = if (parsed.mock) "-" else baseUrlFor(new_provider_name, parsed, cfg.*);
+                    const new_api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
+
+                    if (!parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
+                        prov.deinit();
+                        prov = createProvider(parsed.mock, new_provider_name, new_provider_url, new_api_key, arena, io);
+                        provider_name = new_provider_name;
+                        provider_url = new_provider_url;
+
+                        const model_skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234");
+                        if (try model_selection.select(&prov, null, arena, io, init, model_skip_validation, cfg, init.environ_map, random)) |new_key| {
+                            model_key = new_key;
+                        }
+
+                        try welcome.print(stdout_writer, .{
+                            .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name),
+                            .provider_url = provider_url,
+                            .model_key = model_key,
+                            .oneshot = parsed.oneshot,
+                        });
+                    } else {
+                        prov.setUrlAndKey(cfg.providerUrl, cfg.apiKey);
+                    }
                     try stdout_writer.print("Configuration saved and provider updated.\n", .{});
                     try stdout_writer.flush();
                 }
@@ -367,6 +381,18 @@ fn providerDisplayName(provider_name: []const u8) []const u8 {
     if (std.mem.eql(u8, provider_name, "opencode")) return "OpenCode Zen";
     if (std.mem.eql(u8, provider_name, "lmstudio")) return "LM Studio";
     return provider_name;
+}
+
+fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api_key: []const u8, arena: std.mem.Allocator, io: std.Io) provider.Provider {
+    if (is_mock) return .{ .mock = mock.MockClient.init(arena, io) };
+    if (std.mem.eql(u8, provider_name, "opencode")) {
+        var c = lmstudio.Client.init(arena, io, api_key);
+        c.withBaseUrl(url);
+        return .{ .opencode = c };
+    }
+    var c = lmstudio.Client.init(arena, io, api_key);
+    c.withBaseUrl(url);
+    return .{ .lmstudio = c };
 }
 
 fn resolveApiKey(
