@@ -1,6 +1,10 @@
 # Puny
 
-A minimal AI coding agent for the terminal, powered by [LM Studio](https://lmstudio.ai/) or [OpenCode Zen](https://opencode.ai/zen).
+A minimal AI coding agent for the terminal. 
+
+Currently supports the following model providers:
+- [LM Studio](https://lmstudio.ai/) 
+- [OpenCode Zen](https://opencode.ai/zen).
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
