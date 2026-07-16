@@ -214,7 +214,7 @@ const SseCallback = struct {
 /// For the check to run between individual SSE bytes, initialize the wrapped
 /// `std.Io.Reader` with a one-byte buffer so each byte read reaches the
 /// vtable `stream` implementation below.
-const CancelableReader = struct {
+pub const CancelableReader = struct {
     inner: *std.Io.Reader,
     reader: std.Io.Reader,
 
