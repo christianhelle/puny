@@ -3,15 +3,14 @@ const lmstudio = @import("lmstudio.zig");
 
 pub const default_base_url = "https://opencode.ai/zen";
 
-/// OpenCode Zen serves models over several transports. Puny currently only
-/// supports OpenAI-compatible `/v1/chat/completions`. This heuristic returns
-/// false for model families known to use other transports (/responses,
-/// /messages, /models/<id>) and true for everything else, so newly-added
-/// chat/completions models are accepted automatically.
-pub fn isChatCompletionsCompatible(model_id: []const u8) bool {
+/// OpenCode Zen serves models over several transports. Puny supports
+/// OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages`.
+/// This heuristic returns false for model families known to use unsupported
+/// transports (/responses, /models/<id>) and true for everything else, so
+/// newly-added chat/completions or messages models are accepted automatically.
+pub fn isSupportedModel(model_id: []const u8) bool {
     const excluded = [_][]const u8{
         "gpt-",
-        "claude-",
         "gemini-",
         "qwen",
     };
@@ -20,6 +19,11 @@ pub fn isChatCompletionsCompatible(model_id: []const u8) bool {
         if (std.mem.startsWith(u8, model_id, prefix)) return false;
     }
     return true;
+}
+
+/// Returns true for models served over Anthropic's `/v1/messages` transport.
+pub fn isAnthropicModel(model_id: []const u8) bool {
+    return std.mem.startsWith(u8, model_id, "claude-");
 }
 
 /// Parses the OpenAI-standard `/v1/models` response from OpenCode Zen and
@@ -44,7 +48,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
 
     for (items) |item| {
         const id = if (item.object.get("id")) |v| v.string else continue;
-        if (!isChatCompletionsCompatible(id)) continue;
+        if (!isSupportedModel(id)) continue;
 
         const owned_by = if (item.object.get("owned_by")) |v| v.string else "opencode";
         const arena_alloc = arena.allocator();
@@ -107,31 +111,39 @@ pub fn listModels(client: *lmstudio.Client) !lmstudio.Owned(lmstudio.ListModelsR
     }
 }
 
-test "isChatCompletionsCompatible accepts chat/completions families" {
-    try std.testing.expect(isChatCompletionsCompatible("deepseek-v4-pro"));
-    try std.testing.expect(isChatCompletionsCompatible("deepseek-v4-flash-free"));
-    try std.testing.expect(isChatCompletionsCompatible("kimi-k2.7-code"));
-    try std.testing.expect(isChatCompletionsCompatible("kimi-k2.5"));
-    try std.testing.expect(isChatCompletionsCompatible("glm-5.2"));
-    try std.testing.expect(isChatCompletionsCompatible("minimax-m3"));
-    try std.testing.expect(isChatCompletionsCompatible("grok-4.5"));
-    try std.testing.expect(isChatCompletionsCompatible("grok-build-0.1"));
-    try std.testing.expect(isChatCompletionsCompatible("big-pickle"));
-    try std.testing.expect(isChatCompletionsCompatible("mimo-v2.5-free"));
-    try std.testing.expect(isChatCompletionsCompatible("north-mini-code-free"));
-    try std.testing.expect(isChatCompletionsCompatible("nemotron-3-ultra-free"));
+test "isSupportedModel accepts supported model families" {
+    try std.testing.expect(isSupportedModel("deepseek-v4-pro"));
+    try std.testing.expect(isSupportedModel("deepseek-v4-flash-free"));
+    try std.testing.expect(isSupportedModel("kimi-k2.7-code"));
+    try std.testing.expect(isSupportedModel("kimi-k2.5"));
+    try std.testing.expect(isSupportedModel("glm-5.2"));
+    try std.testing.expect(isSupportedModel("minimax-m3"));
+    try std.testing.expect(isSupportedModel("grok-4.5"));
+    try std.testing.expect(isSupportedModel("grok-build-0.1"));
+    try std.testing.expect(isSupportedModel("big-pickle"));
+    try std.testing.expect(isSupportedModel("mimo-v2.5-free"));
+    try std.testing.expect(isSupportedModel("north-mini-code-free"));
+    try std.testing.expect(isSupportedModel("nemotron-3-ultra-free"));
+    try std.testing.expect(isSupportedModel("claude-opus-4-8"));
+    try std.testing.expect(isSupportedModel("claude-sonnet-4.6"));
+    try std.testing.expect(isSupportedModel("claude-haiku-4.5"));
 }
 
-test "isChatCompletionsCompatible rejects non-chat families" {
-    try std.testing.expect(!isChatCompletionsCompatible("gpt-5.5"));
-    try std.testing.expect(!isChatCompletionsCompatible("gpt-5.3-codex"));
-    try std.testing.expect(!isChatCompletionsCompatible("claude-opus-4-8"));
-    try std.testing.expect(!isChatCompletionsCompatible("claude-sonnet-4.6"));
-    try std.testing.expect(!isChatCompletionsCompatible("claude-haiku-4.5"));
-    try std.testing.expect(!isChatCompletionsCompatible("gemini-3.5-flash"));
-    try std.testing.expect(!isChatCompletionsCompatible("gemini-3.1-pro"));
-    try std.testing.expect(!isChatCompletionsCompatible("qwen3.7-max"));
-    try std.testing.expect(!isChatCompletionsCompatible("qwen3.5-plus"));
+test "isSupportedModel rejects unsupported model families" {
+    try std.testing.expect(!isSupportedModel("gpt-5.5"));
+    try std.testing.expect(!isSupportedModel("gpt-5.3-codex"));
+    try std.testing.expect(!isSupportedModel("gemini-3.5-flash"));
+    try std.testing.expect(!isSupportedModel("gemini-3.1-pro"));
+    try std.testing.expect(!isSupportedModel("qwen3.7-max"));
+    try std.testing.expect(!isSupportedModel("qwen3.5-plus"));
+}
+
+test "isAnthropicModel detects claude families" {
+    try std.testing.expect(isAnthropicModel("claude-opus-4-8"));
+    try std.testing.expect(isAnthropicModel("claude-sonnet-4.6"));
+    try std.testing.expect(isAnthropicModel("claude-haiku-4.5"));
+    try std.testing.expect(!isAnthropicModel("deepseek-v4-pro"));
+    try std.testing.expect(!isAnthropicModel("kimi-k2.7-code"));
 }
 
 test "parseModels maps and filters OpenAI model list" {
@@ -159,7 +171,7 @@ test "parseModels returns empty list when no compatible models" {
     const json =
         \\{"object":"list","data":[
         \\  {"id":"gpt-5.5","object":"model","created":1784147408,"owned_by":"opencode"},
-        \\  {"id":"claude-opus-4-8","object":"model","created":1784147408,"owned_by":"opencode"}
+        \\  {"id":"gemini-3.5-flash","object":"model","created":1784147408,"owned_by":"opencode"}
         \\]}
     ;
 
