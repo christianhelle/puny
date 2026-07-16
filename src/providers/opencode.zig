@@ -30,8 +30,15 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
-    const data = parsed.value.object.get("data") orelse return error.MissingData;
-    const items = data.array.items;
+    const root = switch (parsed.value) {
+        .object => |o| o,
+        else => return error.UnexpectedFormat,
+    };
+    const data_val = root.get("data") orelse return error.MissingData;
+    const items = switch (data_val) {
+        .array => |a| a.items,
+        else => return error.UnexpectedFormat,
+    };
 
     var arena = try allocator.create(std.heap.ArenaAllocator);
     errdefer {
@@ -43,10 +50,21 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
     var models = std.array_list.Managed(lmstudio.ModelInfo).init(arena.allocator());
 
     for (items) |item| {
-        const id = if (item.object.get("id")) |v| v.string else continue;
+        const obj = switch (item) {
+            .object => |o| o,
+            else => continue,
+        };
+        const id_val = obj.get("id") orelse continue;
+        const id = switch (id_val) {
+            .string => |s| s,
+            else => continue,
+        };
         if (!isChatCompletionsCompatible(id)) continue;
 
-        const owned_by = if (item.object.get("owned_by")) |v| v.string else "opencode";
+        const owned_by = if (obj.get("owned_by")) |v| switch (v) {
+            .string => |s| s,
+            else => "opencode",
+        } else "opencode";
         const arena_alloc = arena.allocator();
 
         try models.append(.{
