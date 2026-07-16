@@ -1,7 +1,10 @@
 const std = @import("std");
 const lmstudio = @import("lmstudio.zig");
+const openai = @import("openai.zig");
 
 pub const default_base_url = "https://opencode.ai/zen";
+pub const anthropic_version = "2023-06-01";
+pub const default_max_tokens = 4096;
 
 /// OpenCode Zen serves models over several transports. Puny supports
 /// OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages`.
@@ -109,6 +112,135 @@ pub fn listModels(client: *lmstudio.Client) !lmstudio.Owned(lmstudio.ListModelsR
             return error.ResponseParseError;
         },
     }
+}
+
+fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
+    return try std.json.ObjectMap.init(allocator, &.{}, &.{});
+}
+
+fn newTextBlock(allocator: std.mem.Allocator, text: []const u8) !std.json.Value {
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "type", .{ .string = "text" });
+    try obj.put(allocator, "text", .{ .string = text });
+    return .{ .object = obj };
+}
+
+fn newToolUseBlock(allocator: std.mem.Allocator, id: []const u8, name: []const u8, input: std.json.Value) !std.json.Value {
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "type", .{ .string = "tool_use" });
+    try obj.put(allocator, "id", .{ .string = id });
+    try obj.put(allocator, "name", .{ .string = name });
+    try obj.put(allocator, "input", input);
+    return .{ .object = obj };
+}
+
+fn newToolResultBlock(allocator: std.mem.Allocator, tool_use_id: []const u8, content: []const u8) !std.json.Value {
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "type", .{ .string = "tool_result" });
+    try obj.put(allocator, "tool_use_id", .{ .string = tool_use_id });
+    try obj.put(allocator, "content", .{ .string = content });
+    return .{ .object = obj };
+}
+
+fn parseToolArguments(allocator: std.mem.Allocator, arguments: []const u8) !std.json.Value {
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, arguments, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    return try parsed.value.clone(allocator);
+}
+
+fn anthropicTool(allocator: std.mem.Allocator, tool: openai.ToolDefinition) !std.json.Value {
+    var obj = try newObject(allocator);
+
+    const function = tool.function.object;
+    const name = if (function.get("name")) |v| v.string else return error.MissingToolName;
+    const description = if (function.get("description")) |v| v.string else "";
+    const parameters = function.get("parameters") orelse .{ .object = try newObject(allocator) };
+
+    try obj.put(allocator, "name", .{ .string = name });
+    try obj.put(allocator, "description", .{ .string = description });
+    try obj.put(allocator, "input_schema", parameters);
+    return .{ .object = obj };
+}
+
+fn anthropicMessage(allocator: std.mem.Allocator, msg: openai.Message) !std.json.Value {
+    var obj = try newObject(allocator);
+
+    switch (msg) {
+        .system => unreachable, // handled separately
+        .user => |content| {
+            try obj.put(allocator, "role", .{ .string = "user" });
+            var arr = try std.json.Array.initCapacity(allocator, 1);
+            try arr.append(try newTextBlock(allocator, content));
+            try obj.put(allocator, "content", .{ .array = arr });
+        },
+        .assistant => |assistant| {
+            try obj.put(allocator, "role", .{ .string = "assistant" });
+            var content_blocks = try std.json.Array.initCapacity(allocator, 2);
+            if (assistant.content) |content| {
+                try content_blocks.append(try newTextBlock(allocator, content));
+            }
+            if (assistant.tool_calls) |tool_calls| {
+                for (tool_calls) |tc| {
+                    const input = try parseToolArguments(allocator, tc.function.arguments);
+                    try content_blocks.append(try newToolUseBlock(allocator, tc.id, tc.function.name, input));
+                }
+            }
+            try obj.put(allocator, "content", .{ .array = content_blocks });
+        },
+        .tool => |tool| {
+            try obj.put(allocator, "role", .{ .string = "user" });
+            var arr = try std.json.Array.initCapacity(allocator, 1);
+            try arr.append(try newToolResultBlock(allocator, tool.tool_call_id, tool.content));
+            try obj.put(allocator, "content", .{ .array = arr });
+        },
+    }
+
+    return .{ .object = obj };
+}
+
+/// Builds an Anthropic `/v1/messages` request payload from an OpenAI-style
+/// chat request. The first system message is extracted to the top-level
+/// `system` field; any additional system messages are ignored.
+pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
+    var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
+    var system: ?[]const u8 = null;
+    for (request.messages) |msg| {
+        switch (msg) {
+            .system => |content| {
+                if (system == null) system = content;
+            },
+            else => try messages.append(try anthropicMessage(allocator, msg)),
+        }
+    }
+
+    var tools: ?std.json.Array = null;
+    if (request.tools.len > 0) {
+        tools = try std.json.Array.initCapacity(allocator, request.tools.len);
+        for (request.tools) |tool| {
+            try tools.?.append(try anthropicTool(allocator, tool));
+        }
+    }
+
+    var body_obj = try newObject(allocator);
+    try body_obj.put(allocator, "model", .{ .string = request.model });
+    try body_obj.put(allocator, "messages", .{ .array = messages });
+    try body_obj.put(allocator, "max_tokens", .{ .integer = default_max_tokens });
+    try body_obj.put(allocator, "stream", .{ .bool = request.stream });
+
+    if (system) |value| {
+        try body_obj.put(allocator, "system", .{ .string = value });
+    }
+    if (tools) |value| {
+        try body_obj.put(allocator, "tools", .{ .array = value });
+    }
+    if (request.temperature) |temperature| {
+        try body_obj.put(allocator, "temperature", .{ .float = temperature });
+    }
+
+    var str: std.Io.Writer.Allocating = .init(allocator);
+    defer str.deinit();
+    try std.json.Stringify.value(std.json.Value{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
+    return str.toOwnedSlice();
 }
 
 test "isSupportedModel accepts supported model families" {
