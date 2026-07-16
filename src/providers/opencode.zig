@@ -1,17 +1,17 @@
 const std = @import("std");
+const anthropic = @import("anthropic.zig");
 const lmstudio = @import("lmstudio.zig");
+const openai = @import("openai.zig");
 
 pub const default_base_url = "https://opencode.ai/zen";
 
-/// OpenCode Zen serves models over several transports. Puny currently only
-/// supports OpenAI-compatible `/v1/chat/completions`. This heuristic returns
-/// false for model families known to use other transports (/responses,
-/// /messages, /models/<id>) and true for everything else, so newly-added
-/// chat/completions models are accepted automatically.
+/// OpenCode Zen serves models over several transports. Puny supports OpenAI
+/// `/v1/chat/completions` plus Anthropic `/v1/messages` for Claude models.
+/// This heuristic returns false for model families known to use other
+/// transports and true for everything else.
 pub fn isChatCompletionsCompatible(model_id: []const u8) bool {
     const excluded = [_][]const u8{
         "gpt-",
-        "claude-",
         "gemini-",
         "qwen",
     };
@@ -105,6 +105,17 @@ pub fn listModels(client: *lmstudio.Client) !lmstudio.Owned(lmstudio.ListModelsR
             return error.ResponseParseError;
         },
     }
+
+    pub fn isAnthropicModel(model_id: []const u8) bool {
+        return std.mem.startsWith(u8, model_id, "claude-");
+    }
+
+    pub fn chatStreaming(client: *lmstudio.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+        if (isAnthropicModel(request.model)) {
+            return anthropic.chatStreaming(client, request, callback);
+        }
+        return openai.chatStreaming(client, request, callback);
+    }
 }
 
 test "isChatCompletionsCompatible accepts chat/completions families" {
@@ -125,13 +136,16 @@ test "isChatCompletionsCompatible accepts chat/completions families" {
 test "isChatCompletionsCompatible rejects non-chat families" {
     try std.testing.expect(!isChatCompletionsCompatible("gpt-5.5"));
     try std.testing.expect(!isChatCompletionsCompatible("gpt-5.3-codex"));
-    try std.testing.expect(!isChatCompletionsCompatible("claude-opus-4-8"));
-    try std.testing.expect(!isChatCompletionsCompatible("claude-sonnet-4.6"));
-    try std.testing.expect(!isChatCompletionsCompatible("claude-haiku-4.5"));
     try std.testing.expect(!isChatCompletionsCompatible("gemini-3.5-flash"));
     try std.testing.expect(!isChatCompletionsCompatible("gemini-3.1-pro"));
     try std.testing.expect(!isChatCompletionsCompatible("qwen3.7-max"));
     try std.testing.expect(!isChatCompletionsCompatible("qwen3.5-plus"));
+}
+
+test "isAnthropicModel matches claude families" {
+    try std.testing.expect(isAnthropicModel("claude-opus-4-1"));
+    try std.testing.expect(isAnthropicModel("claude-sonnet-4.6"));
+    try std.testing.expect(!isAnthropicModel("deepseek-v4-pro"));
 }
 
 test "parseModels maps and filters OpenAI model list" {
@@ -159,7 +173,7 @@ test "parseModels returns empty list when no compatible models" {
     const json =
         \\{"object":"list","data":[
         \\  {"id":"gpt-5.5","object":"model","created":1784147408,"owned_by":"opencode"},
-        \\  {"id":"claude-opus-4-8","object":"model","created":1784147408,"owned_by":"opencode"}
+        \\  {"id":"gemini-3.5-flash","object":"model","created":1784147408,"owned_by":"opencode"}
         \\]}
     ;
 

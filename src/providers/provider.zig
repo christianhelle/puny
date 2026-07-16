@@ -26,7 +26,7 @@ pub const Provider = union(enum) {
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
             .lmstudio => |*c| openai.chatStreaming(c, request, callback),
-            .opencode => |*c| openai.chatStreaming(c, request, callback),
+            .opencode => |*c| opencode.chatStreaming(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
         };
     }
