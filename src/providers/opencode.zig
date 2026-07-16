@@ -1,4 +1,5 @@
 const std = @import("std");
+const cancel = @import("../core/cancel.zig");
 const lmstudio = @import("lmstudio.zig");
 const openai = @import("openai.zig");
 
@@ -196,6 +197,177 @@ fn anthropicMessage(allocator: std.mem.Allocator, msg: openai.Message) !std.json
     }
 
     return .{ .object = obj };
+}
+
+const BlockType = enum {
+    text,
+    tool_use,
+};
+
+const AnthropicSseCallback = struct {
+    allocator: std.mem.Allocator,
+    callback: openai.StreamCallback,
+    block_types: std.ArrayList(BlockType),
+    input_tokens: i64 = 0,
+
+    pub fn event(self: *@This(), data: []const u8) !void {
+        const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+
+        const event_type = if (parsed.value.object.get("type")) |v| v.string else return;
+
+        if (std.mem.eql(u8, event_type, "message_start")) {
+            if (parsed.value.object.get("message")) |message| {
+                if (message.object.get("usage")) |usage| {
+                    if (usage.object.get("input_tokens")) |v| self.input_tokens = v.integer;
+                }
+            }
+            return;
+        }
+
+        if (std.mem.eql(u8, event_type, "content_block_start")) {
+            const index = if (parsed.value.object.get("index")) |v| @as(usize, @intCast(v.integer)) else return;
+            const content_block = parsed.value.object.get("content_block") orelse return;
+            const block_type = if (content_block.object.get("type")) |v| v.string else return;
+
+            while (self.block_types.items.len <= index) {
+                try self.block_types.append(.text);
+            }
+
+            if (std.mem.eql(u8, block_type, "tool_use")) {
+                self.block_types.items[index] = .tool_use;
+                const id = if (content_block.object.get("id")) |v| v.string else "";
+                const name = if (content_block.object.get("name")) |v| v.string else "";
+                if (id.len > 0 and name.len > 0) {
+                    try self.callback.emit(.{ .tool_call_start = .{ .index = index, .id = id, .name = name } });
+                }
+            } else {
+                self.block_types.items[index] = .text;
+            }
+            return;
+        }
+
+        if (std.mem.eql(u8, event_type, "content_block_delta")) {
+            const index = if (parsed.value.object.get("index")) |v| @as(usize, @intCast(v.integer)) else return;
+            const delta = parsed.value.object.get("delta") orelse return;
+            const delta_type = if (delta.object.get("type")) |v| v.string else return;
+
+            if (index >= self.block_types.items.len) return;
+            const block_type = self.block_types.items[index];
+
+            switch (block_type) {
+                .text => {
+                    if (std.mem.eql(u8, delta_type, "text_delta")) {
+                        if (delta.object.get("text")) |text| {
+                            try self.callback.emit(.{ .content = text.string });
+                        }
+                    }
+                },
+                .tool_use => {
+                    if (std.mem.eql(u8, delta_type, "input_json_delta")) {
+                        if (delta.object.get("partial_json")) |partial| {
+                            try self.callback.emit(.{ .tool_call_delta = .{ .index = index, .arguments = partial.string } });
+                        }
+                    }
+                },
+            }
+            return;
+        }
+
+        if (std.mem.eql(u8, event_type, "message_delta")) {
+            if (parsed.value.object.get("delta")) |delta| {
+                if (delta.object.get("stop_reason")) |reason| {
+                    const reason_str = reason.string;
+                    try self.callback.emit(.{ .finish = if (reason_str.len == 0) null else reason_str });
+                }
+            }
+            var output_tokens: i64 = 0;
+            if (parsed.value.object.get("usage")) |usage| {
+                if (usage.object.get("output_tokens")) |v| output_tokens = v.integer;
+            }
+            try self.callback.emit(.{ .usage = .{
+                .input_tokens = self.input_tokens,
+                .output_tokens = output_tokens,
+            } });
+        }
+    }
+};
+
+/// Streams a chat completion from Anthropic's `/v1/messages` endpoint and
+/// emits the same `openai.StreamEvent` shapes consumed by the rest of Puny.
+pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    const allocator = client.allocator;
+    const payload = try anthropicRequestPayload(allocator, request);
+    defer allocator.free(payload);
+
+    const url = try std.fmt.allocPrint(allocator, "{s}/v1/messages", .{client.base_url});
+    defer allocator.free(url);
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    try headers.append(allocator, .{ .name = "x-api-key", .value = client.api_key });
+    try headers.append(allocator, .{ .name = "anthropic-version", .value = anthropic_version });
+    try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
+    try headers.append(allocator, .{ .name = "accept", .value = "text/event-stream" });
+
+    const uri = try std.Uri.parse(url);
+    var req = try client.http.request(.POST, uri, .{
+        .redirect_behavior = .unhandled,
+        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .extra_headers = headers.items,
+    });
+    defer req.deinit();
+
+    req.transfer_encoding = .{ .content_length = payload.len };
+    var body = try req.sendBodyUnflushed(&.{});
+    try body.writer.writeAll(payload);
+    try body.end();
+    try req.connection.?.flush();
+
+    var response = try req.receiveHead(&.{});
+
+    var transfer_buffer: [8 * 1024]u8 = undefined;
+    const response_reader = response.reader(&transfer_buffer);
+
+    var cancelable_reader_buffer: [1]u8 = undefined;
+    var cancelable_reader = openai.CancelableReader.init(response_reader, &cancelable_reader_buffer);
+    const reader = &cancelable_reader.reader;
+
+    if (response.head.status.class() != .success) {
+        var body_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer body_alloc.deinit();
+        _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        if (response.head.status == .unauthorized or response.head.status == .forbidden) {
+            lmstudio.printAuthHint(client.io);
+        }
+
+        std.debug.print("Anthropic chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
+            url,
+            @intFromEnum(response.head.status),
+            payload,
+            body_alloc.written(),
+        });
+        return error.ResponseError;
+    }
+
+    var block_types = std.ArrayList(BlockType).init(allocator);
+    defer block_types.deinit();
+
+    var sse = AnthropicSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .block_types = block_types,
+    };
+
+    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+        error.ReadFailed => {
+            if (cancel.isCancelled()) return error.Canceled;
+            return err;
+        },
+        else => return err,
+    };
 }
 
 /// Builds an Anthropic `/v1/messages` request payload from an OpenAI-style
