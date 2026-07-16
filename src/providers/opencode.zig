@@ -15,7 +15,6 @@ pub const default_max_tokens = 4096;
 pub fn isSupportedModel(model_id: []const u8) bool {
     const excluded = [_][]const u8{
         "gemini-",
-        "qwen",
     };
 
     for (excluded) |prefix| {
