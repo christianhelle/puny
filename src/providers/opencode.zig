@@ -14,7 +14,6 @@ pub const default_max_tokens = 4096;
 /// newly-added chat/completions or messages models are accepted automatically.
 pub fn isSupportedModel(model_id: []const u8) bool {
     const excluded = [_][]const u8{
-        "gpt-",
         "gemini-",
         "qwen",
     };
@@ -429,11 +428,11 @@ test "isSupportedModel accepts supported model families" {
     try std.testing.expect(isSupportedModel("claude-opus-4-8"));
     try std.testing.expect(isSupportedModel("claude-sonnet-4.6"));
     try std.testing.expect(isSupportedModel("claude-haiku-4.5"));
+    try std.testing.expect(isSupportedModel("gpt-5.5"));
+    try std.testing.expect(isSupportedModel("gpt-5.3-codex"));
 }
 
 test "isSupportedModel rejects unsupported model families" {
-    try std.testing.expect(!isSupportedModel("gpt-5.5"));
-    try std.testing.expect(!isSupportedModel("gpt-5.3-codex"));
     try std.testing.expect(!isSupportedModel("gemini-3.5-flash"));
     try std.testing.expect(!isSupportedModel("gemini-3.1-pro"));
     try std.testing.expect(!isSupportedModel("qwen3.7-max"));
@@ -453,7 +452,7 @@ test "parseModels maps and filters OpenAI model list" {
     const json =
         \\{"object":"list","data":[
         \\  {"id":"deepseek-v4-pro","object":"model","created":1784147408,"owned_by":"opencode"},
-        \\  {"id":"gpt-5.5","object":"model","created":1784147408,"owned_by":"opencode"},
+        \\  {"id":"gemini-3.5-flash","object":"model","created":1784147408,"owned_by":"opencode"},
         \\  {"id":"kimi-k2.7-code","object":"model","created":1784147408,"owned_by":"opencode"}
         \\]}
     ;
@@ -472,8 +471,8 @@ test "parseModels returns empty list when no compatible models" {
     const allocator = std.testing.allocator;
     const json =
         \\{"object":"list","data":[
-        \\  {"id":"gpt-5.5","object":"model","created":1784147408,"owned_by":"opencode"},
-        \\  {"id":"gemini-3.5-flash","object":"model","created":1784147408,"owned_by":"opencode"}
+        \\  {"id":"gemini-3.5-flash","object":"model","created":1784147408,"owned_by":"opencode"},
+        \\  {"id":"qwen3.7-max","object":"model","created":1784147408,"owned_by":"opencode"}
         \\]}
     ;
 
