@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
+const welcome = @import("../tui/welcome.zig");
 const config = @import("../config/config.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");
@@ -11,6 +12,7 @@ pub const Command = union(enum) {
     reset,
     stats,
     config,
+    help,
     plan: ?[]const u8,
     build: ?[]const u8,
     model: ?[]const u8,
@@ -47,6 +49,9 @@ pub fn parse(user_message: []const u8) Command {
 
     if (std.mem.eql(u8, user_message, "/config"))
         return .config;
+
+    if (std.mem.eql(u8, user_message, "/help"))
+        return .help;
 
     if (std.mem.eql(u8, user_message, "/plan") or std.mem.startsWith(u8, user_message, "/plan ")) {
         if (user_message.len > "/plan ".len) {
@@ -89,6 +94,13 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         .stats => return .print_stats,
 
         .config => return .reconfigure,
+
+        .help => {
+            try ctx.stdout_writer.print("\n", .{});
+            try welcome.printHelp(ctx.stdout_writer);
+            try ctx.stdout_writer.flush();
+            return .continue_;
+        },
 
         .plan => |text| {
             ctx.planning_mode.* = true;
@@ -141,6 +153,7 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqual(Command.reset, parse("/reset"));
     try std.testing.expectEqual(Command.stats, parse("/stats"));
     try std.testing.expectEqual(Command.config, parse("/config"));
+    try std.testing.expectEqual(Command.help, parse("/help"));
 
     try std.testing.expectEqualDeep(Command{ .plan = null }, parse("/plan"));
     try std.testing.expectEqualDeep(Command{ .plan = "do thing" }, parse("/plan do thing"));
@@ -232,6 +245,27 @@ test "dispatch stats returns print_stats" {
     });
 
     try std.testing.expectEqual(Action.print_stats, action);
+}
+
+test "dispatch help prints help and continues" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.help, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+    try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, "Available commands"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, "/help"));
 }
 
 test "dispatch plan without text enters planning mode and continues" {

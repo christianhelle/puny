@@ -18,6 +18,20 @@ fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u
     try writer.print("  {s}{s}{s}{s} {s}\n", .{ ansi.green, name, ansi.reset, pad, description });
 }
 
+pub fn printHelp(writer: *std.Io.Writer) !void {
+    try writer.print("{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
+    try printCommand(writer, "/quit, /exit", "Exit Puny");
+    try printCommand(writer, "/reset", "Clear the conversation");
+    try printCommand(writer, "/stats", "Show session statistics");
+    try printCommand(writer, "/config", "Reconfigure URL and API key");
+    try printCommand(writer, "/plan [task]", "Enter planning mode");
+    try printCommand(writer, "/build [task]", "Switch to build mode");
+    try printCommand(writer, "/model [id]", "Switch to another model");
+    try printCommand(writer, "/help", "Show help information");
+    try writer.print("\n", .{});
+    try writer.print("{s}Type a prompt and press Enter to start chatting.{s}\n", .{ ansi.dim, ansi.reset });
+}
+
 pub fn print(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("\n", .{});
     try writer.print("{s}Welcome to Puny {s}{s} - {s}Your tiny AI coding assistant{s}\n", .{ ansi.cyan, info.version, ansi.reset, ansi.dim, ansi.reset });
@@ -29,16 +43,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("\n", .{});
 
     if (!info.oneshot) {
-        try writer.print("{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
-        try printCommand(writer, "/quit, /exit", "Exit Puny");
-        try printCommand(writer, "/reset", "Clear the conversation");
-        try printCommand(writer, "/stats", "Show session statistics");
-        try printCommand(writer, "/config", "Reconfigure URL and API key");
-        try printCommand(writer, "/plan [task]", "Enter planning mode");
-        try printCommand(writer, "/build [task]", "Switch to build mode");
-        try printCommand(writer, "/model [id]", "Switch to another model");
-        try writer.print("\n", .{});
-        try writer.print("{s}Type a prompt and press Enter to start chatting.{s}\n", .{ ansi.dim, ansi.reset });
+        try printHelp(writer);
     }
 
     try writer.flush();
@@ -63,6 +68,7 @@ test "print writes banner, provider, model, commands and hint" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/config"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/plan"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/help"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
 
