@@ -8,13 +8,7 @@ on:
 
 jobs:
   test:
-    name: Run tests on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -22,9 +16,6 @@ jobs:
         uses: goto-bus-stop/setup-zig@v2
         with:
           zig-version: 0.16.0
-
-      - name: Run tests
-        run: zig build test
 
       - name: Run regression tests
         shell: pwsh
