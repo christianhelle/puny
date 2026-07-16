@@ -207,13 +207,6 @@ const SseCallback = struct {
     }
 };
 
-/// Wraps a Reader so that every read first checks whether the user has
-/// triggered a double-Escape cancellation. Keeps the cancellation logic out
-/// of the generated lmstudio.zig SSE parser.
-///
-/// For the check to run between individual SSE bytes, initialize the wrapped
-/// `std.Io.Reader` with a one-byte buffer so each byte read reaches the
-/// vtable `stream` implementation below.
 pub const CancelableReader = struct {
     inner: *std.Io.Reader,
     reader: std.Io.Reader,
@@ -276,9 +269,6 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
 
-    // Use a single-byte wrapper buffer so the generated SSE parser calls our
-    // vtable stream for every byte, letting us check the cancel flag between
-    // tokens instead of only at multi-kilobyte buffer boundaries.
     var cancelable_reader_buffer: [1]u8 = undefined;
     var cancelable_reader = CancelableReader.init(response_reader, &cancelable_reader_buffer);
     const reader = &cancelable_reader.reader;
