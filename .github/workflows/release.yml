@@ -47,7 +47,7 @@ jobs:
       - name: Set up Zig 0.16.0
         uses: goto-bus-stop/setup-zig@v2
         with:
-          zig-version: 0.16.0
+          version: 0.16.0
 
       # Install cross-compilation deps for aarch64-linux
       - name: Install Linux aarch64 deps (cross)
