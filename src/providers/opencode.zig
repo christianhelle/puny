@@ -7,14 +7,9 @@ pub const default_base_url = "https://opencode.ai/zen";
 pub const anthropic_version = "2023-06-01";
 pub const default_max_tokens = 4096;
 
-/// OpenCode Zen serves models over several transports. Puny supports
-/// OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages`.
-/// This heuristic returns false for model families known to use unsupported
-/// transports (/responses, /models/<id>) and true for everything else, so
-/// newly-added chat/completions or messages models are accepted automatically.
 pub fn isSupportedModel(model_id: []const u8) bool {
     const excluded = [_][]const u8{
-        "gemini-",
+        "gemini-", // Requires Gemini API, not Anthropic or OpenAI-compatible
     };
 
     for (excluded) |prefix| {
@@ -23,15 +18,10 @@ pub fn isSupportedModel(model_id: []const u8) bool {
     return true;
 }
 
-/// Returns true for models served over Anthropic's `/v1/messages` transport.
 pub fn isAnthropicModel(model_id: []const u8) bool {
     return std.mem.startsWith(u8, model_id, "claude-");
 }
 
-/// Parses the OpenAI-standard `/v1/models` response from OpenCode Zen and
-/// converts it into the `ListModelsResponse` shape consumed by the rest of
-/// Puny. Models that are not served over `/v1/chat/completions` are filtered
-/// out so the picker only shows usable models.
 pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lmstudio.Owned(lmstudio.ListModelsResponse) {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
@@ -289,8 +279,6 @@ const AnthropicSseCallback = struct {
     }
 };
 
-/// Streams a chat completion from Anthropic's `/v1/messages` endpoint and
-/// emits the same `openai.StreamEvent` shapes consumed by the rest of Puny.
 pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     const allocator = client.allocator;
     const payload = try anthropicRequestPayload(allocator, request);
@@ -366,9 +354,6 @@ pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequ
     };
 }
 
-/// Builds an Anthropic `/v1/messages` request payload from an OpenAI-style
-/// chat request. The first system message is extracted to the top-level
-/// `system` field; any additional system messages are ignored.
 pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
     var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
     var system: ?[]const u8 = null;
