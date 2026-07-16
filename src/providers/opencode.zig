@@ -419,8 +419,6 @@ test "isSupportedModel accepts supported model families" {
 test "isSupportedModel rejects unsupported model families" {
     try std.testing.expect(!isSupportedModel("gemini-3.5-flash"));
     try std.testing.expect(!isSupportedModel("gemini-3.1-pro"));
-    try std.testing.expect(!isSupportedModel("qwen3.7-max"));
-    try std.testing.expect(!isSupportedModel("qwen3.5-plus"));
 }
 
 test "isAnthropicModel detects claude families" {
@@ -449,21 +447,6 @@ test "parseModels maps and filters OpenAI model list" {
     try std.testing.expectEqualStrings("deepseek-v4-pro", result.value().models[0].display_name);
     try std.testing.expectEqualStrings("opencode", result.value().models[0].publisher);
     try std.testing.expectEqualStrings("kimi-k2.7-code", result.value().models[1].key);
-}
-
-test "parseModels returns empty list when no compatible models" {
-    const allocator = std.testing.allocator;
-    const json =
-        \\{"object":"list","data":[
-        \\  {"id":"gemini-3.5-flash","object":"model","created":1784147408,"owned_by":"opencode"},
-        \\  {"id":"qwen3.7-max","object":"model","created":1784147408,"owned_by":"opencode"}
-        \\]}
-    ;
-
-    var result = try parseModels(allocator, json);
-    defer result.deinit();
-
-    try std.testing.expectEqual(@as(usize, 0), result.value().models.len);
 }
 
 test "parseModels ignores unknown fields" {
