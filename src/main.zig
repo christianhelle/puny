@@ -319,7 +319,7 @@ pub fn main(init: std.process.Init) !void {
                             .oneshot = parsed.oneshot,
                         });
                     } else {
-                        prov.setUrlAndKey(cfg.providerUrl, cfg.apiKey);
+                        prov.setUrlAndKey(new_provider_url, new_api_key);
                     }
                     try stdout_writer.print("Configuration saved and provider updated.\n", .{});
                     try stdout_writer.flush();
