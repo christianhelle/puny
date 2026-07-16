@@ -144,9 +144,7 @@ fn newToolResultBlock(allocator: std.mem.Allocator, tool_use_id: []const u8, con
 }
 
 fn parseToolArguments(allocator: std.mem.Allocator, arguments: []const u8) !std.json.Value {
-    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, arguments, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-    return try parsed.value.clone(allocator);
+    return try std.json.parseFromSliceLeaky(std.json.Value, allocator, arguments, .{ .ignore_unknown_fields = true });
 }
 
 fn anthropicTool(allocator: std.mem.Allocator, tool: openai.ToolDefinition) !std.json.Value {
@@ -155,7 +153,7 @@ fn anthropicTool(allocator: std.mem.Allocator, tool: openai.ToolDefinition) !std
     const function = tool.function.object;
     const name = if (function.get("name")) |v| v.string else return error.MissingToolName;
     const description = if (function.get("description")) |v| v.string else "";
-    const parameters = function.get("parameters") orelse .{ .object = try newObject(allocator) };
+    const parameters = function.get("parameters") orelse std.json.Value{ .object = try newObject(allocator) };
 
     try obj.put(allocator, "name", .{ .string = name });
     try obj.put(allocator, "description", .{ .string = description });
@@ -207,7 +205,7 @@ const BlockType = enum {
 const AnthropicSseCallback = struct {
     allocator: std.mem.Allocator,
     callback: openai.StreamCallback,
-    block_types: std.ArrayList(BlockType),
+    block_types: std.array_list.Managed(BlockType),
     input_tokens: i64 = 0,
 
     pub fn event(self: *@This(), data: []const u8) !void {
@@ -352,7 +350,7 @@ pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequ
         return error.ResponseError;
     }
 
-    var block_types = std.ArrayList(BlockType).init(allocator);
+    var block_types = std.array_list.Managed(BlockType).init(allocator);
     defer block_types.deinit();
 
     var sse = AnthropicSseCallback{
@@ -498,4 +496,186 @@ test "parseModels ignores unknown fields" {
 
     try std.testing.expectEqual(@as(usize, 1), result.value().models.len);
     try std.testing.expectEqualStrings("big-pickle", result.value().models[0].key);
+}
+
+fn sampleToolSchema(allocator: std.mem.Allocator) !std.json.Value {
+    const schema =
+        \\{"name":"read_file","description":"Read a file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}
+    ;
+    return try std.json.parseFromSliceLeaky(std.json.Value, allocator, schema, .{ .ignore_unknown_fields = true });
+}
+
+test "anthropicRequestPayload converts OpenAI request" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const schema = try sampleToolSchema(allocator);
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{
+            .{ .system = "You are helpful." },
+            .{ .user = "Hello" },
+            .{ .assistant = .{ .content = "Hi" } },
+            .{ .assistant = .{
+                .tool_calls = &.{
+                    .{
+                        .id = "call_1",
+                        .function = .{ .name = "read_file", .arguments = "{\"path\":\"src/main.zig\"}" },
+                    },
+                },
+            } },
+            .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } },
+        },
+        .tools = &.{
+            .{ .function = schema },
+        },
+        .stream = true,
+        .temperature = 0.5,
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const obj = parsed.value.object;
+    try std.testing.expectEqualStrings("claude-sonnet-4.6", obj.get("model").?.string);
+    try std.testing.expectEqualStrings("You are helpful.", obj.get("system").?.string);
+    try std.testing.expectEqual(@as(i64, 4096), obj.get("max_tokens").?.integer);
+    try std.testing.expectEqual(@as(f64, 0.5), obj.get("temperature").?.float);
+
+    const messages = obj.get("messages").?.array.items;
+    try std.testing.expectEqual(@as(usize, 4), messages.len);
+
+    try std.testing.expectEqualStrings("user", messages[0].object.get("role").?.string);
+    try std.testing.expectEqualStrings("Hello", messages[0].object.get("content").?.array.items[0].object.get("text").?.string);
+
+    try std.testing.expectEqualStrings("assistant", messages[1].object.get("role").?.string);
+    try std.testing.expectEqualStrings("Hi", messages[1].object.get("content").?.array.items[0].object.get("text").?.string);
+
+    try std.testing.expectEqualStrings("assistant", messages[2].object.get("role").?.string);
+    const tool_use = messages[2].object.get("content").?.array.items[0].object;
+    try std.testing.expectEqualStrings("tool_use", tool_use.get("type").?.string);
+    try std.testing.expectEqualStrings("call_1", tool_use.get("id").?.string);
+    try std.testing.expectEqualStrings("read_file", tool_use.get("name").?.string);
+    try std.testing.expectEqualStrings("src/main.zig", tool_use.get("input").?.object.get("path").?.string);
+
+    try std.testing.expectEqualStrings("user", messages[3].object.get("role").?.string);
+    const tool_result = messages[3].object.get("content").?.array.items[0].object;
+    try std.testing.expectEqualStrings("tool_result", tool_result.get("type").?.string);
+    try std.testing.expectEqualStrings("call_1", tool_result.get("tool_use_id").?.string);
+    try std.testing.expectEqualStrings("file contents", tool_result.get("content").?.string);
+
+    const tools = obj.get("tools").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), tools.len);
+    try std.testing.expectEqualStrings("read_file", tools[0].object.get("name").?.string);
+    try std.testing.expect(tools[0].object.get("input_schema") != null);
+}
+
+const TestEvent = union(enum) {
+    content: []const u8,
+    tool_call_start: struct { index: usize, id: []const u8, name: []const u8 },
+    tool_call_delta: struct { index: usize, arguments: []const u8 },
+    finish: ?[]const u8,
+    usage: openai.TurnUsage,
+};
+
+const TestSseCallback = struct {
+    allocator: std.mem.Allocator,
+    events: *std.array_list.Managed(TestEvent),
+
+    pub fn event(ctx: *anyopaque, ev: openai.StreamEvent) !void {
+        const self: *TestSseCallback = @ptrCast(@alignCast(ctx));
+        switch (ev) {
+            .content => |v| try self.events.append(.{ .content = try self.allocator.dupe(u8, v) }),
+            .tool_call_start => |v| try self.events.append(.{ .tool_call_start = .{
+                .index = v.index,
+                .id = try self.allocator.dupe(u8, v.id),
+                .name = try self.allocator.dupe(u8, v.name),
+            } }),
+            .tool_call_delta => |v| try self.events.append(.{ .tool_call_delta = .{
+                .index = v.index,
+                .arguments = try self.allocator.dupe(u8, v.arguments),
+            } }),
+            .finish => |v| try self.events.append(.{ .finish = if (v) |reason| try self.allocator.dupe(u8, reason) else null }),
+            .usage => |v| try self.events.append(.{ .usage = v }),
+        }
+    }
+};
+
+test "AnthropicSseCallback emits content and usage events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.array_list.Managed(TestEvent).init(allocator);
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const block_types = std.array_list.Managed(BlockType).init(allocator);
+
+    var sse = AnthropicSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .block_types = block_types,
+    };
+
+    try sse.event("{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4.6\",\"content\":[],\"usage\":{\"input_tokens\":10}}}");
+    try sse.event("{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}");
+    try sse.event("{\"type\":\"content_block_stop\",\"index\":0}");
+    try sse.event("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":20}}");
+
+    try std.testing.expectEqual(@as(usize, 4), events.items.len);
+    try std.testing.expectEqualStrings("Hello", events.items[0].content);
+    try std.testing.expectEqualStrings(" world", events.items[1].content);
+    try std.testing.expectEqualStrings("end_turn", events.items[2].finish.?);
+    try std.testing.expectEqual(@as(i64, 10), events.items[3].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 20), events.items[3].usage.output_tokens);
+}
+
+test "AnthropicSseCallback emits tool call events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.array_list.Managed(TestEvent).init(allocator);
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const block_types = std.array_list.Managed(BlockType).init(allocator);
+
+    var sse = AnthropicSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .block_types = block_types,
+    };
+
+    try sse.event("{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"read_file\",\"input\":{}}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"src\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"/main.zig\\\"}\"}}");
+    try sse.event("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":15}}");
+
+    try std.testing.expectEqual(@as(usize, 5), events.items.len);
+    try std.testing.expectEqualStrings("call_1", events.items[0].tool_call_start.id);
+    try std.testing.expectEqualStrings("read_file", events.items[0].tool_call_start.name);
+    try std.testing.expectEqualStrings("{\"path\":\"src", events.items[1].tool_call_delta.arguments);
+    try std.testing.expectEqualStrings("/main.zig\"}", events.items[2].tool_call_delta.arguments);
+    try std.testing.expectEqualStrings("tool_use", events.items[3].finish.?);
+    try std.testing.expectEqual(@as(i64, 15), events.items[4].usage.output_tokens);
 }
