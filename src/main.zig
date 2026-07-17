@@ -410,7 +410,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     try ctx.stdout_writer.flush();
 }
 
-fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: []const u8) !void {
+fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void {
     const model_skip_validation = ctx.parsed.mock;
     if (try model_selection.switchModel(
         ctx.prov,
@@ -537,7 +537,7 @@ pub fn main(init: std.process.Init) !void {
     const system_prompt = try cfg.resolvePrompt(arena, "system", prompts.system);
     try messages.append(.{ .system = system_prompt });
 
-    var pending_prompt = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
+    var pending_prompt: ?[]const u8 = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
     var session_stats = chat.SessionStats.init(arena, io);
     defer session_stats.deinit();
     sigint.register() catch {};
