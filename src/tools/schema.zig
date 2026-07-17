@@ -58,7 +58,12 @@ pub fn fromStruct(allocator: std.mem.Allocator, comptime T: type) !std.json.Valu
     var obj = try newObject(allocator);
     try obj.put(allocator, "type", .{ .string = "object" });
     try obj.put(allocator, "properties", .{ .object = properties });
-    try obj.put(allocator, "required", .{ .array = required });
+    // Gemini's function schema follows the OpenAPI 3.0 subset, which rejects an
+    // empty "required" array with 400 INVALID_ARGUMENT. Omit it when there are
+    // no required properties (harmless and correct for every provider).
+    if (required.items.len > 0) {
+        try obj.put(allocator, "required", .{ .array = required });
+    }
     return .{ .object = obj };
 }
 
@@ -105,6 +110,22 @@ test "schema generation" {
 
     const required = params.get("required").?.array;
     try std.testing.expectEqual(@as(usize, 4), required.items.len);
+}
+
+const AllOptionalParams = struct {
+    path: ?[]const u8 = null,
+    staged: ?bool = null,
+};
+
+test "schema omits empty required array" {
+    const Schema = ToolDefinition("all_optional", "All params optional.", AllOptionalParams);
+    const schema_value = try Schema.schema(std.testing.allocator);
+    defer freeSchema(std.testing.allocator, schema_value);
+
+    const params = schema_value.object.get("parameters").?.object;
+    try std.testing.expect(params.get("properties").?.object.count() == 2);
+    // Gemini rejects "required": [] with 400 INVALID_ARGUMENT, so it must be absent.
+    try std.testing.expect(params.get("required") == null);
 }
 
 fn freeSchema(allocator: std.mem.Allocator, value: std.json.Value) void {
