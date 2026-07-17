@@ -154,6 +154,87 @@ fn promptReconfigure(
     return result;
 }
 
+fn initializeProviderAndModel(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init,
+    parsed: cli.Options,
+    cfg: *config.Config,
+    stdout_writer: *std.Io.Writer,
+    random: std.Random,
+    prov: *provider.Provider,
+    provider_name: *[]const u8,
+    provider_url: *[]const u8,
+    model_key: *[]const u8,
+) !void {
+    provider_name.* = effectiveProvider(parsed, cfg.*);
+    provider_url.* = if (parsed.mock) "-" else baseUrlFor(provider_name.*, parsed, cfg.*);
+    const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
+
+    if (!parsed.mock and requiresApiKey(provider_name.*) and api_key.len == 0) {
+        var stderr_buffer: [1024]u8 = undefined;
+        var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+        const stderr_writer = &stderr_file_writer.interface;
+        stderr_writer.print(
+            "Provider '{s}' requires an API key. Set one with --api-key, PUNY_API_KEY, or --reconfigure.\n",
+            .{providerDisplayName(provider_name.*)},
+        ) catch {};
+        stderr_writer.flush() catch {};
+        return error.MissingApiKey;
+    }
+
+    const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
+    const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
+
+    prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, arena, io);
+
+    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
+        u8,
+        provider_url.*,
+        config.default_lm_studio_url,
+    );
+    model_key.* = (try model_selection.select(
+        prov,
+        configured_model,
+        arena,
+        io,
+        init,
+        skip_validation,
+        cfg,
+        init.environ_map,
+        random,
+    )) orelse blk: {
+        if (configured_model) |model_id| {
+            try stdout_writer.print(
+                "Model '{s}' not found in running models. Showing picker.\n",
+                .{model_id},
+            );
+        }
+        break :blk (try model_selection.select(
+            prov,
+            null,
+            arena,
+            io,
+            init,
+            false,
+            cfg,
+            init.environ_map,
+            random,
+        )) orelse {
+            try stdout_writer.print("No model selected.\n", .{});
+            return;
+        };
+    };
+
+    try welcome.print(stdout_writer, .{
+        .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name.*),
+        .provider_url = provider_url.*,
+        .model_key = model_key.*,
+        .oneshot = parsed.oneshot,
+        .prefilled = parsed.prompt != null,
+    });
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
@@ -178,73 +259,24 @@ pub fn main(init: std.process.Init) !void {
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
-    var provider_name = effectiveProvider(parsed, cfg.*);
-    var provider_url = if (parsed.mock) "-" else baseUrlFor(provider_name, parsed, cfg.*);
-    const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
-
-    if (!parsed.mock and requiresApiKey(provider_name) and api_key.len == 0) {
-        var stderr_buffer: [1024]u8 = undefined;
-        var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-        const stderr_writer = &stderr_file_writer.interface;
-        stderr_writer.print(
-            "Provider '{s}' requires an API key. Set one with --api-key, PUNY_API_KEY, or --reconfigure.\n",
-            .{providerDisplayName(provider_name)},
-        ) catch {};
-        stderr_writer.flush() catch {};
-        return error.MissingApiKey;
-    }
-
-    const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
-    const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
-
-    var prov = createProvider(parsed.mock, provider_name, provider_url, api_key, arena, io);
-    defer prov.deinit();
-
-    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
-        u8,
-        provider_url,
-        config.default_lm_studio_url,
-    );
-    var model_key = (try model_selection.select(
-        &prov,
-        configured_model,
+    var prov: provider.Provider = undefined;
+    var provider_name: []const u8 = undefined;
+    var provider_url: []const u8 = undefined;
+    var model_key: []const u8 = undefined;
+    try initializeProviderAndModel(
         arena,
         io,
         init,
-        skip_validation,
+        parsed,
         cfg,
-        init.environ_map,
+        stdout_writer,
         random,
-    )) orelse blk: {
-        if (configured_model) |model_id| {
-            try stdout_writer.print(
-                "Model '{s}' not found in running models. Showing picker.\n",
-                .{model_id},
-            );
-        }
-        break :blk (try model_selection.select(
-            &prov,
-            null,
-            arena,
-            io,
-            init,
-            false,
-            cfg,
-            init.environ_map,
-            random,
-        )) orelse {
-            try stdout_writer.print("No model selected.\n", .{});
-            return;
-        };
-    };
-
-    try welcome.print(stdout_writer, .{
-        .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name),
-        .provider_url = provider_url,
-        .model_key = model_key,
-        .oneshot = parsed.oneshot,
-        .prefilled = parsed.prompt != null,
-    });
+        &prov,
+        &provider_name,
+        &provider_url,
+        &model_key,
+    );
+    defer prov.deinit();
 
     var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
     defer full_tool_definitions.deinit();
