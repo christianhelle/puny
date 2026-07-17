@@ -110,17 +110,17 @@ pub fn printHelp(io: std.Io) void {
         \\Usage: puny [options]
         \\
         \\Options:
-        \\      --provider <name>    Provider to use: lmstudio or opencode (env/config/CLI precedence)
-        \\  -u, --url <url>        LM Studio endpoint URL (config/env/CLI precedence)
-        \\  -k, --api-key <key>    Provider API token (env/CLI precedence, session only)
-        \\      --api-key-file <path>  Read API token from file
-        \\  -m, --model <id>       Model identifier (skip picker if found in running models)
-        \\  -p, --prompt <text>    Pre-fill prompt as first user message
-        \\  -1, --oneshot, --one-shot  Exit after processing the prompt (requires --prompt)
-        \\  -M, --mock             Use mock provider (no LM Studio required)
-        \\      --reconfigure      Re-run first-run setup and update config
-        \\  -h, --help             Show this help text
-        \\  -V, --version          Print version
+        \\      --provider <name>       Provider to use: lmstudio or opencode (env/config/CLI precedence)
+        \\  -u, --url <url>             LM Studio endpoint URL (config/env/CLI precedence)
+        \\  -k, --api-key <key>         Provider API token (env/CLI precedence, session only)
+        \\      --api-key-file <path>   Read API token from file
+        \\  -m, --model <id>            Model identifier (skip picker if found in running models)
+        \\  -p, --prompt <text>         Pre-fill prompt as first user message
+        \\  -1, --oneshot, --one-shot   Exit after processing the prompt (requires --prompt)
+        \\  -M, --mock                  Use mock provider (no LM Studio required)
+        \\      --reconfigure           Re-run first-run setup and update config
+        \\  -h, --help                  Show this help text
+        \\  -V, --version               Print version
         \\
     , .{version_line});
 }
