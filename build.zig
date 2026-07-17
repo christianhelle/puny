@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const docker = b.option(bool, "docker", "Build for Docker container") orelse false;
@@ -8,15 +8,7 @@ pub fn build(b: *std.Build) void {
     const build_options = createBuildInfoOptions(b);
     build_options.addOption(bool, "docker", docker);
 
-    const exe = b.addExecutable(.{
-        .name = "puny",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    exe.root_module.addOptions("build_options", build_options);
+    const exe = addPunyExecutable(b, "puny", target, optimize, build_options);
 
     b.installArtifact(exe);
 
@@ -47,6 +39,63 @@ pub fn build(b: *std.Build) void {
     });
     docker_step.dependOn(&docker_build.step);
 
+    const test_regression_step = b.step("test-regression", "Run cross-platform builds, unit tests, and regression tests");
+
+    const cross_targets = [_][]const u8{
+        "x86_64-linux",
+        "aarch64-linux",
+        "x86_64-macos",
+        "aarch64-macos",
+        "x86_64-windows-gnu",
+    };
+
+    for (cross_targets) |triple| {
+        const cross_query = try std.Target.Query.parse(.{ .arch_os_abi = triple });
+        const cross_target = b.resolveTargetQuery(cross_query);
+        const cross_exe = addPunyExecutable(b, b.fmt("puny-{s}", .{triple}), cross_target, optimize, build_options);
+        const cross_step = b.step(b.fmt("build-{s}", .{triple}), b.fmt("Build for {s}", .{triple}));
+        cross_step.dependOn(&cross_exe.step);
+        test_regression_step.dependOn(cross_step);
+    }
+
+    const native_build_step = b.step("build-native", "Build native binary");
+    native_build_step.dependOn(&exe.step);
+    test_regression_step.dependOn(native_build_step);
+
+    test_regression_step.dependOn(test_step);
+
+    const regression_checker = b.addExecutable(.{
+        .name = "regression_checker",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/regression_checker.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+
+    const run_regression = b.addRunArtifact(regression_checker);
+    run_regression.addArtifactArg(exe);
+    run_regression.addFileArg(b.path("tests/regression.json"));
+    test_regression_step.dependOn(&run_regression.step);
+}
+
+fn addPunyExecutable(
+    b: *std.Build,
+    name: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    build_options: *std.Build.Step.Options,
+) *std.Build.Step.Compile {
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    exe.root_module.addOptions("build_options", build_options);
+
     const zigzag = b.dependency("zigzag", .{
         .target = target,
         .optimize = optimize,
@@ -57,6 +106,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }));
+
+    return exe;
 }
 
 fn createBuildInfoOptions(b: *std.Build) *std.Build.Step.Options {
