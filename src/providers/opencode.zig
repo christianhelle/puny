@@ -518,17 +518,21 @@ fn googleFunctionDeclaration(allocator: std.mem.Allocator, tool: openai.ToolDefi
     return .{ .object = obj };
 }
 
-fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u8) []const u8 {
-    for (messages) |msg| switch (msg) {
-        .assistant => |assistant| {
-            if (assistant.tool_calls) |tool_calls| {
-                for (tool_calls) |tc| {
-                    if (std.mem.eql(u8, tc.id, tool_call_id)) return tc.function.name;
+fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u8, before_index: usize) []const u8 {
+    var idx = @min(before_index, messages.len);
+    while (idx > 0) : (idx -= 1) {
+        const msg = messages[idx - 1];
+        switch (msg) {
+            .assistant => |assistant| {
+                if (assistant.tool_calls) |tool_calls| {
+                    for (tool_calls) |tc| {
+                        if (std.mem.eql(u8, tc.id, tool_call_id)) return tc.function.name;
+                    }
                 }
-            }
-        },
-        else => {},
-    };
+            },
+            else => {},
+        }
+    }
     return tool_call_id;
 }
 
@@ -576,7 +580,7 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
                 var parts = try std.json.Array.initCapacity(allocator, 1);
                 while (i < request.messages.len and std.meta.activeTag(request.messages[i]) == .tool) {
                     const tool = request.messages[i].tool;
-                    const name = googleToolNameForId(request.messages, tool.tool_call_id);
+                    const name = googleToolNameForId(request.messages, tool.tool_call_id, i);
                     try parts.append(try googleFunctionResponsePart(allocator, name, tool.content));
                     i += 1;
                 }
@@ -1055,6 +1059,27 @@ test "googleRequestPayload converts OpenAI request" {
     const declarations = tools[0].object.get("functionDeclarations").?.array.items;
     try std.testing.expectEqualStrings("read_file", declarations[0].object.get("name").?.string);
     try std.testing.expect(declarations[0].object.get("parameters") != null);
+}
+
+test "googleToolNameForId prefers the nearest prior assistant tool call" {
+    const messages: []const openai.Message = &.{
+        .{ .assistant = .{
+            .tool_calls = &.{
+                .{ .id = "call_0", .function = .{ .name = "read_file", .arguments = "{}" } },
+            },
+        } },
+        .{ .tool = .{ .tool_call_id = "call_0", .content = "old result" } },
+        .{ .assistant = .{
+            .tool_calls = &.{
+                .{ .id = "call_0", .function = .{ .name = "grep_search", .arguments = "{}" } },
+            },
+        } },
+        .{ .tool = .{ .tool_call_id = "call_0", .content = "new result" } },
+    };
+
+    try std.testing.expectEqualStrings("read_file", googleToolNameForId(messages, "call_0", 1));
+    try std.testing.expectEqualStrings("grep_search", googleToolNameForId(messages, "call_0", 3));
+    try std.testing.expectEqualStrings("call_404", googleToolNameForId(messages, "call_404", messages.len));
 }
 
 test "GoogleSseCallback emits content and usage events" {
