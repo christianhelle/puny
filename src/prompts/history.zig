@@ -56,15 +56,27 @@ pub const History = struct {
     pub fn save(self: *const History, io: std.Io) !void {
         const dir = std.fs.path.dirname(self.path) orelse return error.BadPath;
         const cwd = std.Io.Dir.cwd();
-        try cwd.createDirPath(io, dir);
+        cwd.createDirPath(io, dir) catch |err| {
+            std.log.warn("failed to create prompt history directory {s}: {s}. history will not be saved.", .{ dir, @errorName(err) });
+            return;
+        };
 
         const buffer = try std.json.Stringify.valueAlloc(self.allocator, self.entries.items, .{ .whitespace = .indent_2 });
         defer self.allocator.free(buffer);
 
-        var file = try cwd.createFile(io, self.path, .{});
+        var file = cwd.createFile(io, self.path, .{}) catch |err| {
+            std.log.warn("failed to create prompt history file {s}: {s}. history will not be saved.", .{ self.path, @errorName(err) });
+            return;
+        };
         defer file.close(io);
-        try file.writeStreamingAll(io, buffer);
-        try file.writeStreamingAll(io, "\n");
+        file.writeStreamingAll(io, buffer) catch |err| {
+            std.log.warn("failed to write prompt history to {s}: {s}.", .{ self.path, @errorName(err) });
+            return;
+        };
+        file.writeStreamingAll(io, "\n") catch |err| {
+            std.log.warn("failed to write prompt history to {s}: {s}.", .{ self.path, @errorName(err) });
+            return;
+        };
     }
 
     pub fn add(self: *History, text: []const u8) !void {
