@@ -29,7 +29,7 @@ fn isValidProvider(name: []const u8) bool {
 
 fn defaultProviderUrl(provider_name: []const u8) []const u8 {
     if (std.mem.eql(u8, provider_name, "opencode")) return opencode.default_base_url;
-    return "http://127.0.0.1:1234";
+    return config.default_lm_studio_url;
 }
 
 fn promptReconfigure(
@@ -179,7 +179,7 @@ pub fn main(init: std.process.Init) !void {
     var prov = createProvider(parsed.mock, provider_name, provider_url, api_key, arena, io);
     defer prov.deinit();
 
-    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234");
+    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, config.default_lm_studio_url);
     var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation, cfg, init.environ_map, random)) orelse blk: {
         if (configured_model) |model_id| {
             try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
@@ -307,7 +307,7 @@ pub fn main(init: std.process.Init) !void {
                         provider_name = new_provider_name;
                         provider_url = new_provider_url;
 
-                        const model_skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, "http://127.0.0.1:1234");
+                        const model_skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, config.default_lm_studio_url);
                         if (try model_selection.select(&prov, null, arena, io, init, model_skip_validation, cfg, init.environ_map, random)) |new_key| {
                             model_key = new_key;
                         }
@@ -378,7 +378,7 @@ fn baseUrlFor(provider_name: []const u8, parsed: cli.Options, cfg: config.Config
     if (std.mem.eql(u8, cfg.provider, provider_name) and cfg.providerUrl.len > 0) {
         return cfg.providerUrl;
     }
-    return "http://127.0.0.1:1234";
+    return config.default_lm_studio_url;
 }
 
 fn requiresApiKey(provider_name: []const u8) bool {
