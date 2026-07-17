@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Basic text response",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "hello world", "--oneshot"],
+    "expect": ["mock response", "hello world"],
+    "not_expect": []
+  },
+  {
+    "name": "Tool call: read_file",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "read the code", "--oneshot"],
+    "expect": ["Reading", "Tool executed"],
+    "not_expect": []
+  },
+  {
+    "name": "Tool call: grep_search",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "search for pattern", "--oneshot"],
+    "expect": ["grep_search", "Tool executed"],
+    "not_expect": []
+  },
+  {
+    "name": "Tool call: execute_shell",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "run a command", "--oneshot"],
+    "expect": ["Running", "Tool executed"],
+    "not_expect": []
+  },
+  {
+    "name": "Error does not produce content",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "trigger an error", "--oneshot"],
+    "expect": ["Chat failed"],
+    "not_expect": ["mock response"]
+  }
+]
