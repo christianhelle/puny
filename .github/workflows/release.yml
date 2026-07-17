@@ -1,60 +1,61 @@
 name: Release
 
 on:
-  workflow_dispatch:
   push:
-    tags: ["v*.*.*"]
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., v1.0.0)"
+        required: true
+        type: string
 
-permissions:
-  contents: write
+env:
+  ZIG_VERSION: "0.16.0"
 
 jobs:
   build:
-    name: Build (${{ matrix.target }})
+    name: Build Release
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-linux
-            artifact_name: puny-x86_64-linux.tar.gz
-            binary_name: "puny"
-
-          - os: ubuntu-latest
-            target: aarch64-linux
-            artifact_name: puny-aarch64-linux.tar.gz
-            binary_name: "puny"
-
+            binary_name: puny
+            archive_name: puny-linux-x86_64.tar.gz
+          - os: windows-latest
+            target: x86_64-windows
+            binary_name: puny.exe
+            archive_name: puny-windows-x86_64.zip
           - os: macos-latest
             target: x86_64-macos
-            artifact_name: puny-x86_64-macos.tar.gz
-            binary_name: "puny"
-
-          - os: macos-14 # M1 runner
+            binary_name: puny
+            archive_name: puny-macos-x86_64.tar.gz
+          - os: macos-latest
             target: aarch64-macos
-            artifact_name: puny-aarch64-macos.tar.gz
-            binary_name: "puny"
-
-          - os: windows-latest
-            target: x86_64-windows-gnu
-            artifact_name: puny-x86_64-windows.zip
-            binary_name: "puny.exe"
+            binary_name: puny
+            archive_name: puny-macos-aarch64.tar.gz
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # Zig setup
-      - name: Set up Zig 0.16.0
+      - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.ZIG_VERSION }}
 
-      # Install cross-compilation deps for aarch64-linux
-      - name: Install Linux aarch64 deps (cross)
-        if: matrix.target == 'aarch64-linux'
-        run: |
-          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/zig
+            zig-cache
+          key: ${{ runner.os }}-zig-release-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-release-
 
       - name: Build release binary
         run: |
@@ -68,7 +69,7 @@ jobs:
           cp README.md release/
           cp LICENSE release/
           cd release
-          tar -czf ../${{ matrix.artifact_name }} *
+          tar -czf ../${{ matrix.archive_name }} *
 
       - name: Create archive (Windows)
         if: matrix.os == 'windows-latest'
@@ -77,7 +78,7 @@ jobs:
           copy zig-out\bin\${{ matrix.binary_name }} release\
           copy README.md release\
           copy LICENSE release\
-          Compress-Archive -Path release\* -DestinationPath ${{ matrix.artifact_name }}
+          Compress-Archive -Path release\* -DestinationPath ${{ matrix.archive_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -85,12 +86,21 @@ jobs:
           name: ${{ matrix.archive_name }}
           path: ${{ matrix.archive_name }}
 
-  publish-release:
-    needs: build
+  release:
     name: Create Release
+    needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Get version
         id: version
@@ -101,9 +111,16 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
+      - name: Generate changelog
+        id: changelog
+        run: |
+          if [ -f CHANGELOG.md ]; then
+            echo "changelog<<EOF" >> $GITHUB_OUTPUT
+            cat CHANGELOG.md | head -n 50 >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "changelog=Release ${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -126,4 +143,77 @@ jobs:
             See the attached checksums file for verification.
           files: |
             artifacts/**/*
-          draft: true
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+
+  publish-container:
+    name: Publish Container
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: puny-linux-x86_64.tar.gz
+          path: artifacts
+
+      - name: Extract binary
+        run: |
+          cd artifacts
+          tar -xzf puny-linux-x86_64.tar.gz
+          chmod +x puny
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+            ${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
