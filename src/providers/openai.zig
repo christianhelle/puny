@@ -161,7 +161,7 @@ const StreamChunk = struct {
     usage: ?UsageJson = null,
 };
 
-const SseCallback = struct {
+pub const SseCallback = struct {
     allocator: std.mem.Allocator,
     callback: StreamCallback,
 
@@ -305,7 +305,7 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
     };
 }
 
-fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
+pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
     var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
     for (request.messages) |msg| {
         try messages.append(try msg.toJson(allocator));
