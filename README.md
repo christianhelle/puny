@@ -5,12 +5,13 @@ A minimal AI coding agent for the terminal.
 Currently supports the following model providers, with OpenAI, Anthropic, and Google (Gemini) API compatible models:
 - [LM Studio](https://lmstudio.ai/) 
 - [OpenCode Zen](https://opencode.ai/zen)
+- [GitHub Copilot](https://github.com/features/copilot)
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
 ## Features
 
-- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen.
+- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen or your GitHub Copilot subscription.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
@@ -50,6 +51,28 @@ Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions`
 transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models), 
 plus Qwen and Claude models served over Anthropic's `/v1/messages` transport, 
 and Gemini models served over Google's `/v1/models/<model>:streamGenerateContent` transport.
+
+### GitHub Copilot
+
+Drive Puny with your existing [GitHub Copilot](https://github.com/features/copilot) subscription:
+
+```bash
+puny --provider copilot
+```
+
+Puny resolves a GitHub OAuth token in this order:
+
+1. A token you supply manually via `--api-key`, `--api-key-file`, `PUNY_API_KEY`,
+   `config.json`, or the `GITHUB_COPILOT_OAUTH_TOKEN` environment variable.
+2. Auto-discovery of an existing token from the GitHub Copilot editor plugin
+   (`apps.json`/`hosts.json`) or from OpenCode's `auth.json`.
+3. An interactive device-flow login: Puny prints a code and a URL to open in your
+   browser, then persists the acquired token to `config.json` for future runs.
+
+It then exchanges that OAuth token for a short-lived Copilot token and shows the model
+picker. Only chat-capable models from your subscription are listed. The general-purpose
+`GH_TOKEN`/`GITHUB_TOKEN` environment variables are intentionally **not** used, so an
+unrelated GitHub token can't break the exchange.
 
 ## Docker
 
@@ -99,6 +122,15 @@ docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny
 
 ```bash
 docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode --api-key YOUR_API_KEY
+```
+
+### GitHub Copilot
+
+Pass a discovered or manually issued GitHub OAuth token via `PUNY_API_KEY` (device-flow
+login needs an interactive terminal):
+
+```bash
+docker run -it --mount "type=bind,source=${PWD},target=/app" -e PUNY_API_KEY=YOUR_GITHUB_TOKEN christianhelle/puny --provider copilot
 ```
 
 ### Available tags
@@ -168,7 +200,7 @@ puny --prompt "List all source files" --oneshot
 
 ### Select a provider
 
-Use `--provider` to switch between LM Studio (`lmstudio`, the default) and OpenCode Zen (`opencode`). You can also set `PUNY_PROVIDER` or the `provider` field in `config.json`.
+Use `--provider` to switch between LM Studio (`lmstudio`, the default), OpenCode Zen (`opencode`), and GitHub Copilot (`copilot`). You can also set `PUNY_PROVIDER` or the `provider` field in `config.json`.
 
 ```bash
 puny --provider opencode --api-key YOUR_API_KEY
@@ -207,6 +239,11 @@ Precedence is: `--api-key` > `--api-key-file` > `PUNY_API_KEY` > `config.json`.
 
 OpenCode Zen requires an API key. Puny exits early with a hint if the key is missing.
 
+GitHub Copilot does not need an API key up front — Puny discovers an existing GitHub
+OAuth token or runs a device-flow login on first use, then persists it. You can still
+supply a token manually (via `--api-key`, `PUNY_API_KEY`, or `GITHUB_COPILOT_OAUTH_TOKEN`)
+to skip discovery and login.
+
 ### Save provider and API key to config
 
 Run `--reconfigure` to choose a provider and save its URL and API key to `config.json`:
@@ -217,13 +254,13 @@ puny --reconfigure
 
 You will be prompted for:
 
-1. **Provider** — `lmstudio` or `opencode`.
-2. **Provider URL** — press Enter to use the provider's default. (OpenCode Zen's URL is fixed at `https://opencode.ai/zen`.)
+1. **Provider** — `lmstudio`, `opencode`, or `copilot`.
+2. **Provider URL** — press Enter to use the provider's default. (OpenCode Zen's URL is fixed at `https://opencode.ai/zen`; GitHub Copilot's is fixed at `https://api.githubcopilot.com`.)
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
 Once saved, Puny uses the stored provider and key on subsequent runs, so you only need to pass `--provider` or `--api-key` again if you want to override them for a single session. If an OpenCode Zen request fails with an authentication error, Puny prints an auth hint; use `--reconfigure` to update the key.
 
-`--url` and `PUNY_PROVIDER_URL` only affect LM Studio; OpenCode Zen always uses `https://opencode.ai/zen`.
+`--url` and `PUNY_PROVIDER_URL` only affect LM Studio; OpenCode Zen always uses `https://opencode.ai/zen` and GitHub Copilot always uses `https://api.githubcopilot.com`.
 
 ## Tool calling
 
@@ -249,7 +286,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 | Flag                       | Description                                                |
 | -------------------------- | ---------------------------------------------------------- |
-| `--provider <name>`        | Provider: `lmstudio` or `opencode` (env/config/CLI precedence) |
+| `--provider <name>`        | Provider: `lmstudio`, `opencode`, or `copilot` (env/config/CLI precedence) |
 | `-u`, `--url <url>`        | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
 | `-k`, `--api-key <key>`    | Provider API token (session only)                          |
 | `--api-key-file <path>`    | Read provider API token from file (session only)           |
