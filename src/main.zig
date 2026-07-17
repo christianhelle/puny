@@ -272,7 +272,7 @@ fn ensureCopilotAuth(
         return;
     }
 
-    const token = (try client.deviceLogin(stdout_writer)) orelse return error.MissingApiKey;
+    const token = (try copilot.deviceLogin(client, stdout_writer)) orelse return error.MissingApiKey;
     client.setGithubToken(token);
 
     cfg.apiKey = try arena.dupe(u8, token);
