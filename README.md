@@ -74,7 +74,7 @@ docker pull ghcr.io/christianhelle/puny:latest
 Mount your project directory into `/app` and allocate a TTY so Puny can read and edit files:
 
 ```bash
-docker run -it -v "$PWD":/app christianhelle/puny
+docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny
 ```
 
 Puny starts in the current directory and shows the model picker.
@@ -84,7 +84,7 @@ Puny starts in the current directory and shows the model picker.
 Run a single prompt and exit:
 
 ```bash
-docker run -v "$PWD":/app christianhelle/puny --prompt "List all source files" --oneshot
+docker run --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --prompt "List all source files" --oneshot
 ```
 
 ### LM Studio
@@ -92,13 +92,13 @@ docker run -v "$PWD":/app christianhelle/puny --prompt "List all source files" -
 LM Studio must be reachable from inside the container. If it is running on the Docker host, use the host's address or `host.docker.internal` on Docker Desktop:
 
 ```bash
-docker run -it -v "$PWD":/app christianhelle/puny --url http://host.docker.internal:1234
+docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --url http://host.docker.internal:1234
 ```
 
 ### OpenCode Zen
 
 ```bash
-docker run -it -v "$PWD":/app christianhelle/puny --provider opencode --api-key YOUR_API_KEY
+docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode --api-key YOUR_API_KEY
 ```
 
 ### Available tags
@@ -109,10 +109,10 @@ docker run -it -v "$PWD":/app christianhelle/puny --provider opencode --api-key 
 
 ### Build the image locally
 
-The Dockerfile expects the compiled binary at `artifacts/puny`:
+The Dockerfile expects a Linux binary at `artifacts/puny`. Build it for the container target:
 
 ```bash
-zig build
+zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-linux
 mkdir -p artifacts
 cp zig-out/bin/puny artifacts/puny
 docker build -t puny:local .
@@ -121,7 +121,7 @@ docker build -t puny:local .
 Run the locally built image the same way as the published one:
 
 ```bash
-docker run -it -v "$PWD":/app puny:local
+docker run -it --mount "type=bind,source=${PWD},target=/app" puny:local
 ```
 
 ### API key security
