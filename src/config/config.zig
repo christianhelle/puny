@@ -1,5 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
+
+pub const default_lm_studio_url = if (build_options.docker) "http://host.docker.internal:1234" else "http://127.0.0.1:1234";
 
 pub const PromptOverride = struct {
     prefix: []const u8 = "",
@@ -40,7 +43,7 @@ pub const PromptsConfig = struct {
 
 pub const Config = struct {
     provider: []const u8 = "lmstudio",
-    providerUrl: []const u8 = "http://127.0.0.1:1234",
+    providerUrl: []const u8 = default_lm_studio_url,
     apiKey: []const u8 = "",
     model: []const u8 = "",
     prompts: PromptsConfig = .{},
