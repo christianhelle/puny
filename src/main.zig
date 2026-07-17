@@ -23,6 +23,98 @@ const ReconfigurePrompt = struct {
     cancelled: bool = false,
 };
 
+pub fn main(init: std.process.Init) !void {
+    const arena: std.mem.Allocator = init.arena.allocator();
+    const io = init.io;
+
+    const args_slice = try init.minimal.args.toSlice(arena);
+    const parsed = cli.parseArgs(io, init.environ_map, args_slice);
+
+    var cfg_result = try config.load(arena, io, init.environ_map);
+    const cfg = &cfg_result.config;
+
+    var history = try loadHistory(arena, io, init.environ_map);
+    defer history.deinit();
+
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    const stdout_writer = &stdout_file_writer.interface;
+
+    if (parsed.reconfigure) {
+        try runStartupReconfigure(arena, io, init, cfg, stdout_writer);
+    }
+
+    var random_source: std.Random.IoSource = .{ .io = io };
+    const random = random_source.interface();
+
+    var prov: provider.Provider = undefined;
+    var provider_name: []const u8 = undefined;
+    var provider_url: []const u8 = undefined;
+    var model_key: []const u8 = undefined;
+    try initializeProviderAndModel(
+        arena,
+        io,
+        init,
+        parsed,
+        cfg,
+        stdout_writer,
+        random,
+        &prov,
+        &provider_name,
+        &provider_url,
+        &model_key,
+    );
+    defer prov.deinit();
+
+    var full_tool_definitions = try buildToolDefinitions(arena);
+    defer full_tool_definitions.deinit();
+
+    var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
+    defer planning_tool_definitions.deinit();
+
+    var stdin_buffer: [4096]u8 = undefined;
+
+    var planning_mode = false;
+
+    var messages = std.array_list.Managed(openai.Message).init(arena);
+    defer messages.deinit();
+    const system_prompt = try cfg.resolvePrompt(arena, "system", prompts.system);
+    try messages.append(.{ .system = system_prompt });
+
+    var pending_prompt: ?[]const u8 = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
+    var session_stats = chat.SessionStats.init(arena, io);
+    defer session_stats.deinit();
+    sigint.register() catch {};
+
+    var line_alloc: std.Io.Writer.Allocating = .init(arena);
+    defer line_alloc.deinit();
+
+    var ctx = ChatLoopContext{
+        .arena = arena,
+        .io = io,
+        .init = init,
+        .parsed = parsed,
+        .cfg = cfg,
+        .stdout_writer = stdout_writer,
+        .random = random,
+        .history = &history,
+        .prov = &prov,
+        .provider_name = &provider_name,
+        .provider_url = &provider_url,
+        .model_key = &model_key,
+        .full_tool_definitions = &full_tool_definitions,
+        .planning_tool_definitions = &planning_tool_definitions,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .pending_prompt = &pending_prompt,
+        .session_stats = &session_stats,
+        .line_alloc = &line_alloc,
+        .stdin_buffer = &stdin_buffer,
+    };
+
+    try runChatLoop(&ctx);
+}
+
 fn isValidProvider(name: []const u8) bool {
     return std.mem.eql(u8, name, "lmstudio") or std.mem.eql(u8, name, "opencode");
 }
@@ -477,98 +569,6 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
         const turn_result = try runChatTurn(ctx);
         if (turn_result == .exit) return;
     }
-}
-
-pub fn main(init: std.process.Init) !void {
-    const arena: std.mem.Allocator = init.arena.allocator();
-    const io = init.io;
-
-    const args_slice = try init.minimal.args.toSlice(arena);
-    const parsed = cli.parseArgs(io, init.environ_map, args_slice);
-
-    var cfg_result = try config.load(arena, io, init.environ_map);
-    const cfg = &cfg_result.config;
-
-    var history = try loadHistory(arena, io, init.environ_map);
-    defer history.deinit();
-
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
-
-    if (parsed.reconfigure) {
-        try runStartupReconfigure(arena, io, init, cfg, stdout_writer);
-    }
-
-    var random_source: std.Random.IoSource = .{ .io = io };
-    const random = random_source.interface();
-
-    var prov: provider.Provider = undefined;
-    var provider_name: []const u8 = undefined;
-    var provider_url: []const u8 = undefined;
-    var model_key: []const u8 = undefined;
-    try initializeProviderAndModel(
-        arena,
-        io,
-        init,
-        parsed,
-        cfg,
-        stdout_writer,
-        random,
-        &prov,
-        &provider_name,
-        &provider_url,
-        &model_key,
-    );
-    defer prov.deinit();
-
-    var full_tool_definitions = try buildToolDefinitions(arena);
-    defer full_tool_definitions.deinit();
-
-    var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
-    defer planning_tool_definitions.deinit();
-
-    var stdin_buffer: [4096]u8 = undefined;
-
-    var planning_mode = false;
-
-    var messages = std.array_list.Managed(openai.Message).init(arena);
-    defer messages.deinit();
-    const system_prompt = try cfg.resolvePrompt(arena, "system", prompts.system);
-    try messages.append(.{ .system = system_prompt });
-
-    var pending_prompt: ?[]const u8 = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
-    var session_stats = chat.SessionStats.init(arena, io);
-    defer session_stats.deinit();
-    sigint.register() catch {};
-
-    var line_alloc: std.Io.Writer.Allocating = .init(arena);
-    defer line_alloc.deinit();
-
-    var ctx = ChatLoopContext{
-        .arena = arena,
-        .io = io,
-        .init = init,
-        .parsed = parsed,
-        .cfg = cfg,
-        .stdout_writer = stdout_writer,
-        .random = random,
-        .history = &history,
-        .prov = &prov,
-        .provider_name = &provider_name,
-        .provider_url = &provider_url,
-        .model_key = &model_key,
-        .full_tool_definitions = &full_tool_definitions,
-        .planning_tool_definitions = &planning_tool_definitions,
-        .messages = &messages,
-        .planning_mode = &planning_mode,
-        .pending_prompt = &pending_prompt,
-        .session_stats = &session_stats,
-        .line_alloc = &line_alloc,
-        .stdin_buffer = &stdin_buffer,
-    };
-
-    try runChatLoop(&ctx);
 }
 
 fn effectiveProvider(parsed: cli.Options, cfg: config.Config) []const u8 {
