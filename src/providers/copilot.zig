@@ -100,10 +100,16 @@ fn tokenNeedsRefresh(expires_at: i64, now: i64) bool {
     return now >= expires_at - token_refresh_buffer_seconds;
 }
 
+/// Current wall-clock time in seconds since the Unix epoch. The Copilot API returns
+/// token expiries as Unix timestamps, so refresh decisions compare against this.
+fn nowUnixSeconds(io: std.Io) i64 {
+    return std.Io.Timestamp.now(io, .real).toSeconds();
+}
+
 /// Exchange the GitHub OAuth token for a Copilot token, caching it until shortly
 /// before it expires. Returns the currently valid Copilot token.
 pub fn ensureCopilotToken(self: *Client) ![]const u8 {
-    const now = std.time.timestamp();
+    const now = nowUnixSeconds(self.inner.io);
     if (self.copilot_token) |token| {
         if (!tokenNeedsRefresh(self.copilot_token_expires_at, now)) return token;
     }
@@ -669,9 +675,9 @@ pub fn deviceLogin(self: *Client, stdout_writer: *std.Io.Writer) !?[]const u8 {
     try stdout_writer.flush();
 
     var interval_s: i64 = if (device.interval > 0) device.interval else 5;
-    const deadline = std.time.timestamp() + (if (device.expires_in > 0) device.expires_in else 900);
+    const deadline = nowUnixSeconds(self.inner.io) + (if (device.expires_in > 0) device.expires_in else 900);
 
-    while (std.time.timestamp() < deadline) {
+    while (nowUnixSeconds(self.inner.io) < deadline) {
         sleepSeconds(self.inner.io, interval_s + 1);
 
         const poll_body = try std.fmt.allocPrint(
