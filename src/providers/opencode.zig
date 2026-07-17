@@ -564,12 +564,13 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
             .tool => {
                 // Coalesce consecutive tool results into a single user turn so the
                 // conversation keeps alternating user/model, as Gemini expects.
-                var parts = try std.json.Array.initCapacity(allocator, 1);
+                var parts = try std.json.Array.initCapacity(allocator, 2);
                 while (i < request.messages.len and std.meta.activeTag(request.messages[i]) == .tool) {
                     const tool = request.messages[i].tool;
                     const name = googleToolNameForId(request.messages, tool.tool_call_id, i);
-                    const tool_result_text = try std.fmt.allocPrint(allocator, "Tool {s} result:\n{s}", .{ name, tool.content });
-                    try parts.append(try googleTextPart(allocator, tool_result_text));
+                    const tool_result_prefix = try std.fmt.allocPrint(allocator, "Tool {s} result:", .{name});
+                    try parts.append(try googleTextPart(allocator, tool_result_prefix));
+                    try parts.append(try googleTextPart(allocator, tool.content));
                     i += 1;
                 }
 
@@ -1034,9 +1035,11 @@ test "googleRequestPayload converts OpenAI request" {
     // parts labeled with the matched tool name.
     try std.testing.expectEqualStrings("user", contents[3].object.get("role").?.string);
     const response_parts = contents[3].object.get("parts").?.array.items;
-    try std.testing.expectEqual(@as(usize, 2), response_parts.len);
-    try std.testing.expectEqualStrings("Tool read_file result:\nfile contents", response_parts[0].object.get("text").?.string);
-    try std.testing.expectEqualStrings("Tool grep_search result:\nmatch found", response_parts[1].object.get("text").?.string);
+    try std.testing.expectEqual(@as(usize, 4), response_parts.len);
+    try std.testing.expectEqualStrings("Tool read_file result:", response_parts[0].object.get("text").?.string);
+    try std.testing.expectEqualStrings("file contents", response_parts[1].object.get("text").?.string);
+    try std.testing.expectEqualStrings("Tool grep_search result:", response_parts[2].object.get("text").?.string);
+    try std.testing.expectEqualStrings("match found", response_parts[3].object.get("text").?.string);
 
     const tools = obj.get("tools").?.array.items;
     try std.testing.expectEqual(@as(usize, 1), tools.len);
