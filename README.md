@@ -2,7 +2,7 @@
 
 A minimal AI coding agent for the terminal. 
 
-Currently supports the following model providers, limited OpenAI and Anthropic API compatible models (no Gemini support):
+Currently supports the following model providers, with OpenAI, Anthropic, and Google (Gemini) API compatible models:
 - [LM Studio](https://lmstudio.ai/) 
 - [OpenCode Zen](https://opencode.ai/zen)
 
@@ -48,8 +48,8 @@ puny --provider opencode --api-key YOUR_API_KEY
 Puny connects to `https://opencode.ai/zen` and shows the model picker. 
 Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions` 
 transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models), 
-plus Qwen and Claude models served over Anthropic's `/v1/messages` transport. 
-Gemini models still use unsupported transports.
+plus Qwen and Claude models served over Anthropic's `/v1/messages` transport, 
+and Gemini models served over Google's `/v1/models/<model>:streamGenerateContent` transport.
 
 ## Docker
 
