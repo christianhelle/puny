@@ -271,7 +271,7 @@ pub fn main(init: std.process.Init) !void {
             .cfg = cfg,
         });
 
-        if (command == .prompt) {
+        if (command == .prompt and !parsed.oneshot) {
             try history.add(user_message);
             try history.save(io);
         }
