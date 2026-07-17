@@ -165,3 +165,167 @@ test "parseCopilotToken extracts token and expiry" {
     try std.testing.expectEqualStrings("tid=abc;exp=123", result.value);
     try std.testing.expectEqual(@as(i64, 1750000000), result.expires_at);
 }
+
+/// Write a random v4 UUID (36 chars) into `out`, used for the per-request
+/// `x-request-id` header the Copilot API expects.
+fn writeRequestId(io: std.Io, out: *[36]u8) void {
+    var source: std.Random.IoSource = .{ .io = io };
+    const random = source.interface();
+    var bytes: [16]u8 = undefined;
+    random.bytes(&bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    const hex = "0123456789abcdef";
+    var pos: usize = 0;
+    for (bytes, 0..) |b, idx| {
+        if (idx == 4 or idx == 6 or idx == 8 or idx == 10) {
+            out[pos] = '-';
+            pos += 1;
+        }
+        out[pos] = hex[b >> 4];
+        out[pos + 1] = hex[b & 0x0f];
+        pos += 2;
+    }
+}
+
+/// Append the standard Copilot API headers and return the allocated
+/// `Authorization` value, which the caller must free after the request.
+fn appendCopilotHeaders(
+    allocator: std.mem.Allocator,
+    headers: *std.ArrayList(std.http.Header),
+    bearer_token: []const u8,
+    accept: []const u8,
+    request_id: []const u8,
+    initiator: ?[]const u8,
+) ![]u8 {
+    const auth = try std.fmt.allocPrint(allocator, "Bearer {s}", .{bearer_token});
+    try headers.append(allocator, .{ .name = "Authorization", .value = auth });
+    try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
+    try headers.append(allocator, .{ .name = "accept", .value = accept });
+    try headers.append(allocator, .{ .name = "copilot-integration-id", .value = integration_id });
+    try headers.append(allocator, .{ .name = "editor-version", .value = editor_version });
+    try headers.append(allocator, .{ .name = "editor-plugin-version", .value = editor_plugin_version });
+    try headers.append(allocator, .{ .name = "user-agent", .value = user_agent });
+    try headers.append(allocator, .{ .name = "openai-intent", .value = openai_intent });
+    try headers.append(allocator, .{ .name = "x-github-api-version", .value = api_version });
+    try headers.append(allocator, .{ .name = "x-request-id", .value = request_id });
+    if (initiator) |value| try headers.append(allocator, .{ .name = "X-Initiator", .value = value });
+    return auth;
+}
+
+pub fn listModels(self: *Client) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+    const token = try ensureCopilotToken(self);
+    const allocator = self.inner.allocator;
+
+    var request_id: [36]u8 = undefined;
+    writeRequestId(self.inner.io, &request_id);
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    const auth = try appendCopilotHeaders(allocator, &headers, token, "application/json", &request_id, null);
+    defer allocator.free(auth);
+
+    const url = try std.fmt.allocPrint(allocator, "{s}/models", .{self.inner.base_url});
+    defer allocator.free(url);
+
+    var raw = try httpRequest(self, .GET, url, headers.items, null);
+    defer raw.deinit();
+
+    if (raw.status.class() != .success) {
+        if (lmstudio.isAuthFailure(raw.status)) lmstudio.printAuthHint(self.inner.io);
+        return error.ResponseError;
+    }
+
+    return parseModels(allocator, raw.body);
+}
+
+/// Parse a Copilot `/models` response, keeping only chat-capable models.
+pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const data = parsed.value.object.get("data") orelse return error.MissingData;
+
+    var arena = try allocator.create(std.heap.ArenaAllocator);
+    errdefer {
+        arena.deinit();
+        allocator.destroy(arena);
+    }
+    arena.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_alloc = arena.allocator();
+
+    var models = std.array_list.Managed(lmstudio.ModelInfo).init(arena_alloc);
+
+    for (data.array.items) |item| {
+        if (item != .object) continue;
+        const id = if (item.object.get("id")) |v| v.string else continue;
+        if (!isChatModel(item)) continue;
+
+        const name = if (item.object.get("name")) |v| v.string else id;
+        const vendor = if (item.object.get("vendor")) |v| v.string else "github-copilot";
+
+        try models.append(.{
+            .key = try arena_alloc.dupe(u8, id),
+            .display_name = try arena_alloc.dupe(u8, name),
+            .publisher = try arena_alloc.dupe(u8, vendor),
+            .format = "api",
+            .size_bytes = 0,
+            .max_context_length = modelContextLength(item),
+            .loaded_instances = &.{},
+            .type = "llm",
+        });
+    }
+
+    const result = std.json.Parsed(lmstudio.ListModelsResponse){
+        .arena = arena,
+        .value = .{ .models = try models.toOwnedSlice() },
+    };
+
+    return .{
+        .allocator = allocator,
+        .body = try allocator.dupe(u8, response_json),
+        .parsed = result,
+    };
+}
+
+fn isChatModel(item: std.json.Value) bool {
+    const caps = item.object.get("capabilities") orelse return false;
+    if (caps != .object) return false;
+    const kind = caps.object.get("type") orelse return false;
+    if (kind != .string) return false;
+    return std.mem.eql(u8, kind.string, "chat");
+}
+
+fn modelContextLength(item: std.json.Value) i64 {
+    const caps = item.object.get("capabilities") orelse return 0;
+    if (caps != .object) return 0;
+    const limits = caps.object.get("limits") orelse return 0;
+    if (limits != .object) return 0;
+    const value = limits.object.get("max_context_window_tokens") orelse return 0;
+    return switch (value) {
+        .integer => |i| i,
+        else => 0,
+    };
+}
+
+test "parseModels keeps only chat-capable models" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"data":[
+        \\{"id":"gpt-4o","name":"GPT-4o","vendor":"openai","capabilities":{"type":"chat","limits":{"max_context_window_tokens":128000}}},
+        \\{"id":"text-embedding-3-small","name":"Embedding","vendor":"openai","capabilities":{"type":"embeddings"}},
+        \\{"id":"claude-sonnet-4","name":"Claude Sonnet 4","vendor":"anthropic","capabilities":{"type":"chat"}}
+        \\],"object":"list"}
+    ;
+    var owned = try parseModels(allocator, body);
+    defer owned.deinit();
+
+    const models = owned.value().models;
+    try std.testing.expectEqual(@as(usize, 2), models.len);
+    try std.testing.expectEqualStrings("gpt-4o", models[0].key);
+    try std.testing.expectEqualStrings("GPT-4o", models[0].display_name);
+    try std.testing.expectEqualStrings("openai", models[0].publisher);
+    try std.testing.expectEqual(@as(i64, 128000), models[0].max_context_length);
+    try std.testing.expectEqualStrings("claude-sonnet-4", models[1].key);
+}
