@@ -492,19 +492,6 @@ fn googleFunctionCallPart(allocator: std.mem.Allocator, name: []const u8, argume
     return .{ .object = obj };
 }
 
-fn googleFunctionResponsePart(allocator: std.mem.Allocator, name: []const u8, content: []const u8) !std.json.Value {
-    var response = try newObject(allocator);
-    try response.put(allocator, "output", .{ .string = content });
-
-    var function_response = try newObject(allocator);
-    try function_response.put(allocator, "name", .{ .string = name });
-    try function_response.put(allocator, "response", .{ .object = response });
-
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "functionResponse", .{ .object = function_response });
-    return .{ .object = obj };
-}
-
 fn googleFunctionDeclaration(allocator: std.mem.Allocator, tool: openai.ToolDefinition) !std.json.Value {
     const function = tool.function.object;
     const name = if (function.get("name")) |v| v.string else return error.MissingToolName;
@@ -581,7 +568,8 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
                 while (i < request.messages.len and std.meta.activeTag(request.messages[i]) == .tool) {
                     const tool = request.messages[i].tool;
                     const name = googleToolNameForId(request.messages, tool.tool_call_id, i);
-                    try parts.append(try googleFunctionResponsePart(allocator, name, tool.content));
+                    const tool_result_text = try std.fmt.allocPrint(allocator, "Tool {s} result:\n{s}", .{ name, tool.content });
+                    try parts.append(try googleTextPart(allocator, tool_result_text));
                     i += 1;
                 }
 
@@ -1042,17 +1030,13 @@ test "googleRequestPayload converts OpenAI request" {
     const function_call_1 = call_parts[1].object.get("functionCall").?.object;
     try std.testing.expectEqualStrings("grep_search", function_call_1.get("name").?.string);
 
-    // Consecutive tool results are coalesced into a single user turn, and each
-    // functionResponse recovers its function name from the matching tool_call id.
+    // Consecutive tool results are coalesced into a single user turn as text
+    // parts labeled with the matched tool name.
     try std.testing.expectEqualStrings("user", contents[3].object.get("role").?.string);
     const response_parts = contents[3].object.get("parts").?.array.items;
     try std.testing.expectEqual(@as(usize, 2), response_parts.len);
-    const function_response_0 = response_parts[0].object.get("functionResponse").?.object;
-    try std.testing.expectEqualStrings("read_file", function_response_0.get("name").?.string);
-    try std.testing.expectEqualStrings("file contents", function_response_0.get("response").?.object.get("output").?.string);
-    const function_response_1 = response_parts[1].object.get("functionResponse").?.object;
-    try std.testing.expectEqualStrings("grep_search", function_response_1.get("name").?.string);
-    try std.testing.expectEqualStrings("match found", function_response_1.get("response").?.object.get("output").?.string);
+    try std.testing.expectEqualStrings("Tool read_file result:\nfile contents", response_parts[0].object.get("text").?.string);
+    try std.testing.expectEqualStrings("Tool grep_search result:\nmatch found", response_parts[1].object.get("text").?.string);
 
     const tools = obj.get("tools").?.array.items;
     try std.testing.expectEqual(@as(usize, 1), tools.len);
