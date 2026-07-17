@@ -195,6 +195,7 @@ pub fn main(init: std.process.Init) !void {
         .provider_url = provider_url,
         .model_key = model_key,
         .oneshot = parsed.oneshot,
+        .prefilled = parsed.prompt != null,
     });
 
     var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
