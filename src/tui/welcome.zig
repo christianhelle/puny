@@ -7,6 +7,7 @@ pub const Info = struct {
     provider_url: []const u8,
     model_key: []const u8,
     oneshot: bool = false,
+    prefilled: bool = false,
 };
 
 const command_column_width = 15;
@@ -40,7 +41,11 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         try printCommand(writer, "/build [task]", "Switch to build mode");
         try printCommand(writer, "/model [id]", "Switch to another model");
         try writer.print("\n", .{});
-        try writer.print("{s}Type a prompt and press Enter to start chatting.{s}\n", .{ ansi.dim, ansi.reset });
+        if (info.prefilled) {
+            try writer.print("{s}Prefilled prompt will be sent automatically. Type /quit to exit.{s}\n", .{ ansi.dim, ansi.reset });
+        } else {
+            try writer.print("{s}Type a prompt and press Enter to start chatting.{s}\n", .{ ansi.dim, ansi.reset });
+        }
     }
 
     try writer.flush();
@@ -84,5 +89,24 @@ test "oneshot mode omits interactive commands" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Welcome to Puny"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "mock-model"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "/quit"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
+}
+
+test "prefilled prompt mode shows automatic submission hint" {
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try print(&out.writer, .{
+        .provider_name = "LM Studio",
+        .provider_url = "http://127.0.0.1:1234",
+        .model_key = "test-model",
+        .prefilled = true,
+    });
+
+    const text = out.written();
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Welcome to Puny"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Prefilled prompt will be sent automatically"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
