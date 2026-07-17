@@ -160,7 +160,7 @@ Tool-call status lines use concise action-oriented summaries instead of raw JSON
 
 Large payloads, such as file writes, are summarized rather than printed in full.
 
-### ⚠️ Safety warning
+### ⚠️ Safety warning - YOLO mode by default
 
 Tools execute **automatically without confirmation**. This includes file writes (which overwrite files) and shell commands (which run arbitrary commands). Only run Puny in directories where you are comfortable with the model making changes.
 
