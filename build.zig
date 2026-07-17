@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const docker = b.option(bool, "docker", "Build for Docker container") orelse false;
 
-    const build_options = b.addOptions();
+    const build_options = createBuildInfoOptions(b);
     build_options.addOption(bool, "docker", docker);
 
     const exe = b.addExecutable(.{
@@ -57,4 +57,58 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }));
+}
+
+fn createBuildInfoOptions(b: *std.Build) *std.Build.Step.Options {
+    const options = b.addOptions();
+    const io = b.graph.io;
+    const package_version = getPackageVersion(b.allocator, io) orelse "unknown";
+    const git_tag = getGitOutput(b.allocator, io, &.{ "git", "describe", "--tags", "--abbrev=0" }) orelse b.fmt("v{s}", .{package_version});
+    const git_commit = getGitOutput(b.allocator, io, &.{ "git", "rev-parse", "--short", "HEAD" }) orelse "unknown";
+    const dirty = isGitDirty(b.allocator, io);
+    const version = if (std.mem.startsWith(u8, git_tag, "v")) git_tag[1..] else git_tag;
+
+    options.addOption([]const u8, "VERSION", version);
+    options.addOption([]const u8, "GIT_COMMIT", git_commit);
+    options.addOption(bool, "DIRTY", dirty);
+
+    return options;
+}
+
+fn getPackageVersion(allocator: std.mem.Allocator, io: std.Io) ?[]const u8 {
+    const content = std.Io.Dir.cwd().readFileAlloc(io, "build.zig.zon", allocator, .limited(64 * 1024)) catch return null;
+    const marker = ".version = \"";
+    const start = std.mem.indexOf(u8, content, marker) orelse return null;
+    const version_start = start + marker.len;
+    const version_end = std.mem.indexOfScalarPos(u8, content, version_start, '"') orelse return null;
+    return content[version_start..version_end];
+}
+
+fn isGitDirty(allocator: std.mem.Allocator, io: std.Io) bool {
+    const output = getGitOutput(allocator, io, &.{ "git", "status", "--porcelain" }) orelse return false;
+    return output.len > 0;
+}
+
+fn getGitOutput(allocator: std.mem.Allocator, io: std.Io, argv: []const []const u8) ?[]const u8 {
+    const result = std.process.run(allocator, io, .{
+        .argv = argv,
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(16 * 1024),
+    }) catch return null;
+    defer allocator.free(result.stderr);
+
+    switch (result.term) {
+        .exited => |code| {
+            if (code == 0) {
+                return std.mem.trim(u8, result.stdout, " \t\n\r");
+            } else {
+                allocator.free(result.stdout);
+                return null;
+            }
+        },
+        else => {
+            allocator.free(result.stdout);
+            return null;
+        },
+    }
 }
