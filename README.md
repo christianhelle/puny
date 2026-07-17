@@ -118,6 +118,12 @@ cp zig-out/bin/puny artifacts/puny
 docker build -t puny:local .
 ```
 
+Run the locally built image the same way as the published one:
+
+```bash
+docker run -it -v "$PWD":/app puny:local
+```
+
 ### API key security
 
 The examples above pass `--api-key` inline for simplicity. For shared or production environments, prefer mounting a key file with `--api-key-file` or a `config.json` instead.
