@@ -359,6 +359,76 @@ pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequ
     };
 }
 
+pub fn chatStreamingGoogle(client: *lmstudio.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    const allocator = client.allocator;
+    const payload = try googleRequestPayload(allocator, request);
+    defer allocator.free(payload);
+
+    const url = try std.fmt.allocPrint(allocator, "{s}/v1/models/{s}:streamGenerateContent?alt=sse", .{ client.base_url, request.model });
+    defer allocator.free(url);
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    try headers.append(allocator, .{ .name = "x-goog-api-key", .value = client.api_key });
+    try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
+    try headers.append(allocator, .{ .name = "accept", .value = "text/event-stream" });
+
+    const uri = try std.Uri.parse(url);
+    var req = try client.http.request(.POST, uri, .{
+        .redirect_behavior = .unhandled,
+        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .extra_headers = headers.items,
+    });
+    defer req.deinit();
+
+    req.transfer_encoding = .{ .content_length = payload.len };
+    var body = try req.sendBodyUnflushed(&.{});
+    try body.writer.writeAll(payload);
+    try body.end();
+    try req.connection.?.flush();
+
+    var response = try req.receiveHead(&.{});
+
+    var transfer_buffer: [8 * 1024]u8 = undefined;
+    const response_reader = response.reader(&transfer_buffer);
+
+    var cancelable_reader_buffer: [1]u8 = undefined;
+    var cancelable_reader = openai.CancelableReader.init(response_reader, &cancelable_reader_buffer);
+    const reader = &cancelable_reader.reader;
+
+    if (response.head.status.class() != .success) {
+        var body_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer body_alloc.deinit();
+        _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        if (response.head.status == .unauthorized or response.head.status == .forbidden) {
+            lmstudio.printAuthHint(client.io);
+        }
+
+        std.debug.print("Google chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
+            url,
+            @intFromEnum(response.head.status),
+            payload,
+            body_alloc.written(),
+        });
+        return error.ResponseError;
+    }
+
+    var sse = GoogleSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+    };
+
+    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+        error.ReadFailed => {
+            if (cancel.isCancelled()) return error.Canceled;
+            return err;
+        },
+        else => return err,
+    };
+}
+
 pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
     var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
     var system: ?[]const u8 = null;
