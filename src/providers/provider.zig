@@ -3,10 +3,12 @@ const lmstudio = @import("lmstudio.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
 const opencode = @import("opencode.zig");
+const copilot = @import("copilot.zig");
 
 pub const Provider = union(enum) {
     lmstudio: lmstudio.Client,
     opencode: lmstudio.Client,
+    copilot: copilot.Client,
     mock: mock.MockClient,
 
     pub fn deinit(self: *Provider) void {
@@ -19,6 +21,7 @@ pub const Provider = union(enum) {
         return switch (self.*) {
             .lmstudio => |*c| lmstudio.listModels(c),
             .opencode => |*c| opencode.listModels(c),
+            .copilot => |*c| copilot.listModels(c),
             .mock => |*c| c.listModels(),
         };
     }
@@ -32,7 +35,16 @@ pub const Provider = union(enum) {
                 opencode.chatStreamingGoogle(c, request, callback)
             else
                 openai.chatStreaming(c, request, callback),
+            .copilot => |*c| copilot.chatStreaming(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
+        };
+    }
+
+    /// Access the underlying Copilot client, when this provider is Copilot.
+    pub fn asCopilot(self: *Provider) ?*copilot.Client {
+        return switch (self.*) {
+            .copilot => |*c| c,
+            else => null,
         };
     }
 
@@ -45,6 +57,10 @@ pub const Provider = union(enum) {
             .opencode => |*c| {
                 c.withBaseUrl(url);
                 c.api_key = key;
+            },
+            .copilot => |*c| {
+                c.withBaseUrl(url);
+                c.setGithubToken(key);
             },
             .mock => {},
         }
