@@ -1,6 +1,5 @@
 const std = @import("std");
-
-pub const version = "0.1.0";
+const version = @import("../version.zig");
 
 pub const Options = struct {
     provider: ?[]const u8 = null,
@@ -103,7 +102,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
 }
 
 pub fn printHelp(io: std.Io) void {
+    var buf: [256]u8 = undefined;
+    const version_line = version.format(&buf);
     writeErr(io,
+        \\puny {s}
+        \\
         \\Usage: puny [options]
         \\
         \\Options:
@@ -119,11 +122,13 @@ pub fn printHelp(io: std.Io) void {
         \\  -h, --help             Show this help text
         \\  -V, --version          Print version
         \\
-    , .{});
+    , .{version_line});
 }
 
 pub fn printVersion(io: std.Io) void {
-    writeErr(io, "puny {s}\n", .{version});
+    var buf: [256]u8 = undefined;
+    const version_line = version.format(&buf);
+    writeErr(io, "puny {s}\n", .{version_line});
 }
 
 test "parseArgs sets provider from flag" {
