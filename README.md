@@ -45,7 +45,11 @@ Sign in to [OpenCode Zen](https://opencode.ai/zen), copy your API key, then:
 puny --provider opencode --api-key YOUR_API_KEY
 ```
 
-Puny connects to `https://opencode.ai/zen` and shows the model picker. Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions` transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models), plus Claude models served over Anthropic's `/v1/messages` transport. Gemini and Qwen models still use unsupported transports.
+Puny connects to `https://opencode.ai/zen` and shows the model picker. 
+Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions` 
+transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models), 
+plus Qwen and Claude models served over Anthropic's `/v1/messages` transport. 
+Gemini models still use unsupported transports.
 
 ## Usage
 
