@@ -59,7 +59,7 @@ pub const MockClient = struct {
 
         if (containsWord(last_content, "search") or containsWord(last_content, "grep") or containsWord(last_content, "find")) {
             try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_call_1", .name = "grep_search" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"pattern\": \"" } });
+            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"query\": \"" } });
             try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "mock" } });
             try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "\"}" } });
             try callback.emit(.{ .finish = "tool_calls" });

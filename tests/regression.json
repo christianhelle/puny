@@ -14,7 +14,7 @@
   {
     "name": "Tool call: grep_search",
     "args": ["--mock", "--model", "mock-model", "--prompt", "search for pattern", "--oneshot"],
-    "expect": ["grep_search", "Tool executed"],
+    "expect": ["Searching for", "Tool executed"],
     "not_expect": []
   },
   {
