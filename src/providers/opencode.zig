@@ -8,9 +8,10 @@ pub const anthropic_version = "2023-06-01";
 pub const default_max_tokens = 4096;
 
 pub fn isSupportedModel(model_id: []const u8) bool {
-    const excluded = [_][]const u8{
-        "gemini-", // Requires Gemini API, not Anthropic or OpenAI-compatible
-    };
+    // Every OpenCode Zen model is reachable through one of the three
+    // transports (OpenAI-compatible, Anthropic, or Google). Prefixes listed
+    // here are filtered out of the model picker as unreachable.
+    const excluded = [_][]const u8{};
 
     for (excluded) |prefix| {
         if (std.mem.startsWith(u8, model_id, prefix)) return false;
@@ -20,6 +21,10 @@ pub fn isSupportedModel(model_id: []const u8) bool {
 
 pub fn isAnthropicModel(model_id: []const u8) bool {
     return std.mem.startsWith(u8, model_id, "claude-");
+}
+
+pub fn isGoogleModel(model_id: []const u8) bool {
+    return std.mem.startsWith(u8, model_id, "gemini-");
 }
 
 pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lmstudio.Owned(lmstudio.ListModelsResponse) {
@@ -414,11 +419,17 @@ test "isSupportedModel accepts supported model families" {
     try std.testing.expect(isSupportedModel("claude-haiku-4.5"));
     try std.testing.expect(isSupportedModel("gpt-5.5"));
     try std.testing.expect(isSupportedModel("gpt-5.3-codex"));
+    try std.testing.expect(isSupportedModel("gemini-3.5-flash"));
+    try std.testing.expect(isSupportedModel("gemini-3.1-pro"));
 }
 
-test "isSupportedModel rejects unsupported model families" {
-    try std.testing.expect(!isSupportedModel("gemini-3.5-flash"));
-    try std.testing.expect(!isSupportedModel("gemini-3.1-pro"));
+test "isGoogleModel detects gemini families" {
+    try std.testing.expect(isGoogleModel("gemini-3.5-flash"));
+    try std.testing.expect(isGoogleModel("gemini-3.1-pro"));
+    try std.testing.expect(isGoogleModel("gemini-3-flash"));
+    try std.testing.expect(!isGoogleModel("claude-opus-4-8"));
+    try std.testing.expect(!isGoogleModel("deepseek-v4-pro"));
+    try std.testing.expect(!isGoogleModel("gpt-5.5"));
 }
 
 test "isAnthropicModel detects claude families" {
@@ -429,7 +440,7 @@ test "isAnthropicModel detects claude families" {
     try std.testing.expect(!isAnthropicModel("kimi-k2.7-code"));
 }
 
-test "parseModels maps and filters OpenAI model list" {
+test "parseModels maps OpenAI model list" {
     const allocator = std.testing.allocator;
     const json =
         \\{"object":"list","data":[
@@ -442,11 +453,12 @@ test "parseModels maps and filters OpenAI model list" {
     var result = try parseModels(allocator, json);
     defer result.deinit();
 
-    try std.testing.expectEqual(@as(usize, 2), result.value().models.len);
+    try std.testing.expectEqual(@as(usize, 3), result.value().models.len);
     try std.testing.expectEqualStrings("deepseek-v4-pro", result.value().models[0].key);
     try std.testing.expectEqualStrings("deepseek-v4-pro", result.value().models[0].display_name);
     try std.testing.expectEqualStrings("opencode", result.value().models[0].publisher);
-    try std.testing.expectEqualStrings("kimi-k2.7-code", result.value().models[1].key);
+    try std.testing.expectEqualStrings("gemini-3.5-flash", result.value().models[1].key);
+    try std.testing.expectEqualStrings("kimi-k2.7-code", result.value().models[2].key);
 }
 
 test "parseModels ignores unknown fields" {
