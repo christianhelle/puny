@@ -235,6 +235,26 @@ fn initializeProviderAndModel(
     });
 }
 
+fn buildToolDefinitions(arena: std.mem.Allocator) !std.array_list.Managed(openai.ToolDefinition) {
+    var definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
+    errdefer definitions.deinit();
+    for (tools.registry) |tool| {
+        const schema = try tool.schema(arena);
+        try definitions.append(.{ .function = schema });
+    }
+    return definitions;
+}
+
+fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.array_list.Managed(openai.ToolDefinition) {
+    var definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
+    errdefer definitions.deinit();
+    for (tools.planning_registry) |tool| {
+        const schema = try tool.schema(arena);
+        try definitions.append(.{ .function = schema });
+    }
+    return definitions;
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
@@ -278,19 +298,11 @@ pub fn main(init: std.process.Init) !void {
     );
     defer prov.deinit();
 
-    var full_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
+    var full_tool_definitions = try buildToolDefinitions(arena);
     defer full_tool_definitions.deinit();
-    for (tools.registry) |tool| {
-        const schema = try tool.schema(arena);
-        try full_tool_definitions.append(.{ .function = schema });
-    }
 
-    var planning_tool_definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
+    var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
     defer planning_tool_definitions.deinit();
-    for (tools.planning_registry) |tool| {
-        const schema = try tool.schema(arena);
-        try planning_tool_definitions.append(.{ .function = schema });
-    }
 
     var stdin_buffer: [4096]u8 = undefined;
 
