@@ -32,6 +32,15 @@ fn defaultProviderUrl(provider_name: []const u8) []const u8 {
     return config.default_lm_studio_url;
 }
 
+fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
+    const history_path = try prompt_history.historyPath(arena, environ_map);
+    var history = prompt_history.History.init(arena, history_path);
+    history.load(io) catch |err| {
+        if (err != error.FileNotFound) return err;
+    };
+    return history;
+}
+
 fn promptReconfigure(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -78,7 +87,10 @@ fn promptReconfigure(
     } else {
         line_alloc.clearRetainingCapacity();
         try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
-        try stdout_writer.print("Enter new provider URL (default for {s}: {s}, press Enter to keep current): ", .{ provider_name, defaultProviderUrl(provider_name) });
+        try stdout_writer.print(
+            "Enter new provider URL (default for {s}: {s}, press Enter to keep current): ",
+            .{ provider_name, defaultProviderUrl(provider_name) },
+        );
         try stdout_writer.flush();
 
         const new_url = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
@@ -135,12 +147,8 @@ pub fn main(init: std.process.Init) !void {
     var cfg_result = try config.load(arena, io, init.environ_map);
     const cfg = &cfg_result.config;
 
-    const history_path = try prompt_history.historyPath(arena, init.environ_map);
-    var history = prompt_history.History.init(arena, history_path);
+    var history = try loadHistory(arena, io, init.environ_map);
     defer history.deinit();
-    history.load(io) catch |err| {
-        if (err != error.FileNotFound) return err;
-    };
 
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -168,7 +176,10 @@ pub fn main(init: std.process.Init) !void {
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
         const stderr_writer = &stderr_file_writer.interface;
-        stderr_writer.print("Provider '{s}' requires an API key. Set one with --api-key, PUNY_API_KEY, or --reconfigure.\n", .{providerDisplayName(provider_name)}) catch {};
+        stderr_writer.print(
+            "Provider '{s}' requires an API key. Set one with --api-key, PUNY_API_KEY, or --reconfigure.\n",
+            .{providerDisplayName(provider_name)},
+        ) catch {};
         stderr_writer.flush() catch {};
         return error.MissingApiKey;
     }
@@ -179,12 +190,39 @@ pub fn main(init: std.process.Init) !void {
     var prov = createProvider(parsed.mock, provider_name, provider_url, api_key, arena, io);
     defer prov.deinit();
 
-    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, config.default_lm_studio_url);
-    var model_key = (try model_selection.select(&prov, configured_model, arena, io, init, skip_validation, cfg, init.environ_map, random)) orelse blk: {
+    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
+        u8,
+        provider_url,
+        config.default_lm_studio_url,
+    );
+    var model_key = (try model_selection.select(
+        &prov,
+        configured_model,
+        arena,
+        io,
+        init,
+        skip_validation,
+        cfg,
+        init.environ_map,
+        random,
+    )) orelse blk: {
         if (configured_model) |model_id| {
-            try stdout_writer.print("Model '{s}' not found in running models. Showing picker.\n", .{model_id});
+            try stdout_writer.print(
+                "Model '{s}' not found in running models. Showing picker.\n",
+                .{model_id},
+            );
         }
-        break :blk (try model_selection.select(&prov, null, arena, io, init, false, cfg, init.environ_map, random)) orelse {
+        break :blk (try model_selection.select(
+            &prov,
+            null,
+            arena,
+            io,
+            init,
+            false,
+            cfg,
+            init.environ_map,
+            random,
+        )) orelse {
             try stdout_writer.print("No model selected.\n", .{});
             return;
         };
@@ -308,17 +346,36 @@ pub fn main(init: std.process.Init) !void {
                         provider_name = new_provider_name;
                         provider_url = new_provider_url;
 
-                        const model_skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(u8, provider_url, config.default_lm_studio_url);
-                        if (try model_selection.select(&prov, null, arena, io, init, model_skip_validation, cfg, init.environ_map, random)) |new_key| {
+                        const model_skip_validation =
+                            parsed.mock or
+                            parsed.oneshot or
+                            !std.mem.eql(u8, provider_url, config.default_lm_studio_url);
+
+                        const model_selection_result = try model_selection.select(
+                            &prov,
+                            null,
+                            arena,
+                            io,
+                            init,
+                            model_skip_validation,
+                            cfg,
+                            init.environ_map,
+                            random,
+                        );
+
+                        if (model_selection_result) |new_key| {
                             model_key = new_key;
                         }
 
-                        try welcome.print(stdout_writer, .{
-                            .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name),
-                            .provider_url = provider_url,
-                            .model_key = model_key,
-                            .oneshot = parsed.oneshot,
-                        });
+                        try welcome.print(
+                            stdout_writer,
+                            .{
+                                .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name),
+                                .provider_url = provider_url,
+                                .model_key = model_key,
+                                .oneshot = parsed.oneshot,
+                            },
+                        );
                     } else {
                         prov.setUrlAndKey(cfg.providerUrl, cfg.apiKey);
                     }
@@ -329,7 +386,19 @@ pub fn main(init: std.process.Init) !void {
             },
             .switch_model => |model_id| {
                 const model_skip_validation = parsed.mock;
-                if (try model_selection.switchModel(&prov, model_id, model_key, arena, io, init, model_skip_validation, stdout_writer, cfg, init.environ_map, random)) |new_key| {
+                if (try model_selection.switchModel(
+                    &prov,
+                    model_id,
+                    model_key,
+                    arena,
+                    io,
+                    init,
+                    model_skip_validation,
+                    stdout_writer,
+                    cfg,
+                    init.environ_map,
+                    random,
+                )) |new_key| {
                     model_key = new_key;
                 }
                 continue;
