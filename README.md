@@ -107,6 +107,21 @@ docker run -it -v "$PWD":/app christianhelle/puny --provider opencode --api-key 
 - Semantic versions: `v1.2.3`, `1.2`, `1`
 - Branch refs
 
+### Build the image locally
+
+The Dockerfile expects the compiled binary at `artifacts/puny`:
+
+```bash
+zig build
+mkdir -p artifacts
+cp zig-out/bin/puny artifacts/puny
+docker build -t puny:local .
+```
+
+### API key security
+
+The examples above pass `--api-key` inline for simplicity. For shared or production environments, prefer mounting a key file with `--api-key-file` or a `config.json` instead.
+
 ## Usage
 
 Make sure LM Studio is running and a tool-capable model is loaded, then start Puny:
