@@ -3,6 +3,10 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const docker = b.option(bool, "docker", "Build for Docker container") orelse false;
+
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "docker", docker);
 
     const exe = b.addExecutable(.{
         .name = "puny",
@@ -12,6 +16,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    exe.root_module.addOptions("build_options", build_options);
 
     b.installArtifact(exe);
 
@@ -31,6 +36,16 @@ pub fn build(b: *std.Build) void {
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
+
+    const docker_step = b.step("docker", "Build Linux binary for Docker");
+    const docker_build = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "build",
+        "-Ddocker",
+        "-Doptimize=ReleaseSmall",
+        "-Dtarget=x86_64-linux",
+    });
+    docker_step.dependOn(&docker_build.step);
 
     const zigzag = b.dependency("zigzag", .{
         .target = target,
