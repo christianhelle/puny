@@ -12,3 +12,20 @@ pub fn format(buf: []u8) []const u8 {
     const suffix: []const u8 = if (dirty) "-dirty" else "";
     return std.fmt.bufPrint(buf, "{s} ({s}{s})", .{ version, git_commit, suffix }) catch version;
 }
+
+test "format includes version" {
+    var buf: [256]u8 = undefined;
+    const output = format(&buf);
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, version));
+}
+
+test "format includes commit or unknown marker" {
+    var buf: [256]u8 = undefined;
+    const output = format(&buf);
+    if (std.mem.eql(u8, git_commit, "unknown")) {
+        try std.testing.expectEqualStrings(version, output);
+    } else {
+        try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "("));
+        try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, ")"));
+    }
+}
