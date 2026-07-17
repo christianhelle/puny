@@ -255,6 +255,230 @@ fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.array_list.Manage
     return definitions;
 }
 
+const UserInput = union(enum) {
+    message: []const u8,
+    continue_loop,
+    exit,
+};
+
+const TurnResult = enum {
+    continue_loop,
+    exit,
+};
+
+const ChatLoopContext = struct {
+    arena: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init,
+    parsed: cli.Options,
+    cfg: *config.Config,
+    stdout_writer: *std.Io.Writer,
+    random: std.Random,
+    history: *prompt_history.History,
+    prov: *provider.Provider,
+    provider_name: *[]const u8,
+    provider_url: *[]const u8,
+    model_key: *[]const u8,
+    full_tool_definitions: *std.array_list.Managed(openai.ToolDefinition),
+    planning_tool_definitions: *std.array_list.Managed(openai.ToolDefinition),
+    messages: *std.array_list.Managed(openai.Message),
+    planning_mode: *bool,
+    pending_prompt: *?[]const u8,
+    session_stats: *chat.SessionStats,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdin_buffer: *[4096]u8,
+};
+
+fn readUserInput(ctx: *ChatLoopContext) !UserInput {
+    if (ctx.pending_prompt.*) |p| {
+        ctx.pending_prompt.* = null;
+        return .{ .message = p };
+    }
+
+    const maybe_input = input.readLine(ctx.io, ctx.stdout_writer, ctx.line_alloc, ctx.stdin_buffer, ctx.history) catch |err| {
+        if (sigint.isTriggered()) {
+            printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+            return .exit;
+        }
+        return err;
+    };
+
+    return switch (maybe_input) {
+        .submitted => |text| .{ .message = text },
+        .cancelled => {
+            try ctx.stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+            return .continue_loop;
+        },
+        .interrupted, .eof => {
+            if (sigint.isTriggered()) {
+                printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+            }
+            return .exit;
+        },
+    };
+}
+
+fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
+    var turn_complete = false;
+    while (!turn_complete) {
+        const active_tool_definitions = if (ctx.planning_mode.*) ctx.planning_tool_definitions.items else ctx.full_tool_definitions.items;
+
+        var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
+        try thinking_indicator.show(ctx.stdout_writer);
+
+        const result = chat.runTurn(ctx.prov, ctx.arena, ctx.io, ctx.stdout_writer, ctx.session_stats, ctx.random, ctx.model_key.*, ctx.messages, active_tool_definitions, &thinking_indicator) catch |err| {
+            try thinking_indicator.finish(ctx.io, ctx.stdout_writer, 0, false, false, .error_, null);
+            return err;
+        };
+
+        if (result.was_cancelled) {
+            _ = ctx.messages.pop();
+            ctx.session_stats.finalizeTurn(null, false);
+            break;
+        }
+
+        ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
+        turn_complete = result.turn_complete;
+    }
+
+    if (ctx.parsed.oneshot) {
+        try ctx.stdout_writer.print("\n", .{});
+        return .exit;
+    }
+
+    return .continue_loop;
+}
+
+fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
+    if (ctx.parsed.oneshot) {
+        try ctx.stdout_writer.print("\n/config not available in oneshot mode.\n", .{});
+        try ctx.stdout_writer.flush();
+        return;
+    }
+
+    const old_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
+    const result = try promptReconfigure(ctx.arena, ctx.io, ctx.stdout_writer, ctx.cfg);
+    if (result.cancelled) return;
+    if (!result.changed) return;
+
+    try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
+    const new_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
+    const new_provider_url = if (ctx.parsed.mock) "-" else baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
+    const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+
+    if (!ctx.parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
+        ctx.prov.deinit();
+        ctx.prov.* = createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.arena, ctx.io);
+        ctx.provider_name.* = new_provider_name;
+        ctx.provider_url.* = new_provider_url;
+
+        const model_skip_validation =
+            ctx.parsed.mock or
+            ctx.parsed.oneshot or
+            !std.mem.eql(u8, new_provider_url, config.default_lm_studio_url);
+
+        const model_selection_result = try model_selection.select(
+            ctx.prov,
+            null,
+            ctx.arena,
+            ctx.io,
+            ctx.init,
+            model_skip_validation,
+            ctx.cfg,
+            ctx.init.environ_map,
+            ctx.random,
+        );
+
+        if (model_selection_result) |new_key| {
+            ctx.model_key.* = new_key;
+        }
+
+        try welcome.print(
+            ctx.stdout_writer,
+            .{
+                .provider_name = if (ctx.parsed.mock) "Mock" else providerDisplayName(ctx.provider_name.*),
+                .provider_url = ctx.provider_url.*,
+                .model_key = ctx.model_key.*,
+                .oneshot = ctx.parsed.oneshot,
+            },
+        );
+    } else {
+        ctx.prov.setUrlAndKey(ctx.cfg.providerUrl, ctx.cfg.apiKey);
+    }
+
+    try ctx.stdout_writer.print("Configuration saved and provider updated.\n", .{});
+    try ctx.stdout_writer.flush();
+}
+
+fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: []const u8) !void {
+    const model_skip_validation = ctx.parsed.mock;
+    if (try model_selection.switchModel(
+        ctx.prov,
+        model_id,
+        ctx.model_key.*,
+        ctx.arena,
+        ctx.io,
+        ctx.init,
+        model_skip_validation,
+        ctx.stdout_writer,
+        ctx.cfg,
+        ctx.init.environ_map,
+        ctx.random,
+    )) |new_key| {
+        ctx.model_key.* = new_key;
+    }
+}
+
+fn runChatLoop(ctx: *ChatLoopContext) !void {
+    while (true) {
+        if (sigint.isTriggered()) {
+            printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+            return;
+        }
+
+        const user_input = try readUserInput(ctx);
+        const user_message = switch (user_input) {
+            .message => |text| text,
+            .continue_loop => continue,
+            .exit => return,
+        };
+        if (user_message.len == 0) continue;
+
+        const command = commands.parse(user_message);
+        const action = try commands.dispatch(command, .{
+            .arena = ctx.arena,
+            .stdout_writer = ctx.stdout_writer,
+            .messages = ctx.messages,
+            .planning_mode = ctx.planning_mode,
+            .oneshot = ctx.parsed.oneshot,
+            .cfg = ctx.cfg,
+        });
+
+        if (command == .prompt and !ctx.parsed.oneshot) {
+            try ctx.history.add(user_message);
+            try ctx.history.save(ctx.io);
+        }
+
+        switch (action) {
+            .exit => {
+                printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+                return;
+            },
+            .continue_ => continue,
+            .print_stats => {
+                try ctx.session_stats.print(ctx.io, ctx.stdout_writer);
+                continue;
+            },
+            .reconfigure => try handleReconfigureCommand(ctx),
+            .switch_model => |model_id| try handleSwitchModelCommand(ctx, model_id),
+            .run_chat_turn => {},
+        }
+
+        const turn_result = try runChatTurn(ctx);
+        if (turn_result == .exit) return;
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const io = init.io;
@@ -321,173 +545,30 @@ pub fn main(init: std.process.Init) !void {
     var line_alloc: std.Io.Writer.Allocating = .init(arena);
     defer line_alloc.deinit();
 
-    while (true) {
-        if (sigint.isTriggered()) {
-            printExit(&session_stats, io, stdout_writer) catch {};
-            return;
-        }
+    var ctx = ChatLoopContext{
+        .arena = arena,
+        .io = io,
+        .init = init,
+        .parsed = parsed,
+        .cfg = cfg,
+        .stdout_writer = stdout_writer,
+        .random = random,
+        .history = &history,
+        .prov = &prov,
+        .provider_name = &provider_name,
+        .provider_url = &provider_url,
+        .model_key = &model_key,
+        .full_tool_definitions = &full_tool_definitions,
+        .planning_tool_definitions = &planning_tool_definitions,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .pending_prompt = &pending_prompt,
+        .session_stats = &session_stats,
+        .line_alloc = &line_alloc,
+        .stdin_buffer = &stdin_buffer,
+    };
 
-        const user_message = if (pending_prompt) |p| blk: {
-            pending_prompt = null;
-            break :blk p;
-        } else blk: {
-            const maybe_input = input.readLine(io, stdout_writer, &line_alloc, &stdin_buffer, &history) catch |err| {
-                if (sigint.isTriggered()) {
-                    printExit(&session_stats, io, stdout_writer) catch {};
-                    return;
-                }
-                return err;
-            };
-            break :blk switch (maybe_input) {
-                .submitted => |text| text,
-                .cancelled => {
-                    try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
-                    continue;
-                },
-                .interrupted, .eof => {
-                    if (sigint.isTriggered()) {
-                        printExit(&session_stats, io, stdout_writer) catch {};
-                    }
-                    return;
-                },
-            };
-        };
-        if (user_message.len == 0) continue;
-
-        const command = commands.parse(user_message);
-        const action = try commands.dispatch(command, .{
-            .arena = arena,
-            .stdout_writer = stdout_writer,
-            .messages = &messages,
-            .planning_mode = &planning_mode,
-            .oneshot = parsed.oneshot,
-            .cfg = cfg,
-        });
-
-        if (command == .prompt and !parsed.oneshot) {
-            try history.add(user_message);
-            try history.save(io);
-        }
-
-        switch (action) {
-            .exit => {
-                printExit(&session_stats, io, stdout_writer) catch {};
-                return;
-            },
-            .continue_ => continue,
-            .print_stats => {
-                try session_stats.print(io, stdout_writer);
-                continue;
-            },
-            .reconfigure => {
-                if (parsed.oneshot) {
-                    try stdout_writer.print("\n/config not available in oneshot mode.\n", .{});
-                    try stdout_writer.flush();
-                    continue;
-                }
-                const old_provider_name = effectiveProvider(parsed, cfg.*);
-                const result = try promptReconfigure(arena, io, stdout_writer, cfg);
-                if (result.cancelled) continue;
-                if (result.changed) {
-                    try config.save(arena, io, cfg.*, init.environ_map);
-                    const new_provider_name = effectiveProvider(parsed, cfg.*);
-                    const new_provider_url = if (parsed.mock) "-" else baseUrlFor(new_provider_name, parsed, cfg.*);
-                    const new_api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
-
-                    if (!parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
-                        prov.deinit();
-                        prov = createProvider(parsed.mock, new_provider_name, new_provider_url, new_api_key, arena, io);
-                        provider_name = new_provider_name;
-                        provider_url = new_provider_url;
-
-                        const model_skip_validation =
-                            parsed.mock or
-                            parsed.oneshot or
-                            !std.mem.eql(u8, provider_url, config.default_lm_studio_url);
-
-                        const model_selection_result = try model_selection.select(
-                            &prov,
-                            null,
-                            arena,
-                            io,
-                            init,
-                            model_skip_validation,
-                            cfg,
-                            init.environ_map,
-                            random,
-                        );
-
-                        if (model_selection_result) |new_key| {
-                            model_key = new_key;
-                        }
-
-                        try welcome.print(
-                            stdout_writer,
-                            .{
-                                .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name),
-                                .provider_url = provider_url,
-                                .model_key = model_key,
-                                .oneshot = parsed.oneshot,
-                            },
-                        );
-                    } else {
-                        prov.setUrlAndKey(cfg.providerUrl, cfg.apiKey);
-                    }
-                    try stdout_writer.print("Configuration saved and provider updated.\n", .{});
-                    try stdout_writer.flush();
-                }
-                continue;
-            },
-            .switch_model => |model_id| {
-                const model_skip_validation = parsed.mock;
-                if (try model_selection.switchModel(
-                    &prov,
-                    model_id,
-                    model_key,
-                    arena,
-                    io,
-                    init,
-                    model_skip_validation,
-                    stdout_writer,
-                    cfg,
-                    init.environ_map,
-                    random,
-                )) |new_key| {
-                    model_key = new_key;
-                }
-                continue;
-            },
-            .run_chat_turn => {},
-        }
-
-        var turn_complete = false;
-        while (!turn_complete) {
-            const active_tool_definitions = if (planning_mode) planning_tool_definitions.items else full_tool_definitions.items;
-
-            var thinking_indicator = indicator.ThinkingIndicator.init(io);
-            try thinking_indicator.show(stdout_writer);
-
-            const result = chat.runTurn(&prov, arena, io, stdout_writer, &session_stats, random, model_key, &messages, active_tool_definitions, &thinking_indicator) catch |err| {
-                try thinking_indicator.finish(io, stdout_writer, 0, false, false, .error_, null);
-                return err;
-            };
-
-            if (result.was_cancelled) {
-                // Cancelled turn: runTurn already finalized the indicator and usage.
-                _ = messages.pop();
-                session_stats.finalizeTurn(null, false);
-                break;
-            }
-
-            session_stats.finalizeTurn(result.usage, result.turn_complete);
-            turn_complete = result.turn_complete;
-        }
-
-        if (parsed.oneshot) {
-            try stdout_writer.print("\n", .{});
-            return;
-        }
-    }
+    try runChatLoop(&ctx);
 }
 
 fn effectiveProvider(parsed: cli.Options, cfg: config.Config) []const u8 {
