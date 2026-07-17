@@ -442,3 +442,162 @@ test "requestInitiator distinguishes user and agent turns" {
     };
     try std.testing.expectEqualStrings("agent", requestInitiator(&with_tool));
 }
+
+// --- OAuth token discovery -------------------------------------------------
+// Reuse a GitHub OAuth token already stored by editor Copilot plugins or by
+// OpenCode, so users who are logged in elsewhere don't have to log in again.
+
+/// Env var holding a ready-to-use GitHub OAuth token for Copilot.
+const oauth_token_env = "GITHUB_COPILOT_OAUTH_TOKEN";
+
+/// Discover a GitHub OAuth token from the environment or from known config
+/// files. Returns an allocated token (caller owns) or null if none is found.
+pub fn discoverGithubToken(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+) !?[]const u8 {
+    if (environ_map.get(oauth_token_env)) |value| {
+        if (value.len > 0) return try allocator.dupe(u8, value);
+    }
+
+    var candidates = std.ArrayList([]const u8).empty;
+    defer {
+        for (candidates.items) |path| allocator.free(path);
+        candidates.deinit(allocator);
+    }
+    try collectTokenFilePaths(allocator, environ_map, &candidates);
+
+    for (candidates.items) |path| {
+        const data = readFileOpt(allocator, io, path) orelse continue;
+        defer allocator.free(data);
+        if (try oauthTokenFromFile(allocator, path, data)) |token| return token;
+    }
+
+    return null;
+}
+
+fn readFileOpt(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ?[]u8 {
+    const cwd = std.Io.Dir.cwd();
+    return cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(1024 * 1024)) catch null;
+}
+
+fn homeDir(environ_map: *const std.process.Environ.Map) ?[]const u8 {
+    return environ_map.get("HOME") orelse environ_map.get("USERPROFILE");
+}
+
+fn collectTokenFilePaths(
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    candidates: *std.ArrayList([]const u8),
+) !void {
+    // Editor Copilot plugins: apps.json (current) and hosts.json (legacy).
+    for ([_][]const u8{ "apps.json", "hosts.json" }) |name| {
+        if (builtin.os.tag == .windows) {
+            if (environ_map.get("LOCALAPPDATA")) |base| {
+                try candidates.append(allocator, try std.fs.path.join(allocator, &.{ base, "github-copilot", name }));
+            }
+        } else if (environ_map.get("XDG_CONFIG_HOME")) |base| {
+            try candidates.append(allocator, try std.fs.path.join(allocator, &.{ base, "github-copilot", name }));
+        }
+        if (homeDir(environ_map)) |home| {
+            if (builtin.os.tag == .windows) {
+                try candidates.append(allocator, try std.fs.path.join(allocator, &.{ home, "AppData", "Local", "github-copilot", name }));
+            }
+            try candidates.append(allocator, try std.fs.path.join(allocator, &.{ home, ".config", "github-copilot", name }));
+        }
+    }
+
+    // OpenCode credential store.
+    if (environ_map.get("XDG_DATA_HOME")) |base| {
+        try candidates.append(allocator, try std.fs.path.join(allocator, &.{ base, "opencode", "auth.json" }));
+    }
+    if (homeDir(environ_map)) |home| {
+        try candidates.append(allocator, try std.fs.path.join(allocator, &.{ home, ".local", "share", "opencode", "auth.json" }));
+    }
+}
+
+fn oauthTokenFromFile(allocator: std.mem.Allocator, path: []const u8, data: []const u8) !?[]const u8 {
+    if (std.mem.endsWith(u8, path, "auth.json")) {
+        return oauthTokenFromOpencode(allocator, data);
+    }
+    return oauthTokenFromApps(allocator, data);
+}
+
+/// Parse an editor Copilot `apps.json`/`hosts.json`: an object whose keys start
+/// with `github.com`, each holding an `oauth_token` string.
+fn oauthTokenFromApps(allocator: std.mem.Allocator, json: []const u8) !?[]const u8 {
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, json, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+
+    var it = parsed.value.object.iterator();
+    while (it.next()) |entry| {
+        if (!std.mem.startsWith(u8, entry.key_ptr.*, "github.com")) continue;
+        const value = entry.value_ptr.*;
+        if (value != .object) continue;
+        const token = value.object.get("oauth_token") orelse continue;
+        if (token != .string or token.string.len == 0) continue;
+        return try allocator.dupe(u8, token.string);
+    }
+    return null;
+}
+
+/// Parse OpenCode's `auth.json`: `{ "github-copilot": { "refresh": "gho_..." } }`.
+fn oauthTokenFromOpencode(allocator: std.mem.Allocator, json: []const u8) !?[]const u8 {
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, json, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+
+    const entry = parsed.value.object.get("github-copilot") orelse return null;
+    if (entry != .object) return null;
+    const refresh = entry.object.get("refresh") orelse return null;
+    if (refresh != .string or refresh.string.len == 0) return null;
+    return try allocator.dupe(u8, refresh.string);
+}
+
+test "oauthTokenFromApps reads token from app-id keyed entry" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"github.com:Iv1.b507a08c87ecfe98":{"user":"octocat","oauth_token":"gho_apps"}}
+    ;
+    const token = (try oauthTokenFromApps(allocator, json)).?;
+    defer allocator.free(token);
+    try std.testing.expectEqualStrings("gho_apps", token);
+}
+
+test "oauthTokenFromApps reads token from legacy hosts entry" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"github.com":{"user":"octocat","oauth_token":"gho_hosts"}}
+    ;
+    const token = (try oauthTokenFromApps(allocator, json)).?;
+    defer allocator.free(token);
+    try std.testing.expectEqualStrings("gho_hosts", token);
+}
+
+test "oauthTokenFromApps returns null without a github.com entry" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"example.com":{"oauth_token":"nope"}}
+    ;
+    try std.testing.expect((try oauthTokenFromApps(allocator, json)) == null);
+}
+
+test "oauthTokenFromOpencode reads the refresh token" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"github-copilot":{"type":"oauth","refresh":"gho_opencode","access":"tid=x","expires":123}}
+    ;
+    const token = (try oauthTokenFromOpencode(allocator, json)).?;
+    defer allocator.free(token);
+    try std.testing.expectEqualStrings("gho_opencode", token);
+}
+
+test "oauthTokenFromOpencode returns null when copilot entry is absent" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"anthropic":{"type":"api","key":"sk-x"}}
+    ;
+    try std.testing.expect((try oauthTokenFromOpencode(allocator, json)) == null);
+}
