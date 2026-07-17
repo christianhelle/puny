@@ -31,6 +31,3 @@ WORKDIR /app
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/puny"]
-
-# Default command
-CMD ["--help"]
