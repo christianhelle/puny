@@ -1,9 +1,9 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
-const cli = @import("../cli/args.zig");
+const version = @import("../version.zig");
 
 pub const Info = struct {
-    version: []const u8 = cli.version,
+    version: []const u8 = version.version,
     provider_name: []const u8,
     provider_url: []const u8,
     model_key: []const u8,
@@ -19,8 +19,11 @@ fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u
 }
 
 pub fn print(writer: *std.Io.Writer, info: Info) !void {
+    var buf: [256]u8 = undefined;
+    const version_line = version.format(&buf);
+
     try writer.print("\n", .{});
-    try writer.print("{s}Welcome to Puny {s}{s} - {s}Your tiny AI coding assistant{s}\n", .{ ansi.cyan, info.version, ansi.reset, ansi.dim, ansi.reset });
+    try writer.print("{s}Welcome to Puny {s}{s} - {s}Your tiny AI coding assistant{s}\n", .{ ansi.cyan, version_line, ansi.reset, ansi.dim, ansi.reset });
     try writer.print("{s}AI makes mistakes - read the fucking code{s}\n", .{ ansi.dim, ansi.reset });
     try writer.print("\n", .{});
 
