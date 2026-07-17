@@ -41,6 +41,23 @@ fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.pro
     return history;
 }
 
+fn runStartupReconfigure(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init,
+    cfg: *config.Config,
+    stdout_writer: *std.Io.Writer,
+) !void {
+    try stdout_writer.print("\nReconfiguring Puny.\n", .{});
+    const result = try promptReconfigure(arena, io, stdout_writer, cfg);
+    if (result.cancelled) return;
+    if (result.changed) {
+        try config.save(arena, io, cfg.*, init.environ_map);
+        try stdout_writer.print("Configuration saved.\n", .{});
+        try stdout_writer.flush();
+    }
+}
+
 fn promptReconfigure(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -155,14 +172,7 @@ pub fn main(init: std.process.Init) !void {
     const stdout_writer = &stdout_file_writer.interface;
 
     if (parsed.reconfigure) {
-        try stdout_writer.print("\nReconfiguring Puny.\n", .{});
-        const result = try promptReconfigure(arena, io, stdout_writer, cfg);
-        if (result.cancelled) return;
-        if (result.changed) {
-            try config.save(arena, io, cfg.*, init.environ_map);
-            try stdout_writer.print("Configuration saved.\n", .{});
-            try stdout_writer.flush();
-        }
+        try runStartupReconfigure(arena, io, init, cfg, stdout_writer);
     }
 
     var random_source: std.Random.IoSource = .{ .io = io };
