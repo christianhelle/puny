@@ -93,38 +93,6 @@ jobs:
       - name: List assets
         run: find ./artifacts -type f | sort
 
-      # Generate a changelog from commits since the previous tag
-      - name: Generate changelog
-        id: changelog
-        shell: bash
-        run: |
-          printf "# puny v%s\n\n## What's Changed\n\n" "${{ steps.version.outputs.VERSION }}" > CHANGELOG.md
-
-          # Find most recent tag (other than this one)
-          PREV=""
-          for tag in $(git log --tags --pretty="%H %s" -n 100 \
-            | awk '{print $2}' | grep '^v'); do
-            if [ "$tag" != "${GITHUB_REF_NAME}" ]; then
-              PREV="$tag"
-              break
-            fi
-          done
-
-          LOG=""
-          if [ -z "$PREV" ]; then
-            LOG=$(git log --oneline -n 50)
-          else
-            LOG=$(git log --oneline ${PREV}..HEAD)
-          fi
-
-          if [ -z "$LOG" ]; then
-            echo "(no changes since last release)" >> CHANGELOG.md
-          else
-            while IFS= read -r line; do
-              echo "- $line" >> CHANGELOG.md
-            done <<< "$LOG"
-          fi
-
       # Collect asset paths for the release (artifacts/<name>/<binary>)
       - name: Prepare assets list
         id: assets
@@ -147,6 +115,6 @@ jobs:
         with:
           name: puny v${{ steps.version.outputs.VERSION }}
           body_path: CHANGELOG.md
-          draft: false
+          draft: true
           prerelease: false
           fail_on_unmatched_files: true
