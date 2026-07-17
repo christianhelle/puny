@@ -28,6 +28,8 @@ pub const Provider = union(enum) {
             .lmstudio => |*c| openai.chatStreaming(c, request, callback),
             .opencode => |*c| if (opencode.isAnthropicModel(request.model))
                 opencode.chatStreamingAnthropic(c, request, callback)
+            else if (opencode.isGoogleModel(request.model))
+                opencode.chatStreamingGoogle(c, request, callback)
             else
                 openai.chatStreaming(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
