@@ -241,6 +241,34 @@ test "load and save round trip" {
     try std.Io.Dir.cwd().deleteFile(io, path);
 }
 
+test "save tolerates inaccessible history path" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
+
+    const obstructing_path = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-history-obstruction" });
+    defer allocator.free(obstructing_path);
+
+    std.Io.Dir.cwd().deleteFile(io, obstructing_path) catch {};
+
+    {
+        var file = try std.Io.Dir.cwd().createFile(io, obstructing_path, .{});
+        defer file.close(io);
+    }
+    defer std.Io.Dir.cwd().deleteFile(io, obstructing_path) catch {};
+
+    const history_path = try std.fs.path.join(allocator, &.{ obstructing_path, "prompt_history.json" });
+    defer allocator.free(history_path);
+
+    var history = History.init(allocator, history_path);
+    defer history.deinit();
+    try history.add("alpha");
+
+    try history.save(io);
+}
+
 test "history size is capped" {
     var history = History.init(std.testing.allocator, "");
     defer history.deinit();
