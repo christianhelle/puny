@@ -2,9 +2,9 @@
 
 A minimal AI coding agent for the terminal. 
 
-Currently supports the following model providers:
+Currently supports the following model providers, limited OpenAI and Anthropic API compatible models (no Gemini support):
 - [LM Studio](https://lmstudio.ai/) 
-- [OpenCode Zen](https://opencode.ai/zen).
+- [OpenCode Zen](https://opencode.ai/zen)
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
