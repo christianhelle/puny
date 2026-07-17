@@ -3,7 +3,6 @@ const ansi = @import("ansi.zig");
 const version = @import("../version.zig");
 
 pub const Info = struct {
-    version: []const u8 = version.version,
     provider_name: []const u8,
     provider_url: []const u8,
     model_key: []const u8,
