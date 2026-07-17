@@ -2,7 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 
-pub const default_lm_studio_url = if (build_options.docker) "http://host.docker.internal:1234" else "http://127.0.0.1:1234";
+pub const default_lm_studio_url =
+    if (build_options.docker) "http://host.docker.internal:1234" else "http://127.0.0.1:1234";
 
 pub const PromptOverride = struct {
     prefix: []const u8 = "",
@@ -70,8 +71,16 @@ pub const Config = struct {
         self.prompts.deinit(allocator);
     }
 
-    pub fn resolvePrompt(self: Config, allocator: std.mem.Allocator, comptime name: []const u8, default_prompt: []const u8) std.mem.Allocator.Error![]const u8 {
-        const override: ?[]const u8, const prefix: []const u8, const suffix: []const u8 = switch (comptime std.meta.stringToEnum(std.meta.FieldEnum(PromptsConfig), name) orelse @compileError("unknown prompt name: " ++ name)) {
+    pub fn resolvePrompt(
+        self: Config,
+        allocator: std.mem.Allocator,
+        comptime name: []const u8,
+        default_prompt: []const u8,
+    ) std.mem.Allocator.Error![]const u8 {
+        const override: ?[]const u8, const prefix: []const u8, const suffix: []const u8 = switch (comptime std.meta.stringToEnum(
+            std.meta.FieldEnum(PromptsConfig),
+            name,
+        ) orelse @compileError("unknown prompt name: " ++ name)) {
             .system => .{ self.prompts.system.override, self.prompts.system.prefix, self.prompts.system.suffix },
             .planning => .{ self.prompts.planning.override, self.prompts.planning.prefix, self.prompts.planning.suffix },
         };
@@ -117,7 +126,12 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
     return .{ .config = try parsed.value.clone(allocator) };
 }
 
-pub fn save(allocator: std.mem.Allocator, io: std.Io, config: Config, environ_map: *const std.process.Environ.Map) !void {
+pub fn save(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    config: Config,
+    environ_map: *const std.process.Environ.Map,
+) !void {
     const path = try configPath(allocator, environ_map);
     defer allocator.free(path);
 
@@ -155,7 +169,12 @@ test "round-trip default config via JSON" {
     const buffer = try std.json.Stringify.valueAlloc(allocator, original, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
 
-    const parsed = try std.json.parseFromSlice(Config, allocator, buffer, .{ .ignore_unknown_fields = true, .allocate = .alloc_if_needed });
+    const parsed = try std.json.parseFromSlice(
+        Config,
+        allocator,
+        buffer,
+        .{ .ignore_unknown_fields = true, .allocate = .alloc_if_needed },
+    );
     defer parsed.deinit();
 
     var cloned = try parsed.value.clone(allocator);

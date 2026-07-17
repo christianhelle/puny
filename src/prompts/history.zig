@@ -32,17 +32,21 @@ pub const History = struct {
 
     pub fn load(self: *History, io: std.Io) !void {
         const cwd = std.Io.Dir.cwd();
-        const data = cwd.readFileAlloc(io, self.path, self.allocator, std.Io.Limit.limited(1024 * 1024)) catch |err| switch (err) {
-            error.FileNotFound => return,
-            else => |e| return e,
-        };
+        const data = cwd.readFileAlloc(io, self.path, self.allocator, std.Io.Limit.limited(1024 * 1024)) catch |err|
+            switch (err) {
+                error.FileNotFound => return,
+                else => |e| return e,
+            };
         defer self.allocator.free(data);
 
         const parsed = std.json.parseFromSlice([]const []const u8, self.allocator, data, .{
             .ignore_unknown_fields = true,
             .allocate = .alloc_if_needed,
         }) catch |err| {
-            std.log.warn("failed to parse prompt history at {s}: {s}. starting fresh.", .{ self.path, @errorName(err) });
+            std.log.warn(
+                "failed to parse prompt history at {s}: {s}. starting fresh.",
+                .{ self.path, @errorName(err) },
+            );
             return;
         };
         defer parsed.deinit();
@@ -57,15 +61,25 @@ pub const History = struct {
         const dir = std.fs.path.dirname(self.path) orelse return error.BadPath;
         const cwd = std.Io.Dir.cwd();
         cwd.createDirPath(io, dir) catch |err| {
-            std.log.warn("failed to create prompt history directory {s}: {s}. history will not be saved.", .{ dir, @errorName(err) });
+            std.log.warn(
+                "failed to create prompt history directory {s}: {s}. history will not be saved.",
+                .{ dir, @errorName(err) },
+            );
             return;
         };
 
-        const buffer = try std.json.Stringify.valueAlloc(self.allocator, self.entries.items, .{ .whitespace = .indent_2 });
+        const buffer = try std.json.Stringify.valueAlloc(
+            self.allocator,
+            self.entries.items,
+            .{ .whitespace = .indent_2 },
+        );
         defer self.allocator.free(buffer);
 
         var file = cwd.createFile(io, self.path, .{}) catch |err| {
-            std.log.warn("failed to create prompt history file {s}: {s}. history will not be saved.", .{ self.path, @errorName(err) });
+            std.log.warn(
+                "failed to create prompt history file {s}: {s}. history will not be saved.",
+                .{ self.path, @errorName(err) },
+            );
             return;
         };
         defer file.close(io);

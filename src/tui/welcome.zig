@@ -23,7 +23,10 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     const version_line = version.format(&buf);
 
     try writer.print("\n", .{});
-    try writer.print("{s}Welcome to Puny {s}{s} - {s}Your tiny AI coding assistant{s}\n", .{ ansi.cyan, version_line, ansi.reset, ansi.dim, ansi.reset });
+    try writer.print(
+        "{s}Welcome to Puny {s}{s} - {s}Your tiny AI coding assistant{s}\n",
+        .{ ansi.cyan, version_line, ansi.reset, ansi.dim, ansi.reset },
+    );
     try writer.print("{s}AI makes mistakes - read the fucking code{s}\n", .{ ansi.dim, ansi.reset });
     try writer.print("\n", .{});
 
