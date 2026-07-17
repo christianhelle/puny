@@ -601,3 +601,146 @@ test "oauthTokenFromOpencode returns null when copilot entry is absent" {
     ;
     try std.testing.expect((try oauthTokenFromOpencode(allocator, json)) == null);
 }
+
+// --- Device-flow login -----------------------------------------------------
+// Interactive OAuth device flow, used when no token can be discovered.
+
+const DeviceCodeResponse = struct {
+    device_code: []const u8,
+    user_code: []const u8,
+    verification_uri: []const u8,
+    expires_in: i64 = 900,
+    interval: i64 = 5,
+};
+
+const AccessTokenResponse = struct {
+    access_token: ?[]const u8 = null,
+    token_type: ?[]const u8 = null,
+    scope: ?[]const u8 = null,
+    @"error": ?[]const u8 = null,
+    error_description: ?[]const u8 = null,
+};
+
+const PollOutcome = union(enum) {
+    token: []const u8,
+    pending,
+    slow_down,
+    failed: []const u8,
+};
+
+fn sleepSeconds(io: std.Io, seconds: i64) void {
+    if (seconds <= 0) return;
+    const ns: i96 = @as(i96, @intCast(seconds)) * std.time.ns_per_s;
+    io.sleep(.{ .nanoseconds = ns }, .awake) catch {};
+}
+
+/// Run the GitHub device-authorization flow. Prints the verification URL and
+/// user code, polls until authorized, and returns the OAuth token (caller owns)
+/// or null if the flow was denied or timed out.
+pub fn deviceLogin(self: *Client, stdout_writer: *std.Io.Writer) !?[]const u8 {
+    const allocator = self.inner.allocator;
+
+    const json_headers = [_]std.http.Header{
+        .{ .name = "content-type", .value = "application/json" },
+        .{ .name = "accept", .value = "application/json" },
+    };
+
+    const device_body = try std.fmt.allocPrint(
+        allocator,
+        "{{\"client_id\":\"{s}\",\"scope\":\"{s}\"}}",
+        .{ client_id, app_scopes },
+    );
+    defer allocator.free(device_body);
+
+    var device_raw = try httpRequest(self, .POST, github_base_url ++ "/login/device/code", &json_headers, device_body);
+    defer device_raw.deinit();
+    if (device_raw.status.class() != .success) return error.DeviceCodeRequestFailed;
+
+    const device_parsed = std.json.parseFromSlice(DeviceCodeResponse, allocator, device_raw.body, .{ .ignore_unknown_fields = true }) catch
+        return error.DeviceCodeRequestFailed;
+    defer device_parsed.deinit();
+    const device = device_parsed.value;
+
+    try stdout_writer.print(
+        "\nTo sign in to GitHub Copilot, open {s} and enter code: {s}\n",
+        .{ device.verification_uri, device.user_code },
+    );
+    try stdout_writer.print("Waiting for authorization...\n", .{});
+    try stdout_writer.flush();
+
+    var interval_s: i64 = if (device.interval > 0) device.interval else 5;
+    const deadline = std.time.timestamp() + (if (device.expires_in > 0) device.expires_in else 900);
+
+    while (std.time.timestamp() < deadline) {
+        sleepSeconds(self.inner.io, interval_s + 1);
+
+        const poll_body = try std.fmt.allocPrint(
+            allocator,
+            "{{\"client_id\":\"{s}\",\"device_code\":\"{s}\",\"grant_type\":\"urn:ietf:params:oauth:grant-type:device_code\"}}",
+            .{ client_id, device.device_code },
+        );
+        defer allocator.free(poll_body);
+
+        var poll_raw = try httpRequest(self, .POST, github_base_url ++ "/login/oauth/access_token", &json_headers, poll_body);
+        defer poll_raw.deinit();
+
+        switch (parseAccessToken(allocator, poll_raw.body) catch PollOutcome.pending) {
+            .token => |token| return token,
+            .pending => {},
+            .slow_down => interval_s += 5,
+            .failed => |reason| {
+                try stdout_writer.print("GitHub Copilot sign-in failed: {s}\n", .{reason});
+                try stdout_writer.flush();
+                return null;
+            },
+        }
+    }
+
+    try stdout_writer.print("GitHub Copilot sign-in timed out.\n", .{});
+    try stdout_writer.flush();
+    return null;
+}
+
+fn parseAccessToken(allocator: std.mem.Allocator, body: []const u8) !PollOutcome {
+    const parsed = std.json.parseFromSlice(AccessTokenResponse, allocator, body, .{ .ignore_unknown_fields = true }) catch
+        return PollOutcome.pending;
+    defer parsed.deinit();
+
+    if (parsed.value.access_token) |token| {
+        if (token.len > 0) return .{ .token = try allocator.dupe(u8, token) };
+    }
+    if (parsed.value.@"error") |err| {
+        if (std.mem.eql(u8, err, "authorization_pending")) return PollOutcome.pending;
+        if (std.mem.eql(u8, err, "slow_down")) return PollOutcome.slow_down;
+        if (std.mem.eql(u8, err, "expired_token")) return .{ .failed = "the device code expired" };
+        if (std.mem.eql(u8, err, "access_denied")) return .{ .failed = "access was denied" };
+    }
+    return PollOutcome.pending;
+}
+
+test "parseAccessToken returns the access token when present" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"access_token":"gho_flow","token_type":"bearer","scope":"read:user"}
+    ;
+    switch (try parseAccessToken(allocator, body)) {
+        .token => |token| {
+            defer allocator.free(token);
+            try std.testing.expectEqualStrings("gho_flow", token);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseAccessToken maps pending and slow_down errors" {
+    const allocator = std.testing.allocator;
+    try std.testing.expect((try parseAccessToken(allocator,
+        \\{"error":"authorization_pending"}
+    )) == .pending);
+    try std.testing.expect((try parseAccessToken(allocator,
+        \\{"error":"slow_down"}
+    )) == .slow_down);
+    try std.testing.expect((try parseAccessToken(allocator,
+        \\{"error":"expired_token"}
+    )) == .failed);
+}
