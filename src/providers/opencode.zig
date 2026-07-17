@@ -401,6 +401,162 @@ pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.Cha
     return str.toOwnedSlice();
 }
 
+fn googleTextPart(allocator: std.mem.Allocator, text: []const u8) !std.json.Value {
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "text", .{ .string = text });
+    return .{ .object = obj };
+}
+
+fn googleFunctionCallPart(allocator: std.mem.Allocator, name: []const u8, arguments: []const u8) !std.json.Value {
+    const args: std.json.Value = if (std.mem.trim(u8, arguments, " \t\r\n").len == 0)
+        .{ .object = try newObject(allocator) }
+    else
+        try parseToolArguments(allocator, arguments);
+
+    var call = try newObject(allocator);
+    try call.put(allocator, "name", .{ .string = name });
+    try call.put(allocator, "args", args);
+
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "functionCall", .{ .object = call });
+    return .{ .object = obj };
+}
+
+fn googleFunctionResponsePart(allocator: std.mem.Allocator, name: []const u8, content: []const u8) !std.json.Value {
+    var response = try newObject(allocator);
+    try response.put(allocator, "output", .{ .string = content });
+
+    var function_response = try newObject(allocator);
+    try function_response.put(allocator, "name", .{ .string = name });
+    try function_response.put(allocator, "response", .{ .object = response });
+
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "functionResponse", .{ .object = function_response });
+    return .{ .object = obj };
+}
+
+fn googleFunctionDeclaration(allocator: std.mem.Allocator, tool: openai.ToolDefinition) !std.json.Value {
+    const function = tool.function.object;
+    const name = if (function.get("name")) |v| v.string else return error.MissingToolName;
+    const description = if (function.get("description")) |v| v.string else "";
+    const parameters = function.get("parameters") orelse std.json.Value{ .object = try newObject(allocator) };
+
+    var obj = try newObject(allocator);
+    try obj.put(allocator, "name", .{ .string = name });
+    try obj.put(allocator, "description", .{ .string = description });
+    try obj.put(allocator, "parameters", parameters);
+    return .{ .object = obj };
+}
+
+fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u8) []const u8 {
+    for (messages) |msg| switch (msg) {
+        .assistant => |assistant| {
+            if (assistant.tool_calls) |tool_calls| {
+                for (tool_calls) |tc| {
+                    if (std.mem.eql(u8, tc.id, tool_call_id)) return tc.function.name;
+                }
+            }
+        },
+        else => {},
+    };
+    return tool_call_id;
+}
+
+pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
+    var contents = try std.json.Array.initCapacity(allocator, request.messages.len);
+    var system: ?[]const u8 = null;
+
+    var i: usize = 0;
+    while (i < request.messages.len) {
+        switch (request.messages[i]) {
+            .system => |content| {
+                if (system == null) system = content;
+                i += 1;
+            },
+            .user => |content| {
+                var parts = try std.json.Array.initCapacity(allocator, 1);
+                try parts.append(try googleTextPart(allocator, content));
+
+                var obj = try newObject(allocator);
+                try obj.put(allocator, "role", .{ .string = "user" });
+                try obj.put(allocator, "parts", .{ .array = parts });
+                try contents.append(.{ .object = obj });
+                i += 1;
+            },
+            .assistant => |assistant| {
+                var parts = try std.json.Array.initCapacity(allocator, 1);
+                if (assistant.content) |content| {
+                    try parts.append(try googleTextPart(allocator, content));
+                }
+                if (assistant.tool_calls) |tool_calls| {
+                    for (tool_calls) |tc| {
+                        try parts.append(try googleFunctionCallPart(allocator, tc.function.name, tc.function.arguments));
+                    }
+                }
+
+                var obj = try newObject(allocator);
+                try obj.put(allocator, "role", .{ .string = "model" });
+                try obj.put(allocator, "parts", .{ .array = parts });
+                try contents.append(.{ .object = obj });
+                i += 1;
+            },
+            .tool => {
+                // Coalesce consecutive tool results into a single user turn so the
+                // conversation keeps alternating user/model, as Gemini expects.
+                var parts = try std.json.Array.initCapacity(allocator, 1);
+                while (i < request.messages.len and std.meta.activeTag(request.messages[i]) == .tool) {
+                    const tool = request.messages[i].tool;
+                    const name = googleToolNameForId(request.messages, tool.tool_call_id);
+                    try parts.append(try googleFunctionResponsePart(allocator, name, tool.content));
+                    i += 1;
+                }
+
+                var obj = try newObject(allocator);
+                try obj.put(allocator, "role", .{ .string = "user" });
+                try obj.put(allocator, "parts", .{ .array = parts });
+                try contents.append(.{ .object = obj });
+            },
+        }
+    }
+
+    var tools: ?std.json.Array = null;
+    if (request.tools.len > 0) {
+        var declarations = try std.json.Array.initCapacity(allocator, request.tools.len);
+        for (request.tools) |tool| {
+            try declarations.append(try googleFunctionDeclaration(allocator, tool));
+        }
+        var tool_obj = try newObject(allocator);
+        try tool_obj.put(allocator, "functionDeclarations", .{ .array = declarations });
+        tools = try std.json.Array.initCapacity(allocator, 1);
+        try tools.?.append(.{ .object = tool_obj });
+    }
+
+    var generation_config = try newObject(allocator);
+    try generation_config.put(allocator, "maxOutputTokens", .{ .integer = default_max_tokens });
+    if (request.temperature) |temperature| {
+        try generation_config.put(allocator, "temperature", .{ .float = temperature });
+    }
+
+    var body_obj = try newObject(allocator);
+    try body_obj.put(allocator, "contents", .{ .array = contents });
+    if (system) |value| {
+        var system_parts = try std.json.Array.initCapacity(allocator, 1);
+        try system_parts.append(try googleTextPart(allocator, value));
+        var system_obj = try newObject(allocator);
+        try system_obj.put(allocator, "parts", .{ .array = system_parts });
+        try body_obj.put(allocator, "systemInstruction", .{ .object = system_obj });
+    }
+    if (tools) |value| {
+        try body_obj.put(allocator, "tools", .{ .array = value });
+    }
+    try body_obj.put(allocator, "generationConfig", .{ .object = generation_config });
+
+    var str: std.Io.Writer.Allocating = .init(allocator);
+    defer str.deinit();
+    try std.json.Stringify.value(std.json.Value{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
+    return str.toOwnedSlice();
+}
+
 test "isSupportedModel accepts supported model families" {
     try std.testing.expect(isSupportedModel("deepseek-v4-pro"));
     try std.testing.expect(isSupportedModel("deepseek-v4-flash-free"));
