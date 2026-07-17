@@ -557,6 +557,97 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
     return str.toOwnedSlice();
 }
 
+const GoogleSseCallback = struct {
+    allocator: std.mem.Allocator,
+    callback: openai.StreamCallback,
+    tool_call_index: usize = 0,
+    input_tokens: i64 = 0,
+
+    pub fn event(self: *@This(), data: []const u8) !void {
+        const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+
+        if (parsed.value != .object) return;
+        const root = parsed.value.object;
+
+        if (root.get("candidates")) |candidates| {
+            if (candidates == .array) {
+                for (candidates.array.items) |candidate| {
+                    if (candidate != .object) continue;
+                    try self.handleCandidate(candidate.object);
+                }
+            }
+        }
+
+        if (root.get("usageMetadata")) |usage| {
+            if (usage == .object) {
+                if (usage.object.get("promptTokenCount")) |v| {
+                    if (v == .integer) self.input_tokens = v.integer;
+                }
+                var output_tokens: i64 = 0;
+                if (usage.object.get("candidatesTokenCount")) |v| {
+                    if (v == .integer) output_tokens = v.integer;
+                }
+                try self.callback.emit(.{ .usage = .{
+                    .input_tokens = self.input_tokens,
+                    .output_tokens = output_tokens,
+                } });
+            }
+        }
+    }
+
+    fn handleCandidate(self: *@This(), candidate: std.json.ObjectMap) !void {
+        if (candidate.get("content")) |content| {
+            if (content == .object) {
+                if (content.object.get("parts")) |parts| {
+                    if (parts == .array) {
+                        for (parts.array.items) |part| {
+                            if (part != .object) continue;
+                            try self.handlePart(part.object);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (candidate.get("finishReason")) |reason| {
+            if (reason == .string) {
+                try self.callback.emit(.{ .finish = if (reason.string.len == 0) null else reason.string });
+            }
+        }
+    }
+
+    fn handlePart(self: *@This(), part: std.json.ObjectMap) !void {
+        if (part.get("text")) |text| {
+            if (text == .string) {
+                try self.callback.emit(.{ .content = text.string });
+            }
+            return;
+        }
+
+        if (part.get("functionCall")) |function_call| {
+            if (function_call != .object) return;
+            const name = if (function_call.object.get("name")) |v|
+                (if (v == .string) v.string else return)
+            else
+                return;
+
+            const index = self.tool_call_index;
+            self.tool_call_index += 1;
+
+            var id_buf: [32]u8 = undefined;
+            const id = std.fmt.bufPrint(&id_buf, "call_{d}", .{index}) catch return;
+            try self.callback.emit(.{ .tool_call_start = .{ .index = index, .id = id, .name = name } });
+
+            const args = function_call.object.get("args") orelse std.json.Value{ .object = try newObject(self.allocator) };
+            var args_str: std.Io.Writer.Allocating = .init(self.allocator);
+            defer args_str.deinit();
+            try std.json.Stringify.value(args, .{ .emit_null_optional_fields = false }, &args_str.writer);
+            try self.callback.emit(.{ .tool_call_delta = .{ .index = index, .arguments = args_str.written() } });
+        }
+    }
+};
+
 test "isSupportedModel accepts supported model families" {
     try std.testing.expect(isSupportedModel("deepseek-v4-pro"));
     try std.testing.expect(isSupportedModel("deepseek-v4-flash-free"));
