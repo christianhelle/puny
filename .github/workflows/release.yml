@@ -27,13 +27,13 @@ jobs:
             binary_name: "puny"
 
           - os: macos-latest
-            target: x86_64-darwin
-            artifact_name: puny-x86_64-darwin
+            target: x86_64-macos
+            artifact_name: puny-x86_64-macos
             binary_name: "puny"
 
           - os: macos-14 # M1 runner
-            target: aarch64-darwin
-            artifact_name: puny-aarch64-darwin
+            target: aarch64-macos
+            artifact_name: puny-aarch64-macos
             binary_name: "puny"
 
           - os: windows-latest
