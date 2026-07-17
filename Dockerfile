@@ -16,6 +16,10 @@ COPY artifacts/puny /usr/local/bin/puny
 # Make the binary executable
 RUN chmod +x /usr/local/bin/puny
 
+# Create a writable home/config directory for the non-root user.
+RUN mkdir -p /app && chown -R puny:puny /app
+ENV HOME=/app
+
 # Switch to non-root user
 USER puny
 
