@@ -101,7 +101,7 @@ jobs:
           ASSETS=""
           for dir in ./artifacts/*/; do
             artifact_name=$(basename "$dir")
-            binary_path=$(find "${artifact_name}" -type f | head -1)
+            binary_path=$(find "$dir" -type f | head -1)
             if [ -n "$binary_path" ]; then
               # Format: local/path -> display-name (renamed on upload)
               ASSETS="${ASSETS}${binary_path}#${artifact_name}\n"
