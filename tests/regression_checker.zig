@@ -51,8 +51,8 @@ pub fn main(init: std.process.Init) !u8 {
     }
 
     const total = passed + failed;
-    std.debug.print("\n{s} passed, {d} failed (of {d})\n", .{
-        if (failed == 0) "All" else "",
+    std.debug.print("\n{d} passed, {d} failed (of {d})\n", .{
+        passed,
         failed,
         total,
     });
@@ -74,9 +74,25 @@ fn runTest(allocator: std.mem.Allocator, io: std.Io, binary_path: []const u8, te
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term != .exited or result.term.exited != 0) {
-        std.debug.print("FAILED (exit {s})\n", .{@tagName(result.term)});
-        return false;
+    switch (result.term) {
+        .exited => |code| {
+            if (code != 0) {
+                std.debug.print("FAILED (exit {d})\n", .{code});
+                return false;
+            }
+        },
+        .signal => |sig| {
+            std.debug.print("FAILED (signal {s})\n", .{@tagName(sig)});
+            return false;
+        },
+        .stopped => |sig| {
+            std.debug.print("FAILED (stopped {s})\n", .{@tagName(sig)});
+            return false;
+        },
+        .unknown => |code| {
+            std.debug.print("FAILED (unknown {d})\n", .{code});
+            return false;
+        },
     }
 
     for (test_case.expect) |expected| {
