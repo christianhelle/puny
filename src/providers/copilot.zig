@@ -329,3 +329,116 @@ test "parseModels keeps only chat-capable models" {
     try std.testing.expectEqual(@as(i64, 128000), models[0].max_context_length);
     try std.testing.expectEqualStrings("claude-sonnet-4", models[1].key);
 }
+
+/// The Copilot API expects `X-Initiator: agent` once the conversation contains
+/// assistant or tool turns, and `user` for the very first user request.
+fn requestInitiator(messages: []const openai.Message) []const u8 {
+    for (messages) |msg| {
+        switch (msg) {
+            .assistant, .tool => return "agent",
+            else => {},
+        }
+    }
+    return "user";
+}
+
+pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    const token = try ensureCopilotToken(self);
+    const allocator = self.inner.allocator;
+
+    const payload = try openai.requestPayload(allocator, request);
+    defer allocator.free(payload);
+
+    const url = try std.fmt.allocPrint(allocator, "{s}/chat/completions", .{self.inner.base_url});
+    defer allocator.free(url);
+
+    var request_id: [36]u8 = undefined;
+    writeRequestId(self.inner.io, &request_id);
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    const auth = try appendCopilotHeaders(
+        allocator,
+        &headers,
+        token,
+        "text/event-stream",
+        &request_id,
+        requestInitiator(request.messages),
+    );
+    defer allocator.free(auth);
+
+    const uri = try std.Uri.parse(url);
+    var req = try self.inner.http.request(.POST, uri, .{
+        .redirect_behavior = .unhandled,
+        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .extra_headers = headers.items,
+    });
+    defer req.deinit();
+
+    req.transfer_encoding = .{ .content_length = payload.len };
+    var body = try req.sendBodyUnflushed(&.{});
+    try body.writer.writeAll(payload);
+    try body.end();
+    try req.connection.?.flush();
+
+    var response = try req.receiveHead(&.{});
+
+    var transfer_buffer: [8 * 1024]u8 = undefined;
+    const response_reader = response.reader(&transfer_buffer);
+
+    var cancelable_reader_buffer: [1]u8 = undefined;
+    var cancelable_reader = openai.CancelableReader.init(response_reader, &cancelable_reader_buffer);
+    const reader = &cancelable_reader.reader;
+
+    if (response.head.status.class() != .success) {
+        var body_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer body_alloc.deinit();
+        _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        if (response.head.status == .unauthorized or response.head.status == .forbidden) {
+            lmstudio.printAuthHint(self.inner.io);
+        }
+
+        std.debug.print("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
+            url,
+            @intFromEnum(response.head.status),
+            payload,
+            body_alloc.written(),
+        });
+        return error.ResponseError;
+    }
+
+    var sse = openai.SseCallback{
+        .allocator = allocator,
+        .callback = callback,
+    };
+
+    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+        error.ReadFailed => {
+            if (cancel.isCancelled()) return error.Canceled;
+            return err;
+        },
+        else => return err,
+    };
+}
+
+test "requestInitiator distinguishes user and agent turns" {
+    const user_only = [_]openai.Message{
+        .{ .system = "sys" },
+        .{ .user = "hello" },
+    };
+    try std.testing.expectEqualStrings("user", requestInitiator(&user_only));
+
+    const with_assistant = [_]openai.Message{
+        .{ .user = "hello" },
+        .{ .assistant = .{ .content = "hi" } },
+        .{ .user = "again" },
+    };
+    try std.testing.expectEqualStrings("agent", requestInitiator(&with_assistant));
+
+    const with_tool = [_]openai.Message{
+        .{ .user = "hello" },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "result" } },
+    };
+    try std.testing.expectEqualStrings("agent", requestInitiator(&with_tool));
+}
