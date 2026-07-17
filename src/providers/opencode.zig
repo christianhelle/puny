@@ -974,3 +974,143 @@ test "AnthropicSseCallback emits tool call events" {
     try std.testing.expectEqualStrings("tool_use", events.items[3].finish.?);
     try std.testing.expectEqual(@as(i64, 15), events.items[4].usage.output_tokens);
 }
+
+test "googleRequestPayload converts OpenAI request" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const schema = try sampleToolSchema(allocator);
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{
+            .{ .system = "You are helpful." },
+            .{ .user = "Hello" },
+            .{ .assistant = .{ .content = "Hi" } },
+            .{ .assistant = .{
+                .tool_calls = &.{
+                    .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"src/main.zig\"}" } },
+                    .{ .id = "call_2", .function = .{ .name = "grep_search", .arguments = "{\"pattern\":\"foo\"}" } },
+                },
+            } },
+            .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } },
+            .{ .tool = .{ .tool_call_id = "call_2", .content = "match found" } },
+        },
+        .tools = &.{
+            .{ .function = schema },
+        },
+        .stream = true,
+        .temperature = 0.5,
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const obj = parsed.value.object;
+
+    // The model is carried in the URL, not the request body.
+    try std.testing.expect(obj.get("model") == null);
+
+    const system_parts = obj.get("systemInstruction").?.object.get("parts").?.array.items;
+    try std.testing.expectEqualStrings("You are helpful.", system_parts[0].object.get("text").?.string);
+
+    const generation_config = obj.get("generationConfig").?.object;
+    try std.testing.expectEqual(@as(i64, 4096), generation_config.get("maxOutputTokens").?.integer);
+    try std.testing.expectEqual(@as(f64, 0.5), generation_config.get("temperature").?.float);
+
+    const contents = obj.get("contents").?.array.items;
+    try std.testing.expectEqual(@as(usize, 4), contents.len);
+
+    try std.testing.expectEqualStrings("user", contents[0].object.get("role").?.string);
+    try std.testing.expectEqualStrings("Hello", contents[0].object.get("parts").?.array.items[0].object.get("text").?.string);
+
+    try std.testing.expectEqualStrings("model", contents[1].object.get("role").?.string);
+    try std.testing.expectEqualStrings("Hi", contents[1].object.get("parts").?.array.items[0].object.get("text").?.string);
+
+    try std.testing.expectEqualStrings("model", contents[2].object.get("role").?.string);
+    const call_parts = contents[2].object.get("parts").?.array.items;
+    const function_call_0 = call_parts[0].object.get("functionCall").?.object;
+    try std.testing.expectEqualStrings("read_file", function_call_0.get("name").?.string);
+    try std.testing.expectEqualStrings("src/main.zig", function_call_0.get("args").?.object.get("path").?.string);
+    const function_call_1 = call_parts[1].object.get("functionCall").?.object;
+    try std.testing.expectEqualStrings("grep_search", function_call_1.get("name").?.string);
+
+    // Consecutive tool results are coalesced into a single user turn, and each
+    // functionResponse recovers its function name from the matching tool_call id.
+    try std.testing.expectEqualStrings("user", contents[3].object.get("role").?.string);
+    const response_parts = contents[3].object.get("parts").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), response_parts.len);
+    const function_response_0 = response_parts[0].object.get("functionResponse").?.object;
+    try std.testing.expectEqualStrings("read_file", function_response_0.get("name").?.string);
+    try std.testing.expectEqualStrings("file contents", function_response_0.get("response").?.object.get("output").?.string);
+    const function_response_1 = response_parts[1].object.get("functionResponse").?.object;
+    try std.testing.expectEqualStrings("grep_search", function_response_1.get("name").?.string);
+    try std.testing.expectEqualStrings("match found", function_response_1.get("response").?.object.get("output").?.string);
+
+    const tools = obj.get("tools").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), tools.len);
+    const declarations = tools[0].object.get("functionDeclarations").?.array.items;
+    try std.testing.expectEqualStrings("read_file", declarations[0].object.get("name").?.string);
+    try std.testing.expect(declarations[0].object.get("parameters") != null);
+}
+
+test "GoogleSseCallback emits content and usage events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.array_list.Managed(TestEvent).init(allocator);
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    var sse = GoogleSseCallback{ .allocator = allocator, .callback = callback };
+
+    try sse.event("{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello\"}]},\"index\":0}]}");
+    try sse.event("{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\" world\"}]},\"index\":0}]}");
+    try sse.event("{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"STOP\",\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":20,\"totalTokenCount\":30}}");
+
+    try std.testing.expectEqual(@as(usize, 4), events.items.len);
+    try std.testing.expectEqualStrings("Hello", events.items[0].content);
+    try std.testing.expectEqualStrings(" world", events.items[1].content);
+    try std.testing.expectEqualStrings("STOP", events.items[2].finish.?);
+    try std.testing.expectEqual(@as(i64, 10), events.items[3].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 20), events.items[3].usage.output_tokens);
+}
+
+test "GoogleSseCallback emits tool call events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.array_list.Managed(TestEvent).init(allocator);
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    var sse = GoogleSseCallback{ .allocator = allocator, .callback = callback };
+
+    try sse.event("{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"read_file\",\"args\":{\"path\":\"src/main.zig\"}}}]},\"finishReason\":\"STOP\",\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":15}}");
+
+    try std.testing.expectEqual(@as(usize, 4), events.items.len);
+    try std.testing.expectEqual(@as(usize, 0), events.items[0].tool_call_start.index);
+    try std.testing.expectEqualStrings("call_0", events.items[0].tool_call_start.id);
+    try std.testing.expectEqualStrings("read_file", events.items[0].tool_call_start.name);
+    try std.testing.expectEqualStrings("{\"path\":\"src/main.zig\"}", events.items[1].tool_call_delta.arguments);
+    try std.testing.expectEqualStrings("STOP", events.items[2].finish.?);
+    try std.testing.expectEqual(@as(i64, 5), events.items[3].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 15), events.items[3].usage.output_tokens);
+}
