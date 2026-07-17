@@ -18,5 +18,4 @@ jobs:
           version: 0.16.0
 
       - name: Run regression tests
-        shell: pwsh
-        run: ./scripts/test-regression.ps1
+        run: zig build test-regression
