@@ -62,5 +62,3 @@ pub fn readLineSimple(
         raw_message;
     return result;
 }
-
-
