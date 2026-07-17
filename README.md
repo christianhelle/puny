@@ -51,6 +51,62 @@ transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and t
 plus Qwen and Claude models served over Anthropic's `/v1/messages` transport. 
 Gemini models still use unsupported transports.
 
+## Docker
+
+Puny is published as a container image to both Docker Hub and GitHub Container Registry.
+
+### Pull the image
+
+From Docker Hub:
+
+```bash
+docker pull christianhelle/puny:latest
+```
+
+From GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/christianhelle/puny:latest
+```
+
+### Run interactively
+
+Mount your project directory into `/app` and allocate a TTY so Puny can read and edit files:
+
+```bash
+docker run -it -v "$PWD":/app christianhelle/puny
+```
+
+Puny starts in the current directory and shows the model picker.
+
+### One-shot prompt
+
+Run a single prompt and exit:
+
+```bash
+docker run -v "$PWD":/app christianhelle/puny --prompt "List all source files" --oneshot
+```
+
+### LM Studio
+
+LM Studio must be reachable from inside the container. If it is running on the Docker host, use the host's address or `host.docker.internal` on Docker Desktop:
+
+```bash
+docker run -it -v "$PWD":/app christianhelle/puny --url http://host.docker.internal:1234
+```
+
+### OpenCode Zen
+
+```bash
+docker run -it -v "$PWD":/app christianhelle/puny --provider opencode --api-key YOUR_API_KEY
+```
+
+### Available tags
+
+- `latest`
+- Semantic versions: `v1.2.3`, `1.2`, `1`
+- Branch refs
+
 ## Usage
 
 Make sure LM Studio is running and a tool-capable model is loaded, then start Puny:
