@@ -109,14 +109,16 @@ docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny
 
 ### Build the image locally
 
-The Dockerfile expects a Linux binary at `artifacts/puny`. Build it for the container target:
+The Dockerfile expects a Linux binary at `artifacts/puny`. Build it with the Docker step:
 
 ```bash
-zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-linux
+zig build docker
 mkdir -p artifacts
 cp zig-out/bin/puny artifacts/puny
 docker build -t puny:local .
 ```
+
+`zig build docker` is equivalent to `zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-linux -Ddocker` and sets the default LM Studio URL to `http://host.docker.internal:1234`.
 
 Run the locally built image the same way as the published one:
 
