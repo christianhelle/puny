@@ -5,3 +5,4 @@ zig-cache/
 *.pdb
 *.exe
 zig-pkg
+artifacts
