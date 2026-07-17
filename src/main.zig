@@ -256,6 +256,38 @@ fn promptReconfigure(
     return result;
 }
 
+fn ensureCopilotAuth(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init,
+    cfg: *config.Config,
+    stdout_writer: *std.Io.Writer,
+    prov: *provider.Provider,
+) !void {
+    const client = prov.asCopilot() orelse return;
+    if (client.github_token.len > 0) return;
+
+    if (try copilot.discoverGithubToken(arena, io, init.environ_map)) |token| {
+        client.setGithubToken(token);
+        return;
+    }
+
+    const token = (try client.deviceLogin(stdout_writer)) orelse return error.MissingApiKey;
+    client.setGithubToken(token);
+
+    cfg.apiKey = try arena.dupe(u8, token);
+    config.save(arena, io, cfg.*, init.environ_map) catch |err| {
+        var stderr_buffer: [1024]u8 = undefined;
+        var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+        const stderr_writer = &stderr_file_writer.interface;
+        stderr_writer.print(
+            "Warning: could not persist GitHub Copilot token: {s}\n",
+            .{@errorName(err)},
+        ) catch {};
+        stderr_writer.flush() catch {};
+    };
+}
+
 fn initializeProviderAndModel(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -289,6 +321,7 @@ fn initializeProviderAndModel(
     const configured_model = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
 
     prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, arena, io);
+    if (!parsed.mock) try ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
     const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
         u8,
@@ -471,6 +504,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (!ctx.parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
         ctx.prov.deinit();
         ctx.prov.* = createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.arena, ctx.io);
+        if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
         ctx.provider_name.* = new_provider_name;
         ctx.provider_url.* = new_provider_url;
 
