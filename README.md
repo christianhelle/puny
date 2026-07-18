@@ -130,7 +130,7 @@ Pass a discovered or manually issued GitHub OAuth token via `PUNY_API_KEY` (devi
 login needs an interactive terminal):
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" -e PUNY_API_KEY=gho_YOUR_GITHUB_OAUTH_TOKEN christianhelle/puny --provider copilot
+docker run -it --mount "type=bind,source=${PWD},target=/app" -e PUNY_API_KEY=gho_... christianhelle/puny --provider copilot
 ```
 
 ### Available tags
