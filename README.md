@@ -1,11 +1,10 @@
 # Puny
 
-A minimal AI coding agent for the terminal. 
+A minimal AI coding agent for the terminal that currently supports the following model providers, with OpenAI, Anthropic, and Google (Gemini) API compatible models:
 
-Currently supports the following model providers, with OpenAI, Anthropic, and Google (Gemini) API compatible models:
 - [LM Studio](https://lmstudio.ai/) 
 - [OpenCode Zen](https://opencode.ai/zen)
-- [GitHub Copilot](https://github.com/features/copilot)
+- [GitHub Copilot](https://github.com/features/copilot) ***(Experimental)***
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
@@ -54,7 +53,7 @@ and Gemini models served over Google's `/v1/models/<model>:streamGenerateContent
 
 ### GitHub Copilot
 
-Drive Puny with your existing [GitHub Copilot](https://github.com/features/copilot) subscription:
+Use Puny with your existing [GitHub Copilot](https://github.com/features/copilot) subscription:
 
 ```bash
 puny --provider copilot
@@ -73,6 +72,8 @@ It then exchanges that OAuth token for a short-lived Copilot token and shows the
 picker. Only chat-capable models from your subscription are listed. The general-purpose
 `GH_TOKEN`/`GITHUB_TOKEN` environment variables are intentionally **not** used, so an
 unrelated GitHub token can't break the exchange.
+
+Support for GitHub Copilot is experimental and the only model that currently works is Kimi 2.7 Code.
 
 ## Docker
 
