@@ -85,7 +85,7 @@ pub const Widget = struct {
         defer ctx.allocator.free(header);
 
         const pane_height = if (ctx.height > 1) ctx.height - 1 else 1;
-        const orientation: zz.SplitPaneOrientation = if (ctx.width < 80) .vertical else .horizontal;
+        const orientation: zz.components.SplitPaneOrientation = if (ctx.width < 80) .vertical else .horizontal;
         self.split.orientation = orientation;
         self.split.setSize(ctx.width, pane_height);
         self.split.setRatio(if (orientation == .horizontal) 0.45 else 0.50);
@@ -247,7 +247,7 @@ test "model picker switches to vertical layout on narrow terminals" {
     defer widget.deinit();
 
     _ = widget.view(&ctx);
-    try std.testing.expectEqual(zz.SplitPaneOrientation.vertical, widget.split.orientation);
+    try std.testing.expectEqual(zz.components.SplitPaneOrientation.vertical, widget.split.orientation);
 }
 
 test "model picker selects model on Enter" {
