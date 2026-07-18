@@ -283,6 +283,8 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
         if (item != .object) continue;
         const id = if (item.object.get("id")) |v| v.string else continue;
         if (!isChatModel(item)) continue;
+        if (!isModelPickerEnabled(item)) continue;
+        if (!supportsChatCompletions(item)) continue;
 
         const name = if (item.object.get("name")) |v| v.string else id;
         const vendor = if (item.object.get("vendor")) |v| v.string else "github-copilot";
@@ -319,6 +321,33 @@ fn isChatModel(item: std.json.Value) bool {
     return std.mem.eql(u8, kind.string, "chat");
 }
 
+/// The Copilot `/models` catalog marks user-selectable models with
+/// `model_picker_enabled`. This is the curated set the GitHub Copilot CLI and editors
+/// surface in their model pickers, so filtering on it drops the legacy and internal
+/// models (e.g. gpt-3.5-turbo, gpt-4o, exec-agent-*, trajectory-compaction) that the
+/// raw catalog also lists.
+fn isModelPickerEnabled(item: std.json.Value) bool {
+    const value = item.object.get("model_picker_enabled") orelse return false;
+    return switch (value) {
+        .bool => |b| b,
+        else => false,
+    };
+}
+
+/// Puny drives Copilot over the OpenAI-compatible `/chat/completions` endpoint, so
+/// picker-enabled models that are only served over `/responses` (e.g. gpt-5.5,
+/// gpt-5.3-codex, mai-code-1-flash-picker) can't be used here and are excluded. A
+/// missing `supported_endpoints` field means the model uses the default
+/// `/chat/completions` transport.
+fn supportsChatCompletions(item: std.json.Value) bool {
+    const endpoints = item.object.get("supported_endpoints") orelse return true;
+    if (endpoints != .array) return true;
+    for (endpoints.array.items) |ep| {
+        if (ep == .string and std.mem.eql(u8, ep.string, "/chat/completions")) return true;
+    }
+    return false;
+}
+
 fn modelContextLength(item: std.json.Value) i64 {
     const caps = item.object.get("capabilities") orelse return 0;
     if (caps != .object) return 0;
@@ -331,25 +360,31 @@ fn modelContextLength(item: std.json.Value) i64 {
     };
 }
 
-test "parseModels keeps only chat-capable models" {
+test "parseModels keeps only picker-enabled chat models on /chat/completions" {
     const allocator = std.testing.allocator;
     const body =
         \\{"data":[
-        \\{"id":"gpt-4o","name":"GPT-4o","vendor":"openai","capabilities":{"type":"chat","limits":{"max_context_window_tokens":128000}}},
-        \\{"id":"text-embedding-3-small","name":"Embedding","vendor":"openai","capabilities":{"type":"embeddings"}},
-        \\{"id":"claude-sonnet-4","name":"Claude Sonnet 4","vendor":"anthropic","capabilities":{"type":"chat"}}
+        \\{"id":"claude-sonnet-4.5","name":"Claude Sonnet 4.5","vendor":"Anthropic","model_picker_enabled":true,"capabilities":{"type":"chat","limits":{"max_context_window_tokens":200000}},"supported_endpoints":["/chat/completions","/v1/messages"]},
+        \\{"id":"gpt-4o","name":"GPT-4o","vendor":"Azure OpenAI","model_picker_enabled":false,"capabilities":{"type":"chat","limits":{"max_context_window_tokens":128000}}},
+        \\{"id":"text-embedding-3-small","name":"Embedding","vendor":"openai","model_picker_enabled":true,"capabilities":{"type":"embeddings"}},
+        \\{"id":"gpt-5.5","name":"GPT-5.5","vendor":"OpenAI","model_picker_enabled":true,"capabilities":{"type":"chat"},"supported_endpoints":["/responses","ws:/responses"]},
+        \\{"id":"gemini-2.5-pro","name":"Gemini 2.5 Pro","vendor":"Google","model_picker_enabled":true,"capabilities":{"type":"chat"}}
         \\],"object":"list"}
     ;
     var owned = try parseModels(allocator, body);
     defer owned.deinit();
 
     const models = owned.value().models;
+    // Kept: claude-sonnet-4.5 (picker + /chat/completions) and gemini-2.5-pro
+    // (picker + no supported_endpoints => default /chat/completions).
+    // Dropped: gpt-4o (picker disabled), text-embedding-3-small (not chat),
+    // gpt-5.5 (picker enabled but /responses-only).
     try std.testing.expectEqual(@as(usize, 2), models.len);
-    try std.testing.expectEqualStrings("gpt-4o", models[0].key);
-    try std.testing.expectEqualStrings("GPT-4o", models[0].display_name);
-    try std.testing.expectEqualStrings("openai", models[0].publisher);
-    try std.testing.expectEqual(@as(i64, 128000), models[0].max_context_length);
-    try std.testing.expectEqualStrings("claude-sonnet-4", models[1].key);
+    try std.testing.expectEqualStrings("claude-sonnet-4.5", models[0].key);
+    try std.testing.expectEqualStrings("Claude Sonnet 4.5", models[0].display_name);
+    try std.testing.expectEqualStrings("Anthropic", models[0].publisher);
+    try std.testing.expectEqual(@as(i64, 200000), models[0].max_context_length);
+    try std.testing.expectEqualStrings("gemini-2.5-pro", models[1].key);
 }
 
 /// The Copilot API expects `X-Initiator: agent` once the conversation contains
