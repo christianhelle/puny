@@ -21,6 +21,7 @@ const user_agent = "GitHubCopilotChat/0.26.7";
 const integration_id = "vscode-chat";
 const api_version = "2025-04-01";
 const openai_intent = "conversation-panel";
+const max_token_file_size = 1024 * 1024;
 
 // Refresh the Copilot token this many seconds before it actually expires.
 const token_refresh_buffer_seconds = 120;
@@ -506,7 +507,7 @@ pub fn discoverGithubToken(
 
 fn readFileOpt(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ?[]u8 {
     const cwd = std.Io.Dir.cwd();
-    return cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(1024 * 1024)) catch null;
+    return cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(max_token_file_size)) catch null;
 }
 
 fn homeDir(environ_map: *const std.process.Environ.Map) ?[]const u8 {
