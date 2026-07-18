@@ -222,7 +222,7 @@ fn appendCopilotHeaders(
     initiator: ?[]const u8,
 ) ![]u8 {
     const auth = try std.fmt.allocPrint(allocator, "Bearer {s}", .{bearer_token});
-    try headers.append(allocator, .{ .name = "Authorization", .value = auth });
+    try headers.append(allocator, .{ .name = "authorization", .value = auth });
     try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
     try headers.append(allocator, .{ .name = "accept", .value = accept });
     try headers.append(allocator, .{ .name = "copilot-integration-id", .value = integration_id });
