@@ -90,6 +90,21 @@ fn httpRequest(
     };
 }
 
+fn appendFormField(writer: anytype, name: []const u8, value: []const u8, first: bool) !void {
+    if (!first) try writer.writeByte('&');
+    try writeFormComponent(writer, name);
+    try writer.writeByte('=');
+    try writeFormComponent(writer, value);
+}
+
+fn writeFormComponent(writer: anytype, value: []const u8) !void {
+    for (value) |c| switch (c) {
+        'A'...'Z', 'a'...'z', '0'...'9', '-', '.', '_', '~' => try writer.writeByte(c),
+        ' ' => try writer.writeByte('+'),
+        else => try writer.print("%{X:0>2}", .{c}),
+    };
+}
+
 const CopilotTokenResponse = struct {
     token: []const u8,
     expires_at: i64 = 0,
@@ -405,12 +420,18 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
             lmstudio.printAuthHint(self.inner.io);
         }
 
-        std.debug.print("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
-            url,
-            @intFromEnum(response.head.status),
-            payload,
-            body_alloc.written(),
-        });
+        if (builtin.mode == .Debug) {
+            std.debug.print("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n  Response: {s}\n", .{
+                url,
+                @intFromEnum(response.head.status),
+                body_alloc.written(),
+            });
+        } else {
+            std.debug.print("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n", .{
+                url,
+                @intFromEnum(response.head.status),
+            });
+        }
         return error.ResponseError;
     }
 
@@ -608,6 +629,16 @@ test "oauthTokenFromOpencode returns null when copilot entry is absent" {
     try std.testing.expect((try oauthTokenFromOpencode(allocator, json)) == null);
 }
 
+test "appendFormField percent-encodes form values" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try appendFormField(&output.writer, "scope", "read:user email", true);
+    try appendFormField(&output.writer, "device_code", "abc:/+=", false);
+
+    try std.testing.expectEqualStrings("scope=read%3Auser+email&device_code=abc%3A%2F%2B%3D", output.written());
+}
+
 // --- Device-flow login -----------------------------------------------------
 // Interactive OAuth device flow, used when no token can be discovered.
 
@@ -646,19 +677,18 @@ fn sleepSeconds(io: std.Io, seconds: i64) void {
 pub fn deviceLogin(self: *Client, stdout_writer: *std.Io.Writer) !?[]const u8 {
     const allocator = self.inner.allocator;
 
-    const json_headers = [_]std.http.Header{
-        .{ .name = "content-type", .value = "application/json" },
+    const form_headers = [_]std.http.Header{
+        .{ .name = "content-type", .value = "application/x-www-form-urlencoded" },
         .{ .name = "accept", .value = "application/json" },
     };
 
-    const device_body = try std.fmt.allocPrint(
-        allocator,
-        "{{\"client_id\":\"{s}\",\"scope\":\"{s}\"}}",
-        .{ client_id, app_scopes },
-    );
-    defer allocator.free(device_body);
+    var device_body_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer device_body_alloc.deinit();
+    try appendFormField(&device_body_alloc.writer, "client_id", client_id, true);
+    try appendFormField(&device_body_alloc.writer, "scope", app_scopes, false);
+    const device_body = device_body_alloc.written();
 
-    var device_raw = try httpRequest(self, .POST, github_base_url ++ "/login/device/code", &json_headers, device_body);
+    var device_raw = try httpRequest(self, .POST, github_base_url ++ "/login/device/code", &form_headers, device_body);
     defer device_raw.deinit();
     if (device_raw.status.class() != .success) return error.DeviceCodeRequestFailed;
 
@@ -680,14 +710,14 @@ pub fn deviceLogin(self: *Client, stdout_writer: *std.Io.Writer) !?[]const u8 {
     while (nowUnixSeconds(self.inner.io) < deadline) {
         sleepSeconds(self.inner.io, interval_s + 1);
 
-        const poll_body = try std.fmt.allocPrint(
-            allocator,
-            "{{\"client_id\":\"{s}\",\"device_code\":\"{s}\",\"grant_type\":\"urn:ietf:params:oauth:grant-type:device_code\"}}",
-            .{ client_id, device.device_code },
-        );
-        defer allocator.free(poll_body);
+        var poll_body_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer poll_body_alloc.deinit();
+        try appendFormField(&poll_body_alloc.writer, "client_id", client_id, true);
+        try appendFormField(&poll_body_alloc.writer, "device_code", device.device_code, false);
+        try appendFormField(&poll_body_alloc.writer, "grant_type", "urn:ietf:params:oauth:grant-type:device_code", false);
+        const poll_body = poll_body_alloc.written();
 
-        var poll_raw = try httpRequest(self, .POST, github_base_url ++ "/login/oauth/access_token", &json_headers, poll_body);
+        var poll_raw = try httpRequest(self, .POST, github_base_url ++ "/login/oauth/access_token", &form_headers, poll_body);
         defer poll_raw.deinit();
 
         switch (parseAccessToken(allocator, poll_raw.body) catch PollOutcome.pending) {
