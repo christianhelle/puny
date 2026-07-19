@@ -1,5 +1,5 @@
 const std = @import("std");
-const lmstudio = @import("lmstudio.zig");
+const client = @import("client.zig");
 const openai = @import("openai.zig");
 
 pub const MockClient = struct {
@@ -14,7 +14,7 @@ pub const MockClient = struct {
         _ = self;
     }
 
-    pub fn listModels(self: *MockClient) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+    pub fn listModels(self: *MockClient) !client.Owned(client.ListModelsResponse) {
         const json =
             \\{"models":[
             \\  {"key":"mock-model","display_name":"Mock Model (GPT-4 level)","publisher":"mock","format":"gguf","size_bytes":0,"max_context_length":128000,"loaded_instances":[],"type":"llm"},
@@ -24,7 +24,7 @@ pub const MockClient = struct {
         const json_bytes = try self.allocator.dupe(u8, json);
         errdefer self.allocator.free(json_bytes);
         const parsed = try std.json.parseFromSlice(
-            lmstudio.ListModelsResponse,
+            client.ListModelsResponse,
             self.allocator,
             json_bytes,
             .{ .ignore_unknown_fields = true },
