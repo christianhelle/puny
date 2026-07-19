@@ -2,6 +2,17 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 
+fn isValidUtf8(s: []const u8) bool {
+    var i: usize = 0;
+    while (i < s.len) {
+        const len = std.unicode.utf8ByteSequenceLength(s[i]) catch return false;
+        if (i + len > s.len) return false;
+        _ = std.unicode.utf8Decode(s[i..][0..len]) catch return false;
+        i += len;
+    }
+    return true;
+}
+
 pub const default_lm_studio_url =
     if (build_options.docker) "http://host.docker.internal:1234" else "http://127.0.0.1:1234";
 
@@ -123,7 +134,12 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
     };
     defer parsed.deinit();
 
-    return .{ .config = try parsed.value.clone(allocator) };
+    var cfg = try parsed.value.clone(allocator);
+    if (!isValidUtf8(cfg.model)) {
+        allocator.free(cfg.model);
+        cfg.model = try allocator.dupe(u8, "");
+    }
+    return .{ .config = cfg };
 }
 
 pub fn save(
@@ -201,4 +217,9 @@ test "resolvePrompt applies prefix, suffix, and override" {
     const planning = try cfg.resolvePrompt(allocator, "planning", "default");
     defer allocator.free(planning);
     try std.testing.expectEqualStrings("overridden", planning);
+}
+
+test "isValidUtf8 rejects invalid bytes" {
+    try std.testing.expect(isValidUtf8("ornith-1.0-35b"));
+    try std.testing.expect(!isValidUtf8(&.{0xaa}));
 }
