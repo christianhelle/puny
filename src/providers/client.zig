@@ -507,3 +507,10 @@ test "appendClientHeaders omits Authorization header when api key is empty" {
     const auth = findHeader(headers.items, "Authorization");
     try std.testing.expect(auth == null);
 }
+
+test "lmstudio.zig compiles after regeneration" {
+    const lmstudio = @import("lmstudio.zig");
+    _ = lmstudio.Client;
+    _ = lmstudio.ListModelsResponse;
+    _ = lmstudio.ModelInfo;
+}
