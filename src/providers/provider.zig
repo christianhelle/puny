@@ -4,7 +4,7 @@ const openai = @import("openai.zig");
 const mock = @import("mock.zig");
 const opencode = @import("opencode.zig");
 const copilot = @import("copilot.zig");
-const lmstudio_models = @import("lmstudio_models.zig");
+const models = @import("models.zig");
 
 pub const Provider = union(enum) {
     lmstudio: client.Client,
@@ -21,8 +21,8 @@ pub const Provider = union(enum) {
     pub fn listModels(self: *Provider) !client.Owned(client.ModelsList) {
         return switch (self.*) {
             .lmstudio => |*c| blk: {
-                var owned = try lmstudio_models.listModels(c);
-                break :blk try lmstudio_models.toSharedModels(&owned);
+                var owned = try models.listModels(c);
+                break :blk try models.toSharedModels(&owned);
             },
             .opencode => |*c| blk: {
                 var owned = try opencode.listModels(c);
