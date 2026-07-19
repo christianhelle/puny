@@ -27,7 +27,7 @@ pub fn select(
         var models = try listModelsWithRetry(prov, io, random, 0);
         defer models.deinit();
         const found = for (models.value().models) |m| {
-            if (std.mem.eql(u8, m.key, id)) break true;
+            if (std.mem.eql(u8, m.id, id)) break true;
         } else false;
         if (found) {
             return try arena.dupe(u8, id);
@@ -53,7 +53,7 @@ pub fn select(
 }
 
 fn selectModelInteractive(
-    models: []const client.ModelInfo,
+    models: []const client.Model,
     arena: std.mem.Allocator,
     io: std.Io,
     init: std.process.Init,
@@ -83,7 +83,7 @@ fn selectModelInteractive(
 }
 
 fn selectModelText(
-    models: []const client.ModelInfo,
+    models: []const client.Model,
     arena: std.mem.Allocator,
     io: std.Io,
 ) !?[]const u8 {
@@ -93,7 +93,7 @@ fn selectModelText(
 
     try stdout_writer.print("\nAvailable models:\n", .{});
     for (models, 0..) |m, i| {
-        try stdout_writer.print("  {d}. {s} — {s}\n", .{ i + 1, m.key, m.display_name });
+        try stdout_writer.print("  {d}. {s} — {s}\n", .{ i + 1, m.id, m.display_name });
     }
     try stdout_writer.print("\nEnter model number or key: ", .{});
     try stdout_writer.flush();
@@ -106,7 +106,7 @@ fn selectModelText(
 
     const idx = std.fmt.parseInt(usize, line, 10) catch null;
     if (idx) |i| {
-        if (i > 0 and i <= models.len) return try arena.dupe(u8, models[i - 1].key);
+        if (i > 0 and i <= models.len) return try arena.dupe(u8, models[i - 1].id);
         try stdout_writer.print("Invalid model number.\n", .{});
         try stdout_writer.flush();
         return null;
@@ -145,7 +145,7 @@ pub fn switchModel(
     return new_key;
 }
 
-pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, comptime retries: usize) !client.Owned(client.ListModelsResponse) {
+pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, comptime retries: usize) !client.Owned(client.ModelsList) {
     var retry_count: usize = 0;
     const cfg = retry.default_config;
     while (true) {
@@ -163,11 +163,11 @@ pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, compti
     }
 }
 
-fn emptyListModelsResponse(allocator: std.mem.Allocator) !client.Owned(client.ListModelsResponse) {
+fn emptyListModelsResponse(allocator: std.mem.Allocator) !client.Owned(client.ModelsList) {
     const json = "{\"models\":[]}";
     const body = try allocator.dupe(u8, json);
     errdefer allocator.free(body);
-    const parsed = try std.json.parseFromSlice(client.ListModelsResponse, allocator, body, .{ .ignore_unknown_fields = true });
+    const parsed = try std.json.parseFromSlice(client.ModelsList, allocator, body, .{ .ignore_unknown_fields = true });
     return .{
         .allocator = allocator,
         .body = body,
@@ -181,7 +181,7 @@ const TestProvider = struct {
     fail_count: usize = 0,
     err: anyerror = error.ConnectionRefused,
 
-    pub fn listModels(self: *@This()) !client.Owned(client.ListModelsResponse) {
+    pub fn listModels(self: *@This()) !client.Owned(client.ModelsList) {
         self.calls += 1;
         if (self.calls <= self.fail_count) return self.err;
         return emptyListModelsResponse(self.allocator);

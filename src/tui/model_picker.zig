@@ -2,9 +2,9 @@ const std = @import("std");
 const zz = @import("zigzag");
 const client = @import("../providers/client.zig");
 
-var model_pick_list: []const client.ModelInfo = &.{};
+var model_pick_list: []const client.Model = &.{};
 
-pub fn setModels(models: []const client.ModelInfo) void {
+pub fn setModels(models: []const client.Model) void {
     model_pick_list = models;
 }
 
