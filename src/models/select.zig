@@ -39,14 +39,16 @@ pub fn select(
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
 
     if (cfg) |c| {
-        c.model = key;
-        config.save(arena, io, c.*, environ_map) catch |err| {
+        if (client.isValidUtf8(key)) {
+            c.model = key;
+            config.save(arena, io, c.*, environ_map) catch |err| {
             var stderr_buffer: [1024]u8 = undefined;
             var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
             const stderr_writer = &stderr_file_writer.interface;
             stderr_writer.print("Warning: failed to save selected model to config: {s}\n", .{@errorName(err)}) catch {};
             stderr_writer.flush() catch {};
         };
+        }
     }
 
     return key;
