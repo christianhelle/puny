@@ -239,8 +239,13 @@ const AnthropicSseCallback = struct {
     callback: openai.StreamCallback,
     block_types: std.array_list.Managed(BlockType),
     input_tokens: i64 = 0,
+    observer: ?http_client.HttpObserver = null,
 
     pub fn event(self: *@This(), data: []const u8) !void {
+        if (self.observer) |obs| {
+            if (obs.on_chunk) |cb| cb(obs.ctx, data);
+        }
+
         const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
 
@@ -339,12 +344,23 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
     try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
     try headers.append(allocator, .{ .name = "accept", .value = "text/event-stream" });
 
+    if (client.http_observer) |obs| {
+        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
+    }
+
     const uri = try std.Uri.parse(url);
-    var req = try client.http.request(.POST, uri, .{
+
+    const start = std.Io.Clock.awake.now(client.io);
+    var req = client.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
         .headers = .{ .accept_encoding = .{ .override = "identity" } },
         .extra_headers = headers.items,
-    });
+    }) catch |err| {
+        if (client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
     defer req.deinit();
 
     req.transfer_encoding = .{ .content_length = payload.len };
@@ -353,7 +369,13 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
     try body.end();
     try req.connection.?.flush();
 
-    var response = try req.receiveHead(&.{});
+    var response = req.receiveHead(&.{}) catch |err| {
+        if (client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
+    const elapsed_ns = @as(u64, @intCast(start.untilNow(client.io, .awake).nanoseconds));
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
@@ -366,6 +388,10 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         var body_alloc: std.Io.Writer.Allocating = .init(allocator);
         defer body_alloc.deinit();
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        if (client.http_observer) |obs| {
+            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
+        }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
             http_client.printAuthHint(client.io);
@@ -380,6 +406,10 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         return error.ResponseError;
     }
 
+    if (client.http_observer) |obs| {
+        if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
+    }
+
     var block_types = std.array_list.Managed(BlockType).init(allocator);
     defer block_types.deinit();
 
@@ -387,6 +417,7 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         .allocator = allocator,
         .callback = callback,
         .block_types = block_types,
+        .observer = client.http_observer,
     };
 
     http_client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
@@ -413,12 +444,23 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
     try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
     try headers.append(allocator, .{ .name = "accept", .value = "text/event-stream" });
 
+    if (client.http_observer) |obs| {
+        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
+    }
+
     const uri = try std.Uri.parse(url);
-    var req = try client.http.request(.POST, uri, .{
+
+    const start = std.Io.Clock.awake.now(client.io);
+    var req = client.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
         .headers = .{ .accept_encoding = .{ .override = "identity" } },
         .extra_headers = headers.items,
-    });
+    }) catch |err| {
+        if (client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
     defer req.deinit();
 
     req.transfer_encoding = .{ .content_length = payload.len };
@@ -427,7 +469,13 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
     try body.end();
     try req.connection.?.flush();
 
-    var response = try req.receiveHead(&.{});
+    var response = req.receiveHead(&.{}) catch |err| {
+        if (client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
+    const elapsed_ns = @as(u64, @intCast(start.untilNow(client.io, .awake).nanoseconds));
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
@@ -440,6 +488,10 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
         var body_alloc: std.Io.Writer.Allocating = .init(allocator);
         defer body_alloc.deinit();
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        if (client.http_observer) |obs| {
+            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
+        }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
             http_client.printAuthHint(client.io);
@@ -454,9 +506,14 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
         return error.ResponseError;
     }
 
+    if (client.http_observer) |obs| {
+        if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
+    }
+
     var sse = GoogleSseCallback{
         .allocator = allocator,
         .callback = callback,
+        .observer = client.http_observer,
     };
 
     http_client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
@@ -664,8 +721,13 @@ const GoogleSseCallback = struct {
     callback: openai.StreamCallback,
     tool_call_index: usize = 0,
     input_tokens: i64 = 0,
+    observer: ?http_client.HttpObserver = null,
 
     pub fn event(self: *@This(), data: []const u8) !void {
+        if (self.observer) |obs| {
+            if (obs.on_chunk) |cb| cb(obs.ctx, data);
+        }
+
         const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
 
