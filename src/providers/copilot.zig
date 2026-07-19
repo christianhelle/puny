@@ -72,22 +72,39 @@ fn httpRequest(
     payload: ?[]const u8,
 ) !client.RawResponse {
     const allocator = self.inner.allocator;
+
+    if (self.inner.http_observer) |obs| {
+        if (obs.onRequest) |cb| cb(obs.ctx, method, url, extra_headers, payload);
+    }
+
     const uri = try std.Uri.parse(url);
     var response_body: std.Io.Writer.Allocating = .init(allocator);
     defer response_body.deinit();
 
-    const result = try self.inner.http.fetch(.{
+    const start = std.Io.Clock.awake.now(self.inner.io);
+    const result = self.inner.http.fetch(.{
         .location = .{ .uri = uri },
         .method = method,
         .extra_headers = extra_headers,
         .payload = payload,
         .response_writer = &response_body.writer,
-    });
+    }) catch |err| {
+        if (self.inner.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, method, url, @errorName(err));
+        }
+        return err;
+    };
+    const elapsed_ns = @as(u64, @intCast(start.untilNow(self.inner.io, .awake).nanoseconds));
+
+    const body = try response_body.toOwnedSlice();
+    if (self.inner.http_observer) |obs| {
+        if (obs.onResponse) |cb| cb(obs.ctx, method, url, result.status, &.{}, body, elapsed_ns);
+    }
 
     return .{
         .allocator = allocator,
         .status = result.status,
-        .body = try response_body.toOwnedSlice(),
+        .body = body,
     };
 }
 
@@ -467,12 +484,23 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
     );
     defer allocator.free(auth);
 
+    if (self.inner.http_observer) |obs| {
+        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
+    }
+
     const uri = try std.Uri.parse(url);
-    var req = try self.inner.http.request(.POST, uri, .{
+
+    const start = std.Io.Clock.awake.now(self.inner.io);
+    var req = self.inner.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
         .headers = .{ .accept_encoding = .{ .override = "identity" } },
         .extra_headers = headers.items,
-    });
+    }) catch |err| {
+        if (self.inner.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
     defer req.deinit();
 
     req.transfer_encoding = .{ .content_length = payload.len };
@@ -481,7 +509,13 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
     try body.end();
     try req.connection.?.flush();
 
-    var response = try req.receiveHead(&.{});
+    var response = req.receiveHead(&.{}) catch |err| {
+        if (self.inner.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
+    const elapsed_ns = @as(u64, @intCast(start.untilNow(self.inner.io, .awake).nanoseconds));
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
@@ -494,6 +528,10 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         var body_alloc: std.Io.Writer.Allocating = .init(allocator);
         defer body_alloc.deinit();
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        if (self.inner.http_observer) |obs| {
+            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
+        }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
             client.printAuthHint(self.inner.io);
@@ -514,9 +552,14 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         return error.ResponseError;
     }
 
+    if (self.inner.http_observer) |obs| {
+        if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
+    }
+
     var sse = openai.SseCallback{
         .allocator = allocator,
         .callback = callback,
+        .observer = self.inner.http_observer,
     };
 
     client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
