@@ -1,59 +1,19 @@
 const std = @import("std");
 
 ///////////////////////////////////////////
-// Shared model-list types
+// Shared app model-list types
 ///////////////////////////////////////////
 
-pub const ListModelsResponse = struct {
-    models: []const ModelInfo,
-};
-
-pub const LoadedInstanceConfig = struct {
-    context_length: i64,
-    num_experts: ?i64 = null,
-    flash_attention: ?bool = null,
-    eval_batch_size: ?i64 = null,
-    parallel: ?i64 = null,
-    offload_kv_cache_to_gpu: ?bool = null,
-};
-
-pub const LoadedInstance = struct {
+/// Provider-agnostic model descriptor used by the app UI and selection logic.
+pub const Model = struct {
     id: []const u8,
-    config: LoadedInstanceConfig,
-};
-
-pub const ModelInfoCapabilitiesReasoning = struct {
-    allowed_options: []const []const u8,
-    default: []const u8,
-};
-
-pub const ModelInfoCapabilities = struct {
-    trained_for_tool_use: ?bool = null,
-    reasoning: ?ModelInfoCapabilitiesReasoning = null,
-    vision: ?bool = null,
-};
-
-pub const ModelInfoQuantization = struct {
-    name: []const u8,
-    bits_per_weight: f64,
-};
-
-pub const ModelInfo = struct {
-    params_string: ?[]const u8 = null,
-    publisher: []const u8,
-    key: []const u8,
-    format: []const u8,
-    variants: ?[]const []const u8 = null,
-    selected_variant: ?[]const u8 = null,
     display_name: []const u8,
-    size_bytes: i64,
-    architecture: ?[]const u8 = null,
-    max_context_length: i64,
-    capabilities: ?ModelInfoCapabilities = null,
-    loaded_instances: []const LoadedInstance,
-    quantization: ?ModelInfoQuantization = null,
-    description: ?[]const u8 = null,
-    @"type": []const u8,
+    provider: []const u8,
+    context_length: i64,
+};
+
+pub const ModelsList = struct {
+    models: []const Model,
 };
 
 ///////////////////////////////////////////
@@ -425,34 +385,6 @@ fn TypedSseCallback(comptime T: type, comptime Callback: type) type {
             try self.callback.event(&parsed.value);
         }
     };
-}
-
-///////////////////////////////////////////
-// Helpers for model listing
-///////////////////////////////////////////
-
-pub fn listModelsResult(client: *Client) !ApiResult(ListModelsResponse) {
-    const allocator = client.allocator;
-    var uri_buf: std.Io.Writer.Allocating = .init(allocator);
-    defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/api/v1/models", .{client.base_url});
-    return parseRawResponse(ListModelsResponse, try requestRaw(client, std.http.Method.GET, uri_buf.written(), null));
-}
-
-pub fn listModels(client: *Client) !Owned(ListModelsResponse) {
-    var result = try listModelsResult(client);
-    switch (result) {
-        .ok => |ok| return ok,
-        .api_error => |*err| {
-            if (isAuthFailure(err.status)) printAuthHint(client.io);
-            err.deinit();
-            return error.ResponseError;
-        },
-        .parse_error => |*err| {
-            err.raw.deinit();
-            return error.ResponseParseError;
-        },
-    }
 }
 
 ///////////////////////////////////////////
