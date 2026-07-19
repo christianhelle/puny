@@ -350,7 +350,7 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         .block_types = block_types,
     };
 
-    http_client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    http_client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
@@ -420,7 +420,7 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
         .callback = callback,
     };
 
-    http_client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    http_client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;

@@ -476,7 +476,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         .callback = callback,
     };
 
-    client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
