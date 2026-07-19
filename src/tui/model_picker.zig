@@ -1,10 +1,10 @@
 const std = @import("std");
 const zz = @import("zigzag");
-const lmstudio = @import("../providers/lmstudio.zig");
+const client = @import("../providers/client.zig");
 
-var model_pick_list: []const lmstudio.ModelInfo = &.{};
+var model_pick_list: []const client.ModelInfo = &.{};
 
-pub fn setModels(models: []const lmstudio.ModelInfo) void {
+pub fn setModels(models: []const client.ModelInfo) void {
     model_pick_list = models;
 }
 
