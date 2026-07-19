@@ -22,13 +22,25 @@ pub const Widget = struct {
             .selected = null,
         };
         for (model_pick_list) |m| {
-            self.list.addItem(.init(m.id, m.display_name)) catch {};
+            const id = ctx.persistent_allocator.dupe(u8, m.id) catch continue;
+            const display_name = ctx.persistent_allocator.dupe(u8, m.display_name) catch {
+                ctx.persistent_allocator.free(id);
+                continue;
+            };
+            self.list.addItem(.init(id, display_name)) catch {
+                ctx.persistent_allocator.free(id);
+                ctx.persistent_allocator.free(display_name);
+            };
         }
         self.list.height = ctx.height -| 2;
         return .none;
     }
 
     pub fn deinit(self: *Widget) void {
+        for (self.list.items.items) |item| {
+            self.list.allocator.free(item.value);
+            self.list.allocator.free(item.title);
+        }
         self.list.deinit();
     }
 
