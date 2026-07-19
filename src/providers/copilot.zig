@@ -236,7 +236,18 @@ fn appendCopilotHeaders(
     return auth;
 }
 
-pub fn listModels(self: *Client) !client.Owned(client.ListModelsResponse) {
+pub const ModelInfo = struct {
+    id: []const u8,
+    name: []const u8,
+    vendor: []const u8,
+    context_length: i64,
+};
+
+pub const ModelsList = struct {
+    data: []const ModelInfo,
+};
+
+pub fn listModels(self: *Client) !client.Owned(ModelsList) {
     const token = try ensureCopilotToken(self);
     const allocator = self.inner.allocator;
 
@@ -262,8 +273,44 @@ pub fn listModels(self: *Client) !client.Owned(client.ListModelsResponse) {
     return parseModels(allocator, raw.body);
 }
 
+/// Convert a Copilot-specific model list into the app-wide shared model list.
+/// The source `owned` is deinitialized; ownership of the returned value is transferred.
+pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.ModelsList) {
+    const allocator = owned.allocator;
+    const source = owned.value();
+
+    var arena = try allocator.create(std.heap.ArenaAllocator);
+    errdefer {
+        arena.deinit();
+        allocator.destroy(arena);
+    }
+    arena.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_alloc = arena.allocator();
+
+    var models = try arena_alloc.alloc(client.Model, source.data.len);
+    for (source.data, 0..) |m, i| {
+        models[i] = .{
+            .id = try arena_alloc.dupe(u8, m.id),
+            .display_name = try arena_alloc.dupe(u8, m.name),
+            .provider = try arena_alloc.dupe(u8, m.vendor),
+            .context_length = m.context_length,
+        };
+    }
+
+    owned.deinit();
+
+    return .{
+        .allocator = allocator,
+        .body = try allocator.dupe(u8, ""),
+        .parsed = .{
+            .arena = arena,
+            .value = .{ .models = models },
+        },
+    };
+}
+
 /// Parse a Copilot `/models` response, keeping only chat-capable models.
-pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !client.Owned(client.ListModelsResponse) {
+pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !client.Owned(ModelsList) {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
@@ -277,7 +324,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
     arena.* = std.heap.ArenaAllocator.init(allocator);
     const arena_alloc = arena.allocator();
 
-    var models = std.array_list.Managed(client.ModelInfo).init(arena_alloc);
+    var models = std.array_list.Managed(ModelInfo).init(arena_alloc);
 
     for (data.array.items) |item| {
         if (item != .object) continue;
@@ -290,20 +337,16 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
         const vendor = if (item.object.get("vendor")) |v| v.string else "github-copilot";
 
         try models.append(.{
-            .key = try arena_alloc.dupe(u8, id),
-            .display_name = try arena_alloc.dupe(u8, name),
-            .publisher = try arena_alloc.dupe(u8, vendor),
-            .format = "api",
-            .size_bytes = 0,
-            .max_context_length = modelContextLength(item),
-            .loaded_instances = &.{},
-            .type = "llm",
+            .id = try arena_alloc.dupe(u8, id),
+            .name = try arena_alloc.dupe(u8, name),
+            .vendor = try arena_alloc.dupe(u8, vendor),
+            .context_length = modelContextLength(item),
         });
     }
 
-    const result = std.json.Parsed(client.ListModelsResponse){
+    const result = std.json.Parsed(ModelsList){
         .arena = arena,
-        .value = .{ .models = try models.toOwnedSlice() },
+        .value = .{ .data = try models.toOwnedSlice() },
     };
 
     return .{
@@ -374,17 +417,17 @@ test "parseModels keeps only picker-enabled chat models on /chat/completions" {
     var owned = try parseModels(allocator, body);
     defer owned.deinit();
 
-    const models = owned.value().models;
+    const models = owned.value().data;
     // Kept: claude-sonnet-4.5 (picker + /chat/completions) and gemini-2.5-pro
     // (picker + no supported_endpoints => default /chat/completions).
     // Dropped: gpt-4o (picker disabled), text-embedding-3-small (not chat),
     // gpt-5.5 (picker enabled but /responses-only).
     try std.testing.expectEqual(@as(usize, 2), models.len);
-    try std.testing.expectEqualStrings("claude-sonnet-4.5", models[0].key);
-    try std.testing.expectEqualStrings("Claude Sonnet 4.5", models[0].display_name);
-    try std.testing.expectEqualStrings("Anthropic", models[0].publisher);
-    try std.testing.expectEqual(@as(i64, 200000), models[0].max_context_length);
-    try std.testing.expectEqualStrings("gemini-2.5-pro", models[1].key);
+    try std.testing.expectEqualStrings("claude-sonnet-4.5", models[0].id);
+    try std.testing.expectEqualStrings("Claude Sonnet 4.5", models[0].name);
+    try std.testing.expectEqualStrings("Anthropic", models[0].vendor);
+    try std.testing.expectEqual(@as(i64, 200000), models[0].context_length);
+    try std.testing.expectEqualStrings("gemini-2.5-pro", models[1].id);
 }
 
 /// The Copilot API expects `X-Initiator: agent` once the conversation contains
