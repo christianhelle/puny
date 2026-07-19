@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const cancel = @import("../core/cancel.zig");
-const lmstudio = @import("lmstudio.zig");
+const client = @import("client.zig");
 const openai = @import("openai.zig");
 
 // GitHub Copilot is OpenAI-compatible on the wire but uses a two-token auth flow:
@@ -27,7 +27,7 @@ const max_token_file_size = 1024 * 1024;
 const token_refresh_buffer_seconds = 120;
 
 pub const Client = struct {
-    inner: lmstudio.Client,
+    inner: client.Client,
     /// Long-lived GitHub OAuth token (gho_...). Resolved from manual config,
     /// auto-discovery, or device-flow login before the first request.
     github_token: []const u8 = "",
@@ -37,7 +37,7 @@ pub const Client = struct {
     copilot_token_expires_at: i64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, github_token: []const u8) Client {
-        var inner = lmstudio.Client.init(allocator, io, "");
+        var inner = client.Client.init(allocator, io, "");
         inner.withBaseUrl(default_base_url);
         return .{
             .inner = inner,
@@ -70,7 +70,7 @@ fn httpRequest(
     url: []const u8,
     extra_headers: []const std.http.Header,
     payload: ?[]const u8,
-) !lmstudio.RawResponse {
+) !client.RawResponse {
     const allocator = self.inner.allocator;
     const uri = try std.Uri.parse(url);
     var response_body: std.Io.Writer.Allocating = .init(allocator);
@@ -149,7 +149,7 @@ pub fn ensureCopilotToken(self: *Client) ![]const u8 {
     defer raw.deinit();
 
     if (raw.status.class() != .success) {
-        if (lmstudio.isAuthFailure(raw.status)) lmstudio.printAuthHint(self.inner.io);
+        if (client.isAuthFailure(raw.status)) client.printAuthHint(self.inner.io);
         return error.TokenExchangeFailed;
     }
 
@@ -236,7 +236,7 @@ fn appendCopilotHeaders(
     return auth;
 }
 
-pub fn listModels(self: *Client) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+pub fn listModels(self: *Client) !client.Owned(client.ListModelsResponse) {
     const token = try ensureCopilotToken(self);
     const allocator = self.inner.allocator;
 
@@ -255,7 +255,7 @@ pub fn listModels(self: *Client) !lmstudio.Owned(lmstudio.ListModelsResponse) {
     defer raw.deinit();
 
     if (raw.status.class() != .success) {
-        if (lmstudio.isAuthFailure(raw.status)) lmstudio.printAuthHint(self.inner.io);
+        if (client.isAuthFailure(raw.status)) client.printAuthHint(self.inner.io);
         return error.ResponseError;
     }
 
@@ -263,7 +263,7 @@ pub fn listModels(self: *Client) !lmstudio.Owned(lmstudio.ListModelsResponse) {
 }
 
 /// Parse a Copilot `/models` response, keeping only chat-capable models.
-pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !client.Owned(client.ListModelsResponse) {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
@@ -277,7 +277,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
     arena.* = std.heap.ArenaAllocator.init(allocator);
     const arena_alloc = arena.allocator();
 
-    var models = std.array_list.Managed(lmstudio.ModelInfo).init(arena_alloc);
+    var models = std.array_list.Managed(client.ModelInfo).init(arena_alloc);
 
     for (data.array.items) |item| {
         if (item != .object) continue;
@@ -301,7 +301,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
         });
     }
 
-    const result = std.json.Parsed(lmstudio.ListModelsResponse){
+    const result = std.json.Parsed(client.ListModelsResponse){
         .arena = arena,
         .value = .{ .models = try models.toOwnedSlice() },
     };
@@ -453,7 +453,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            lmstudio.printAuthHint(self.inner.io);
+            client.printAuthHint(self.inner.io);
         }
 
         if (builtin.mode == .Debug) {
@@ -476,7 +476,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         .callback = callback,
     };
 
-    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
