@@ -164,8 +164,13 @@ const StreamChunk = struct {
 pub const SseCallback = struct {
     allocator: std.mem.Allocator,
     callback: StreamCallback,
+    observer: ?client.HttpObserver = null,
 
     pub fn event(self: *@This(), data: []const u8) !void {
+        if (self.observer) |obs| {
+            if (obs.on_chunk) |cb| cb(obs.ctx, data);
+        }
+
         const parsed = try std.json.parseFromSlice(StreamChunk, self.allocator, data, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
 
@@ -251,11 +256,22 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
     defer if (auth_header) |value| allocator.free(value);
 
     const uri = try std.Uri.parse(url);
-    var req = try chat_client.http.request(.POST, uri, .{
+
+    if (chat_client.http_observer) |obs| {
+        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
+    }
+
+    const start = std.Io.Clock.awake.now(chat_client.io);
+    var req = chat_client.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
         .headers = .{ .accept_encoding = .{ .override = "identity" } },
         .extra_headers = headers.items,
-    });
+    }) catch |err| {
+        if (chat_client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
     defer req.deinit();
 
     req.transfer_encoding = .{ .content_length = payload.len };
@@ -264,7 +280,13 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
     try body.end();
     try req.connection.?.flush();
 
-    var response = try req.receiveHead(&.{});
+    var response = req.receiveHead(&.{}) catch |err| {
+        if (chat_client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
+    const elapsed_ns = @as(u64, @intCast(start.untilNow(chat_client.io, .awake).nanoseconds));
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
@@ -277,6 +299,10 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
         var body_alloc: std.Io.Writer.Allocating = .init(allocator);
         defer body_alloc.deinit();
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
+
+        if (chat_client.http_observer) |obs| {
+            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
+        }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
             client.printAuthHint(chat_client.io);
@@ -291,9 +317,14 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
         return error.ResponseError;
     }
 
+    if (chat_client.http_observer) |obs| {
+        if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
+    }
+
     var sse = SseCallback{
         .allocator = allocator,
         .callback = callback,
+        .observer = chat_client.http_observer,
     };
 
     client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
