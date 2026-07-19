@@ -55,7 +55,10 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
 
     var models = try arena_alloc.alloc(client.Model, source.models.len);
     for (source.models, 0..) |m, i| {
-        const display_name = if (m.display_name.len > 0) m.display_name else m.key;
+        const display_name = if (m.display_name.len > 0 and client.isValidUtf8(m.display_name))
+            m.display_name
+        else
+            m.key;
         models[i] = .{
             .id = try arena_alloc.dupe(u8, m.key),
             .display_name = try arena_alloc.dupe(u8, display_name),
