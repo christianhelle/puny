@@ -12,6 +12,7 @@ pub const Options = struct {
     oneshot: bool = false,
     mock: bool = false,
     reconfigure: bool = false,
+    debug: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -69,6 +70,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.prompt = args[i];
         } else if (std.mem.eql(u8, arg, "--reconfigure")) {
             opts.reconfigure = true;
+        } else if (std.mem.eql(u8, arg, "--debug")) {
+            opts.debug = true;
         } else {
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
@@ -119,6 +122,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -1, --oneshot, --one-shot   Exit after processing the prompt (requires --prompt)
         \\  -M, --mock                  Use mock provider (no LM Studio required)
         \\      --reconfigure           Re-run first-run setup and update config
+        \\      --debug                 Log HTTP requests and responses to stderr
         \\  -h, --help                  Show this help text
         \\  -V, --version               Print version
         \\
@@ -170,4 +174,13 @@ test "parseArgs flag overrides PUNY_PROVIDER env" {
     const args = &[_][:0]const u8{ "puny", "--provider", "opencode" };
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expectEqualStrings("opencode", opts.provider.?);
+}
+
+test "parseArgs sets debug from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--debug" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.debug);
 }
