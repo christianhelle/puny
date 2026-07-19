@@ -1,7 +1,7 @@
 const std = @import("std");
 const config = @import("../config/config.zig");
 const input = @import("../tui/input.zig");
-const lmstudio = @import("../providers/lmstudio.zig");
+const client = @import("../providers/client.zig");
 const model_picker = @import("../tui/model_picker.zig");
 const provider = @import("../providers/provider.zig");
 const retry = @import("../core/retry.zig");
@@ -53,7 +53,7 @@ pub fn select(
 }
 
 fn selectModelInteractive(
-    models: []const lmstudio.ModelInfo,
+    models: []const client.ModelInfo,
     arena: std.mem.Allocator,
     io: std.Io,
     init: std.process.Init,
@@ -83,7 +83,7 @@ fn selectModelInteractive(
 }
 
 fn selectModelText(
-    models: []const lmstudio.ModelInfo,
+    models: []const client.ModelInfo,
     arena: std.mem.Allocator,
     io: std.Io,
 ) !?[]const u8 {
@@ -145,7 +145,7 @@ pub fn switchModel(
     return new_key;
 }
 
-pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, comptime retries: usize) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, comptime retries: usize) !client.Owned(client.ListModelsResponse) {
     var retry_count: usize = 0;
     const cfg = retry.default_config;
     while (true) {
@@ -163,11 +163,11 @@ pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, compti
     }
 }
 
-fn emptyListModelsResponse(allocator: std.mem.Allocator) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+fn emptyListModelsResponse(allocator: std.mem.Allocator) !client.Owned(client.ListModelsResponse) {
     const json = "{\"models\":[]}";
     const body = try allocator.dupe(u8, json);
     errdefer allocator.free(body);
-    const parsed = try std.json.parseFromSlice(lmstudio.ListModelsResponse, allocator, body, .{ .ignore_unknown_fields = true });
+    const parsed = try std.json.parseFromSlice(client.ListModelsResponse, allocator, body, .{ .ignore_unknown_fields = true });
     return .{
         .allocator = allocator,
         .body = body,
@@ -181,7 +181,7 @@ const TestProvider = struct {
     fail_count: usize = 0,
     err: anyerror = error.ConnectionRefused,
 
-    pub fn listModels(self: *@This()) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+    pub fn listModels(self: *@This()) !client.Owned(client.ListModelsResponse) {
         self.calls += 1;
         if (self.calls <= self.fail_count) return self.err;
         return emptyListModelsResponse(self.allocator);
