@@ -296,7 +296,7 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
         .callback = callback,
     };
 
-    client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
