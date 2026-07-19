@@ -6,6 +6,7 @@
 - Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Decouple providers from generated lmstudio.zig ([#30](https://github.com/christianhelle/puny/pull/30)) ([@christianhelle](https://github.com/christianhelle/))
 - Filter Copilot models to the CLI's picker-enabled chat-completions set ([#29](https://github.com/christianhelle/puny/pull/29)) ([@christianhelle](https://github.com/christianhelle/))
 - Add GitHub Copilot model provider ([#27](https://github.com/christianhelle/puny/pull/27)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix Gemini tool-calling across turns ([#26](https://github.com/christianhelle/puny/pull/26)) ([@christianhelle](https://github.com/christianhelle/))
@@ -19,10 +20,10 @@
 ## [v0.1.0](https://github.com/christianhelle/puny/releases/tag/v0.1.0) (2026-07-17)
 
 ### Merged Pull Requests
-- Build for all platforms in regression test script ([#6](https://github.com/christianhelle/puny/pull/6)) ([@christianhelle](https://github.com/christianhelle/))
 - Show token statistics using /stats and upon exit ([#3](https://github.com/christianhelle/puny/pull/3)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Build for all platforms in regression test script ([#6](https://github.com/christianhelle/puny/pull/6)) ([@christianhelle](https://github.com/christianhelle/))
 - Enable Claude, GPT, and Qwen models from OpenCode Zen ([#20](https://github.com/christianhelle/puny/pull/20)) ([@christianhelle](https://github.com/christianhelle/))
 - Add GitHub Workflows ([#19](https://github.com/christianhelle/puny/pull/19)) ([@christianhelle](https://github.com/christianhelle/))
 - Add OpenCode Zen as a model provider ([#18](https://github.com/christianhelle/puny/pull/18)) ([@christianhelle](https://github.com/christianhelle/))
