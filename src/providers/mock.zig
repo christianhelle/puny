@@ -14,17 +14,17 @@ pub const MockClient = struct {
         _ = self;
     }
 
-    pub fn listModels(self: *MockClient) !client.Owned(client.ListModelsResponse) {
+    pub fn listModels(self: *MockClient) !client.Owned(ModelsList) {
         const json =
             \\{"models":[
-            \\  {"key":"mock-model","display_name":"Mock Model (GPT-4 level)","publisher":"mock","format":"gguf","size_bytes":0,"max_context_length":128000,"loaded_instances":[],"type":"llm"},
-            \\  {"key":"mock-model-fast","display_name":"Mock Model Fast","publisher":"mock","format":"gguf","size_bytes":0,"max_context_length":32000,"loaded_instances":[],"type":"llm"}
+            \\  {"key":"mock-model","display_name":"Mock Model (GPT-4 level)","publisher":"mock","max_context_length":128000},
+            \\  {"key":"mock-model-fast","display_name":"Mock Model Fast","publisher":"mock","max_context_length":32000}
             \\]}
         ;
         const json_bytes = try self.allocator.dupe(u8, json);
         errdefer self.allocator.free(json_bytes);
         const parsed = try std.json.parseFromSlice(
-            client.ListModelsResponse,
+            ModelsList,
             self.allocator,
             json_bytes,
             .{ .ignore_unknown_fields = true },
@@ -33,6 +33,53 @@ pub const MockClient = struct {
             .allocator = self.allocator,
             .body = json_bytes,
             .parsed = parsed,
+        };
+    }
+
+    pub const ModelInfo = struct {
+        key: []const u8,
+        display_name: []const u8,
+        publisher: []const u8,
+        max_context_length: i64,
+    };
+
+    pub const ModelsList = struct {
+        models: []const ModelInfo,
+    };
+
+    /// Convert a mock-specific model list into the app-wide shared model list.
+    /// The source `owned` is deinitialized; ownership of the returned value is transferred.
+    pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.ModelsList) {
+        const allocator = owned.allocator;
+        const source = owned.value();
+
+        var arena = try allocator.create(std.heap.ArenaAllocator);
+        errdefer {
+            arena.deinit();
+            allocator.destroy(arena);
+        }
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        const arena_alloc = arena.allocator();
+
+        var models = try arena_alloc.alloc(client.Model, source.models.len);
+        for (source.models, 0..) |m, i| {
+            models[i] = .{
+                .id = try arena_alloc.dupe(u8, m.key),
+                .display_name = try arena_alloc.dupe(u8, m.display_name),
+                .provider = try arena_alloc.dupe(u8, m.publisher),
+                .context_length = m.max_context_length,
+            };
+        }
+
+        owned.deinit();
+
+        return .{
+            .allocator = allocator,
+            .body = try allocator.dupe(u8, ""),
+            .parsed = .{
+                .arena = arena,
+                .value = .{ .models = models },
+            },
         };
     }
 
