@@ -1,6 +1,6 @@
 const std = @import("std");
 const cancel = @import("../core/cancel.zig");
-const lmstudio = @import("lmstudio.zig");
+const http_client = @import("client.zig");
 const openai = @import("openai.zig");
 
 pub const default_base_url = "https://opencode.ai/zen";
@@ -27,7 +27,7 @@ pub fn isGoogleModel(model_id: []const u8) bool {
     return std.mem.startsWith(u8, model_id, "gemini-");
 }
 
-pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !http_client.Owned(http_client.ListModelsResponse) {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
@@ -41,7 +41,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
     }
     arena.* = std.heap.ArenaAllocator.init(allocator);
 
-    var models = std.array_list.Managed(lmstudio.ModelInfo).init(arena.allocator());
+    var models = std.array_list.Managed(http_client.ModelInfo).init(arena.allocator());
 
     for (items) |item| {
         const id = if (item.object.get("id")) |v| v.string else continue;
@@ -62,7 +62,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
         });
     }
 
-    const result = std.json.Parsed(lmstudio.ListModelsResponse){
+    const result = std.json.Parsed(http_client.ListModelsResponse){
         .arena = arena,
         .value = .{ .models = try models.toOwnedSlice() },
     };
@@ -74,15 +74,15 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !lms
     };
 }
 
-pub fn listModelsRaw(client: *lmstudio.Client) !lmstudio.RawResponse {
+pub fn listModelsRaw(client: *http_client.Client) !http_client.RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
     try uri_buf.writer.print("{s}/v1/models", .{client.base_url});
-    return lmstudio.requestRaw(client, std.http.Method.GET, uri_buf.written(), null);
+    return http_client.requestRaw(client, std.http.Method.GET, uri_buf.written(), null);
 }
 
-fn listModelsResult(client: *lmstudio.Client) !lmstudio.ApiResult(lmstudio.ListModelsResponse) {
+fn listModelsResult(client: *http_client.Client) !http_client.ApiResult(http_client.ListModelsResponse) {
     var raw = try listModelsRaw(client);
     if (raw.status.class() != .success) return .{ .api_error = raw };
     const result = parseModels(client.allocator, raw.body) catch |err| {
@@ -92,12 +92,12 @@ fn listModelsResult(client: *lmstudio.Client) !lmstudio.ApiResult(lmstudio.ListM
     return .{ .ok = result };
 }
 
-pub fn listModels(client: *lmstudio.Client) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+pub fn listModels(client: *http_client.Client) !http_client.Owned(http_client.ListModelsResponse) {
     var result = try listModelsResult(client);
     switch (result) {
         .ok => |ok| return ok,
         .api_error => |*err| {
-            if (lmstudio.isAuthFailure(err.status)) lmstudio.printAuthHint(client.io);
+            if (http_client.isAuthFailure(err.status)) http_client.printAuthHint(client.io);
             err.deinit();
             return error.ResponseError;
         },
@@ -284,7 +284,7 @@ const AnthropicSseCallback = struct {
     }
 };
 
-pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     const allocator = client.allocator;
     const payload = try anthropicRequestPayload(allocator, request);
     defer allocator.free(payload);
@@ -329,7 +329,7 @@ pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequ
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            lmstudio.printAuthHint(client.io);
+            http_client.printAuthHint(client.io);
         }
 
         std.debug.print("Anthropic chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
@@ -350,7 +350,7 @@ pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequ
         .block_types = block_types,
     };
 
-    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    http_client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
@@ -359,7 +359,7 @@ pub fn chatStreamingAnthropic(client: *lmstudio.Client, request: openai.ChatRequ
     };
 }
 
-pub fn chatStreamingGoogle(client: *lmstudio.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     const allocator = client.allocator;
     const payload = try googleRequestPayload(allocator, request);
     defer allocator.free(payload);
@@ -403,7 +403,7 @@ pub fn chatStreamingGoogle(client: *lmstudio.Client, request: openai.ChatRequest
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            lmstudio.printAuthHint(client.io);
+            http_client.printAuthHint(client.io);
         }
 
         std.debug.print("Google chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
@@ -420,7 +420,7 @@ pub fn chatStreamingGoogle(client: *lmstudio.Client, request: openai.ChatRequest
         .callback = callback,
     };
 
-    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    http_client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
