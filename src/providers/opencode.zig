@@ -27,7 +27,16 @@ pub fn isGoogleModel(model_id: []const u8) bool {
     return std.mem.startsWith(u8, model_id, "gemini-");
 }
 
-pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !http_client.Owned(http_client.ListModelsResponse) {
+pub const ModelInfo = struct {
+    id: []const u8,
+    owned_by: []const u8,
+};
+
+pub const ModelsList = struct {
+    data: []const ModelInfo,
+};
+
+pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !http_client.Owned(ModelsList) {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
@@ -41,7 +50,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !htt
     }
     arena.* = std.heap.ArenaAllocator.init(allocator);
 
-    var models = std.array_list.Managed(http_client.ModelInfo).init(arena.allocator());
+    var models = std.array_list.Managed(ModelInfo).init(arena.allocator());
 
     for (items) |item| {
         const id = if (item.object.get("id")) |v| v.string else continue;
@@ -51,26 +60,56 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !htt
         const arena_alloc = arena.allocator();
 
         try models.append(.{
-            .key = try arena_alloc.dupe(u8, id),
-            .display_name = try arena_alloc.dupe(u8, id),
-            .publisher = try arena_alloc.dupe(u8, owned_by),
-            .format = "api",
-            .size_bytes = 0,
-            .max_context_length = 0,
-            .loaded_instances = &.{},
-            .type = "llm",
+            .id = try arena_alloc.dupe(u8, id),
+            .owned_by = try arena_alloc.dupe(u8, owned_by),
         });
     }
 
-    const result = std.json.Parsed(http_client.ListModelsResponse){
+    const result = std.json.Parsed(ModelsList){
         .arena = arena,
-        .value = .{ .models = try models.toOwnedSlice() },
+        .value = .{ .data = try models.toOwnedSlice() },
     };
 
     return .{
         .allocator = allocator,
         .body = try allocator.dupe(u8, response_json),
         .parsed = result,
+    };
+}
+
+/// Convert an OpenCode-specific model list into the app-wide shared model list.
+/// The source `owned` is deinitialized; ownership of the returned value is transferred.
+pub fn toSharedModels(owned: *http_client.Owned(ModelsList)) !http_client.Owned(http_client.ModelsList) {
+    const allocator = owned.allocator;
+    const source = owned.value();
+
+    var arena = try allocator.create(std.heap.ArenaAllocator);
+    errdefer {
+        arena.deinit();
+        allocator.destroy(arena);
+    }
+    arena.* = std.heap.ArenaAllocator.init(allocator);
+    const arena_alloc = arena.allocator();
+
+    var models = try arena_alloc.alloc(http_client.Model, source.data.len);
+    for (source.data, 0..) |m, i| {
+        models[i] = .{
+            .id = try arena_alloc.dupe(u8, m.id),
+            .display_name = try arena_alloc.dupe(u8, m.id),
+            .provider = try arena_alloc.dupe(u8, m.owned_by),
+            .context_length = 0,
+        };
+    }
+
+    owned.deinit();
+
+    return .{
+        .allocator = allocator,
+        .body = try allocator.dupe(u8, ""),
+        .parsed = .{
+            .arena = arena,
+            .value = .{ .models = models },
+        },
     };
 }
 
@@ -82,7 +121,7 @@ pub fn listModelsRaw(client: *http_client.Client) !http_client.RawResponse {
     return http_client.requestRaw(client, std.http.Method.GET, uri_buf.written(), null);
 }
 
-fn listModelsResult(client: *http_client.Client) !http_client.ApiResult(http_client.ListModelsResponse) {
+fn listModelsResult(client: *http_client.Client) !http_client.ApiResult(ModelsList) {
     var raw = try listModelsRaw(client);
     if (raw.status.class() != .success) return .{ .api_error = raw };
     const result = parseModels(client.allocator, raw.body) catch |err| {
@@ -92,7 +131,7 @@ fn listModelsResult(client: *http_client.Client) !http_client.ApiResult(http_cli
     return .{ .ok = result };
 }
 
-pub fn listModels(client: *http_client.Client) !http_client.Owned(http_client.ListModelsResponse) {
+pub fn listModels(client: *http_client.Client) !http_client.Owned(ModelsList) {
     var result = try listModelsResult(client);
     switch (result) {
         .ok => |ok| return ok,
