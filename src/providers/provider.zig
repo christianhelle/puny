@@ -78,4 +78,13 @@ pub const Provider = union(enum) {
             .mock => {},
         }
     }
+
+    pub fn setHttpObserver(self: *Provider, observer: client.HttpObserver) void {
+        switch (self.*) {
+            .lmstudio => |*c| c.http_observer = observer,
+            .opencode => |*c| c.http_observer = observer,
+            .copilot => |*c| c.inner.http_observer = observer,
+            .mock => {},
+        }
+    }
 };
