@@ -1,13 +1,13 @@
 const std = @import("std");
-const lmstudio = @import("lmstudio.zig");
+const client = @import("client.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
 const opencode = @import("opencode.zig");
 const copilot = @import("copilot.zig");
 
 pub const Provider = union(enum) {
-    lmstudio: lmstudio.Client,
-    opencode: lmstudio.Client,
+    lmstudio: client.Client,
+    opencode: client.Client,
     copilot: copilot.Client,
     mock: mock.MockClient,
 
@@ -17,9 +17,9 @@ pub const Provider = union(enum) {
         }
     }
 
-    pub fn listModels(self: *Provider) !lmstudio.Owned(lmstudio.ListModelsResponse) {
+    pub fn listModels(self: *Provider) !client.Owned(client.ListModelsResponse) {
         return switch (self.*) {
-            .lmstudio => |*c| lmstudio.listModels(c),
+            .lmstudio => |*c| client.listModels(c),
             .opencode => |*c| opencode.listModels(c),
             .copilot => |*c| copilot.listModels(c),
             .mock => |*c| c.listModels(),
