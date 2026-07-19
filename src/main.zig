@@ -6,7 +6,7 @@ const commands = @import("cli/commands.zig");
 const config = @import("config/config.zig");
 const indicator = @import("tui/indicator.zig");
 const input = @import("tui/input.zig");
-const lmstudio = @import("providers/lmstudio.zig");
+const client = @import("providers/client.zig");
 const mock = @import("providers/mock.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
@@ -644,7 +644,7 @@ fn providerDisplayName(provider_name: []const u8) []const u8 {
 fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api_key: []const u8, arena: std.mem.Allocator, io: std.Io) provider.Provider {
     if (is_mock) return .{ .mock = mock.MockClient.init(arena, io) };
     if (std.mem.eql(u8, provider_name, "opencode")) {
-        var c = lmstudio.Client.init(arena, io, api_key);
+        var c = client.Client.init(arena, io, api_key);
         c.withBaseUrl(url);
         return .{ .opencode = c };
     }
@@ -653,7 +653,7 @@ fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api
         c.withBaseUrl(url);
         return .{ .copilot = c };
     }
-    var c = lmstudio.Client.init(arena, io, api_key);
+    var c = client.Client.init(arena, io, api_key);
     c.withBaseUrl(url);
     return .{ .lmstudio = c };
 }
