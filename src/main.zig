@@ -327,6 +327,7 @@ fn initializeProviderAndModel(
     };
 
     prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, arena, io);
+    if (parsed.debug) attachHttpDebugObserver(prov);
     if (!parsed.mock) try ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
     const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
@@ -510,6 +511,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (!ctx.parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
         ctx.prov.deinit();
         ctx.prov.* = createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.arena, ctx.io);
+        if (ctx.parsed.debug) attachHttpDebugObserver(ctx.prov);
         if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
         ctx.provider_name.* = new_provider_name;
         ctx.provider_url.* = new_provider_url;
@@ -645,6 +647,62 @@ fn providerDisplayName(provider_name: []const u8) []const u8 {
     if (std.mem.eql(u8, provider_name, "lmstudio")) return "LM Studio";
     if (std.mem.eql(u8, provider_name, "copilot")) return "GitHub Copilot";
     return provider_name;
+}
+
+fn attachHttpDebugObserver(prov: *provider.Provider) void {
+    prov.setHttpObserver(httpDebugObserver());
+}
+
+fn httpDebugObserver() http_client.HttpObserver {
+    return .{
+        .ctx = null,
+        .onRequest = &logHttpRequest,
+        .onResponse = &logHttpResponse,
+        .onError = &logHttpError,
+        .on_chunk = &logHttpChunk,
+    };
+}
+
+fn logHttpRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+    _ = ctx;
+    std.debug.print("=== REQUEST ===\n", .{});
+    std.debug.print("{s} {s}\n", .{ @tagName(method), url });
+    std.debug.print("Headers:\n", .{});
+    for (headers) |h| {
+        std.debug.print("  {s}: {s}\n", .{ h.name, h.value });
+    }
+    if (body) |b| {
+        std.debug.print("Body ({d} bytes):\n{s}\n", .{ b.len, b });
+    }
+}
+
+fn logHttpResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, status: std.http.Status, headers: []const std.http.Header, body: []const u8, duration_ns: u64) void {
+    _ = ctx;
+    const ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    std.debug.print("=== RESPONSE ===\n", .{});
+    std.debug.print("{s} {s}\n", .{ @tagName(method), url });
+    std.debug.print("Status: {d} ({s})\n", .{ @intFromEnum(status), @tagName(status) });
+    std.debug.print("Duration: {d:.2}ms\n", .{ms});
+    std.debug.print("Headers:\n", .{});
+    for (headers) |h| {
+        std.debug.print("  {s}: {s}\n", .{ h.name, h.value });
+    }
+    if (body.len > 0) {
+        std.debug.print("Body ({d} bytes):\n{s}\n", .{ body.len, body });
+    }
+}
+
+fn logHttpError(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, err_name: []const u8) void {
+    _ = ctx;
+    std.debug.print("=== ERROR ===\n", .{});
+    std.debug.print("{s} {s}\n", .{ @tagName(method), url });
+    std.debug.print("Error: {s}\n", .{err_name});
+}
+
+fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
+    _ = ctx;
+    std.debug.print("=== CHUNK ===\n", .{});
+    std.debug.print("{s}\n", .{data});
 }
 
 fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api_key: []const u8, arena: std.mem.Allocator, io: std.Io) provider.Provider {
