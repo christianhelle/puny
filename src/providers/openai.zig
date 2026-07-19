@@ -1,6 +1,6 @@
 const std = @import("std");
 const cancel = @import("../core/cancel.zig");
-const lmstudio = @import("lmstudio.zig");
+const client = @import("client.zig");
 
 pub const ToolCall = struct {
     id: []const u8,
@@ -237,21 +237,21 @@ pub const CancelableReader = struct {
     }
 };
 
-pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: StreamCallback) !void {
-    const allocator = client.allocator;
+pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback: StreamCallback) !void {
+    const allocator = chat_client.allocator;
     const payload = try requestPayload(allocator, request);
     defer allocator.free(payload);
 
-    const url = try std.fmt.allocPrint(allocator, "{s}/v1/chat/completions", .{client.base_url});
+    const url = try std.fmt.allocPrint(allocator, "{s}/v1/chat/completions", .{chat_client.base_url});
     defer allocator.free(url);
 
     var headers = std.ArrayList(std.http.Header).empty;
     defer headers.deinit(allocator);
-    const auth_header = try lmstudio.appendClientHeaders(allocator, &headers, client, "application/json", "text/event-stream");
+    const auth_header = try client.appendClientHeaders(allocator, &headers, chat_client, "application/json", "text/event-stream");
     defer if (auth_header) |value| allocator.free(value);
 
     const uri = try std.Uri.parse(url);
-    var req = try client.http.request(.POST, uri, .{
+    var req = try chat_client.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
         .headers = .{ .accept_encoding = .{ .override = "identity" } },
         .extra_headers = headers.items,
@@ -279,7 +279,7 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
         _ = reader.streamRemaining(&body_alloc.writer) catch {};
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            lmstudio.printAuthHint(client.io);
+            client.printAuthHint(chat_client.io);
         }
 
         std.debug.print("OpenAI chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
@@ -296,7 +296,7 @@ pub fn chatStreaming(client: *lmstudio.Client, request: ChatRequest, callback: S
         .callback = callback,
     };
 
-    lmstudio.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
+    client.parseSseReader(allocator, reader, &sse) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
