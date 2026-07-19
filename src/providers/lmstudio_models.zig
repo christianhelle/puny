@@ -27,8 +27,9 @@ pub fn listModels(http_client: *client.Client) !client.Owned(ModelsList) {
         return error.ResponseError;
     }
 
-    const parsed = try std.json.parseFromSlice(ModelsList, allocator, raw.body, .{ .ignore_unknown_fields = true });
     const body = try allocator.dupe(u8, raw.body);
+    errdefer allocator.free(body);
+    const parsed = try std.json.parseFromSlice(ModelsList, allocator, body, .{ .ignore_unknown_fields = true });
     raw.deinit();
 
     return .{
@@ -54,9 +55,10 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
 
     var models = try arena_alloc.alloc(client.Model, source.models.len);
     for (source.models, 0..) |m, i| {
+        const display_name = if (m.display_name.len > 0) m.display_name else m.key;
         models[i] = .{
             .id = try arena_alloc.dupe(u8, m.key),
-            .display_name = try arena_alloc.dupe(u8, m.display_name),
+            .display_name = try arena_alloc.dupe(u8, display_name),
             .provider = try arena_alloc.dupe(u8, m.publisher),
             .context_length = m.max_context_length,
         };
@@ -72,4 +74,50 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
             .value = .{ .models = models },
         },
     };
+}
+
+test "toSharedModels copies LM Studio model fields" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"models":[
+        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"Qwen2.5 7B Instruct","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
+        \\]}
+    ;
+
+    const owned = try std.json.parseFromSlice(ModelsList, allocator, json, .{ .ignore_unknown_fields = true });
+    var wrapped = client.Owned(ModelsList){
+        .allocator = allocator,
+        .body = try allocator.dupe(u8, json),
+        .parsed = owned,
+    };
+
+    var shared = try toSharedModels(&wrapped);
+    defer shared.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), shared.value().models.len);
+    try std.testing.expectEqualStrings("qwen2.5-7b", shared.value().models[0].id);
+    try std.testing.expectEqualStrings("Qwen2.5 7B Instruct", shared.value().models[0].display_name);
+    try std.testing.expectEqualStrings("lmstudio", shared.value().models[0].provider);
+    try std.testing.expectEqual(@as(i64, 32768), shared.value().models[0].context_length);
+}
+
+test "toSharedModels falls back to key when display_name is empty" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"models":[
+        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
+        \\]}
+    ;
+
+    const owned = try std.json.parseFromSlice(ModelsList, allocator, json, .{ .ignore_unknown_fields = true });
+    var wrapped = client.Owned(ModelsList){
+        .allocator = allocator,
+        .body = try allocator.dupe(u8, json),
+        .parsed = owned,
+    };
+
+    var shared = try toSharedModels(&wrapped);
+    defer shared.deinit();
+
+    try std.testing.expectEqualStrings("qwen2.5-7b", shared.value().models[0].display_name);
 }
