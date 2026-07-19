@@ -22,7 +22,7 @@ pub const Widget = struct {
             .selected = null,
         };
         for (model_pick_list) |m| {
-            self.list.addItem(.init(m.key, m.display_name)) catch {};
+            self.list.addItem(.init(m.id, m.display_name)) catch {};
         }
         self.list.height = ctx.height -| 2;
         return .none;
