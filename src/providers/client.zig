@@ -16,6 +16,18 @@ pub const ModelsList = struct {
     models: []const Model,
 };
 
+/// Returns true when `s` is a valid UTF-8 byte sequence.
+pub fn isValidUtf8(s: []const u8) bool {
+    var i: usize = 0;
+    while (i < s.len) {
+        const len = std.unicode.utf8ByteSequenceLength(s[i]) catch return false;
+        if (i + len > s.len) return false;
+        _ = std.unicode.utf8Decode(s[i..][0..len]) catch return false;
+        i += len;
+    }
+    return true;
+}
+
 ///////////////////////////////////////////
 // HTTP client primitives
 ///////////////////////////////////////////
@@ -445,4 +457,11 @@ test "lmstudio.zig compiles after regeneration" {
     _ = lmstudio.Client;
     _ = lmstudio.ListModelsResponse;
     _ = lmstudio.ModelInfo;
+}
+
+test "isValidUtf8 accepts ASCII and rejects invalid bytes" {
+    try std.testing.expect(isValidUtf8("hello"));
+    try std.testing.expect(isValidUtf8("Qwen2.5 7B Instruct"));
+    try std.testing.expect(!isValidUtf8(&.{0xaa}));
+    try std.testing.expect(!isValidUtf8(&.{ 0xc0, 0x80 }));
 }
