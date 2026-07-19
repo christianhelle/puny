@@ -85,6 +85,7 @@ pub const HttpObserver = struct {
     onRequest: ?*const fn (ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void,
     onResponse: ?*const fn (ctx: ?*anyopaque, method: std.http.Method, url: []const u8, status: std.http.Status, headers: []const std.http.Header, body: []const u8, duration_ns: u64) void,
     onError: ?*const fn (ctx: ?*anyopaque, method: std.http.Method, url: []const u8, err_name: []const u8) void,
+    on_chunk: ?*const fn (ctx: ?*anyopaque, data: []const u8) void = null,
 };
 
 pub const Client = struct {
