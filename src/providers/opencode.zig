@@ -802,12 +802,11 @@ test "parseModels maps OpenAI model list" {
     var result = try parseModels(allocator, json);
     defer result.deinit();
 
-    try std.testing.expectEqual(@as(usize, 3), result.value().models.len);
-    try std.testing.expectEqualStrings("deepseek-v4-pro", result.value().models[0].key);
-    try std.testing.expectEqualStrings("deepseek-v4-pro", result.value().models[0].display_name);
-    try std.testing.expectEqualStrings("opencode", result.value().models[0].publisher);
-    try std.testing.expectEqualStrings("gemini-3.5-flash", result.value().models[1].key);
-    try std.testing.expectEqualStrings("kimi-k2.7-code", result.value().models[2].key);
+    try std.testing.expectEqual(@as(usize, 3), result.value().data.len);
+    try std.testing.expectEqualStrings("deepseek-v4-pro", result.value().data[0].id);
+    try std.testing.expectEqualStrings("opencode", result.value().data[0].owned_by);
+    try std.testing.expectEqualStrings("gemini-3.5-flash", result.value().data[1].id);
+    try std.testing.expectEqualStrings("kimi-k2.7-code", result.value().data[2].id);
 }
 
 test "parseModels ignores unknown fields" {
@@ -821,8 +820,8 @@ test "parseModels ignores unknown fields" {
     var result = try parseModels(allocator, json);
     defer result.deinit();
 
-    try std.testing.expectEqual(@as(usize, 1), result.value().models.len);
-    try std.testing.expectEqualStrings("big-pickle", result.value().models[0].key);
+    try std.testing.expectEqual(@as(usize, 1), result.value().data.len);
+    try std.testing.expectEqualStrings("big-pickle", result.value().data[0].id);
 }
 
 fn sampleToolSchema(allocator: std.mem.Allocator) !std.json.Value {
