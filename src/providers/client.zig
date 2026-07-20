@@ -39,7 +39,9 @@ pub fn Owned(comptime T: type) type {
         parsed: std.json.Parsed(T),
 
         pub fn deinit(self: *@This()) void {
+            const arena = self.parsed.arena;
             self.parsed.deinit();
+            self.allocator.destroy(arena);
             self.allocator.free(self.body);
         }
 
