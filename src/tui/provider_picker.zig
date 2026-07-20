@@ -10,6 +10,7 @@ pub const ProviderOption = struct {
 pub const default_providers = [_]ProviderOption{
     .{ .id = "lmstudio", .display_name = "LM Studio" },
     .{ .id = "opencode", .display_name = "OpenCode Zen" },
+    .{ .id = "opencode-go", .display_name = "OpenCode Go" },
     .{ .id = "copilot", .display_name = "GitHub Copilot" },
     .{ .id = "mock", .display_name = "Mock" },
 };
