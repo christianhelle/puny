@@ -205,6 +205,27 @@ test "add stores prompts and avoids consecutive duplicates" {
     try std.testing.expectEqualStrings("world", history.entries.items[1]);
 }
 
+test "clear removes all entries and resets navigation" {
+    var history = History.init(std.testing.allocator, "");
+    defer history.deinit();
+
+    try history.add("first");
+    try history.add("second");
+    _ = history.previous("draft");
+    try std.testing.expectEqual(@as(usize, 2), history.entries.items.len);
+    try std.testing.expect(history.saved_current != null);
+
+    history.clear();
+
+    try std.testing.expectEqual(@as(usize, 0), history.entries.items.len);
+    try std.testing.expectEqual(@as(?usize, null), history.browsing_index);
+    try std.testing.expectEqual(@as(?[]const u8, null), history.saved_current);
+
+    try history.add("after");
+    try std.testing.expectEqual(@as(usize, 1), history.entries.items.len);
+    try std.testing.expectEqualStrings("after", history.entries.items[0]);
+}
+
 test "navigation moves through history and restores current draft" {
     var history = History.init(std.testing.allocator, "");
     defer history.deinit();

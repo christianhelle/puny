@@ -197,14 +197,13 @@ test "dispatch quit returns exit" {
     try std.testing.expectEqual(Action.exit, action);
 }
 
-test "dispatch reset clears messages and resets planning mode" {
+test "dispatch reset returns full_reset action" {
     var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer messages_arena_state.deinit();
     var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
-    try messages.append(.{ .user = "previous" });
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    var planning_mode = true;
+    var planning_mode = false;
 
     const action = try dispatch(.reset, .{
         .arena = std.testing.allocator,
@@ -217,10 +216,7 @@ test "dispatch reset clears messages and resets planning mode" {
         .cfg = &default_cfg,
     });
 
-    try std.testing.expectEqual(Action.continue_, action);
-    try std.testing.expect(!planning_mode);
-    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
-    try std.testing.expectEqual(openai.Message.system, messages.items[0]);
+    try std.testing.expectEqual(Action.full_reset, action);
 }
 
 test "dispatch config returns reconfigure" {
