@@ -329,14 +329,10 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
         };
 
         const raw_line = line_buf.written();
-        const ends_with_newline = raw_line.len > 0 and raw_line[raw_line.len - 1] == '\n';
-        const line = if (ends_with_newline)
-            raw_line[0 .. raw_line.len - 1]
-        else
-            raw_line;
+        const line = std.mem.trimEnd(u8, raw_line, "\r");
 
         if (try processSseLine(&event_data, line, callback)) return;
-        if (line_len == 0 or !ends_with_newline) break;
+        if (line_len == 0) break;
     }
 
     _ = try dispatchSseEvent(&event_data, callback);

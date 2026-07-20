@@ -210,16 +210,28 @@ fn appendJsonValue(
     output: *std.array_list.Managed(u8),
     value: std.json.Value,
 ) !void {
+    try appendJsonValueDepth(output, value, 0);
+}
+
+fn appendJsonValueDepth(
+    output: *std.array_list.Managed(u8),
+    value: std.json.Value,
+    depth: usize,
+) !void {
+    if (depth > 3) {
+        try output.appendSlice("...");
+        return;
+    }
     switch (value) {
         .string => |s| try appendJsonString(output, s),
         .bool => |b| try output.appendSlice(if (b) "true" else "false"),
         .integer => |i| {
-            var buf: [64]u8 = undefined;
+            var buf: [80]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "{d}", .{i});
             try output.appendSlice(text);
         },
         .float => |f| {
-            var buf: [128]u8 = undefined;
+            var buf: [160]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "{d}", .{f});
             try output.appendSlice(text);
         },
@@ -234,7 +246,7 @@ fn appendJsonValue(
             for (arr.items) |item| {
                 if (!first) try output.appendSlice(", ");
                 first = false;
-                try appendJsonValue(output, item);
+                try appendJsonValueDepth(output, item, depth + 1);
             }
             try output.appendSlice("]");
         },
@@ -251,7 +263,7 @@ fn appendJsonValue(
                 first = false;
                 try output.appendSlice(entry.key_ptr.*);
                 try output.appendSlice(": ");
-                try appendJsonValue(output, entry.value_ptr.*);
+                try appendJsonValueDepth(output, entry.value_ptr.*, depth + 1);
             }
             try output.appendSlice("}");
         },
