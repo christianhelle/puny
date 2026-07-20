@@ -154,11 +154,12 @@ fn findProviderById(id: []const u8) ?ProviderOption {
 }
 
 test "default_providers contains expected providers" {
-    try std.testing.expectEqual(@as(usize, 4), default_providers.len);
+    try std.testing.expectEqual(@as(usize, 5), default_providers.len);
     try std.testing.expectEqualStrings("lmstudio", default_providers[0].id);
     try std.testing.expectEqualStrings("opencode", default_providers[1].id);
-    try std.testing.expectEqualStrings("copilot", default_providers[2].id);
-    try std.testing.expectEqualStrings("mock", default_providers[3].id);
+    try std.testing.expectEqualStrings("opencode-go", default_providers[2].id);
+    try std.testing.expectEqualStrings("copilot", default_providers[3].id);
+    try std.testing.expectEqualStrings("mock", default_providers[4].id);
 }
 
 test "findProviderById finds known providers" {
