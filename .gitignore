@@ -6,3 +6,4 @@ zig-cache/
 *.exe
 zig-pkg
 artifacts
+puny_debug.log
