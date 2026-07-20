@@ -224,11 +224,7 @@ fn appendJsonValue(
             try output.appendSlice(text);
         },
         .null => try output.appendSlice("null"),
-        .array, .object => {
-            try output.appendSlice("{");
-            try output.appendSlice("...");
-            try output.appendSlice("}");
-        },
+        .array, .object => try output.appendSlice("{...}"),
     }
 }
 
