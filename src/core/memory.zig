@@ -148,14 +148,15 @@ fn getRssBytesWindows() !u64 {
 // ── Formatting helper ────────────────────────────────────────────────
 
 /// Formats a byte count into a human-friendly string (B, KB, MB, GB).
+/// Uses decimal (1000-based) units to match Task Manager and OS tools.
 /// The result is written into `buf` and returned as a slice.
 pub fn formatBytes(buf: *[32]u8, bytes: u64) []const u8 {
     const units = [_][]const u8{ "B", "KB", "MB", "GB" };
 
     var idx: usize = 0;
     var divisor: u64 = 1;
-    while (idx < 3 and bytes >= divisor * 1024) : (idx += 1) {
-        divisor *= 1024;
+    while (idx < 3 and bytes >= divisor * 1000) : (idx += 1) {
+        divisor *= 1000;
     }
 
     const value: f64 = @as(f64, @floatFromInt(bytes)) / @as(f64, @floatFromInt(divisor));
@@ -182,9 +183,9 @@ test "formatBytes formats various sizes" {
     var buf: [32]u8 = undefined;
     try std.testing.expectEqualStrings("0 B", formatBytes(&buf, 0));
     try std.testing.expectEqualStrings("512 B", formatBytes(&buf, 512));
-    try std.testing.expectEqualStrings("1 KB", formatBytes(&buf, 1024));
-    try std.testing.expectEqualStrings("1.5 KB", formatBytes(&buf, 1536));
-    try std.testing.expectEqualStrings("1 MB", formatBytes(&buf, 1024 * 1024));
-    try std.testing.expectEqualStrings("2.5 MB", formatBytes(&buf, 2_621_440)); // 2.5 * 1024^2
-    try std.testing.expectEqualStrings("1 GB", formatBytes(&buf, 1024 * 1024 * 1024));
+    try std.testing.expectEqualStrings("1 KB", formatBytes(&buf, 1000));
+    try std.testing.expectEqualStrings("1.5 KB", formatBytes(&buf, 1500));
+    try std.testing.expectEqualStrings("1 MB", formatBytes(&buf, 1000 * 1000));
+    try std.testing.expectEqualStrings("2.5 MB", formatBytes(&buf, 2_500_000));
+    try std.testing.expectEqualStrings("1 GB", formatBytes(&buf, 1000 * 1000 * 1000));
 }
