@@ -27,6 +27,8 @@ const ReconfigurePrompt = struct {
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
+    var messages_arena_state = std.heap.ArenaAllocator.init(arena);
+    const messages_arena = messages_arena_state.allocator();
     const io = init.io;
 
     const args_slice = try init.minimal.args.toSlice(arena);
@@ -95,9 +97,9 @@ pub fn main(init: std.process.Init) !void {
 
     var planning_mode = false;
 
-    var messages = std.array_list.Managed(openai.Message).init(arena);
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena);
     defer messages.deinit();
-    const system_prompt = try cfg.resolvePrompt(arena, "system", prompts.system);
+    const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
     try messages.append(.{ .system = system_prompt });
 
     var pending_prompt: ?[]const u8 = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
@@ -110,6 +112,7 @@ pub fn main(init: std.process.Init) !void {
 
     var ctx = ChatLoopContext{
         .arena = arena,
+        .messages_arena = &messages_arena_state,
         .io = io,
         .init = init,
         .parsed = parsed,
@@ -426,6 +429,7 @@ const TurnResult = enum {
 
 const ChatLoopContext = struct {
     arena: std.mem.Allocator,
+    messages_arena: *std.heap.ArenaAllocator,
     io: std.Io,
     init: std.process.Init,
     parsed: cli.Options,
@@ -485,7 +489,18 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
         try thinking_indicator.show(ctx.stdout_writer);
 
-        const result = chat.runTurn(ctx.prov, ctx.arena, ctx.io, ctx.stdout_writer, ctx.session_stats, ctx.random, ctx.model_key.*, ctx.messages, active_tool_definitions, &thinking_indicator) catch |err| {
+        const result = chat.runTurn(
+            ctx.prov,
+            ctx.messages_arena.allocator(),
+            ctx.io,
+            ctx.stdout_writer,
+            ctx.session_stats,
+            ctx.random,
+            ctx.model_key.*,
+            ctx.messages,
+            active_tool_definitions,
+            &thinking_indicator,
+        ) catch |err| {
             try thinking_indicator.finish(ctx.io, ctx.stdout_writer, 0, false, false, .error_, null);
             return err;
         };
@@ -687,6 +702,8 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
         const command = commands.parse(user_message);
         const action = try commands.dispatch(command, .{
             .arena = ctx.arena,
+            .messages_alloc = ctx.messages_arena.allocator(),
+            .messages_arena = ctx.messages_arena,
             .stdout_writer = ctx.stdout_writer,
             .messages = ctx.messages,
             .planning_mode = ctx.planning_mode,
