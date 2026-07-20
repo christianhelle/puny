@@ -31,6 +31,9 @@ pub fn main(init: std.process.Init) !void {
     const args_slice = try init.minimal.args.toSlice(arena);
     const parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
+    var debug_log: ?DebugLog = if (parsed.debug) try DebugLog.init("puny_debug.log") else null;
+    defer if (debug_log) |*log| log.deinit();
+
     var cfg_result = try config.load(arena, io, init.environ_map);
     const cfg = &cfg_result.config;
 
@@ -65,6 +68,7 @@ pub fn main(init: std.process.Init) !void {
         &provider_url,
         &model_key,
     );
+    if (debug_log) |*log| attachHttpDebugObserver(&prov, log);
     defer prov.deinit();
 
     var full_tool_definitions = try buildToolDefinitions(arena);
@@ -111,6 +115,7 @@ pub fn main(init: std.process.Init) !void {
         .session_stats = &session_stats,
         .line_alloc = &line_alloc,
         .stdin_buffer = &stdin_buffer,
+        .debug_log = if (debug_log) |*log| log else null,
     };
 
     try runChatLoop(&ctx);
@@ -327,7 +332,6 @@ fn initializeProviderAndModel(
     };
 
     prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, arena, io);
-    if (parsed.debug) attachHttpDebugObserver(prov);
     if (!parsed.mock) try ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
     const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
@@ -429,6 +433,7 @@ const ChatLoopContext = struct {
     session_stats: *chat.SessionStats,
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: *[4096]u8,
+    debug_log: ?*DebugLog,
 };
 
 fn readUserInput(ctx: *ChatLoopContext) !UserInput {
@@ -511,7 +516,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (!ctx.parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
         ctx.prov.deinit();
         ctx.prov.* = createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.arena, ctx.io);
-        if (ctx.parsed.debug) attachHttpDebugObserver(ctx.prov);
+        if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
         if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
         ctx.provider_name.* = new_provider_name;
         ctx.provider_url.* = new_provider_url;
@@ -649,13 +654,30 @@ fn providerDisplayName(provider_name: []const u8) []const u8 {
     return provider_name;
 }
 
-fn attachHttpDebugObserver(prov: *provider.Provider) void {
-    prov.setHttpObserver(httpDebugObserver());
+const DebugLog = struct {
+    file: std.fs.File,
+
+    fn init(filename: []const u8) !DebugLog {
+        const file = try std.fs.cwd().createFile(filename, .{});
+        return .{ .file = file };
+    }
+
+    fn deinit(self: *DebugLog) void {
+        self.file.close();
+    }
+
+    fn print(self: *DebugLog, comptime fmt: []const u8, args: anytype) void {
+        self.file.writer().print(fmt, args) catch {};
+    }
+};
+
+fn attachHttpDebugObserver(prov: *provider.Provider, debug_log: *DebugLog) void {
+    prov.setHttpObserver(httpDebugObserver(debug_log));
 }
 
-fn httpDebugObserver() http_client.HttpObserver {
+fn httpDebugObserver(debug_log: *DebugLog) http_client.HttpObserver {
     return .{
-        .ctx = null,
+        .ctx = debug_log,
         .onRequest = &logHttpRequest,
         .onResponse = &logHttpResponse,
         .onError = &logHttpError,
@@ -664,45 +686,45 @@ fn httpDebugObserver() http_client.HttpObserver {
 }
 
 fn logHttpRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
-    _ = ctx;
-    std.debug.print("=== REQUEST ===\n", .{});
-    std.debug.print("{s} {s}\n", .{ @tagName(method), url });
-    std.debug.print("Headers:\n", .{});
+    const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
+    log.print("=== REQUEST ===\n", .{});
+    log.print("{s} {s}\n", .{ @tagName(method), url });
+    log.print("Headers:\n", .{});
     for (headers) |h| {
-        std.debug.print("  {s}: {s}\n", .{ h.name, h.value });
+        log.print("  {s}: {s}\n", .{ h.name, h.value });
     }
     if (body) |b| {
-        std.debug.print("Body ({d} bytes):\n{s}\n", .{ b.len, b });
+        log.print("Body ({d} bytes):\n{s}\n", .{ b.len, b });
     }
 }
 
 fn logHttpResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, status: std.http.Status, headers: []const std.http.Header, body: []const u8, duration_ns: u64) void {
-    _ = ctx;
+    const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
     const ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
-    std.debug.print("=== RESPONSE ===\n", .{});
-    std.debug.print("{s} {s}\n", .{ @tagName(method), url });
-    std.debug.print("Status: {d} ({s})\n", .{ @intFromEnum(status), @tagName(status) });
-    std.debug.print("Duration: {d:.2}ms\n", .{ms});
-    std.debug.print("Headers:\n", .{});
+    log.print("=== RESPONSE ===\n", .{});
+    log.print("{s} {s}\n", .{ @tagName(method), url });
+    log.print("Status: {d} ({s})\n", .{ @intFromEnum(status), @tagName(status) });
+    log.print("Duration: {d:.2}ms\n", .{ms});
+    log.print("Headers:\n", .{});
     for (headers) |h| {
-        std.debug.print("  {s}: {s}\n", .{ h.name, h.value });
+        log.print("  {s}: {s}\n", .{ h.name, h.value });
     }
     if (body.len > 0) {
-        std.debug.print("Body ({d} bytes):\n{s}\n", .{ body.len, body });
+        log.print("Body ({d} bytes):\n{s}\n", .{ body.len, body });
     }
 }
 
 fn logHttpError(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, err_name: []const u8) void {
-    _ = ctx;
-    std.debug.print("=== ERROR ===\n", .{});
-    std.debug.print("{s} {s}\n", .{ @tagName(method), url });
-    std.debug.print("Error: {s}\n", .{err_name});
+    const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
+    log.print("=== ERROR ===\n", .{});
+    log.print("{s} {s}\n", .{ @tagName(method), url });
+    log.print("Error: {s}\n", .{err_name});
 }
 
 fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
-    _ = ctx;
-    std.debug.print("=== CHUNK ===\n", .{});
-    std.debug.print("{s}\n", .{data});
+    const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
+    log.print("=== CHUNK ===\n", .{});
+    log.print("{s}\n", .{data});
 }
 
 fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api_key: []const u8, arena: std.mem.Allocator, io: std.Io) provider.Provider {
