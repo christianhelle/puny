@@ -322,13 +322,16 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
         try checkCancellation(cancellation_token);
         line_buf.clearRetainingCapacity();
 
-        _ = reader.streamDelimiterLimit(&line_buf.writer, '\n', .limited(max_sse_line_size)) catch |err| switch (err) {
+        const line_len = reader.streamDelimiterLimit(&line_buf.writer, '\n', .limited(max_sse_line_size)) catch |err| switch (err) {
             error.StreamTooLong => return error.SseLineTooLong,
             error.ReadFailed => return err,
             error.WriteFailed => return err,
         };
 
         const ended_with_delimiter = blk: {
+            if (line_len == 0) break :blk false;
+            const written = line_buf.written();
+            if (written[written.len - 1] == '\n') break :blk true;
             const byte = reader.peekByte() catch |err| switch (err) {
                 error.EndOfStream => break :blk false,
                 error.ReadFailed => return err,
@@ -340,7 +343,13 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
             break :blk false;
         };
 
-        if (try processSseLine(&event_data, line_buf.written(), callback)) return;
+        const raw_line = line_buf.written();
+        const line = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\n')
+            raw_line[0 .. raw_line.len - 1]
+        else
+            raw_line;
+
+        if (try processSseLine(&event_data, line, callback)) return;
         if (!ended_with_delimiter) break;
     }
 
