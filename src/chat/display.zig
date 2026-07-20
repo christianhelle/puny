@@ -18,7 +18,7 @@ pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) 
     defer parsed.deinit();
 
     if (!try renderKnown(&output, tool_call.function.name, parsed.value)) {
-        try appendGeneric(&output, allocator, tool_call.function.name, parsed.value);
+        try appendGeneric(&output, tool_call.function.name, parsed.value);
     }
     return output.toOwnedSlice();
 }
@@ -119,7 +119,6 @@ fn renderKnown(
 
 fn appendGeneric(
     output: *std.array_list.Managed(u8),
-    allocator: std.mem.Allocator,
     name: []const u8,
     args: std.json.Value,
 ) !void {
@@ -141,13 +140,13 @@ fn appendGeneric(
             first = false;
             try output.appendSlice(entry.key_ptr.*);
             try output.append('=');
-            try appendJsonValue(output, allocator, entry.value_ptr.*);
+            try appendJsonValue(output, entry.value_ptr.*);
         }
         return;
     }
 
     try output.appendSlice(" with ");
-    try appendJsonValue(output, allocator, args);
+    try appendJsonValue(output, args);
 }
 
 fn getString(args: std.json.Value, key: []const u8) ?[]const u8 {
@@ -209,18 +208,28 @@ fn appendJsonString(output: *std.array_list.Managed(u8), value: []const u8) !voi
 
 fn appendJsonValue(
     output: *std.array_list.Managed(u8),
-    allocator: std.mem.Allocator,
     value: std.json.Value,
 ) !void {
-    if (value == .string) {
-        try appendJsonString(output, value.string);
-        return;
+    switch (value) {
+        .string => |s| try appendJsonString(output, s),
+        .bool => |b| try output.appendSlice(if (b) "true" else "false"),
+        .integer => |i| {
+            var buf: [32]u8 = undefined;
+            const text = try std.fmt.bufPrint(&buf, "{d}", .{i});
+            try output.appendSlice(text);
+        },
+        .float => |f| {
+            var buf: [64]u8 = undefined;
+            const text = try std.fmt.bufPrint(&buf, "{d}", .{f});
+            try output.appendSlice(text);
+        },
+        .null => try output.appendSlice("null"),
+        .array, .object => {
+            try output.appendSlice("{");
+            try output.appendSlice("...");
+            try output.appendSlice("}");
+        },
     }
-
-    var json = std.Io.Writer.Allocating.init(allocator);
-    defer json.deinit();
-    try std.json.Stringify.value(value, .{}, &json.writer);
-    try appendCapped(output, json.written());
 }
 
 fn appendCapped(output: *std.array_list.Managed(u8), value: []const u8) !void {
