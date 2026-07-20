@@ -12,6 +12,7 @@ const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const provider_picker = @import("tui/provider_picker.zig");
 const opencode_zen = @import("providers/opencode_zen.zig");
+const opencode_go = @import("providers/opencode_go.zig");
 const copilot = @import("providers/copilot.zig");
 const prompt_history = @import("prompts/history.zig");
 const prompts = @import("prompts/prompts.zig");
@@ -141,18 +142,21 @@ pub fn main(init: std.process.Init) !void {
 fn isValidProvider(name: []const u8) bool {
     return std.mem.eql(u8, name, "lmstudio") or
         std.mem.eql(u8, name, "opencode") or
+        std.mem.eql(u8, name, "opencode-go") or
         std.mem.eql(u8, name, "copilot") or
         std.mem.eql(u8, name, "mock");
 }
 
 fn providerHasFixedUrl(provider_name: []const u8) bool {
     return std.mem.eql(u8, provider_name, "opencode") or
+        std.mem.eql(u8, provider_name, "opencode-go") or
         std.mem.eql(u8, provider_name, "copilot") or
         std.mem.eql(u8, provider_name, "mock");
 }
 
 fn defaultProviderUrl(provider_name: []const u8) []const u8 {
     if (std.mem.eql(u8, provider_name, "opencode")) return opencode_zen.default_base_url;
+    if (std.mem.eql(u8, provider_name, "opencode-go")) return opencode_go.default_base_url;
     if (std.mem.eql(u8, provider_name, "copilot")) return copilot.default_base_url;
     if (std.mem.eql(u8, provider_name, "mock")) return "-";
     return config.default_lm_studio_url;
@@ -786,11 +790,13 @@ fn baseUrlFor(provider_name: []const u8, parsed: cli.Options, cfg: config.Config
 }
 
 fn requiresApiKey(provider_name: []const u8) bool {
-    return std.mem.eql(u8, provider_name, "opencode");
+    return std.mem.eql(u8, provider_name, "opencode") or
+        std.mem.eql(u8, provider_name, "opencode-go");
 }
 
 fn providerDisplayName(provider_name: []const u8) []const u8 {
     if (std.mem.eql(u8, provider_name, "opencode")) return "OpenCode Zen";
+    if (std.mem.eql(u8, provider_name, "opencode-go")) return "OpenCode Go";
     if (std.mem.eql(u8, provider_name, "lmstudio")) return "LM Studio";
     if (std.mem.eql(u8, provider_name, "copilot")) return "GitHub Copilot";
     if (std.mem.eql(u8, provider_name, "mock")) return "Mock";
@@ -868,6 +874,11 @@ fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api
         var c = http_client.Client.init(arena, io, api_key);
         c.withBaseUrl(url);
         return .{ .opencode = c };
+    }
+    if (std.mem.eql(u8, provider_name, "opencode-go")) {
+        var c = http_client.Client.init(arena, io, api_key);
+        c.withBaseUrl(url);
+        return .{ .opencode_go = c };
     }
     if (std.mem.eql(u8, provider_name, "copilot")) {
         var c = copilot.Client.init(arena, io, api_key);
