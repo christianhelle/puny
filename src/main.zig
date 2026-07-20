@@ -136,17 +136,20 @@ pub fn main(init: std.process.Init) !void {
 fn isValidProvider(name: []const u8) bool {
     return std.mem.eql(u8, name, "lmstudio") or
         std.mem.eql(u8, name, "opencode") or
-        std.mem.eql(u8, name, "copilot");
+        std.mem.eql(u8, name, "copilot") or
+        std.mem.eql(u8, name, "mock");
 }
 
 fn providerHasFixedUrl(provider_name: []const u8) bool {
     return std.mem.eql(u8, provider_name, "opencode") or
-        std.mem.eql(u8, provider_name, "copilot");
+        std.mem.eql(u8, provider_name, "copilot") or
+        std.mem.eql(u8, provider_name, "mock");
 }
 
 fn defaultProviderUrl(provider_name: []const u8) []const u8 {
     if (std.mem.eql(u8, provider_name, "opencode")) return opencode.default_base_url;
     if (std.mem.eql(u8, provider_name, "copilot")) return copilot.default_base_url;
+    if (std.mem.eql(u8, provider_name, "mock")) return "-";
     return config.default_lm_studio_url;
 }
 
@@ -663,6 +666,7 @@ fn providerDisplayName(provider_name: []const u8) []const u8 {
     if (std.mem.eql(u8, provider_name, "opencode")) return "OpenCode Zen";
     if (std.mem.eql(u8, provider_name, "lmstudio")) return "LM Studio";
     if (std.mem.eql(u8, provider_name, "copilot")) return "GitHub Copilot";
+    if (std.mem.eql(u8, provider_name, "mock")) return "Mock";
     return provider_name;
 }
 
@@ -732,7 +736,7 @@ fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
 }
 
 fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api_key: []const u8, arena: std.mem.Allocator, io: std.Io) provider.Provider {
-    if (is_mock) return .{ .mock = mock.MockClient.init(arena, io) };
+    if (is_mock or std.mem.eql(u8, provider_name, "mock")) return .{ .mock = mock.MockClient.init(arena, io) };
     if (std.mem.eql(u8, provider_name, "opencode")) {
         var c = http_client.Client.init(arena, io, api_key);
         c.withBaseUrl(url);
@@ -849,6 +853,7 @@ test "baseUrlFor uses CLI url for lmstudio only" {
     try std.testing.expectEqualStrings("http://cli.example", baseUrlFor("lmstudio", parsed, cfg));
     try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", parsed, cfg));
     try std.testing.expectEqualStrings(copilot.default_base_url, baseUrlFor("copilot", parsed, cfg));
+    try std.testing.expectEqualStrings("-", baseUrlFor("mock", parsed, cfg));
 }
 
 test "baseUrlFor uses config url only when provider matches config" {
@@ -864,6 +869,7 @@ test "baseUrlFor returns provider defaults" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("http://127.0.0.1:1234", baseUrlFor("lmstudio", .{}, cfg));
     try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg));
+    try std.testing.expectEqualStrings("-", baseUrlFor("mock", .{}, cfg));
 }
 
 test "requiresApiKey only for opencode" {
@@ -877,13 +883,15 @@ test "providerDisplayName maps known providers" {
     try std.testing.expectEqualStrings("LM Studio", providerDisplayName("lmstudio"));
     try std.testing.expectEqualStrings("OpenCode Zen", providerDisplayName("opencode"));
     try std.testing.expectEqualStrings("GitHub Copilot", providerDisplayName("copilot"));
+    try std.testing.expectEqualStrings("Mock", providerDisplayName("mock"));
     try std.testing.expectEqualStrings("custom", providerDisplayName("custom"));
 }
 
-test "isValidProvider accepts lmstudio, opencode and copilot" {
+test "isValidProvider accepts lmstudio, opencode, copilot and mock" {
     try std.testing.expect(isValidProvider("lmstudio"));
     try std.testing.expect(isValidProvider("opencode"));
     try std.testing.expect(isValidProvider("copilot"));
+    try std.testing.expect(isValidProvider("mock"));
     try std.testing.expect(!isValidProvider("openai"));
     try std.testing.expect(!isValidProvider(""));
 }
@@ -892,11 +900,13 @@ test "defaultProviderUrl returns provider-specific defaults" {
     try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("lmstudio"));
     try std.testing.expectEqualStrings(opencode.default_base_url, defaultProviderUrl("opencode"));
     try std.testing.expectEqualStrings(copilot.default_base_url, defaultProviderUrl("copilot"));
+    try std.testing.expectEqualStrings("-", defaultProviderUrl("mock"));
     try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("unknown"));
 }
 
-test "providerHasFixedUrl for opencode and copilot" {
+test "providerHasFixedUrl for opencode, copilot and mock" {
     try std.testing.expect(providerHasFixedUrl("opencode"));
     try std.testing.expect(providerHasFixedUrl("copilot"));
+    try std.testing.expect(providerHasFixedUrl("mock"));
     try std.testing.expect(!providerHasFixedUrl("lmstudio"));
 }
