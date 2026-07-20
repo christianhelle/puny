@@ -410,8 +410,7 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
     }
 
-    var block_types = std.array_list.Managed(BlockType).init(allocator);
-    defer block_types.deinit();
+    const block_types = std.array_list.Managed(BlockType).init(allocator);
 
     var sse = AnthropicSseCallback{
         .allocator = allocator,
@@ -420,6 +419,7 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         .observer = client.http_observer,
     };
 
+    defer sse.block_types.deinit();
     http_client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
