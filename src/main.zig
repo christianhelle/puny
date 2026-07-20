@@ -722,6 +722,30 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 return;
             },
             .continue_ => continue,
+            .full_reset => {
+                try ctx.stdout_writer.print(" Performing full memory reset...", .{});
+                try ctx.stdout_writer.flush();
+
+                _ = ctx.messages_arena.reset(.free_all);
+                ctx.messages.* = std.array_list.Managed(openai.Message).init(ctx.messages_arena.allocator());
+                ctx.planning_mode.* = false;
+                const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
+                try ctx.messages.append(.{ .system = system_prompt });
+
+                ctx.session_stats.deinit();
+                ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
+
+                const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+                ctx.prov.deinit();
+                ctx.prov.* = createProvider(ctx.parsed.mock, ctx.provider_name.*, ctx.provider_url.*, new_api_key, ctx.arena, ctx.io);
+                if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
+
+                ctx.history.clear();
+
+                try ctx.stdout_writer.print(" OK\n", .{});
+                try ctx.stdout_writer.flush();
+                continue;
+            },
             .print_stats => {
                 try ctx.session_stats.print(ctx.io, ctx.stdout_writer);
                 continue;
