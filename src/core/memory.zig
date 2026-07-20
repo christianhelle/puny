@@ -20,9 +20,15 @@ pub fn getRssBytes(allocator: std.mem.Allocator, io: std.Io) !u64 {
 
 // ── Linux ────────────────────────────────────────────────────────────
 
-fn getRssBytesLinux(allocator: std.mem.Allocator, io: std.Io) !u64 {
-    const data = try std.fs.openFileAbsolute("/proc/self/status", .{}).readAllAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(data);
+fn getRssBytesLinux(_: std.mem.Allocator, _: std.Io) !u64 {
+    // We use the old std.fs API here because /proc is a virtual filesystem
+    // and opening via absolute path is the most straightforward approach.
+    const file = try std.fs.openFileAbsolute("/proc/self/status", .{});
+    defer file.close();
+
+    var buf: [4096]u8 = undefined;
+    const n = try file.readAll(&buf);
+    const data = buf[0..n];
 
     const marker = "VmRSS:";
     const start = std.mem.indexOf(u8, data, marker) orelse return error.MissingVmRSS;
