@@ -11,7 +11,7 @@ const mock = @import("providers/mock.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const provider_picker = @import("tui/provider_picker.zig");
-const opencode = @import("providers/opencode.zig");
+const opencode_zen = @import("providers/opencode_zen.zig");
 const copilot = @import("providers/copilot.zig");
 const prompt_history = @import("prompts/history.zig");
 const prompts = @import("prompts/prompts.zig");
@@ -152,7 +152,7 @@ fn providerHasFixedUrl(provider_name: []const u8) bool {
 }
 
 fn defaultProviderUrl(provider_name: []const u8) []const u8 {
-    if (std.mem.eql(u8, provider_name, "opencode")) return opencode.default_base_url;
+    if (std.mem.eql(u8, provider_name, "opencode")) return opencode_zen.default_base_url;
     if (std.mem.eql(u8, provider_name, "copilot")) return copilot.default_base_url;
     if (std.mem.eql(u8, provider_name, "mock")) return "-";
     return config.default_lm_studio_url;
@@ -992,7 +992,7 @@ test "baseUrlFor uses CLI url for lmstudio only" {
     const cfg = config.Config{};
     const parsed = cli.Options{ .url = "http://cli.example" };
     try std.testing.expectEqualStrings("http://cli.example", baseUrlFor("lmstudio", parsed, cfg));
-    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", parsed, cfg));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", parsed, cfg));
     try std.testing.expectEqualStrings(copilot.default_base_url, baseUrlFor("copilot", parsed, cfg));
     try std.testing.expectEqualStrings("-", baseUrlFor("mock", parsed, cfg));
 }
@@ -1000,16 +1000,16 @@ test "baseUrlFor uses CLI url for lmstudio only" {
 test "baseUrlFor uses config url only when provider matches config" {
     const cfg_lmstudio = config.Config{ .provider = "lmstudio", .providerUrl = "http://config-lmstudio" };
     try std.testing.expectEqualStrings("http://config-lmstudio", baseUrlFor("lmstudio", .{}, cfg_lmstudio));
-    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg_lmstudio));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", .{}, cfg_lmstudio));
 
     const cfg_opencode = config.Config{ .provider = "opencode", .providerUrl = "http://config-opencode" };
-    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg_opencode));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", .{}, cfg_opencode));
 }
 
 test "baseUrlFor returns provider defaults" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("http://127.0.0.1:1234", baseUrlFor("lmstudio", .{}, cfg));
-    try std.testing.expectEqualStrings(opencode.default_base_url, baseUrlFor("opencode", .{}, cfg));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", .{}, cfg));
     try std.testing.expectEqualStrings("-", baseUrlFor("mock", .{}, cfg));
 }
 
@@ -1039,7 +1039,7 @@ test "isValidProvider accepts lmstudio, opencode, copilot and mock" {
 
 test "defaultProviderUrl returns provider-specific defaults" {
     try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("lmstudio"));
-    try std.testing.expectEqualStrings(opencode.default_base_url, defaultProviderUrl("opencode"));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, defaultProviderUrl("opencode"));
     try std.testing.expectEqualStrings(copilot.default_base_url, defaultProviderUrl("copilot"));
     try std.testing.expectEqualStrings("-", defaultProviderUrl("mock"));
     try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("unknown"));
