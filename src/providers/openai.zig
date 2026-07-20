@@ -63,8 +63,8 @@ pub const Message = union(enum) {
                 if (assistant.tool_calls) |tool_calls| {
                     var arr = try std.json.Array.initCapacity(allocator, tool_calls.len);
                     errdefer {
-                        for (arr.items) |item| item.object.deinit(allocator);
-                        arr.deinit(allocator);
+                        for (arr.items) |*item| item.object.deinit(allocator);
+                        arr.deinit();
                     }
                     for (tool_calls) |tc| {
                         var func = try newObject(allocator);
