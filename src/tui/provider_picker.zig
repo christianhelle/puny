@@ -88,10 +88,9 @@ pub fn selectProviderInteractive(
 ) !?[]const u8 {
     setProviders(&default_providers);
     var program = zz.Program(Widget).init(init.gpa, io, init.environ_map);
+    defer program.deinit();
 
     program.run() catch |err| {
-        program.deinit();
-
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
         const stderr_writer = &stderr_file_writer.interface;
@@ -104,13 +103,8 @@ pub fn selectProviderInteractive(
         return try selectProviderText(arena, io);
     };
 
-    const picked = program.model.selected orelse {
-        program.deinit();
-        return null;
-    };
-    const key = try arena.dupe(u8, picked);
-    program.deinit();
-    return key;
+    const picked = program.model.selected orelse return null;
+    return try arena.dupe(u8, picked);
 }
 
 pub fn selectProviderText(
