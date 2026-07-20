@@ -10,8 +10,8 @@ pub const Info = struct {
     prefilled: bool = false,
 };
 
-const command_column_width = 15;
-const command_padding = "               "[0..command_column_width];
+const command_column_width = 18;
+const command_padding = "                  "[0..command_column_width];
 
 fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u8) !void {
     const pad = if (name.len >= command_column_width) "" else command_padding[name.len..];
@@ -43,6 +43,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         try printCommand(writer, "/plan [task]", "Enter planning mode");
         try printCommand(writer, "/build [task]", "Switch to build mode");
         try printCommand(writer, "/model [id]", "Switch to another model");
+        try printCommand(writer, "/provider [name]", "Switch to another provider");
         try writer.print("\n", .{});
         if (info.prefilled) {
             try writer.print("{s}Prefilled prompt will be sent automatically. Type /quit to exit.{s}\n", .{ ansi.dim, ansi.reset });
@@ -81,6 +82,7 @@ test "print writes banner, provider, model, commands and hint" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/config"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/plan"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/provider"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
 
