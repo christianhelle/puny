@@ -2,6 +2,7 @@ const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const chat_retry = @import("retry.zig");
 const indicator = @import("../tui/indicator.zig");
+const memory = @import("../core/memory.zig");
 const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const tools = @import("tools");
@@ -173,6 +174,14 @@ pub const SessionStats = struct {
             }
         }
         try writer.print("\n  Session duration:    {d:.1}s\n", .{elapsed_s});
+
+        // Show process memory usage if available.
+        if (memory.getRssBytes(self.allocator, io)) |rss_bytes| {
+            var buf: [32]u8 = undefined;
+            const formatted = memory.formatBytes(&buf, rss_bytes);
+            try writer.print("  Memory usage:        {s}\n", .{formatted});
+        } else |_| {}
+
         try writer.flush();
     }
 };
