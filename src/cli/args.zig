@@ -122,7 +122,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -1, --oneshot, --one-shot   Exit after processing the prompt (requires --prompt)
         \\  -M, --mock                  Use mock provider (no LM Studio required)
         \\      --reconfigure           Re-run first-run setup and update config
-        \\      --debug                 Log HTTP requests and responses to stderr
+        \\      --debug                 Log HTTP requests and responses to puny_debug.log
         \\  -h, --help                  Show this help text
         \\  -V, --version               Print version
         \\
