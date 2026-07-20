@@ -28,5 +28,53 @@
     "args": ["--mock", "--model", "mock-model", "--prompt", "trigger an error", "--oneshot"],
     "expect": ["Chat failed"],
     "not_expect": ["mock response"]
+  },
+  {
+    "name": "Long text output",
+    "args": ["--mock", "--model", "mock-model-long", "--prompt", "write something long", "--oneshot"],
+    "expect": ["The mock provider generates long text"],
+    "not_expect": []
+  },
+  {
+    "name": "Echo mode",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "echo hello world", "--oneshot"],
+    "expect": ["Echo:", "hello world"],
+    "not_expect": []
+  },
+  {
+    "name": "Empty response",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "give me an empty response", "--oneshot"],
+    "expect": [],
+    "not_expect": ["mock response"]
+  },
+  {
+    "name": "Random text output",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "generate random text", "--oneshot"],
+    "expect": ["abcdefghijklmnopqrstuvwxyz"],
+    "not_expect": []
+  },
+  {
+    "name": "Usage stats response",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "show usage info", "--oneshot"],
+    "expect": ["usage statistics", "output_tokens"],
+    "not_expect": []
+  },
+  {
+    "name": "Partial response (no finish)",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "give me a partial response", "--oneshot"],
+    "expect": ["partial response", "truncated stream"],
+    "not_expect": []
+  },
+  {
+    "name": "Fast mode (instant)",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "respond fast", "--oneshot"],
+    "expect": ["mock response"],
+    "not_expect": []
+  },
+  {
+    "name": "Slow mode",
+    "args": ["--mock", "--model", "mock-model-slow", "--prompt", "respond slowly", "--oneshot"],
+    "expect": ["mock response"],
+    "not_expect": []
   }
 ]
