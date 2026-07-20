@@ -22,8 +22,6 @@ pub const MockKeyword = enum {
     slow,
     /// Echo the user's message back as the response.
     echo,
-    /// Produce random-looking text (~300 chars).
-    random,
     /// Produce an empty response (no content, just finish).
     empty,
     /// Produce partial content (simulates a truncated response with no finish event).
@@ -184,11 +182,6 @@ pub const MockClient = struct {
             return respondWithEmpty(callback);
         }
 
-        // Check for random mode
-        if (isKeyword(last_content, .random)) {
-            return respondWithRandom(callback, speed, self.io);
-        }
-
         // Check for partial mode
         if (isKeyword(last_content, .partial)) {
             return respondWithPartial(callback, speed, self.io);
@@ -254,7 +247,6 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .fast => "fast",
         .slow => "slow",
         .echo => "echo",
-        .random => "random",
         .empty => "empty",
         .partial => "partial",
         .usage => "usage",
@@ -346,20 +338,6 @@ fn respondWithLong(callback: openai.StreamCallback, speed: MockSpeed, io: std.Io
             sentence_len = 0;
         }
 
-        try emitDelay(speed, io);
-    }
-    try callback.emit(.{ .finish = "stop" });
-}
-
-fn respondWithRandom(callback: openai.StreamCallback, speed: MockSpeed, io: std.Io) !void {
-    var seed: u64 = 42;
-    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789 ";
-
-    var i: usize = 0;
-    while (i < 300) : (i += 1) {
-        seed = seed * 6364136223846793005 + 1;
-        const idx = @as(usize, @intCast(seed % alphabet.len));
-        try callback.emit(.{ .content = &.{alphabet[idx]} });
         try emitDelay(speed, io);
     }
     try callback.emit(.{ .finish = "stop" });
