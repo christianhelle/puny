@@ -54,6 +54,14 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     try writer.flush();
 }
 
+pub fn printSummary(writer: *std.Io.Writer, info: Info) !void {
+    try writer.print("\n", .{});
+    try writer.print("  {s}Provider:{s} {s} ({s})\n", .{ ansi.bright, ansi.reset, info.provider_name, info.provider_url });
+    try writer.print("  {s}Model:{s}    {s}\n", .{ ansi.bright, ansi.reset, info.model_key });
+    try writer.print("\n", .{});
+    try writer.flush();
+}
+
 test "print writes banner, provider, model, commands and hint" {
     const allocator = std.testing.allocator;
     var out = std.Io.Writer.Allocating.init(allocator);
