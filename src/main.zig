@@ -746,6 +746,20 @@ fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api
     return .{ .lmstudio = c };
 }
 
+test "createProvider returns mock for mock flag or provider name" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var by_flag = createProvider(true, "lmstudio", "http://example", "", allocator, std.testing.io);
+    defer by_flag.deinit();
+    try std.testing.expectEqual(std.meta.activeTag(by_flag), std.meta.Tag(provider.Provider).mock);
+
+    var by_name = createProvider(false, "mock", "-", "", allocator, std.testing.io);
+    defer by_name.deinit();
+    try std.testing.expectEqual(std.meta.activeTag(by_name), std.meta.Tag(provider.Provider).mock);
+}
+
 fn resolveApiKey(
     allocator: std.mem.Allocator,
     io: std.Io,
