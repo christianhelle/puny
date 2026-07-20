@@ -27,7 +27,7 @@ const ReconfigurePrompt = struct {
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
-    var messages_arena_state = std.heap.ArenaAllocator.init(arena);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const messages_arena = messages_arena_state.allocator();
     const io = init.io;
 
