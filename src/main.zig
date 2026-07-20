@@ -240,7 +240,7 @@ fn promptReconfigure(
         if (new_url.len > 0) {
             cfg.providerUrl = try arena.dupe(u8, new_url);
             result.changed = true;
-        } else if (provider_changed and cfg.providerUrl.len == 0) {
+        } else if (provider_changed) {
             cfg.providerUrl = try arena.dupe(u8, default_url);
             result.changed = true;
         }
