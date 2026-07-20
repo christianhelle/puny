@@ -237,6 +237,7 @@ fn appendJsonValueDepth(
             const text = try std.fmt.bufPrint(&buf, "{d}", .{f});
             try output.appendSlice(text);
         },
+        .number_string => |s| try output.appendSlice(s),
         .null => try output.appendSlice("null"),
         .array => |arr| {
             if (arr.items.len == 0) {
