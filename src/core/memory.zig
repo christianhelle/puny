@@ -20,21 +20,21 @@ pub fn getRssBytes(allocator: std.mem.Allocator, io: std.Io) !u64 {
 
 // ── Linux ────────────────────────────────────────────────────────────
 
-fn getRssBytesLinux(_: std.mem.Allocator, _: std.Io) !u64 {
-    // We use the old std.fs API here because /proc is a virtual filesystem
-    // and opening via absolute path is the most straightforward approach.
-    const file = try std.fs.openFileAbsolute("/proc/self/status", .{});
-    defer file.close();
-
-    var buf: [4096]u8 = undefined;
-    const n = try file.readAll(&buf);
-    const data = buf[0..n];
+fn getRssBytesLinux(allocator: std.mem.Allocator, io: std.Io) !u64 {
+    const data = try std.Io.Dir.cwd().readFileAlloc(io, "/proc/self/status", allocator, std.Io.Limit.limited(16 * 1024));
+    defer allocator.free(data);
 
     const marker = "VmRSS:";
     const start = std.mem.indexOf(u8, data, marker) orelse return error.MissingVmRSS;
-    const after_marker = std.mem.trimLeft(u8, data[start + marker.len..], " \t");
-    const kb_end = std.mem.indexOfAny(u8, after_marker, " \t\n\r") orelse after_marker.len;
-    const kb_str = after_marker[0..kb_end];
+    const after_marker = data[start + marker.len..];
+    // Skip leading spaces/tabs
+    var i: usize = 0;
+    while (i < after_marker.len and (after_marker[i] == ' ' or after_marker[i] == '\t')) : (i += 1) {}
+    const kb_start = after_marker[i..];
+    // Find end of number (space, tab, newline, carriage return)
+    var j: usize = 0;
+    while (j < kb_start.len and kb_start[j] != ' ' and kb_start[j] != '\t' and kb_start[j] != '\n' and kb_start[j] != '\r') : (j += 1) {}
+    const kb_str = kb_start[0..j];
     const kb = try std.fmt.parseInt(u64, kb_str, 10);
     return kb * 1024;
 }
@@ -124,7 +124,18 @@ const windows = if (is_windows) struct {
 } else void {};
 
 fn getRssBytesWindows() !u64 {
-    var counters: windows.PROCESS_MEMORY_COUNTERS = .{ .cb = @sizeOf(windows.PROCESS_MEMORY_COUNTERS) };
+    var counters: windows.PROCESS_MEMORY_COUNTERS = .{
+        .cb = @sizeOf(windows.PROCESS_MEMORY_COUNTERS),
+        .PageFaultCount = 0,
+        .PeakWorkingSetSize = 0,
+        .WorkingSetSize = 0,
+        .QuotaPeakPagedPoolUsage = 0,
+        .QuotaPagedPoolUsage = 0,
+        .QuotaPeakNonPagedPoolUsage = 0,
+        .QuotaNonPagedPoolUsage = 0,
+        .PagefileUsage = 0,
+        .PeakPagefileUsage = 0,
+    };
     const ret = windows.GetProcessMemoryInfo(
         windows.GetCurrentProcess(),
         &counters,
@@ -140,19 +151,24 @@ fn getRssBytesWindows() !u64 {
 /// The result is written into `buf` and returned as a slice.
 pub fn formatBytes(buf: *[32]u8, bytes: u64) []const u8 {
     const units = [_][]const u8{ "B", "KB", "MB", "GB" };
-    const thresholds = [_]u64{ 1024, 1024 * 1024, 1024 * 1024 * 1024, std.math.maxInt(u64) };
 
     var idx: usize = 0;
-    while (idx < 3 and bytes >= thresholds[idx + 1]) : (idx += 1) {}
+    var divisor: u64 = 1;
+    while (idx < 3 and bytes >= divisor * 1024) : (idx += 1) {
+        divisor *= 1024;
+    }
 
-    const value: f64 = @as(f64, @floatFromInt(bytes)) / @as(f64, @floatFromInt(thresholds[idx]));
-    const formatted = std.fmt.bufPrint(buf, "{d:.1}", .{value}) catch unreachable;
+    const value: f64 = @as(f64, @floatFromInt(bytes)) / @as(f64, @floatFromInt(divisor));
 
-    // Trim trailing ".0" for integer-friendly display
-    const trimmed = if (std.mem.endsWith(u8, formatted, ".0"))
-        formatted[0 .. formatted.len - 2]
+    // Use a local buffer for the number to avoid aliasing the output buffer.
+    var num_buf: [16]u8 = undefined;
+    const num_str = std.fmt.bufPrint(&num_buf, "{d:.1}", .{value}) catch unreachable;
+
+    // Trim trailing ".0" for integer-friendly display (e.g. "45.0" -> "45")
+    const trimmed = if (std.mem.endsWith(u8, num_str, ".0"))
+        num_str[0 .. num_str.len - 2]
     else
-        formatted;
+        num_str;
 
     return std.fmt.bufPrint(buf, "{s} {s}", .{ trimmed, units[idx] }) catch unreachable;
 }
