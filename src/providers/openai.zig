@@ -39,18 +39,21 @@ pub const Message = union(enum) {
         return switch (self) {
             .system => |content| blk: {
                 var obj = try newObject(allocator);
+                errdefer obj.deinit(allocator);
                 try obj.put(allocator, "role", .{ .string = "system" });
                 try obj.put(allocator, "content", .{ .string = content });
                 break :blk .{ .object = obj };
             },
             .user => |content| blk: {
                 var obj = try newObject(allocator);
+                errdefer obj.deinit(allocator);
                 try obj.put(allocator, "role", .{ .string = "user" });
                 try obj.put(allocator, "content", .{ .string = content });
                 break :blk .{ .object = obj };
             },
             .assistant => |assistant| blk: {
                 var obj = try newObject(allocator);
+                errdefer obj.deinit(allocator);
                 try obj.put(allocator, "role", .{ .string = "assistant" });
                 if (assistant.content) |content| {
                     try obj.put(allocator, "content", .{ .string = content });
@@ -59,12 +62,18 @@ pub const Message = union(enum) {
                 }
                 if (assistant.tool_calls) |tool_calls| {
                     var arr = try std.json.Array.initCapacity(allocator, tool_calls.len);
+                    errdefer {
+                        for (arr.items) |item| item.object.deinit(allocator);
+                        arr.deinit(allocator);
+                    }
                     for (tool_calls) |tc| {
                         var func = try newObject(allocator);
+                        errdefer func.deinit(allocator);
                         try func.put(allocator, "name", .{ .string = tc.function.name });
                         try func.put(allocator, "arguments", .{ .string = tc.function.arguments });
 
                         var tc_obj = try newObject(allocator);
+                        errdefer tc_obj.deinit(allocator);
                         try tc_obj.put(allocator, "id", .{ .string = tc.id });
                         try tc_obj.put(allocator, "type", .{ .string = tc.type });
                         try tc_obj.put(allocator, "function", .{ .object = func });
@@ -76,6 +85,7 @@ pub const Message = union(enum) {
             },
             .tool => |tool| blk: {
                 var obj = try newObject(allocator);
+                errdefer obj.deinit(allocator);
                 try obj.put(allocator, "role", .{ .string = "tool" });
                 try obj.put(allocator, "tool_call_id", .{ .string = tool.tool_call_id });
                 try obj.put(allocator, "content", .{ .string = tool.content });
@@ -337,33 +347,98 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
 }
 
 pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
-    var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
-    for (request.messages) |msg| {
-        try messages.append(try msg.toJson(allocator));
-    }
-
-    var tools = try std.json.Array.initCapacity(allocator, request.tools.len);
-    for (request.tools) |tool| {
-        var obj = try newObject(allocator);
-        try obj.put(allocator, "type", .{ .string = tool.type });
-        try obj.put(allocator, "function", tool.function);
-        try tools.append(.{ .object = obj });
-    }
-
-    var body_obj = try newObject(allocator);
-    try body_obj.put(allocator, "model", .{ .string = request.model });
-    try body_obj.put(allocator, "messages", .{ .array = messages });
-    try body_obj.put(allocator, "tools", .{ .array = tools });
-    try body_obj.put(allocator, "stream", .{ .bool = request.stream });
-
-    if (request.temperature) |temperature| {
-        try body_obj.put(allocator, "temperature", .{ .float = temperature });
-    }
-
     var str: std.Io.Writer.Allocating = .init(allocator);
-    defer str.deinit();
-    try std.json.Stringify.value(std.json.Value{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
+    errdefer str.deinit();
+
+    var jw = std.json.Stringify.init(allocator, .{ .emit_null_optional_fields = false }, &str.writer);
+    defer jw.deinit();
+
+    try jw.beginObject();
+    try jw.objectField("model");
+    try jw.write(request.model);
+    try jw.objectField("messages");
+    try jw.beginArray();
+    for (request.messages) |msg| {
+        try writeMessage(&jw, msg);
+    }
+    try jw.endArray();
+    try jw.objectField("tools");
+    try jw.beginArray();
+    for (request.tools) |tool| {
+        try jw.beginObject();
+        try jw.objectField("type");
+        try jw.write(tool.type);
+        try jw.objectField("function");
+        try jw.write(tool.function);
+        try jw.endObject();
+    }
+    try jw.endArray();
+    try jw.objectField("stream");
+    try jw.write(request.stream);
+    if (request.temperature) |temperature| {
+        try jw.objectField("temperature");
+        try jw.write(temperature);
+    }
+    try jw.endObject();
+
     return str.toOwnedSlice();
+}
+
+fn writeMessage(jw: *std.json.Stringify, msg: Message) !void {
+    try jw.beginObject();
+    switch (msg) {
+        .system => |content| {
+            try jw.objectField("role");
+            try jw.write("system");
+            try jw.objectField("content");
+            try jw.write(content);
+        },
+        .user => |content| {
+            try jw.objectField("role");
+            try jw.write("user");
+            try jw.objectField("content");
+            try jw.write(content);
+        },
+        .assistant => |assistant| {
+            try jw.objectField("role");
+            try jw.write("assistant");
+            try jw.objectField("content");
+            if (assistant.content) |content| {
+                try jw.write(content);
+            } else {
+                try jw.write(null);
+            }
+            if (assistant.tool_calls) |tool_calls| {
+                try jw.objectField("tool_calls");
+                try jw.beginArray();
+                for (tool_calls) |tc| {
+                    try jw.beginObject();
+                    try jw.objectField("id");
+                    try jw.write(tc.id);
+                    try jw.objectField("type");
+                    try jw.write(tc.type);
+                    try jw.objectField("function");
+                    try jw.beginObject();
+                    try jw.objectField("name");
+                    try jw.write(tc.function.name);
+                    try jw.objectField("arguments");
+                    try jw.write(tc.function.arguments);
+                    try jw.endObject();
+                    try jw.endObject();
+                }
+                try jw.endArray();
+            }
+        },
+        .tool => |tool| {
+            try jw.objectField("role");
+            try jw.write("tool");
+            try jw.objectField("tool_call_id");
+            try jw.write(tool.tool_call_id);
+            try jw.objectField("content");
+            try jw.write(tool.content);
+        },
+    }
+    try jw.endObject();
 }
 
 test "message JSON conversion" {
