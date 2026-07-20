@@ -627,8 +627,14 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 try ctx.session_stats.print(ctx.io, ctx.stdout_writer);
                 continue;
             },
-            .reconfigure => try handleReconfigureCommand(ctx),
-            .switch_model => |model_id| try handleSwitchModelCommand(ctx, model_id),
+            .reconfigure => {
+                try handleReconfigureCommand(ctx);
+                continue;
+            },
+            .switch_model => |model_id| {
+                try handleSwitchModelCommand(ctx, model_id);
+                continue;
+            },
             .run_chat_turn => {},
         }
 
