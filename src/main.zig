@@ -552,19 +552,19 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
         if (model_selection_result) |new_key| {
             ctx.model_key.* = new_key;
         }
-
-        try welcome.print(
-            ctx.stdout_writer,
-            .{
-                .provider_name = if (ctx.parsed.mock) "Mock" else providerDisplayName(ctx.provider_name.*),
-                .provider_url = ctx.provider_url.*,
-                .model_key = ctx.model_key.*,
-                .oneshot = ctx.parsed.oneshot,
-            },
-        );
     } else {
         ctx.prov.setUrlAndKey(ctx.cfg.providerUrl, ctx.cfg.apiKey);
+        ctx.provider_url.* = ctx.cfg.providerUrl;
     }
+
+    try welcome.printSummary(
+        ctx.stdout_writer,
+        .{
+            .provider_name = if (ctx.parsed.mock) "Mock" else providerDisplayName(ctx.provider_name.*),
+            .provider_url = ctx.provider_url.*,
+            .model_key = ctx.model_key.*,
+        },
+    );
 
     try ctx.stdout_writer.print("Configuration saved and provider updated.\n", .{});
     try ctx.stdout_writer.flush();
