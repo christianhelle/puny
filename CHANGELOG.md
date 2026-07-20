@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Merged Pull Requests
+- Improve --mock mode ([#34](https://github.com/christianhelle/puny/pull/34)) ([@christianhelle](https://github.com/christianhelle/))
 - Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
