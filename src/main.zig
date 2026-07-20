@@ -48,6 +48,7 @@ pub fn main(init: std.process.Init) !void {
     };
 
     var cfg_result = try config.load(arena, io, init.environ_map);
+    defer cfg_result.deinit(arena);
     const cfg = &cfg_result.config;
 
     var history = try loadHistory(arena, io, init.environ_map);
