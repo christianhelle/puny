@@ -115,6 +115,19 @@ pub const History = struct {
         }
     }
 
+    pub fn clear(self: *History) void {
+        for (self.entries.items) |entry| {
+            self.allocator.free(entry);
+        }
+        self.entries.deinit(self.allocator);
+        self.entries = .empty;
+        if (self.saved_current) |current| {
+            self.allocator.free(current);
+            self.saved_current = null;
+        }
+        self.browsing_index = null;
+    }
+
     pub fn resetNavigation(self: *History) void {
         self.browsing_index = null;
         if (self.saved_current) |current| {
