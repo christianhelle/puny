@@ -7,6 +7,7 @@
 - Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Add OpenCode Go as a provider ([#37](https://github.com/christianhelle/puny/pull/37)) ([@christianhelle](https://github.com/christianhelle/))
 - Clear app state and free memory usage upon /reset ([#36](https://github.com/christianhelle/puny/pull/36)) ([@christianhelle](https://github.com/christianhelle/))
 - Introduce /provider command for switching provider 
  ([#35](https://github.com/christianhelle/puny/pull/35)) ([@christianhelle](https://github.com/christianhelle/))
