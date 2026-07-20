@@ -7,6 +7,8 @@
 - Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Introduce /provider command for switching provider 
+ ([#35](https://github.com/christianhelle/puny/pull/35)) ([@christianhelle](https://github.com/christianhelle/))
 - Provider Picker widget ([#33](https://github.com/christianhelle/puny/pull/33)) ([@christianhelle](https://github.com/christianhelle/))
 - HTTP Debug Logging to File ([#32](https://github.com/christianhelle/puny/pull/32)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --debug HTTP request/response logging for all providers ([#31](https://github.com/christianhelle/puny/pull/31)) ([@christianhelle](https://github.com/christianhelle/))
