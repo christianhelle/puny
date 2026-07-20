@@ -30,6 +30,8 @@ pub const Action = union(enum) {
 
 pub const Context = struct {
     arena: std.mem.Allocator,
+    messages_alloc: std.mem.Allocator,
+    messages_arena: *std.heap.ArenaAllocator,
     stdout_writer: *std.Io.Writer,
     messages: *std.array_list.Managed(openai.Message),
     planning_mode: *bool,
@@ -86,9 +88,10 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         .quit => return .exit,
 
         .reset => {
-            ctx.messages.clearRetainingCapacity();
+            _ = ctx.messages_arena.reset(.free_all);
+            ctx.messages.* = std.array_list.Managed(openai.Message).init(ctx.messages_arena.allocator());
             ctx.planning_mode.* = false;
-            const system_prompt = try ctx.cfg.resolvePrompt(ctx.arena, "system", prompts.system);
+            const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
             try ctx.messages.append(.{ .system = system_prompt });
             try ctx.stdout_writer.print("\nConversation reset.", .{});
             try ctx.stdout_writer.flush();
@@ -101,10 +104,10 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
 
         .plan => |text| {
             ctx.planning_mode.* = true;
-            const planning_prompt = try ctx.cfg.resolvePrompt(ctx.arena, "planning", prompts.planning);
+            const planning_prompt = try ctx.cfg.resolvePrompt(ctx.messages_alloc, "planning", prompts.planning);
             try ctx.messages.append(.{ .system = planning_prompt });
             if (text) |t| {
-                try ctx.messages.append(.{ .user = try ctx.arena.dupe(u8, t) });
+                try ctx.messages.append(.{ .user = try ctx.messages_alloc.dupe(u8, t) });
                 try ctx.stdout_writer.print("\n{s}Entering planning mode: {s}{s}\n", .{ ansi.bright, t, ansi.reset });
                 try ctx.stdout_writer.flush();
                 return .run_chat_turn;
@@ -118,7 +121,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             ctx.planning_mode.* = false;
             try ctx.messages.append(.{ .user = "Now implement the plan. Write all necessary code." });
             if (text) |t| {
-                try ctx.messages.append(.{ .user = try ctx.arena.dupe(u8, t) });
+                try ctx.messages.append(.{ .user = try ctx.messages_alloc.dupe(u8, t) });
                 try ctx.stdout_writer.print("\n{s}Switching to build mode: {s}{s}\n", .{ ansi.bright, t, ansi.reset });
                 try ctx.stdout_writer.flush();
                 return .run_chat_turn;
@@ -147,7 +150,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         },
 
         .prompt => |text| {
-            try ctx.messages.append(.{ .user = try ctx.arena.dupe(u8, text) });
+            try ctx.messages.append(.{ .user = try ctx.messages_alloc.dupe(u8, text) });
             return .run_chat_turn;
         },
     }
@@ -176,7 +179,9 @@ test "parse recognizes all slash commands" {
 }
 
 test "dispatch quit returns exit" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -184,6 +189,8 @@ test "dispatch quit returns exit" {
 
     const action = try dispatch(.quit, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -195,8 +202,9 @@ test "dispatch quit returns exit" {
 }
 
 test "dispatch reset clears messages and resets planning mode" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
-    defer messages.deinit();
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     try messages.append(.{ .user = "previous" });
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -204,6 +212,8 @@ test "dispatch reset clears messages and resets planning mode" {
 
     const action = try dispatch(.reset, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -218,7 +228,9 @@ test "dispatch reset clears messages and resets planning mode" {
 }
 
 test "dispatch config returns reconfigure" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -226,6 +238,8 @@ test "dispatch config returns reconfigure" {
 
     const action = try dispatch(.config, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -237,7 +251,9 @@ test "dispatch config returns reconfigure" {
 }
 
 test "dispatch stats returns print_stats" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -245,6 +261,8 @@ test "dispatch stats returns print_stats" {
 
     const action = try dispatch(.stats, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -256,7 +274,9 @@ test "dispatch stats returns print_stats" {
 }
 
 test "dispatch plan without text enters planning mode and continues" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -264,6 +284,8 @@ test "dispatch plan without text enters planning mode and continues" {
 
     const action = try dispatch(Command{ .plan = null }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -278,7 +300,9 @@ test "dispatch plan without text enters planning mode and continues" {
 }
 
 test "dispatch plan with text enters planning mode and runs chat turn" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -286,6 +310,8 @@ test "dispatch plan with text enters planning mode and runs chat turn" {
 
     const action = try dispatch(Command{ .plan = "do thing" }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -301,7 +327,9 @@ test "dispatch plan with text enters planning mode and runs chat turn" {
 }
 
 test "dispatch build without text switches to build mode and continues" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -309,6 +337,8 @@ test "dispatch build without text switches to build mode and continues" {
 
     const action = try dispatch(Command{ .build = null }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -323,7 +353,9 @@ test "dispatch build without text switches to build mode and continues" {
 }
 
 test "dispatch build with text switches to build mode and runs chat turn" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -331,6 +363,8 @@ test "dispatch build with text switches to build mode and runs chat turn" {
 
     const action = try dispatch(Command{ .build = "now" }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -346,7 +380,9 @@ test "dispatch build with text switches to build mode and runs chat turn" {
 }
 
 test "dispatch model in oneshot mode rejects" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -354,6 +390,8 @@ test "dispatch model in oneshot mode rejects" {
 
     const action = try dispatch(Command{ .model = "x" }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -365,7 +403,9 @@ test "dispatch model in oneshot mode rejects" {
 }
 
 test "dispatch model returns switch model" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -373,6 +413,8 @@ test "dispatch model returns switch model" {
 
     const action = try dispatch(Command{ .model = "llama" }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -384,7 +426,9 @@ test "dispatch model returns switch model" {
 }
 
 test "dispatch provider in oneshot mode rejects" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -392,6 +436,8 @@ test "dispatch provider in oneshot mode rejects" {
 
     const action = try dispatch(Command{ .provider = "opencode" }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -403,7 +449,9 @@ test "dispatch provider in oneshot mode rejects" {
 }
 
 test "dispatch provider returns switch provider" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -411,6 +459,8 @@ test "dispatch provider returns switch provider" {
 
     const action = try dispatch(Command{ .provider = "opencode" }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -422,7 +472,9 @@ test "dispatch provider returns switch provider" {
 }
 
 test "dispatch provider without text returns switch provider with null" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -430,6 +482,8 @@ test "dispatch provider without text returns switch provider with null" {
 
     const action = try dispatch(Command{ .provider = null }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
@@ -441,7 +495,9 @@ test "dispatch provider without text returns switch provider with null" {
 }
 
 test "dispatch prompt appends user message and runs chat turn" {
-    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.array_list.Managed(openai.Message).init(messages_arena_state.allocator());
     defer messages.deinit();
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -449,6 +505,8 @@ test "dispatch prompt appends user message and runs chat turn" {
 
     const action = try dispatch(Command{ .prompt = "hello" }, .{
         .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
         .stdout_writer = &out.writer,
         .messages = &messages,
         .planning_mode = &planning_mode,
