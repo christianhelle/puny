@@ -228,19 +228,6 @@ fn appendJsonValue(
     }
 }
 
-fn appendCapped(output: *std.array_list.Managed(u8), value: []const u8) !void {
-    var index: usize = 0;
-    var display_length: usize = 0;
-    while (index < value.len and display_length < max_value_length) {
-        const width = std.unicode.utf8ByteSequenceLength(value[index]) catch 1;
-        const next_index = @min(value.len, index + width);
-        try output.appendSlice(value[index..next_index]);
-        index = next_index;
-        display_length += 1;
-    }
-    if (index < value.len) try output.appendSlice("...");
-}
-
 fn appendCount(
     output: *std.array_list.Managed(u8),
     value: usize,
