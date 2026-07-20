@@ -171,3 +171,14 @@ test "findProviderById finds known providers" {
     try std.testing.expectEqualStrings("Mock", findProviderById("mock").?.display_name);
     try std.testing.expect(findProviderById("unknown") == null);
 }
+
+test "setProviders replaces the picker list" {
+    const custom = [_]ProviderOption{
+        .{ .id = "custom", .display_name = "Custom Provider" },
+    };
+    setProviders(&custom);
+    defer setProviders(&default_providers);
+
+    try std.testing.expectEqualStrings("Custom Provider", findProviderById("custom").?.display_name);
+    try std.testing.expect(findProviderById("lmstudio") == null);
+}
