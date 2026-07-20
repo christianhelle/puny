@@ -3,6 +3,7 @@ const openai = @import("../providers/openai.zig");
 
 const max_value_length = 120;
 const max_json_render_depth = 3;
+const max_integer_string_length = 32;
 
 pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8 {
     var output = std.array_list.Managed(u8).init(allocator);
@@ -227,7 +228,7 @@ fn appendJsonValueDepth(
         .string => |s| try appendJsonString(output, s),
         .bool => |b| try output.appendSlice(if (b) "true" else "false"),
         .integer => |i| {
-            var buf: [32]u8 = undefined;
+            var buf: [max_integer_string_length]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "{d}", .{i});
             try output.appendSlice(text);
         },
