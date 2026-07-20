@@ -3,12 +3,14 @@ const client = @import("client.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
 const opencode = @import("opencode_zen.zig");
+const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const models = @import("models.zig");
 
 pub const Provider = union(enum) {
     lmstudio: client.Client,
     opencode: client.Client,
+    opencode_go: client.Client,
     copilot: copilot.Client,
     mock: mock.MockClient,
 
@@ -27,6 +29,10 @@ pub const Provider = union(enum) {
             .opencode => |*c| blk: {
                 var owned = try opencode.listModels(c);
                 break :blk try opencode.toSharedModels(&owned);
+            },
+            .opencode_go => |*c| blk: {
+                var owned = try opencode_go.listModels(c);
+                break :blk try opencode_go.toSharedModels(&owned);
             },
             .copilot => |*c| blk: {
                 var owned = try copilot.listModels(c);
@@ -48,6 +54,10 @@ pub const Provider = union(enum) {
                 opencode.chatStreamingGoogle(c, request, callback)
             else
                 openai.chatStreaming(c, request, callback),
+            .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
+                opencode.chatStreamingAnthropic(c, request, callback)
+            else
+                openai.chatStreaming(c, request, callback),
             .copilot => |*c| copilot.chatStreaming(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
         };
@@ -67,7 +77,7 @@ pub const Provider = union(enum) {
                 c.withBaseUrl(url);
                 c.api_key = key;
             },
-            .opencode => |*c| {
+            .opencode, .opencode_go => |*c| {
                 c.withBaseUrl(url);
                 c.api_key = key;
             },
@@ -82,7 +92,7 @@ pub const Provider = union(enum) {
     pub fn setHttpObserver(self: *Provider, observer: client.HttpObserver) void {
         switch (self.*) {
             .lmstudio => |*c| c.http_observer = observer,
-            .opencode => |*c| c.http_observer = observer,
+            .opencode, .opencode_go => |*c| c.http_observer = observer,
             .copilot => |*c| c.inner.http_observer = observer,
             .mock => {},
         }
