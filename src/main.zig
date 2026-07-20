@@ -10,6 +10,7 @@ const http_client = @import("providers/client.zig");
 const mock = @import("providers/mock.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
+const provider_picker = @import("tui/provider_picker.zig");
 const opencode = @import("providers/opencode.zig");
 const copilot = @import("providers/copilot.zig");
 const prompt_history = @import("prompts/history.zig");
@@ -170,7 +171,7 @@ fn runStartupReconfigure(
     stdout_writer: *std.Io.Writer,
 ) !void {
     try stdout_writer.print("\nReconfiguring Puny.\n", .{});
-    const result = try promptReconfigure(arena, io, stdout_writer, cfg);
+    const result = try promptReconfigure(arena, io, init, stdout_writer, cfg);
     if (result.cancelled) return;
     if (result.changed) {
         try config.save(arena, io, cfg.*, init.environ_map);
@@ -182,6 +183,7 @@ fn runStartupReconfigure(
 fn promptReconfigure(
     arena: std.mem.Allocator,
     io: std.Io,
+    init: std.process.Init,
     stdout_writer: *std.Io.Writer,
     cfg: *config.Config,
 ) !ReconfigurePrompt {
@@ -192,28 +194,19 @@ fn promptReconfigure(
     var result = ReconfigurePrompt{};
 
     try stdout_writer.print("Current provider: {s}\n", .{cfg.provider});
-    try stdout_writer.print("Enter provider (lmstudio/opencode/copilot, or press Enter to keep current): ", .{});
     try stdout_writer.flush();
 
-    const new_provider = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
-        if (sigint.isTriggered()) return .{ .cancelled = true };
-        return err;
-    } orelse {
+    const picked_provider = try provider_picker.selectProviderInteractive(arena, io, init) orelse {
         try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
         try stdout_writer.flush();
         return .{ .cancelled = true };
     };
 
     var provider_name: []const u8 = cfg.provider;
-    if (new_provider.len > 0) {
-        if (!isValidProvider(new_provider)) {
-            try stdout_writer.print("Invalid provider '{s}'. Keeping {s}.\n", .{ new_provider, cfg.provider });
-            try stdout_writer.flush();
-        } else {
-            cfg.provider = try arena.dupe(u8, new_provider);
-            provider_name = cfg.provider;
-            result.changed = true;
-        }
+    if (!std.mem.eql(u8, picked_provider, cfg.provider)) {
+        cfg.provider = try arena.dupe(u8, picked_provider);
+        provider_name = cfg.provider;
+        result.changed = true;
     }
 
     const provider_url_is_fixed = providerHasFixedUrl(provider_name);
@@ -227,8 +220,8 @@ fn promptReconfigure(
         line_alloc.clearRetainingCapacity();
         try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
         try stdout_writer.print(
-            "Enter new provider URL (default for {s}: {s}, press Enter to keep current): ",
-            .{ provider_name, defaultProviderUrl(provider_name) },
+            "Enter new provider URL (default: {s}; press Enter for default): ",
+            .{defaultProviderUrl(provider_name)},
         );
         try stdout_writer.flush();
 
@@ -241,11 +234,12 @@ fn promptReconfigure(
             return .{ .cancelled = true };
         };
 
+        const default_url = defaultProviderUrl(provider_name);
         if (new_url.len > 0) {
             cfg.providerUrl = try arena.dupe(u8, new_url);
             result.changed = true;
-        } else if (result.changed and cfg.providerUrl.len == 0) {
-            cfg.providerUrl = try arena.dupe(u8, defaultProviderUrl(provider_name));
+        } else if (!std.mem.eql(u8, cfg.providerUrl, default_url)) {
+            cfg.providerUrl = try arena.dupe(u8, default_url);
             result.changed = true;
         }
     }
@@ -519,7 +513,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     }
 
     const old_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
-    const result = try promptReconfigure(ctx.arena, ctx.io, ctx.stdout_writer, ctx.cfg);
+    const result = try promptReconfigure(ctx.arena, ctx.io, ctx.init, ctx.stdout_writer, ctx.cfg);
     if (result.cancelled) return;
     if (!result.changed) return;
 
