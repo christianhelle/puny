@@ -227,12 +227,12 @@ fn appendJsonValueDepth(
         .string => |s| try appendJsonString(output, s),
         .bool => |b| try output.appendSlice(if (b) "true" else "false"),
         .integer => |i| {
-            var buf: [80]u8 = undefined;
+            var buf: [32]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "{d}", .{i});
             try output.appendSlice(text);
         },
         .float => |f| {
-            var buf: [160]u8 = undefined;
+            var buf: [64]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "{d}", .{f});
             try output.appendSlice(text);
         },
