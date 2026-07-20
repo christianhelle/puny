@@ -246,8 +246,16 @@ pub const OpenAiAccumulator = struct {
             null;
         const tool_calls = if (self.tool_calls.items.len > 0) blk: {
             const arr = try allocator.alloc(openai.ToolCall, self.tool_calls.items.len);
-            errdefer allocator.free(arr);
-            for (self.tool_calls.items, 0..) |tc, i| {
+            errdefer {
+                for (arr[0..i]) |tc| {
+                    allocator.free(tc.id);
+                    allocator.free(tc.function.name);
+                    allocator.free(tc.function.arguments);
+                }
+                allocator.free(arr);
+            }
+            var i: usize = 0;
+            for (self.tool_calls.items) |tc| {
                 arr[i] = .{
                     .id = try tools.dupeString(allocator, tc.id),
                     .function = .{
@@ -255,6 +263,7 @@ pub const OpenAiAccumulator = struct {
                         .arguments = try tools.dupeString(allocator, tc.function.arguments),
                     },
                 };
+                i += 1;
             }
             break :blk arr;
         } else null;
