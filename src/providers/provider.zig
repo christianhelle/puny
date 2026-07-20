@@ -2,7 +2,7 @@ const std = @import("std");
 const client = @import("client.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
-const opencode = @import("opencode_zen.zig");
+const opencode_zen = @import("opencode_zen.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const models = @import("models.zig");
@@ -27,8 +27,8 @@ pub const Provider = union(enum) {
                 break :blk try models.toSharedModels(&owned);
             },
             .opencode => |*c| blk: {
-                var owned = try opencode.listModels(c);
-                break :blk try opencode.toSharedModels(&owned);
+                var owned = try opencode_zen.listModels(c);
+                break :blk try opencode_zen.toSharedModels(&owned);
             },
             .opencode_go => |*c| blk: {
                 var owned = try opencode_go.listModels(c);
@@ -48,14 +48,14 @@ pub const Provider = union(enum) {
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
             .lmstudio => |*c| openai.chatStreaming(c, request, callback),
-            .opencode => |*c| if (opencode.isAnthropicModel(request.model))
-                opencode.chatStreamingAnthropic(c, request, callback)
-            else if (opencode.isGoogleModel(request.model))
-                opencode.chatStreamingGoogle(c, request, callback)
+            .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
+                opencode_zen.chatStreamingAnthropic(c, request, callback)
+            else if (opencode_zen.isGoogleModel(request.model))
+                opencode_zen.chatStreamingGoogle(c, request, callback)
             else
                 openai.chatStreaming(c, request, callback),
             .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
-                opencode.chatStreamingAnthropic(c, request, callback)
+                opencode_zen.chatStreamingAnthropic(c, request, callback)
             else
                 openai.chatStreaming(c, request, callback),
             .copilot => |*c| copilot.chatStreaming(c, request, callback),
