@@ -102,7 +102,10 @@ const windows = if (is_windows) struct {
     pub const DWORD = u32;
     pub const SIZE_T = usize;
 
-    pub const PROCESS_MEMORY_COUNTERS = extern struct {
+    /// PROCESS_MEMORY_COUNTERS_EX — Microsoft provides the extended version
+    /// that includes PrivateUsage (private working set), which matches
+    /// what Task Manager shows in the "Memory" column.
+    pub const PROCESS_MEMORY_COUNTERS_EX = extern struct {
         cb: DWORD,
         PageFaultCount: DWORD,
         PeakWorkingSetSize: SIZE_T,
@@ -113,19 +116,22 @@ const windows = if (is_windows) struct {
         QuotaNonPagedPoolUsage: SIZE_T,
         PagefileUsage: SIZE_T,
         PeakPagefileUsage: SIZE_T,
+        PrivateUsage: SIZE_T,
     };
 
     pub extern "kernel32" fn GetCurrentProcess() callconv(.winapi) HANDLE;
+    /// GetProcessMemoryInfo accepts the extended struct; the kernel
+    /// inspects cb to determine which variant was passed.
     pub extern "psapi" fn GetProcessMemoryInfo(
         Process: HANDLE,
-        ppsmemCounters: *PROCESS_MEMORY_COUNTERS,
+        ppsmemCounters: *PROCESS_MEMORY_COUNTERS_EX,
         cb: DWORD,
     ) callconv(.winapi) BOOL;
 } else void {};
 
 fn getRssBytesWindows() !u64 {
-    var counters: windows.PROCESS_MEMORY_COUNTERS = .{
-        .cb = @sizeOf(windows.PROCESS_MEMORY_COUNTERS),
+    var counters: windows.PROCESS_MEMORY_COUNTERS_EX = .{
+        .cb = @sizeOf(windows.PROCESS_MEMORY_COUNTERS_EX),
         .PageFaultCount = 0,
         .PeakWorkingSetSize = 0,
         .WorkingSetSize = 0,
@@ -135,14 +141,15 @@ fn getRssBytesWindows() !u64 {
         .QuotaNonPagedPoolUsage = 0,
         .PagefileUsage = 0,
         .PeakPagefileUsage = 0,
+        .PrivateUsage = 0,
     };
     const ret = windows.GetProcessMemoryInfo(
         windows.GetCurrentProcess(),
         &counters,
-        @sizeOf(windows.PROCESS_MEMORY_COUNTERS),
+        @sizeOf(windows.PROCESS_MEMORY_COUNTERS_EX),
     );
     if (ret == 0) return error.GetProcessMemoryInfoFailed;
-    return @intCast(counters.WorkingSetSize);
+    return @intCast(counters.PrivateUsage);
 }
 
 // ── Formatting helper ────────────────────────────────────────────────
