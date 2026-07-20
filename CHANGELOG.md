@@ -6,6 +6,7 @@
 - Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- HTTP Debug Logging to File ([#32](https://github.com/christianhelle/puny/pull/32)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --debug HTTP request/response logging for all providers ([#31](https://github.com/christianhelle/puny/pull/31)) ([@christianhelle](https://github.com/christianhelle/))
 - Decouple providers from generated lmstudio.zig ([#30](https://github.com/christianhelle/puny/pull/30)) ([@christianhelle](https://github.com/christianhelle/))
 - Filter Copilot models to the CLI's picker-enabled chat-completions set ([#29](https://github.com/christianhelle/puny/pull/29)) ([@christianhelle](https://github.com/christianhelle/))
