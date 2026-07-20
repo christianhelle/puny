@@ -2,7 +2,7 @@ const std = @import("std");
 const client = @import("client.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
-const opencode = @import("opencode.zig");
+const opencode = @import("opencode_zen.zig");
 const copilot = @import("copilot.zig");
 const models = @import("models.zig");
 
