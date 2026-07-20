@@ -77,12 +77,6 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !htt
     };
 }
 
-fn emptyOwnedBody(allocator: std.mem.Allocator) []u8 {
-    _ = allocator;
-    return "";
-}
-}
-
 /// Convert an OpenCode-specific model list into the app-wide shared model list.
 /// The source `owned` is deinitialized; ownership of the returned value is transferred.
 pub fn toSharedModels(owned: *http_client.Owned(ModelsList)) !http_client.Owned(http_client.ModelsList) {
@@ -111,7 +105,7 @@ pub fn toSharedModels(owned: *http_client.Owned(ModelsList)) !http_client.Owned(
 
     return .{
         .allocator = allocator,
-        .body = emptyOwnedBody(allocator),
+        .body = "",
         .parsed = .{
             .arena = arena,
             .value = .{ .models = models },
