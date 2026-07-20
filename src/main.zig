@@ -203,9 +203,11 @@ fn promptReconfigure(
     };
 
     var provider_name: []const u8 = cfg.provider;
+    var provider_changed = false;
     if (!std.mem.eql(u8, picked_provider, cfg.provider)) {
         cfg.provider = try arena.dupe(u8, picked_provider);
         provider_name = cfg.provider;
+        provider_changed = true;
         result.changed = true;
     }
 
@@ -238,7 +240,7 @@ fn promptReconfigure(
         if (new_url.len > 0) {
             cfg.providerUrl = try arena.dupe(u8, new_url);
             result.changed = true;
-        } else if (!std.mem.eql(u8, cfg.providerUrl, default_url)) {
+        } else if (provider_changed and cfg.providerUrl.len == 0) {
             cfg.providerUrl = try arena.dupe(u8, default_url);
             result.changed = true;
         }
