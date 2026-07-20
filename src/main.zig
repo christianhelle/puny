@@ -31,8 +31,20 @@ pub fn main(init: std.process.Init) !void {
     const args_slice = try init.minimal.args.toSlice(arena);
     const parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
-    var debug_log: ?DebugLog = if (parsed.debug) try DebugLog.init("puny_debug.log") else null;
-    defer if (debug_log) |*log| log.deinit();
+    var debug_buffer: [4096]u8 = undefined;
+    var debug_file_writer: std.Io.File.Writer = undefined;
+    var debug_log: ?DebugLog = if (parsed.debug) blk: {
+        const file = try std.Io.Dir.cwd().createFile(io, "puny_debug.log", .{});
+        debug_file_writer = .init(file, io, &debug_buffer);
+        break :blk DebugLog{
+            .file = file,
+            .writer = &debug_file_writer.interface,
+        };
+    } else null;
+    defer if (debug_log) |*log| {
+        log.writer.flush() catch {};
+        log.file.close(io);
+    };
 
     var cfg_result = try config.load(arena, io, init.environ_map);
     const cfg = &cfg_result.config;
@@ -655,19 +667,11 @@ fn providerDisplayName(provider_name: []const u8) []const u8 {
 }
 
 const DebugLog = struct {
-    file: std.fs.File,
-
-    fn init(filename: []const u8) !DebugLog {
-        const file = try std.fs.cwd().createFile(filename, .{});
-        return .{ .file = file };
-    }
-
-    fn deinit(self: *DebugLog) void {
-        self.file.close();
-    }
+    file: std.Io.File,
+    writer: *std.Io.Writer,
 
     fn print(self: *DebugLog, comptime fmt: []const u8, args: anytype) void {
-        self.file.writer().print(fmt, args) catch {};
+        self.writer.print(fmt, args) catch {};
     }
 };
 
