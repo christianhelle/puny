@@ -21,6 +21,7 @@ pub const Command = union(enum) {
 pub const Action = union(enum) {
     exit,
     continue_,
+    full_reset,
     run_chat_turn,
     print_stats,
     reconfigure,
@@ -88,14 +89,9 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         .quit => return .exit,
 
         .reset => {
-            _ = ctx.messages_arena.reset(.free_all);
-            ctx.messages.* = std.array_list.Managed(openai.Message).init(ctx.messages_arena.allocator());
-            ctx.planning_mode.* = false;
-            const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
-            try ctx.messages.append(.{ .system = system_prompt });
             try ctx.stdout_writer.print("\nConversation reset.", .{});
             try ctx.stdout_writer.flush();
-            return .continue_;
+            return .full_reset;
         },
 
         .stats => return .print_stats,
