@@ -14,6 +14,7 @@ pub const Command = union(enum) {
     plan: ?[]const u8,
     build: ?[]const u8,
     model: ?[]const u8,
+    provider: ?[]const u8,
     prompt: []const u8,
 };
 
@@ -24,6 +25,7 @@ pub const Action = union(enum) {
     print_stats,
     reconfigure,
     switch_model: ?[]const u8,
+    switch_provider: ?[]const u8,
 };
 
 pub const Context = struct {
@@ -67,6 +69,13 @@ pub fn parse(user_message: []const u8) Command {
             return .{ .model = user_message["/model ".len..] };
         }
         return .{ .model = null };
+    }
+
+    if (std.mem.eql(u8, user_message, "/provider") or std.mem.startsWith(u8, user_message, "/provider ")) {
+        if (user_message.len > "/provider ".len) {
+            return .{ .provider = user_message["/provider ".len..] };
+        }
+        return .{ .provider = null };
     }
 
     return .{ .prompt = user_message };
@@ -128,6 +137,15 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             return .{ .switch_model = model_id };
         },
 
+        .provider => |provider_id| {
+            if (ctx.oneshot) {
+                try ctx.stdout_writer.print("\n/provider not available in oneshot mode.\n", .{});
+                try ctx.stdout_writer.flush();
+                return .continue_;
+            }
+            return .{ .switch_provider = provider_id };
+        },
+
         .prompt => |text| {
             try ctx.messages.append(.{ .user = try ctx.arena.dupe(u8, text) });
             return .run_chat_turn;
@@ -150,6 +168,9 @@ test "parse recognizes all slash commands" {
 
     try std.testing.expectEqualDeep(Command{ .model = null }, parse("/model"));
     try std.testing.expectEqualDeep(Command{ .model = "llama" }, parse("/model llama"));
+
+    try std.testing.expectEqualDeep(Command{ .provider = null }, parse("/provider"));
+    try std.testing.expectEqualDeep(Command{ .provider = "opencode" }, parse("/provider opencode"));
 
     try std.testing.expectEqualDeep(Command{ .prompt = "hello" }, parse("hello"));
 }
@@ -360,6 +381,63 @@ test "dispatch model returns switch model" {
     });
 
     try std.testing.expectEqualDeep(Action{ .switch_model = "llama" }, action);
+}
+
+test "dispatch provider in oneshot mode rejects" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .provider = "opencode" }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = true,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+}
+
+test "dispatch provider returns switch provider" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .provider = "opencode" }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .switch_provider = "opencode" }, action);
+}
+
+test "dispatch provider without text returns switch provider with null" {
+    var messages = std.array_list.Managed(openai.Message).init(std.testing.allocator);
+    defer messages.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .provider = null }, .{
+        .arena = std.testing.allocator,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .switch_provider = null }, action);
 }
 
 test "dispatch prompt appends user message and runs chat turn" {
