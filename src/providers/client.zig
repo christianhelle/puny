@@ -328,10 +328,10 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
             error.WriteFailed => return err,
         };
 
+        const raw_line = line_buf.written();
         const ended_with_delimiter = blk: {
-            if (line_len == 0) break :blk false;
-            const written = line_buf.written();
-            if (written[written.len - 1] == '\n') break :blk true;
+            if (raw_line.len == 0) break :blk false;
+            if (raw_line[raw_line.len - 1] == '\n') break :blk true;
             const byte = reader.peekByte() catch |err| switch (err) {
                 error.EndOfStream => break :blk false,
                 error.ReadFailed => return err,
@@ -343,7 +343,6 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
             break :blk false;
         };
 
-        const raw_line = line_buf.written();
         const line = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\n')
             raw_line[0 .. raw_line.len - 1]
         else

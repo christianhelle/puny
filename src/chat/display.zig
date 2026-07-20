@@ -224,7 +224,29 @@ fn appendJsonValue(
             try output.appendSlice(text);
         },
         .null => try output.appendSlice("null"),
-        .array, .object => try output.appendSlice("{...}"),
+        .array => |arr| {
+            try output.appendSlice("[");
+            var first = true;
+            for (arr.items) |item| {
+                if (!first) try output.appendSlice(", ");
+                first = false;
+                try appendJsonValue(output, item);
+            }
+            try output.appendSlice("]");
+        },
+        .object => |obj| {
+            try output.appendSlice("{");
+            var first = true;
+            var it = obj.iterator();
+            while (it.next()) |entry| {
+                if (!first) try output.appendSlice(", ");
+                first = false;
+                try output.appendSlice(entry.key_ptr.*);
+                try output.appendSlice(": ");
+                try appendJsonValue(output, entry.value_ptr.*);
+            }
+            try output.appendSlice("}");
+        },
     }
 }
 
