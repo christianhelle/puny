@@ -219,7 +219,7 @@ fn appendJsonValueDepth(
     value: std.json.Value,
     depth: usize,
 ) !void {
-    if (depth > max_json_render_depth) {
+    if (depth >= max_json_render_depth) {
         try output.appendSlice("...");
         return;
     }
