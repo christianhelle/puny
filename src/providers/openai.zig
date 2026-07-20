@@ -347,98 +347,98 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
 }
 
 pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
-    var str: std.Io.Writer.Allocating = .init(allocator);
-    errdefer str.deinit();
+    var json_buffer: std.Io.Writer.Allocating = .init(allocator);
+    errdefer json_buffer.deinit();
 
-    var jw = std.json.Stringify.init(allocator, .{ .emit_null_optional_fields = false }, &str.writer);
-    defer jw.deinit();
+    var stringifier = std.json.Stringify.init(allocator, .{ .emit_null_optional_fields = false }, &json_buffer.writer);
+    defer stringifier.deinit();
 
-    try jw.beginObject();
-    try jw.objectField("model");
-    try jw.write(request.model);
-    try jw.objectField("messages");
-    try jw.beginArray();
+    try stringifier.beginObject();
+    try stringifier.objectField("model");
+    try stringifier.write(request.model);
+    try stringifier.objectField("messages");
+    try stringifier.beginArray();
     for (request.messages) |msg| {
-        try writeMessage(&jw, msg);
+        try writeMessage(&stringifier, msg);
     }
-    try jw.endArray();
-    try jw.objectField("tools");
-    try jw.beginArray();
+    try stringifier.endArray();
+    try stringifier.objectField("tools");
+    try stringifier.beginArray();
     for (request.tools) |tool| {
-        try jw.beginObject();
-        try jw.objectField("type");
-        try jw.write(tool.type);
-        try jw.objectField("function");
-        try jw.write(tool.function);
-        try jw.endObject();
+        try stringifier.beginObject();
+        try stringifier.objectField("type");
+        try stringifier.write(tool.type);
+        try stringifier.objectField("function");
+        try stringifier.write(tool.function);
+        try stringifier.endObject();
     }
-    try jw.endArray();
-    try jw.objectField("stream");
-    try jw.write(request.stream);
+    try stringifier.endArray();
+    try stringifier.objectField("stream");
+    try stringifier.write(request.stream);
     if (request.temperature) |temperature| {
-        try jw.objectField("temperature");
-        try jw.write(temperature);
+        try stringifier.objectField("temperature");
+        try stringifier.write(temperature);
     }
-    try jw.endObject();
+    try stringifier.endObject();
 
-    return str.toOwnedSlice();
+    return json_buffer.toOwnedSlice();
 }
 
-fn writeMessage(jw: *std.json.Stringify, msg: Message) !void {
-    try jw.beginObject();
+fn writeMessage(stringifier: *std.json.Stringify, msg: Message) !void {
+    try stringifier.beginObject();
     switch (msg) {
         .system => |content| {
-            try jw.objectField("role");
-            try jw.write("system");
-            try jw.objectField("content");
-            try jw.write(content);
+            try stringifier.objectField("role");
+            try stringifier.write("system");
+            try stringifier.objectField("content");
+            try stringifier.write(content);
         },
         .user => |content| {
-            try jw.objectField("role");
-            try jw.write("user");
-            try jw.objectField("content");
-            try jw.write(content);
+            try stringifier.objectField("role");
+            try stringifier.write("user");
+            try stringifier.objectField("content");
+            try stringifier.write(content);
         },
         .assistant => |assistant| {
-            try jw.objectField("role");
-            try jw.write("assistant");
-            try jw.objectField("content");
+            try stringifier.objectField("role");
+            try stringifier.write("assistant");
+            try stringifier.objectField("content");
             if (assistant.content) |content| {
-                try jw.write(content);
+                try stringifier.write(content);
             } else {
-                try jw.write(null);
+                try stringifier.write(null);
             }
             if (assistant.tool_calls) |tool_calls| {
-                try jw.objectField("tool_calls");
-                try jw.beginArray();
+                try stringifier.objectField("tool_calls");
+                try stringifier.beginArray();
                 for (tool_calls) |tc| {
-                    try jw.beginObject();
-                    try jw.objectField("id");
-                    try jw.write(tc.id);
-                    try jw.objectField("type");
-                    try jw.write(tc.type);
-                    try jw.objectField("function");
-                    try jw.beginObject();
-                    try jw.objectField("name");
-                    try jw.write(tc.function.name);
-                    try jw.objectField("arguments");
-                    try jw.write(tc.function.arguments);
-                    try jw.endObject();
-                    try jw.endObject();
+                    try stringifier.beginObject();
+                    try stringifier.objectField("id");
+                    try stringifier.write(tc.id);
+                    try stringifier.objectField("type");
+                    try stringifier.write(tc.type);
+                    try stringifier.objectField("function");
+                    try stringifier.beginObject();
+                    try stringifier.objectField("name");
+                    try stringifier.write(tc.function.name);
+                    try stringifier.objectField("arguments");
+                    try stringifier.write(tc.function.arguments);
+                    try stringifier.endObject();
+                    try stringifier.endObject();
                 }
-                try jw.endArray();
+                try stringifier.endArray();
             }
         },
         .tool => |tool| {
-            try jw.objectField("role");
-            try jw.write("tool");
-            try jw.objectField("tool_call_id");
-            try jw.write(tool.tool_call_id);
-            try jw.objectField("content");
-            try jw.write(tool.content);
+            try stringifier.objectField("role");
+            try stringifier.write("tool");
+            try stringifier.objectField("tool_call_id");
+            try stringifier.write(tool.tool_call_id);
+            try stringifier.objectField("content");
+            try stringifier.write(tool.content);
         },
     }
-    try jw.endObject();
+    try stringifier.endObject();
 }
 
 test "message JSON conversion" {

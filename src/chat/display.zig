@@ -2,6 +2,7 @@ const std = @import("std");
 const openai = @import("../providers/openai.zig");
 
 const max_value_length = 120;
+const max_json_render_depth = 3;
 
 pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8 {
     var output = std.array_list.Managed(u8).init(allocator);
@@ -218,7 +219,7 @@ fn appendJsonValueDepth(
     value: std.json.Value,
     depth: usize,
 ) !void {
-    if (depth > 3) {
+    if (depth > max_json_render_depth) {
         try output.appendSlice("...");
         return;
     }
