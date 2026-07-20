@@ -4,13 +4,14 @@ A minimal AI coding agent for the terminal that currently supports the following
 
 - [LM Studio](https://lmstudio.ai/) 
 - [OpenCode Zen](https://opencode.ai/zen)
+- [OpenCode Go](https://opencode.ai/go)
 - [GitHub Copilot](https://github.com/features/copilot)
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
 ## Features
 
-- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen or your GitHub Copilot subscription.
+- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
@@ -50,6 +51,18 @@ Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions`
 transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models), 
 plus Qwen and Claude models served over Anthropic's `/v1/messages` transport, 
 and Gemini models served over Google's `/v1/models/<model>:streamGenerateContent` transport.
+
+### OpenCode Go
+
+Sign in to [OpenCode Zen](https://opencode.ai/zen), subscribe to Go, copy your API key (same key for Zen and Go), then:
+
+```bash
+puny --provider opencode-go --api-key YOUR_API_KEY
+```
+
+Puny connects to `https://opencode.ai/zen/go` and shows the model picker. 
+Go models are served over OpenAI-compatible `/v1/chat/completions` (DeepSeek, Grok, GLM, Kimi, MiMo)
+and Anthropic `/v1/messages` (MiniMax, Qwen) transports.
 
 ### GitHub Copilot
 
@@ -129,6 +142,12 @@ docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny
 docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode --api-key YOUR_API_KEY
 ```
 
+### OpenCode Go
+
+```bash
+docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode-go --api-key YOUR_API_KEY
+```
+
 ### GitHub Copilot
 
 Pass a discovered or manually issued GitHub OAuth token via `PUNY_API_KEY` (device-flow
@@ -206,7 +225,7 @@ puny --prompt "List all source files" --oneshot
 
 ### Select a provider
 
-Use `--provider` to switch between LM Studio (`lmstudio`, the default), OpenCode Zen (`opencode`), and GitHub Copilot (`copilot`). You can also set `PUNY_PROVIDER` or the `provider` field in `config.json`.
+Use `--provider` to switch between LM Studio (`lmstudio`, the default), OpenCode Zen (`opencode`), OpenCode Go (`opencode-go`), and GitHub Copilot (`copilot`). You can also set `PUNY_PROVIDER` or the `provider` field in `config.json`.
 
 ```bash
 puny --provider opencode --api-key YOUR_API_KEY
@@ -260,7 +279,7 @@ puny --reconfigure
 
 You will be prompted for:
 
-1. **Provider** — `lmstudio`, `opencode`, or `copilot`.
+1. **Provider** — `lmstudio`, `opencode`, `opencode-go`, or `copilot`.
 2. **Provider URL** — press Enter to use the provider's default. (OpenCode Zen's URL is fixed at `https://opencode.ai/zen`; GitHub Copilot's is fixed at `https://api.githubcopilot.com`.)
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
@@ -292,7 +311,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 | Flag                       | Description                                                |
 | -------------------------- | ---------------------------------------------------------- |
-| `--provider <name>`        | Provider: `lmstudio`, `opencode`, or `copilot` (env/config/CLI precedence) |
+| `--provider <name>`        | Provider: `lmstudio`, `opencode`, `opencode-go`, or `copilot` (env/config/CLI precedence) |
 | `-u`, `--url <url>`        | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
 | `-k`, `--api-key <key>`    | Provider API token (session only)                          |
 | `--api-key-file <path>`    | Read provider API token from file (session only)           |
