@@ -130,6 +130,12 @@ pub const MockClient = struct {
     pub fn chatStreaming(self: *MockClient, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         const last_content = findLastUserMessage(request.messages);
 
+        // If the last message is a tool result, respond with a plain completion
+        // to avoid re-triggering tool call keywords from the original user message.
+        if (isToolResultMessage(request.messages)) {
+            return respondWithCompletion(callback);
+        }
+
         // Check for error/timeout/fail first (highest priority)
         if (isKeyword(last_content, .err) or isKeyword(last_content, .timeout) or isKeyword(last_content, .fail)) {
             return error.ResponseError;
@@ -213,6 +219,14 @@ fn findLastUserMessage(messages: []const openai.Message) []const u8 {
         }
     }
     return "";
+}
+
+fn isToolResultMessage(messages: []const openai.Message) bool {
+    if (messages.len == 0) return false;
+    return switch (messages[messages.len - 1]) {
+        .tool => true,
+        else => false,
+    };
 }
 
 fn containsWord(text: []const u8, word: []const u8) bool {
@@ -385,6 +399,12 @@ fn respondWithUsage(callback: openai.StreamCallback, user_message: []const u8, s
         .tokens_per_second = 100.0,
         .time_to_first_token_seconds = 0.0,
     } });
+}
+
+fn respondWithCompletion(callback: openai.StreamCallback) !void {
+    try callback.emit(.{ .content = "Tool executed successfully. Here's the result:\n\n" });
+    try callback.emit(.{ .content = "The operation completed. I'm running in mock mode, so the result is simulated.\n" });
+    try callback.emit(.{ .finish = "stop" });
 }
 
 /// Emit a delay based on mock speed.
