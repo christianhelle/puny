@@ -117,7 +117,7 @@ pub const MockClient = struct {
 
         return .{
             .allocator = allocator,
-            .body = try allocator.dupe(u8, ""),
+            .body = "",
             .parsed = .{
                 .arena = arena,
                 .value = .{ .models = models },

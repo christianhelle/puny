@@ -318,7 +318,7 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
 
     return .{
         .allocator = allocator,
-        .body = try allocator.dupe(u8, ""),
+        .body = "",
         .parsed = .{
             .arena = arena,
             .value = .{ .models = models },

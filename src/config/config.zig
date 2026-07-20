@@ -137,7 +137,7 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
     var cfg = try parsed.value.clone(allocator);
     if (!isValidUtf8(cfg.model)) {
         allocator.free(cfg.model);
-        cfg.model = try allocator.dupe(u8, "");
+        cfg.model = "";
     }
     return .{ .config = cfg };
 }
