@@ -2,6 +2,8 @@ const std = @import("std");
 const client = @import("client.zig");
 const openai = @import("openai.zig");
 
+const toolCallCount = 10; // Number of tool calls to simulate in mock mode.
+
 /// Mock mode controls the delay between token emissions.
 pub const MockSpeed = enum {
     /// No delay between tokens (instant).
@@ -141,28 +143,34 @@ pub const MockClient = struct {
 
         // Check for tool call keywords
         if (isKeyword(last_content, .read)) {
-            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_call_1", .name = "read_file" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"path\": \"" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "." } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "\"}" } });
+            for (0..toolCallCount) |i| {
+                try callback.emit(.{ .tool_call_start = .{ .index = i, .id = "mock_call_1", .name = "read_file" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "{\"path\": \"" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "." } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "\"}" } });
+            }
             try callback.emit(.{ .finish = "tool_calls" });
             return;
         }
 
         if (isKeyword(last_content, .search)) {
-            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_call_1", .name = "grep_search" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"query\": \"" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "mock" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "\"}" } });
+            for (0..toolCallCount) |i| {
+                try callback.emit(.{ .tool_call_start = .{ .index = i, .id = "mock_call_1", .name = "grep_search" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "{\"query\": \"" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "mock" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "\"}" } });
+            }
             try callback.emit(.{ .finish = "tool_calls" });
             return;
         }
 
         if (isKeyword(last_content, .shell)) {
-            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_call_1", .name = "execute_shell" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"command\": \"" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "echo mock" } });
-            try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "\"}" } });
+            for (0..toolCallCount) |i| {
+                try callback.emit(.{ .tool_call_start = .{ .index = i, .id = "mock_call_1", .name = "execute_shell" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "{\"command\": \"" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "echo mock" } });
+                try callback.emit(.{ .tool_call_delta = .{ .index = i, .arguments = "\"}" } });
+            }
             try callback.emit(.{ .finish = "tool_calls" });
             return;
         }
@@ -296,14 +304,13 @@ fn respondWithLong(callback: openai.StreamCallback, speed: MockSpeed, io: std.Io
     // Generate a long text of ~1000 words, emitted at the given speed.
     // At 100 tokens/sec (normal), this takes ~10 seconds.
     const word_pool = [_][]const u8{
-        "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-        "mock", "provider", "generates", "long", "text", "for", "testing",
-        "purposes", "streaming", "works", "correctly", "with", "this",
-        "output", "mode", "you", "can", "see", "tokens", "flowing",
-        "in", "real", "time", "the", "interface", "handles", "partial",
-        "results", "beautifully", "and", "renders", "markdown", "formatting",
-        "as", "expected", "this", "is", "a", "useful", "feature", "for",
-        "testing", "the", "ui", "under", "various", "conditions",
+        "the",        "quick",    "brown",     "fox",     "jumps",       "over",    "lazy",       "dog",
+        "mock",       "provider", "generates", "long",    "text",        "for",     "testing",    "purposes",
+        "streaming",  "works",    "correctly", "with",    "this",        "output",  "mode",       "you",
+        "can",        "see",      "tokens",    "flowing", "in",          "real",    "time",       "the",
+        "interface",  "handles",  "partial",   "results", "beautifully", "and",     "renders",    "markdown",
+        "formatting", "as",       "expected",  "this",    "is",          "a",       "useful",     "feature",
+        "for",        "testing",  "the",       "ui",      "under",       "various", "conditions",
     };
 
     var word_idx: usize = 0;
