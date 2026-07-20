@@ -214,17 +214,21 @@ fn appendJsonValue(
         .string => |s| try appendJsonString(output, s),
         .bool => |b| try output.appendSlice(if (b) "true" else "false"),
         .integer => |i| {
-            var buf: [32]u8 = undefined;
+            var buf: [64]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "{d}", .{i});
             try output.appendSlice(text);
         },
         .float => |f| {
-            var buf: [64]u8 = undefined;
+            var buf: [128]u8 = undefined;
             const text = try std.fmt.bufPrint(&buf, "{d}", .{f});
             try output.appendSlice(text);
         },
         .null => try output.appendSlice("null"),
         .array => |arr| {
+            if (arr.items.len == 0) {
+                try output.appendSlice("[]");
+                return;
+            }
             try output.appendSlice("[");
             var first = true;
             for (arr.items) |item| {
@@ -235,6 +239,10 @@ fn appendJsonValue(
             try output.appendSlice("]");
         },
         .object => |obj| {
+            if (obj.count() == 0) {
+                try output.appendSlice("{}");
+                return;
+            }
             try output.appendSlice("{");
             var first = true;
             var it = obj.iterator();

@@ -329,27 +329,14 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
         };
 
         const raw_line = line_buf.written();
-        const ended_with_delimiter = blk: {
-            if (raw_line.len == 0) break :blk false;
-            if (raw_line[raw_line.len - 1] == '\n') break :blk true;
-            const byte = reader.peekByte() catch |err| switch (err) {
-                error.EndOfStream => break :blk false,
-                error.ReadFailed => return err,
-            };
-            if (byte == '\n') {
-                _ = try reader.takeByte();
-                break :blk true;
-            }
-            break :blk false;
-        };
-
-        const line = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\n')
+        const ends_with_newline = raw_line.len > 0 and raw_line[raw_line.len - 1] == '\n';
+        const line = if (ends_with_newline)
             raw_line[0 .. raw_line.len - 1]
         else
             raw_line;
 
         if (try processSseLine(&event_data, line, callback)) return;
-        if (!ended_with_delimiter) break;
+        if (line_len == 0 or !ends_with_newline) break;
     }
 
     _ = try dispatchSseEvent(&event_data, callback);
