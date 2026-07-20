@@ -350,8 +350,10 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 
     var json_buffer: std.Io.Writer.Allocating = .init(allocator);
     errdefer json_buffer.deinit();
 
-    var stringifier = std.json.Stringify.init(allocator, .{ .emit_null_optional_fields = false }, &json_buffer.writer);
-    defer stringifier.deinit();
+    var stringifier = std.json.Stringify{
+        .writer = &json_buffer.writer,
+        .options = .{ .emit_null_optional_fields = false },
+    };
 
     try stringifier.beginObject();
     try stringifier.objectField("model");
