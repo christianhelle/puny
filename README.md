@@ -4,7 +4,7 @@ A minimal AI coding agent for the terminal that currently supports the following
 
 - [LM Studio](https://lmstudio.ai/) 
 - [OpenCode Zen](https://opencode.ai/zen)
-- [GitHub Copilot](https://github.com/features/copilot) ***(Experimental)***
+- [GitHub Copilot](https://github.com/features/copilot)
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
@@ -330,7 +330,7 @@ zig build test
 
 ## Development / testing
 
-### Mock mode (no LM Studio required)
+### Mock mode (no LM Studio, OpenCode Zen, or Github Copilot required)
 
 Start without a running AI backend:
 
