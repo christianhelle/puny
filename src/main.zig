@@ -74,6 +74,7 @@ pub fn main(init: std.process.Init) !void {
     var model_key: []const u8 = undefined;
     try initializeProviderAndModel(
         arena,
+        messages_arena,
         io,
         init,
         parsed,
@@ -314,6 +315,7 @@ fn ensureCopilotAuth(
 
 fn initializeProviderAndModel(
     arena: std.mem.Allocator,
+    provider_arena: std.mem.Allocator,
     io: std.Io,
     init: std.process.Init,
     parsed: cli.Options,
@@ -350,7 +352,7 @@ fn initializeProviderAndModel(
         break :blk null;
     };
 
-    prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, arena, io);
+    prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, provider_arena, io);
     if (!parsed.mock) try ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
     const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
@@ -546,7 +548,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
 
     if (!ctx.parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
         ctx.prov.deinit();
-        ctx.prov.* = createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.arena, ctx.io);
+        ctx.prov.* = createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
         if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
         ctx.provider_name.* = new_provider_name;
@@ -650,7 +652,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
     // Re-create the provider
     const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
     ctx.prov.deinit();
-    ctx.prov.* = createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.arena, ctx.io);
+    ctx.prov.* = createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
     if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
     if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
     ctx.provider_name.* = picked_provider;
@@ -730,6 +732,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 try ctx.stdout_writer.print(" Performing full memory reset...", .{});
                 try ctx.stdout_writer.flush();
 
+                ctx.prov.deinit();
                 _ = ctx.messages_arena.reset(.free_all);
                 ctx.messages.* = std.array_list.Managed(openai.Message).init(ctx.messages_arena.allocator());
                 ctx.planning_mode.* = false;
@@ -740,8 +743,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
 
                 const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
-                ctx.prov.deinit();
-                ctx.prov.* = createProvider(ctx.parsed.mock, ctx.provider_name.*, ctx.provider_url.*, new_api_key, ctx.arena, ctx.io);
+                ctx.prov.* = createProvider(ctx.parsed.mock, ctx.provider_name.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
                 if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                 ctx.history.clear();
