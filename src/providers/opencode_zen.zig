@@ -151,82 +151,83 @@ fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
     return try std.json.ObjectMap.init(allocator, &.{}, &.{});
 }
 
-fn newTextBlock(allocator: std.mem.Allocator, text: []const u8) !std.json.Value {
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "type", .{ .string = "text" });
-    try obj.put(allocator, "text", .{ .string = text });
-    return .{ .object = obj };
-}
-
-fn newToolUseBlock(allocator: std.mem.Allocator, id: []const u8, name: []const u8, input: std.json.Value) !std.json.Value {
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "type", .{ .string = "tool_use" });
-    try obj.put(allocator, "id", .{ .string = id });
-    try obj.put(allocator, "name", .{ .string = name });
-    try obj.put(allocator, "input", input);
-    return .{ .object = obj };
-}
-
-fn newToolResultBlock(allocator: std.mem.Allocator, tool_use_id: []const u8, content: []const u8) !std.json.Value {
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "type", .{ .string = "tool_result" });
-    try obj.put(allocator, "tool_use_id", .{ .string = tool_use_id });
-    try obj.put(allocator, "content", .{ .string = content });
-    return .{ .object = obj };
-}
-
 fn parseToolArguments(allocator: std.mem.Allocator, arguments: []const u8) !std.json.Value {
     return try std.json.parseFromSliceLeaky(std.json.Value, allocator, arguments, .{ .ignore_unknown_fields = true });
 }
 
-fn anthropicTool(allocator: std.mem.Allocator, tool: openai.ToolDefinition) !std.json.Value {
-    var obj = try newObject(allocator);
+fn writeAnthropicTextBlock(writer: anytype, text: []const u8) !void {
+    try writer.writeAll("{\"type\":\"text\",\"text\":");
+    try std.json.Stringify.value(text, .{}, writer);
+    try writer.writeByte('}');
+}
 
+fn writeAnthropicToolUseBlock(writer: anytype, id: []const u8, name: []const u8, input: std.json.Value) !void {
+    try writer.writeAll("{\"type\":\"tool_use\",\"id\":");
+    try std.json.Stringify.value(id, .{}, writer);
+    try writer.writeAll(",\"name\":");
+    try std.json.Stringify.value(name, .{}, writer);
+    try writer.writeAll(",\"input\":");
+    try std.json.Stringify.value(input, .{}, writer);
+    try writer.writeByte('}');
+}
+
+fn writeAnthropicToolResultBlock(writer: anytype, tool_use_id: []const u8, content: []const u8) !void {
+    try writer.writeAll("{\"type\":\"tool_result\",\"tool_use_id\":");
+    try std.json.Stringify.value(tool_use_id, .{}, writer);
+    try writer.writeAll(",\"content\":");
+    try std.json.Stringify.value(content, .{}, writer);
+    try writer.writeByte('}');
+}
+
+fn writeAnthropicTool(writer: anytype, tool: openai.ToolDefinition) !void {
     const function = tool.function.object;
     const name = if (function.get("name")) |v| v.string else return error.MissingToolName;
     const description = if (function.get("description")) |v| v.string else "";
-    const parameters = function.get("parameters") orelse std.json.Value{ .object = try newObject(allocator) };
 
-    try obj.put(allocator, "name", .{ .string = name });
-    try obj.put(allocator, "description", .{ .string = description });
-    try obj.put(allocator, "input_schema", parameters);
-    return .{ .object = obj };
+    try writer.writeAll("{\"name\":");
+    try std.json.Stringify.value(name, .{}, writer);
+    try writer.writeAll(",\"description\":");
+    try std.json.Stringify.value(description, .{}, writer);
+    try writer.writeAll(",\"input_schema\":");
+    if (function.get("parameters")) |params| {
+        try std.json.Stringify.value(params, .{}, writer);
+    } else {
+        try writer.writeAll("{}");
+    }
+    try writer.writeByte('}');
 }
 
-fn anthropicMessage(allocator: std.mem.Allocator, msg: openai.Message) !std.json.Value {
-    var obj = try newObject(allocator);
-
+fn writeAnthropicMessage(allocator: std.mem.Allocator, writer: anytype, msg: openai.Message) !void {
     switch (msg) {
         .system => unreachable, // handled separately
         .user => |content| {
-            try obj.put(allocator, "role", .{ .string = "user" });
-            var arr = try std.json.Array.initCapacity(allocator, 1);
-            try arr.append(try newTextBlock(allocator, content));
-            try obj.put(allocator, "content", .{ .array = arr });
+            try writer.writeAll("{\"role\":\"user\",\"content\":[");
+            try writeAnthropicTextBlock(writer, content);
+            try writer.writeAll("]}");
         },
         .assistant => |assistant| {
-            try obj.put(allocator, "role", .{ .string = "assistant" });
-            var content_blocks = try std.json.Array.initCapacity(allocator, 2);
+            try writer.writeAll("{\"role\":\"assistant\",\"content\":[");
+            var first = true;
             if (assistant.content) |content| {
-                try content_blocks.append(try newTextBlock(allocator, content));
+                try writeAnthropicTextBlock(writer, content);
+                first = false;
             }
             if (assistant.tool_calls) |tool_calls| {
                 for (tool_calls) |tc| {
+                    if (!first) try writer.writeByte(',');
                     const input = try parseToolArguments(allocator, tc.function.arguments);
-                    try content_blocks.append(try newToolUseBlock(allocator, tc.id, tc.function.name, input));
+                    try writeAnthropicToolUseBlock(writer, tc.id, tc.function.name, input);
+                    first = false;
                 }
             }
-            try obj.put(allocator, "content", .{ .array = content_blocks });
+            try writer.writeAll("]}");
         },
         .tool => |tool| {
-            try obj.put(allocator, "role", .{ .string = "user" });
-            var arr = try std.json.Array.initCapacity(allocator, 1);
-            try arr.append(try newToolResultBlock(allocator, tool.tool_call_id, tool.content));
-            try obj.put(allocator, "content", .{ .array = arr });
+            try writer.writeAll("{\"role\":\"user\",\"content\":[");
+            try writeAnthropicToolResultBlock(writer, tool.tool_call_id, tool.content);
+            try writer.writeAll("]}");
         },
     }
-
-    return .{ .object = obj };
 }
 
 const BlockType = enum {
@@ -526,45 +527,59 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
 }
 
 pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
-    var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
+
+    try w.writeAll("{\"model\":");
+    try std.json.Stringify.value(request.model, .{}, w);
+
     var system: ?[]const u8 = null;
+
+    try w.writeAll(",\"messages\":[");
+    var first_msg = true;
     for (request.messages) |msg| {
         switch (msg) {
             .system => |content| {
                 if (system == null) system = content;
             },
-            else => try messages.append(try anthropicMessage(allocator, msg)),
+            else => {
+                if (!first_msg) try w.writeByte(',');
+                try writeAnthropicMessage(allocator, w, msg);
+                first_msg = false;
+            },
         }
     }
+    try w.writeByte(']');
 
-    var tools: ?std.json.Array = null;
-    if (request.tools.len > 0) {
-        tools = try std.json.Array.initCapacity(allocator, request.tools.len);
-        for (request.tools) |tool| {
-            try tools.?.append(try anthropicTool(allocator, tool));
-        }
-    }
+    try w.writeAll(",\"max_tokens\":");
+    try std.json.Stringify.value(default_max_tokens, .{}, w);
 
-    var body_obj = try newObject(allocator);
-    try body_obj.put(allocator, "model", .{ .string = request.model });
-    try body_obj.put(allocator, "messages", .{ .array = messages });
-    try body_obj.put(allocator, "max_tokens", .{ .integer = default_max_tokens });
-    try body_obj.put(allocator, "stream", .{ .bool = request.stream });
+    try w.writeAll(",\"stream\":");
+    try std.json.Stringify.value(request.stream, .{}, w);
 
     if (system) |value| {
-        try body_obj.put(allocator, "system", .{ .string = value });
-    }
-    if (tools) |value| {
-        try body_obj.put(allocator, "tools", .{ .array = value });
-    }
-    if (request.temperature) |temperature| {
-        try body_obj.put(allocator, "temperature", .{ .float = temperature });
+        try w.writeAll(",\"system\":");
+        try std.json.Stringify.value(value, .{}, w);
     }
 
-    var str: std.Io.Writer.Allocating = .init(allocator);
-    defer str.deinit();
-    try std.json.Stringify.value(std.json.Value{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
-    return str.toOwnedSlice();
+    if (request.tools.len > 0) {
+        try w.writeAll(",\"tools\":[");
+        for (request.tools, 0..) |tool, i| {
+            if (i > 0) try w.writeByte(',');
+            try writeAnthropicTool(w, tool);
+        }
+        try w.writeByte(']');
+    }
+
+    if (request.temperature) |temp| {
+        try w.writeAll(",\"temperature\":");
+        try std.json.Stringify.value(temp, .{}, w);
+    }
+
+    try w.writeByte('}');
+
+    return buf.toOwnedSlice();
 }
 
 fn googleTextPart(allocator: std.mem.Allocator, text: []const u8) !std.json.Value {
