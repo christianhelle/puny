@@ -4,13 +4,9 @@ const memory = @import("../memory.zig");
 /// Reads `/proc/self/status` and returns resident (VmRSS) and private (VmData)
 /// bytes for the current process.
 pub fn getMemoryStats(allocator: std.mem.Allocator, io: std.Io) !memory.MemoryStats {
-    const data = try std.Io.Dir.cwd().readFileAlloc(
-        io,
-        "/proc/self/status",
-        allocator,
-        std.Io.Limit.limited(16 * 1024),
-    );
-    defer allocator.free(data);
+    _ = allocator;
+    var buf: [16 * 1024]u8 = undefined;
+    const data = try readFileToBuffer(io, "/proc/self/status", &buf);
 
     const rss_kb = try parseKbField(data, "VmRSS:");
     const data_kb = try parseKbField(data, "VmData:");
@@ -19,6 +15,22 @@ pub fn getMemoryStats(allocator: std.mem.Allocator, io: std.Io) !memory.MemorySt
         .resident = rss_kb * 1024,
         .private = data_kb * 1024,
     };
+}
+
+fn readFileToBuffer(io: std.Io, path: []const u8, buf: []u8) ![]u8 {
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+    var file_reader = file.reader(io, buf);
+    const reader = &file_reader.interface;
+    var written: usize = 0;
+    while (written < buf.len) {
+        const bytes = reader.readSliceShort(buf[written..]) catch |err| switch (err) {
+            error.ReadFailed => return file_reader.err.?,
+        };
+        if (bytes == 0) break;
+        written += bytes;
+    }
+    return buf[0..written];
 }
 
 fn parseKbField(data: []const u8, marker: []const u8) !u64 {
