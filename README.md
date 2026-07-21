@@ -329,7 +329,7 @@ While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
 - `/reset` — clear the conversation history
-- `/stats` — show session statistics
+- `/stats` — show session statistics and memory usage
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description)
 - `/build [task]` — switch to build mode (optionally with a task description)
