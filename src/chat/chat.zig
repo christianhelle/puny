@@ -8,6 +8,7 @@ const tools = @import("tools");
 const tool_display = @import("display.zig");
 const usage_estimator = @import("usage.zig");
 const cancel = @import("../core/cancel.zig");
+const memory = @import("../core/memory.zig");
 const zz = @import("zigzag");
 
 fn countNewlines(text: []const u8) usize {
@@ -173,6 +174,18 @@ pub const SessionStats = struct {
             }
         }
         try writer.print("\n  Session duration:    {d:.1}s\n", .{elapsed_s});
+
+        try writer.print("\n{s}─── Memory ───{s}\n", .{ ansi.dim, ansi.reset });
+        if (memory.getMemoryStats(self.allocator, io)) |stats| {
+            var buf_a: [32]u8 = undefined;
+            var buf_b: [32]u8 = undefined;
+            try writer.print("  {s:<21}{s}\n", .{ memory.resident_label, memory.formatBytes(&buf_a, stats.resident) });
+            try writer.print("  {s:<21}{s}\n", .{ memory.private_label, memory.formatBytes(&buf_b, stats.private) });
+        } else |_| {
+            try writer.print("  {s:<21}N/A\n", .{memory.resident_label});
+            try writer.print("  {s:<21}N/A\n", .{memory.private_label});
+        }
+
         try writer.flush();
     }
 };
