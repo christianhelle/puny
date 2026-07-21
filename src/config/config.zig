@@ -128,7 +128,7 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
 
     const parsed = std.json.parseFromSlice(Config, allocator, data, .{
         .ignore_unknown_fields = true,
-        .allocate = .alloc_if_needed,
+        .allocate = .alloc_always,
     }) catch |err| {
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
