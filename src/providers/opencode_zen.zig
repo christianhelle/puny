@@ -151,23 +151,23 @@ fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
     return try std.json.ObjectMap.init(allocator, &.{}, &.{});
 }
 
-fn parseToolArguments(allocator: std.mem.Allocator, arguments: []const u8) !std.json.Value {
-    return try std.json.parseFromSliceLeaky(std.json.Value, allocator, arguments, .{ .ignore_unknown_fields = true });
-}
-
 fn writeAnthropicTextBlock(writer: anytype, text: []const u8) !void {
     try writer.writeAll("{\"type\":\"text\",\"text\":");
     try std.json.Stringify.value(text, .{}, writer);
     try writer.writeByte('}');
 }
 
-fn writeAnthropicToolUseBlock(writer: anytype, id: []const u8, name: []const u8, input: std.json.Value) !void {
+fn writeAnthropicToolUseBlock(writer: anytype, id: []const u8, name: []const u8, arguments: []const u8) !void {
     try writer.writeAll("{\"type\":\"tool_use\",\"id\":");
     try std.json.Stringify.value(id, .{}, writer);
     try writer.writeAll(",\"name\":");
     try std.json.Stringify.value(name, .{}, writer);
     try writer.writeAll(",\"input\":");
-    try std.json.Stringify.value(input, .{}, writer);
+    if (std.mem.trim(u8, arguments, " \t\r\n").len > 0) {
+        try writer.writeAll(arguments);
+    } else {
+        try writer.writeAll("{}");
+    }
     try writer.writeByte('}');
 }
 
@@ -197,7 +197,7 @@ fn writeAnthropicTool(writer: anytype, tool: openai.ToolDefinition) !void {
     try writer.writeByte('}');
 }
 
-fn writeAnthropicMessage(allocator: std.mem.Allocator, writer: anytype, msg: openai.Message) !void {
+fn writeAnthropicMessage(writer: anytype, msg: openai.Message) !void {
     switch (msg) {
         .system => unreachable, // handled separately
         .user => |content| {
@@ -215,8 +215,7 @@ fn writeAnthropicMessage(allocator: std.mem.Allocator, writer: anytype, msg: ope
             if (assistant.tool_calls) |tool_calls| {
                 for (tool_calls) |tc| {
                     if (!first) try writer.writeByte(',');
-                    const input = try parseToolArguments(allocator, tc.function.arguments);
-                    try writeAnthropicToolUseBlock(writer, tc.id, tc.function.name, input);
+                    try writeAnthropicToolUseBlock(writer, tc.id, tc.function.name, tc.function.arguments);
                     first = false;
                 }
             }
@@ -545,7 +544,7 @@ pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.Cha
             },
             else => {
                 if (!first_msg) try w.writeByte(',');
-                try writeAnthropicMessage(allocator, w, msg);
+                try writeAnthropicMessage(w, msg);
                 first_msg = false;
             },
         }

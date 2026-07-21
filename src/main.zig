@@ -353,6 +353,7 @@ fn initializeProviderAndModel(
     };
 
     prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, provider_arena, io);
+    errdefer prov.deinit();
     if (!parsed.mock) try ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
     const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
@@ -733,6 +734,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 try ctx.stdout_writer.flush();
 
                 ctx.prov.deinit();
+                ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
                 _ = ctx.messages_arena.reset(.free_all);
                 ctx.messages.* = std.array_list.Managed(openai.Message).init(ctx.messages_arena.allocator());
                 ctx.planning_mode.* = false;
