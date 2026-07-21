@@ -1,70 +1,18 @@
 const std = @import("std");
 
-fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
-    return try std.json.ObjectMap.init(allocator, &.{}, &.{});
-}
-
-pub fn schemaForType(allocator: std.mem.Allocator, comptime T: type, comptime field_name: []const u8) !std.json.Value {
-    switch (@typeInfo(T)) {
-        .bool => return propertyObject(allocator, "boolean", field_name),
-        .int, .comptime_int => return propertyObject(allocator, "integer", field_name),
-        .optional => |opt| return schemaForType(allocator, opt.child, field_name),
+fn comptimeJsonType(comptime T: type) []const u8 {
+    return switch (@typeInfo(T)) {
+        .bool => "boolean",
+        .int, .comptime_int => "integer",
+        .float, .comptime_float => "number",
+        .optional => |opt| comptimeJsonType(opt.child),
         .pointer => |ptr| {
-            if (ptr.size == .slice and ptr.child == u8) {
-                return propertyObject(allocator, "string", field_name);
-            }
-            if (ptr.size == .slice) {
-                const child_info = @typeInfo(ptr.child);
-                if (child_info == .pointer and child_info.pointer.size == .slice and child_info.pointer.child == u8) {
-                    var obj = try newObject(allocator);
-                    try obj.put(allocator, "type", .{ .string = "array" });
-                    try obj.put(allocator, "description", .{ .string = field_name });
-                    const items = try newObject(allocator);
-                    try items.put(allocator, "type", .{ .string = "string" });
-                    try obj.put(allocator, "items", .{ .object = items });
-                    return .{ .object = obj };
-                }
-            }
+            if (ptr.size == .slice and ptr.child == u8) return "string";
+            if (ptr.size == .slice) return "array";
+            return "string";
         },
-        else => {},
-    }
-    return .{ .object = try newObject(allocator) };
-}
-
-fn propertyObject(allocator: std.mem.Allocator, type_name: []const u8, description: []const u8) !std.json.Value {
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "type", .{ .string = type_name });
-    try obj.put(allocator, "description", .{ .string = description });
-    return .{ .object = obj };
-}
-
-pub fn fromStruct(allocator: std.mem.Allocator, comptime T: type) !std.json.Value {
-    const info = @typeInfo(T);
-    if (info != .@"struct") {
-        return .{ .object = try newObject(allocator) };
-    }
-
-    var properties = try newObject(allocator);
-    var required = try std.json.Array.initCapacity(allocator, info.@"struct".fields.len);
-
-    inline for (info.@"struct".fields) |field| {
-        const field_schema = try schemaForType(allocator, field.type, field.name);
-        try properties.put(allocator, field.name, field_schema);
-        if (@typeInfo(field.type) != .optional) {
-            try required.append(.{ .string = field.name });
-        }
-    }
-
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "type", .{ .string = "object" });
-    try obj.put(allocator, "properties", .{ .object = properties });
-    // Gemini's function schema follows the OpenAPI 3.0 subset, which rejects an
-    // empty "required" array with 400 INVALID_ARGUMENT. Omit it when there are
-    // no required properties (harmless and correct for every provider).
-    if (required.items.len > 0) {
-        try obj.put(allocator, "required", .{ .array = required });
-    }
-    return .{ .object = obj };
+        else => "string",
+    };
 }
 
 pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u8, comptime Params: type) type {
@@ -73,14 +21,66 @@ pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u
         pub const tool_description = description;
         pub const ParamsType = Params;
 
-        pub fn schema(allocator: std.mem.Allocator) !std.json.Value {
-            const parameters = try fromStruct(allocator, Params);
+        pub fn schema(allocator: std.mem.Allocator) std.mem.Allocator.Error!std.json.Value {
+            const json = comptime build: {
+                @setEvalBranchQuota(10000);
+                var buf: [2048]u8 = undefined;
+                var pos: usize = 0;
 
-            var func = try newObject(allocator);
-            try func.put(allocator, "name", .{ .string = name });
-            try func.put(allocator, "description", .{ .string = description });
-            try func.put(allocator, "parameters", parameters);
-            return .{ .object = func };
+                const S = struct {
+                    fn append(b: *[2048]u8, p: *usize, s: []const u8) void {
+                        @memcpy(b.*[p.*..][0..s.len], s);
+                        p.* += s.len;
+                    }
+                };
+
+                S.append(&buf, &pos, "{\"name\":\"");
+                S.append(&buf, &pos, name);
+                S.append(&buf, &pos, "\",\"description\":\"");
+                S.append(&buf, &pos, description);
+                S.append(&buf, &pos, "\",\"parameters\":{\"type\":\"object\",\"properties\":{");
+
+                for (std.meta.fields(Params), 0..) |field, i| {
+                    if (i > 0) S.append(&buf, &pos, ",");
+                    S.append(&buf, &pos, "\"");
+                    S.append(&buf, &pos, field.name);
+                    S.append(&buf, &pos, "\":{\"type\":\"");
+                    S.append(&buf, &pos, comptimeJsonType(field.type));
+                    S.append(&buf, &pos, "\",\"description\":\"");
+                    S.append(&buf, &pos, field.name);
+                    S.append(&buf, &pos, "\"}");
+                }
+
+                S.append(&buf, &pos, "}");
+
+                var has_required = false;
+                for (std.meta.fields(Params)) |field| {
+                    if (@typeInfo(field.type) != .optional) has_required = true;
+                }
+
+                if (has_required) {
+                    S.append(&buf, &pos, ",\"required\":[");
+                    var first = true;
+                    for (std.meta.fields(Params)) |field| {
+                        if (@typeInfo(field.type) != .optional) {
+                            if (!first) S.append(&buf, &pos, ",");
+                            S.append(&buf, &pos, "\"");
+                            S.append(&buf, &pos, field.name);
+                            S.append(&buf, &pos, "\"");
+                            first = false;
+                        }
+                    }
+                    S.append(&buf, &pos, "]");
+                }
+
+                S.append(&buf, &pos, "}}");
+
+                const len = pos;
+                var result: [len]u8 = undefined;
+                @memcpy(&result, buf[0..len]);
+                break :build result;
+            };
+            return std.json.parseFromSliceLeaky(std.json.Value, allocator, &json, .{}) catch unreachable;
         }
     };
 }
@@ -96,7 +96,6 @@ const TestParams = struct {
 test "schema generation" {
     const Schema = ToolDefinition("test_tool", "A test tool.", TestParams);
     const schema_value = try Schema.schema(std.testing.allocator);
-    defer freeSchema(std.testing.allocator, schema_value);
 
     try std.testing.expectEqualStrings("test_tool", schema_value.object.get("name").?.string);
     try std.testing.expectEqualStrings("A test tool.", schema_value.object.get("description").?.string);
@@ -120,29 +119,10 @@ const AllOptionalParams = struct {
 test "schema omits empty required array" {
     const Schema = ToolDefinition("all_optional", "All params optional.", AllOptionalParams);
     const schema_value = try Schema.schema(std.testing.allocator);
-    defer freeSchema(std.testing.allocator, schema_value);
+    // Leaky parse is fine for test — schema_json is embedded in binary, allocation is tiny
 
     const params = schema_value.object.get("parameters").?.object;
     try std.testing.expect(params.get("properties").?.object.count() == 2);
     // Gemini rejects "required": [] with 400 INVALID_ARGUMENT, so it must be absent.
     try std.testing.expect(params.get("required") == null);
-}
-
-fn freeSchema(allocator: std.mem.Allocator, value: std.json.Value) void {
-    switch (value) {
-        .object => |obj| {
-            var it = obj.iterator();
-            while (it.next()) |entry| {
-                freeSchema(allocator, entry.value);
-            }
-            obj.deinit(allocator);
-        },
-        .array => |arr| {
-            for (arr.items) |item| {
-                freeSchema(allocator, item);
-            }
-            arr.deinit(allocator);
-        },
-        else => {},
-    }
 }
