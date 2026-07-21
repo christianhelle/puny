@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Memory and Resource usage Optimization ([#39](https://github.com/christianhelle/puny/pull/39)) ([@christianhelle](https://github.com/christianhelle/))
 - Show app memory usage in /stats ([#38](https://github.com/christianhelle/puny/pull/38)) ([@christianhelle](https://github.com/christianhelle/))
 - Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
 - Improve --mock mode ([#34](https://github.com/christianhelle/puny/pull/34)) ([@christianhelle](https://github.com/christianhelle/))
