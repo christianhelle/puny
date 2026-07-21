@@ -107,6 +107,10 @@ fn addPunyExecutable(
         .optimize = optimize,
     }));
 
+    if (target.result.os.tag == .windows) {
+        exe.root_module.linkSystemLibrary("psapi", .{});
+    }
+
     return exe;
 }
 
