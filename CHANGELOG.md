@@ -2,11 +2,10 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
-- Improve --mock mode ([#34](https://github.com/christianhelle/puny/pull/34)) ([@christianhelle](https://github.com/christianhelle/))
-- Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Show app memory usage in /stats ([#38](https://github.com/christianhelle/puny/pull/38)) ([@christianhelle](https://github.com/christianhelle/))
+- Changelog generator workflow ([#28](https://github.com/christianhelle/puny/pull/28)) ([@christianhelle](https://github.com/christianhelle/))
+- Improve --mock mode ([#34](https://github.com/christianhelle/puny/pull/34)) ([@christianhelle](https://github.com/christianhelle/))
 - Add OpenCode Go as a provider ([#37](https://github.com/christianhelle/puny/pull/37)) ([@christianhelle](https://github.com/christianhelle/))
 - Clear app state and free memory usage upon /reset ([#36](https://github.com/christianhelle/puny/pull/36)) ([@christianhelle](https://github.com/christianhelle/))
 - Introduce /provider command for switching provider 
@@ -27,10 +26,8 @@
 
 ## [v0.1.0](https://github.com/christianhelle/puny/releases/tag/v0.1.0) (2026-07-17)
 
-### Merged Pull Requests
-- Show token statistics using /stats and upon exit ([#3](https://github.com/christianhelle/puny/pull/3)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Show token statistics using /stats and upon exit ([#3](https://github.com/christianhelle/puny/pull/3)) ([@christianhelle](https://github.com/christianhelle/))
 - Build for all platforms in regression test script ([#6](https://github.com/christianhelle/puny/pull/6)) ([@christianhelle](https://github.com/christianhelle/))
 - Enable Claude, GPT, and Qwen models from OpenCode Zen ([#20](https://github.com/christianhelle/puny/pull/20)) ([@christianhelle](https://github.com/christianhelle/))
 - Add GitHub Workflows ([#19](https://github.com/christianhelle/puny/pull/19)) ([@christianhelle](https://github.com/christianhelle/))
