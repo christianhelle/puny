@@ -104,9 +104,14 @@ pub const Config = struct {
 pub const LoadResult = struct {
     config: Config,
     had_error: bool = false,
+    arena: ?std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *LoadResult, allocator: std.mem.Allocator) void {
-        self.config.deinit(allocator);
+        if (self.arena) |*a| {
+            a.deinit();
+        } else {
+            self.config.deinit(allocator);
+        }
     }
 };
 
@@ -132,14 +137,15 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
         stderr_writer.flush() catch {};
         return .{ .config = Config.default(), .had_error = true };
     };
-    defer parsed.deinit();
 
-    var cfg = try parsed.value.clone(allocator);
+    // Steal the parser's arena: strings live in the arena, not in a clone
+    var cfg = parsed.value;
     if (!isValidUtf8(cfg.model)) {
-        allocator.free(cfg.model);
-        cfg.model = try allocator.dupe(u8, "");
+        cfg.model = "";
     }
-    return .{ .config = cfg };
+    const arena = parsed.arena.*;
+    allocator.destroy(parsed.arena);
+    return .{ .config = cfg, .arena = arena };
 }
 
 pub fn save(
