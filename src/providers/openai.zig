@@ -35,59 +35,63 @@ pub const Message = union(enum) {
     assistant: AssistantContent,
     tool: ToolResult,
 
-    pub fn toJson(self: Message, allocator: std.mem.Allocator) !std.json.Value {
-        return switch (self) {
-            .system => |content| blk: {
-                var obj = try newObject(allocator);
-                try obj.put(allocator, "role", .{ .string = "system" });
-                try obj.put(allocator, "content", .{ .string = content });
-                break :blk .{ .object = obj };
+    pub fn jsonStringify(self: Message, jw: *std.json.Stringify) !void {
+        try jw.beginObject();
+        switch (self) {
+            .system => |content| {
+                try jw.objectField("role");
+                try jw.write("system");
+                try jw.objectField("content");
+                try jw.write(content);
             },
-            .user => |content| blk: {
-                var obj = try newObject(allocator);
-                try obj.put(allocator, "role", .{ .string = "user" });
-                try obj.put(allocator, "content", .{ .string = content });
-                break :blk .{ .object = obj };
+            .user => |content| {
+                try jw.objectField("role");
+                try jw.write("user");
+                try jw.objectField("content");
+                try jw.write(content);
             },
-            .assistant => |assistant| blk: {
-                var obj = try newObject(allocator);
-                try obj.put(allocator, "role", .{ .string = "assistant" });
+            .assistant => |assistant| {
+                try jw.objectField("role");
+                try jw.write("assistant");
+                try jw.objectField("content");
                 if (assistant.content) |content| {
-                    try obj.put(allocator, "content", .{ .string = content });
+                    try jw.write(content);
                 } else {
-                    try obj.put(allocator, "content", .{ .null = {} });
+                    try jw.write(std.json.Value{ .null = {} });
                 }
                 if (assistant.tool_calls) |tool_calls| {
-                    var arr = try std.json.Array.initCapacity(allocator, tool_calls.len);
+                    try jw.objectField("tool_calls");
+                    try jw.beginArray();
                     for (tool_calls) |tc| {
-                        var func = try newObject(allocator);
-                        try func.put(allocator, "name", .{ .string = tc.function.name });
-                        try func.put(allocator, "arguments", .{ .string = tc.function.arguments });
-
-                        var tc_obj = try newObject(allocator);
-                        try tc_obj.put(allocator, "id", .{ .string = tc.id });
-                        try tc_obj.put(allocator, "type", .{ .string = tc.type });
-                        try tc_obj.put(allocator, "function", .{ .object = func });
-                        try arr.append(.{ .object = tc_obj });
+                        try jw.beginObject();
+                        try jw.objectField("id");
+                        try jw.write(tc.id);
+                        try jw.objectField("type");
+                        try jw.write(tc.type);
+                        try jw.objectField("function");
+                        try jw.beginObject();
+                        try jw.objectField("name");
+                        try jw.write(tc.function.name);
+                        try jw.objectField("arguments");
+                        try jw.write(tc.function.arguments);
+                        try jw.endObject();
+                        try jw.endObject();
                     }
-                    try obj.put(allocator, "tool_calls", .{ .array = arr });
+                    try jw.endArray();
                 }
-                break :blk .{ .object = obj };
             },
-            .tool => |tool| blk: {
-                var obj = try newObject(allocator);
-                try obj.put(allocator, "role", .{ .string = "tool" });
-                try obj.put(allocator, "tool_call_id", .{ .string = tool.tool_call_id });
-                try obj.put(allocator, "content", .{ .string = tool.content });
-                break :blk .{ .object = obj };
+            .tool => |tool| {
+                try jw.objectField("role");
+                try jw.write("tool");
+                try jw.objectField("tool_call_id");
+                try jw.write(tool.tool_call_id);
+                try jw.objectField("content");
+                try jw.write(tool.content);
             },
-        };
+        }
+        try jw.endObject();
     }
 };
-
-fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
-    return try std.json.ObjectMap.init(allocator, &.{}, &.{});
-}
 
 pub const ToolDefinition = struct {
     type: []const u8 = "function",
@@ -337,45 +341,63 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
 }
 
 pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
-    var messages = try std.json.Array.initCapacity(allocator, request.messages.len);
-    for (request.messages) |msg| {
-        try messages.append(try msg.toJson(allocator));
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
+
+    try w.writeAll("{\"model\":");
+    try std.json.Stringify.value(request.model, .{}, w);
+
+    try w.writeAll(",\"messages\":[");
+    for (request.messages, 0..) |msg, i| {
+        if (i > 0) try w.writeByte(',');
+        try std.json.Stringify.value(msg, .{}, w);
+    }
+    try w.writeByte(']');
+
+    try w.writeAll(",\"tools\":[");
+    for (request.tools, 0..) |tool, i| {
+        if (i > 0) try w.writeByte(',');
+        try w.writeAll("{\"type\":");
+        try std.json.Stringify.value(tool.type, .{}, w);
+        try w.writeAll(",\"function\":");
+        try std.json.Stringify.value(tool.function, .{}, w);
+        try w.writeByte('}');
+    }
+    try w.writeByte(']');
+
+    try w.writeAll(",\"stream\":true");
+
+    if (request.temperature) |temp| {
+        try w.writeAll(",\"temperature\":");
+        try std.json.Stringify.value(temp, .{}, w);
     }
 
-    var tools = try std.json.Array.initCapacity(allocator, request.tools.len);
-    for (request.tools) |tool| {
-        var obj = try newObject(allocator);
-        try obj.put(allocator, "type", .{ .string = tool.type });
-        try obj.put(allocator, "function", tool.function);
-        try tools.append(.{ .object = obj });
-    }
+    try w.writeByte('}');
 
-    var body_obj = try newObject(allocator);
-    try body_obj.put(allocator, "model", .{ .string = request.model });
-    try body_obj.put(allocator, "messages", .{ .array = messages });
-    try body_obj.put(allocator, "tools", .{ .array = tools });
-    try body_obj.put(allocator, "stream", .{ .bool = request.stream });
-
-    if (request.temperature) |temperature| {
-        try body_obj.put(allocator, "temperature", .{ .float = temperature });
-    }
-
-    var str: std.Io.Writer.Allocating = .init(allocator);
-    defer str.deinit();
-    try std.json.Stringify.value(std.json.Value{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
-    return str.toOwnedSlice();
+    return buf.toOwnedSlice();
 }
 
 test "message JSON conversion" {
     const allocator = std.testing.allocator;
 
-    var system_msg = try (Message{ .system = "You are a helpful assistant." }).toJson(allocator);
-    try std.testing.expectEqualStrings("system", system_msg.object.get("role").?.string);
-    try std.testing.expectEqualStrings("You are a helpful assistant.", system_msg.object.get("content").?.string);
-    system_msg.object.deinit(allocator);
+    {
+        var buf: std.Io.Writer.Allocating = .init(allocator);
+        defer buf.deinit();
+        try std.json.Stringify.value(Message{ .system = "You are a helpful assistant." }, .{}, &buf.writer);
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, buf.written(), .{});
+        defer parsed.deinit();
+        try std.testing.expectEqualStrings("system", parsed.value.object.get("role").?.string);
+        try std.testing.expectEqualStrings("You are a helpful assistant.", parsed.value.object.get("content").?.string);
+    }
 
-    var tool_msg = try (Message{ .tool = .{ .tool_call_id = "call_1", .content = "result" } }).toJson(allocator);
-    try std.testing.expectEqualStrings("tool", tool_msg.object.get("role").?.string);
-    try std.testing.expectEqualStrings("call_1", tool_msg.object.get("tool_call_id").?.string);
-    tool_msg.object.deinit(allocator);
+    {
+        var buf: std.Io.Writer.Allocating = .init(allocator);
+        defer buf.deinit();
+        try std.json.Stringify.value(Message{ .tool = .{ .tool_call_id = "call_1", .content = "result" } }, .{}, &buf.writer);
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, buf.written(), .{});
+        defer parsed.deinit();
+        try std.testing.expectEqualStrings("tool", parsed.value.object.get("role").?.string);
+        try std.testing.expectEqualStrings("call_1", parsed.value.object.get("tool_call_id").?.string);
+    }
 }
