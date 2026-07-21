@@ -582,38 +582,40 @@ pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.Cha
     return buf.toOwnedSlice();
 }
 
-fn googleTextPart(allocator: std.mem.Allocator, text: []const u8) !std.json.Value {
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "text", .{ .string = text });
-    return .{ .object = obj };
+fn writeGoogleTextPart(writer: anytype, text: []const u8) !void {
+    try writer.writeAll("{\"text\":");
+    try std.json.Stringify.value(text, .{}, writer);
+    try writer.writeByte('}');
 }
 
-fn googleFunctionCallPart(allocator: std.mem.Allocator, name: []const u8, arguments: []const u8) !std.json.Value {
-    const args: std.json.Value = if (std.mem.trim(u8, arguments, " \t\r\n").len == 0)
-        .{ .object = try newObject(allocator) }
-    else
-        try parseToolArguments(allocator, arguments);
-
-    var call = try newObject(allocator);
-    try call.put(allocator, "name", .{ .string = name });
-    try call.put(allocator, "args", args);
-
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "functionCall", .{ .object = call });
-    return .{ .object = obj };
+fn writeGoogleFunctionCallPart(writer: anytype, name: []const u8, arguments: []const u8) !void {
+    try writer.writeAll("{\"functionCall\":{\"name\":");
+    try std.json.Stringify.value(name, .{}, writer);
+    try writer.writeAll(",\"args\":");
+    if (std.mem.trim(u8, arguments, " \t\r\n").len > 0) {
+        try writer.writeAll(arguments);
+    } else {
+        try writer.writeAll("{}");
+    }
+    try writer.writeAll("}}");
 }
 
-fn googleFunctionDeclaration(allocator: std.mem.Allocator, tool: openai.ToolDefinition) !std.json.Value {
+fn writeGoogleFunctionDeclaration(writer: anytype, tool: openai.ToolDefinition) !void {
     const function = tool.function.object;
     const name = if (function.get("name")) |v| v.string else return error.MissingToolName;
     const description = if (function.get("description")) |v| v.string else "";
-    const parameters = function.get("parameters") orelse std.json.Value{ .object = try newObject(allocator) };
 
-    var obj = try newObject(allocator);
-    try obj.put(allocator, "name", .{ .string = name });
-    try obj.put(allocator, "description", .{ .string = description });
-    try obj.put(allocator, "parameters", parameters);
-    return .{ .object = obj };
+    try writer.writeAll("{\"name\":");
+    try std.json.Stringify.value(name, .{}, writer);
+    try writer.writeAll(",\"description\":");
+    try std.json.Stringify.value(description, .{}, writer);
+    try writer.writeAll(",\"parameters\":");
+    if (function.get("parameters")) |params| {
+        try std.json.Stringify.value(params, .{}, writer);
+    } else {
+        try writer.writeAll("{}");
+    }
+    try writer.writeByte('}');
 }
 
 fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u8, before_index: usize) []const u8 {
@@ -635,10 +637,16 @@ fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u
 }
 
 pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
-    var contents = try std.json.Array.initCapacity(allocator, request.messages.len);
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
+
     var system: ?[]const u8 = null;
 
+    try w.writeAll("{\"contents\":[");
+
     var i: usize = 0;
+    var first_content = true;
     while (i < request.messages.len) {
         switch (request.messages[i]) {
             .system => |content| {
@@ -646,89 +654,81 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
                 i += 1;
             },
             .user => |content| {
-                var parts = try std.json.Array.initCapacity(allocator, 1);
-                try parts.append(try googleTextPart(allocator, content));
-
-                var obj = try newObject(allocator);
-                try obj.put(allocator, "role", .{ .string = "user" });
-                try obj.put(allocator, "parts", .{ .array = parts });
-                try contents.append(.{ .object = obj });
+                if (!first_content) try w.writeByte(',');
+                try w.writeAll("{\"role\":\"user\",\"parts\":[");
+                try writeGoogleTextPart(w, content);
+                try w.writeAll("]}");
+                first_content = false;
                 i += 1;
             },
             .assistant => |assistant| {
-                var parts = try std.json.Array.initCapacity(allocator, 1);
+                if (!first_content) try w.writeByte(',');
+                try w.writeAll("{\"role\":\"model\",\"parts\":[");
+                var first_part = true;
                 if (assistant.content) |content| {
-                    try parts.append(try googleTextPart(allocator, content));
+                    try writeGoogleTextPart(w, content);
+                    first_part = false;
                 }
                 if (assistant.tool_calls) |tool_calls| {
                     for (tool_calls) |tc| {
-                        try parts.append(try googleFunctionCallPart(allocator, tc.function.name, tc.function.arguments));
+                        if (!first_part) try w.writeByte(',');
+                        try writeGoogleFunctionCallPart(w, tc.function.name, tc.function.arguments);
+                        first_part = false;
                     }
                 }
-
-                var obj = try newObject(allocator);
-                try obj.put(allocator, "role", .{ .string = "model" });
-                try obj.put(allocator, "parts", .{ .array = parts });
-                try contents.append(.{ .object = obj });
+                try w.writeAll("]}");
+                first_content = false;
                 i += 1;
             },
             .tool => {
-                // Coalesce consecutive tool results into a single user turn so the
-                // conversation keeps alternating user/model, as Gemini expects.
-                var parts = try std.json.Array.initCapacity(allocator, 2);
+                if (!first_content) try w.writeByte(',');
+                try w.writeAll("{\"role\":\"user\",\"parts\":[");
+                var first_part = true;
                 while (i < request.messages.len and std.meta.activeTag(request.messages[i]) == .tool) {
                     const tool = request.messages[i].tool;
                     const name = googleToolNameForId(request.messages, tool.tool_call_id, i);
-                    const tool_result_prefix = try std.fmt.allocPrint(allocator, "Tool {s} result:", .{name});
-                    try parts.append(try googleTextPart(allocator, tool_result_prefix));
-                    try parts.append(try googleTextPart(allocator, tool.content));
+                    if (!first_part) try w.writeByte(',');
+                    var prefix_buf: [256]u8 = undefined;
+                    const prefix = try std.fmt.bufPrint(&prefix_buf, "Tool {s} result:", .{name});
+                    try writeGoogleTextPart(w, prefix);
+                    try w.writeByte(',');
+                    try writeGoogleTextPart(w, tool.content);
+                    first_part = false;
                     i += 1;
                 }
-
-                var obj = try newObject(allocator);
-                try obj.put(allocator, "role", .{ .string = "user" });
-                try obj.put(allocator, "parts", .{ .array = parts });
-                try contents.append(.{ .object = obj });
+                try w.writeAll("]}");
+                first_content = false;
             },
         }
     }
+    try w.writeByte(']');
 
-    var tools: ?std.json.Array = null;
-    if (request.tools.len > 0) {
-        var declarations = try std.json.Array.initCapacity(allocator, request.tools.len);
-        for (request.tools) |tool| {
-            try declarations.append(try googleFunctionDeclaration(allocator, tool));
-        }
-        var tool_obj = try newObject(allocator);
-        try tool_obj.put(allocator, "functionDeclarations", .{ .array = declarations });
-        tools = try std.json.Array.initCapacity(allocator, 1);
-        try tools.?.append(.{ .object = tool_obj });
-    }
-
-    var generation_config = try newObject(allocator);
-    try generation_config.put(allocator, "maxOutputTokens", .{ .integer = default_max_tokens });
-    if (request.temperature) |temperature| {
-        try generation_config.put(allocator, "temperature", .{ .float = temperature });
-    }
-
-    var body_obj = try newObject(allocator);
-    try body_obj.put(allocator, "contents", .{ .array = contents });
     if (system) |value| {
-        var system_parts = try std.json.Array.initCapacity(allocator, 1);
-        try system_parts.append(try googleTextPart(allocator, value));
-        var system_obj = try newObject(allocator);
-        try system_obj.put(allocator, "parts", .{ .array = system_parts });
-        try body_obj.put(allocator, "systemInstruction", .{ .object = system_obj });
+        try w.writeAll(",\"systemInstruction\":{\"parts\":[");
+        try writeGoogleTextPart(w, value);
+        try w.writeAll("]}");
     }
-    if (tools) |value| {
-        try body_obj.put(allocator, "tools", .{ .array = value });
-    }
-    try body_obj.put(allocator, "generationConfig", .{ .object = generation_config });
 
-    var str: std.Io.Writer.Allocating = .init(allocator);
-    defer str.deinit();
-    try std.json.Stringify.value(std.json.Value{ .object = body_obj }, .{ .emit_null_optional_fields = false }, &str.writer);
-    return str.toOwnedSlice();
+    if (request.tools.len > 0) {
+        try w.writeAll(",\"tools\":[{\"functionDeclarations\":[");
+        for (request.tools, 0..) |tool, j| {
+            if (j > 0) try w.writeByte(',');
+            try writeGoogleFunctionDeclaration(w, tool);
+        }
+        try w.writeAll("]}]");
+    }
+
+    try w.writeAll(",\"generationConfig\":{\"maxOutputTokens\":");
+    try std.json.Stringify.value(default_max_tokens, .{}, w);
+    if (request.temperature) |temp| {
+        try w.writeAll(",\"temperature\":");
+        try std.json.Stringify.value(temp, .{}, w);
+    }
+    try w.writeByte('}');
+
+    try w.writeByte('}');
+
+    return buf.toOwnedSlice();
 }
 
 const GoogleSseCallback = struct {
