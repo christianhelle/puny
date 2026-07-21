@@ -723,3 +723,18 @@ test "SessionStats skips models without finalized turns" {
     try std.testing.expectEqual(@as(usize, 2), stats.models.items.len);
     try std.testing.expectEqual(@as(usize, 1), stats.totalTurns());
 }
+
+test "SessionStats.print includes memory section" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try stats.print(std.testing.io, &output.writer);
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "─── Memory ───") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, memory.resident_label) != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, memory.private_label) != null);
+}
