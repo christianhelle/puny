@@ -1,6 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
+const opencode_zen = @import("../providers/opencode_zen.zig");
+const opencode_go = @import("../providers/opencode_go.zig");
+const copilot = @import("../providers/copilot.zig");
 
 fn isValidUtf8(s: []const u8) bool {
     var i: usize = 0;
@@ -53,11 +56,27 @@ pub const PromptsConfig = struct {
     }
 };
 
+pub const Providers = enum {
+    lmstudio,
+    opencode_zen,
+    opencode_go,
+    copilot,
+};
+
 pub const Provider = struct {
-    name: []const u8,
-    apiKey: []const u8,
+    name: Providers,
+    apiKey: ?[]const u8,
     url: []const u8,
     defaultModel: []const u8,
+
+    pub fn clone(self: Provider, allocator: std.mem.Allocator) std.mem.Allocator.Error!Provider {
+        return .{
+            .name = try allocator.dupe(u8, self.name),
+            .apiKey = if (self.apiKey) |value| try allocator.dupe(u8, value) else null,
+            .url = try allocator.dupe(u8, self.url),
+            .defaultModel = try allocator.dupe(u8, self.defaultModel),
+        };
+    }
 };
 
 pub const Config = struct {
@@ -66,7 +85,12 @@ pub const Config = struct {
     apiKey: []const u8 = "",
     model: []const u8 = "",
     prompts: PromptsConfig = .{},
-    providers: std.ArrayList(Provider) = .empty,
+    providers: [4]Provider = [4]Provider{
+        .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = "", .defaultModel = "" },
+        .{ .name = .opencode_zen, .url = opencode_go.default_base_url, .apiKey = "", .defaultModel = "" },
+        .{ .name = .opencode_go, .url = opencode_zen.default_base_url, .apiKey = "", .defaultModel = "" },
+        .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = "", .defaultModel = "" },
+    },
 
     pub fn default() Config {
         return .{};
@@ -79,7 +103,6 @@ pub const Config = struct {
             .apiKey = try allocator.dupe(u8, self.apiKey),
             .model = try allocator.dupe(u8, self.model),
             .prompts = try self.prompts.clone(allocator),
-            .providers = try self.providers.clone(allocator),
         };
     }
 
@@ -237,4 +260,47 @@ test "resolvePrompt applies prefix, suffix, and override" {
 test "isValidUtf8 rejects invalid bytes" {
     try std.testing.expect(isValidUtf8("ornith-1.0-35b"));
     try std.testing.expect(!isValidUtf8(&.{0xaa}));
+}
+
+test "can deserialize valid config JSON" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{
+        \\  "provider": "lmstudio",
+        \\  "providerUrl": "http://127.0.0.1:1234",
+        \\  "model": "google/gemma-4-e2b",
+        \\  "prompts": {
+        \\    "system": {
+        \\      "prefix": "",
+        \\      "suffix": "",
+        \\      "override": null
+        \\    },
+        \\    "planning": {
+        \\      "prefix": "",
+        \\      "suffix": "",
+        \\      "override": null
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const parsed = try std.json.parseFromSlice(
+        Config,
+        allocator,
+        json,
+        .{ .ignore_unknown_fields = true, .allocate = .alloc_if_needed },
+    );
+    defer parsed.deinit();
+}
+
+test "can serialize config to JSON" {
+    const allocator = std.testing.allocator;
+    const cfg = Config{
+        .provider = "lmstudio",
+        .providerUrl = "http://127.0.0.1:1234",
+        .model = "google/gemma-4-e2b",
+    };
+
+    const buffer = try std.json.Stringify.valueAlloc(allocator, cfg, .{ .whitespace = .indent_2 });
+    defer allocator.free(buffer);
 }
