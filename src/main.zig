@@ -1007,24 +1007,24 @@ test "baseUrlFor uses CLI url for lmstudio only" {
     try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, parsed, cfg));
     try std.testing.expectEqualStrings(opencode_go.default_base_url, baseUrlFor(.opencode_go, parsed, cfg));
     try std.testing.expectEqualStrings(copilot.default_base_url, baseUrlFor(.copilot, parsed, cfg));
-    try std.testing.expectEqualStrings("-", baseUrlFor("mock", parsed, cfg));
+    try std.testing.expectEqualStrings("-", baseUrlFor(.mock, parsed, cfg));
 }
 
 test "baseUrlFor uses config url only when provider matches config" {
-    const cfg_lmstudio = config.Config{ .provider = "lmstudio", .providerUrl = "http://config-lmstudio" };
-    try std.testing.expectEqualStrings("http://config-lmstudio", baseUrlFor("lmstudio", .{}, cfg_lmstudio));
-    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", .{}, cfg_lmstudio));
+    const cfg_lmstudio = config.Config{ .provider = .lmstudio, .providerUrl = "http://config-lmstudio" };
+    try std.testing.expectEqualStrings("http://config-lmstudio", baseUrlFor(.lmstudio, .{}, cfg_lmstudio));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, .{}, cfg_lmstudio));
 
-    const cfg_opencode = config.Config{ .provider = "opencode", .providerUrl = "http://config-opencode" };
-    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", .{}, cfg_opencode));
+    const cfg_opencode = config.Config{ .provider = .opencode_zen, .providerUrl = "http://config-opencode" };
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, .{}, cfg_opencode));
 }
 
 test "baseUrlFor returns provider defaults" {
     const cfg = config.Config{};
-    try std.testing.expectEqualStrings("http://127.0.0.1:1234", baseUrlFor("lmstudio", .{}, cfg));
-    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", .{}, cfg));
-    try std.testing.expectEqualStrings(opencode_go.default_base_url, baseUrlFor("opencode-go", .{}, cfg));
-    try std.testing.expectEqualStrings("-", baseUrlFor("mock", .{}, cfg));
+    try std.testing.expectEqualStrings("http://127.0.0.1:1234", baseUrlFor(.lmstudio, .{}, cfg));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, .{}, cfg));
+    try std.testing.expectEqualStrings(opencode_go.default_base_url, baseUrlFor(.opencode_go, .{}, cfg));
+    try std.testing.expectEqualStrings("-", baseUrlFor(.mock, .{}, cfg));
 }
 
 test "requiresApiKey only for opencode and opencode-go" {
