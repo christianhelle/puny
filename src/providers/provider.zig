@@ -7,6 +7,24 @@ const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const models = @import("models.zig");
 
+pub const SupportedProviders = enum {
+    lmstudio,
+    opencode_zen,
+    opencode_go,
+    copilot,
+    mock,
+};
+
+pub fn getProviderDisplayName(selected_provider: SupportedProviders) []const u8 {
+    return switch (selected_provider) {
+        .lmstudio => "LM Studio",
+        .opencode_zen => "OpenCode Zen",
+        .opencode_go => "OpenCode Go",
+        .copilot => "GitHub Copilot",
+        .mock => "Mock",
+    };
+}
+
 pub const Provider = union(enum) {
     lmstudio: client.Client,
     opencode: client.Client,
@@ -98,3 +116,12 @@ pub const Provider = union(enum) {
         }
     }
 };
+
+test "getProviderDisplayName maps known providers" {
+    try std.testing.expectEqualStrings("LM Studio", getProviderDisplayName("lmstudio"));
+    try std.testing.expectEqualStrings("OpenCode Zen", getProviderDisplayName("opencode"));
+    try std.testing.expectEqualStrings("OpenCode Go", getProviderDisplayName("opencode-go"));
+    try std.testing.expectEqualStrings("GitHub Copilot", getProviderDisplayName("copilot"));
+    try std.testing.expectEqualStrings("Mock", getProviderDisplayName("mock"));
+    try std.testing.expectEqualStrings("custom", getProviderDisplayName("custom"));
+}
