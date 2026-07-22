@@ -896,11 +896,11 @@ test "createProvider returns mock for mock flag or provider name" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    var by_flag = createProvider(true, "lmstudio", "http://example", "", allocator, std.testing.io);
+    var by_flag = createProvider(true, .lmstudio, "http://example", "", allocator, std.testing.io);
     defer by_flag.deinit();
     try std.testing.expectEqual(std.meta.activeTag(by_flag), std.meta.Tag(provider.Provider).mock);
 
-    var by_name = createProvider(false, "mock", "-", "", allocator, std.testing.io);
+    var by_name = createProvider(false, .mock, "-", "", allocator, std.testing.io);
     defer by_name.deinit();
     try std.testing.expectEqual(std.meta.activeTag(by_name), std.meta.Tag(provider.Provider).mock);
 }
@@ -991,13 +991,13 @@ test "resolveApiKey reads and trims api key file" {
 
 test "effectiveProvider precedence" {
     const cfg_default = config.Config{};
-    try std.testing.expectEqualStrings("lmstudio", effectiveProvider(.{}, cfg_default));
+    try std.testing.expectEqual(.lmstudio, effectiveProvider(.{}, cfg_default));
 
-    const cfg_opencode = config.Config{ .provider = "opencode" };
-    try std.testing.expectEqualStrings("opencode", effectiveProvider(.{}, cfg_opencode));
+    const cfg_opencode = config.Config{ .provider = .opencode_zen };
+    try std.testing.expectEqual(.opencode_zen, effectiveProvider(.{}, cfg_opencode));
 
-    const parsed_flag = cli.Options{ .provider = "opencode" };
-    try std.testing.expectEqualStrings("opencode", effectiveProvider(parsed_flag, config.Config{ .provider = "lmstudio" }));
+    const parsed_flag = cli.Options{ .provider = "opencode_zen" };
+    try std.testing.expectEqual(.opencode_zen, effectiveProvider(parsed_flag, config.Config{ .provider = .lmstudio }));
 }
 
 test "baseUrlFor uses CLI url for lmstudio only" {
