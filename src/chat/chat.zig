@@ -306,7 +306,7 @@ pub const OpenAiAccumulator = struct {
                     try stdout.flush();
                 }
                 self.lines_printed += countNewlines(text);
-                try self.content.appendSlice(text);
+                try self.content.appendSlice(self.allocator, text);
             },
             .tool_call_start => |tc| {
                 const gop = try self.partial_calls.getOrPut(self.allocator, tc.index);
@@ -453,7 +453,7 @@ pub fn runTurn(
 
     if (accumulator.hasToolCalls()) {
         const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
-        try messages.append(.{ .assistant = assistant_content });
+        try messages.append(arena, .{ .assistant = assistant_content });
 
         var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
@@ -461,7 +461,7 @@ pub fn runTurn(
             try stdout_writer.flush();
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
-            try messages.append(.{ .tool = .{ .tool_call_id = tc.id, .content = result } });
+            try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
         const cursor_offset = content_cursor_offset + tool_output_lines;
@@ -473,7 +473,7 @@ pub fn runTurn(
 
     if (has_content) {
         const content = try tools.dupeString(arena, accumulator.content.items);
-        try messages.append(.{ .assistant = .{ .content = content } });
+        try messages.append(arena, .{ .assistant = .{ .content = content } });
     }
 
     return .{ .turn_complete = true, .usage = turn_usage };
