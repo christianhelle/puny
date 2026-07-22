@@ -118,10 +118,9 @@ pub const Provider = union(enum) {
 };
 
 test "getProviderDisplayName maps known providers" {
-    try std.testing.expectEqualStrings("LM Studio", getProviderDisplayName("lmstudio"));
-    try std.testing.expectEqualStrings("OpenCode Zen", getProviderDisplayName("opencode"));
-    try std.testing.expectEqualStrings("OpenCode Go", getProviderDisplayName("opencode-go"));
-    try std.testing.expectEqualStrings("GitHub Copilot", getProviderDisplayName("copilot"));
-    try std.testing.expectEqualStrings("Mock", getProviderDisplayName("mock"));
-    try std.testing.expectEqualStrings("custom", getProviderDisplayName("custom"));
+    try std.testing.expectEqualStrings("LM Studio", getProviderDisplayName(.lmstudio));
+    try std.testing.expectEqualStrings("OpenCode Zen", getProviderDisplayName(.opencode_zen));
+    try std.testing.expectEqualStrings("OpenCode Go", getProviderDisplayName(.opencode_go));
+    try std.testing.expectEqualStrings("GitHub Copilot", getProviderDisplayName(.copilot));
+    try std.testing.expectEqualStrings("Mock", getProviderDisplayName(.mock));
 }
