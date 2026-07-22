@@ -90,19 +90,19 @@ pub fn main(init: std.process.Init) !void {
     defer prov.deinit();
 
     var full_tool_definitions = try buildToolDefinitions(arena);
-    defer full_tool_definitions.deinit();
+    defer full_tool_definitions.deinit(arena);
 
     var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
-    defer planning_tool_definitions.deinit();
+    defer planning_tool_definitions.deinit(arena);
 
     var stdin_buffer: [4096]u8 = undefined;
 
     var planning_mode = false;
 
-    var messages = std.array_list.Managed(openai.Message).init(messages_arena);
-    defer messages.deinit();
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(messages_arena);
     const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
-    try messages.append(.{ .system = system_prompt });
+    try messages.append(messages_arena, .{ .system = system_prompt });
 
     var pending_prompt: ?[]const u8 = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
     var session_stats = chat.SessionStats.init(arena, io);
@@ -403,22 +403,22 @@ fn initializeProviderAndModel(
     });
 }
 
-fn buildToolDefinitions(arena: std.mem.Allocator) !std.array_list.Managed(openai.ToolDefinition) {
-    var definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
-    errdefer definitions.deinit();
+fn buildToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefinition) {
+    var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
+    errdefer definitions.deinit(arena);
     for (tools.registry) |tool| {
         const schema = try tool.schema(arena);
-        try definitions.append(.{ .function = schema });
+        try definitions.append(arena, .{ .function = schema });
     }
     return definitions;
 }
 
-fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.array_list.Managed(openai.ToolDefinition) {
-    var definitions = std.array_list.Managed(openai.ToolDefinition).init(arena);
-    errdefer definitions.deinit();
+fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefinition) {
+    var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
+    errdefer definitions.deinit(arena);
     for (tools.planning_registry) |tool| {
         const schema = try tool.schema(arena);
-        try definitions.append(.{ .function = schema });
+        try definitions.append(arena, .{ .function = schema });
     }
     return definitions;
 }
@@ -448,9 +448,9 @@ const ChatLoopContext = struct {
     provider_name: *[]const u8,
     provider_url: *[]const u8,
     model_key: *[]const u8,
-    full_tool_definitions: *std.array_list.Managed(openai.ToolDefinition),
-    planning_tool_definitions: *std.array_list.Managed(openai.ToolDefinition),
-    messages: *std.array_list.Managed(openai.Message),
+    full_tool_definitions: *std.ArrayList(openai.ToolDefinition),
+    planning_tool_definitions: *std.ArrayList(openai.ToolDefinition),
+    messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
     pending_prompt: *?[]const u8,
     session_stats: *chat.SessionStats,
@@ -736,10 +736,10 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 ctx.prov.deinit();
                 ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
                 _ = ctx.messages_arena.reset(.free_all);
-                ctx.messages.* = std.array_list.Managed(openai.Message).init(ctx.messages_arena.allocator());
+                ctx.messages.* = .empty;
                 ctx.planning_mode.* = false;
                 const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
-                try ctx.messages.append(.{ .system = system_prompt });
+                try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
 
                 ctx.session_stats.deinit();
                 ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
