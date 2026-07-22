@@ -9,25 +9,25 @@ const GrepSearchParams = struct {
 };
 
 fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams) ![]const u8 {
-    var argv = std.array_list.Managed([]const u8).init(allocator);
-    defer argv.deinit();
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
 
-    try argv.append("rg");
-    try argv.append("--line-number");
-    try argv.append("--with-filename");
+    try argv.append(allocator, "rg");
+    try argv.append(allocator, "--line-number");
+    try argv.append(allocator, "--with-filename");
 
     if (params.case_sensitive) |case_sensitive| {
         if (!case_sensitive) {
-            try argv.append("--ignore-case");
+            try argv.append(allocator, "--ignore-case");
         }
     }
 
-    try argv.append(params.query);
+    try argv.append(allocator, params.query);
 
     if (params.path) |path| {
-        try argv.append(path);
+        try argv.append(allocator, path);
     } else {
-        try argv.append(".");
+        try argv.append(allocator, ".");
     }
 
     return helpers.runCommand(allocator, io, argv.items, null);
