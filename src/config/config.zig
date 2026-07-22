@@ -53,12 +53,20 @@ pub const PromptsConfig = struct {
     }
 };
 
+pub const Provider = struct {
+    name: []const u8,
+    apiKey: []const u8,
+    url: []const u8,
+    defaultModel: []const u8,
+};
+
 pub const Config = struct {
     provider: []const u8 = "lmstudio",
     providerUrl: []const u8 = default_lm_studio_url,
     apiKey: []const u8 = "",
     model: []const u8 = "",
     prompts: PromptsConfig = .{},
+    //providerList: std.ArrayList(Provider),
 
     pub fn default() Config {
         return .{};
