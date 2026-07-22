@@ -58,7 +58,7 @@ pub const PromptsConfig = struct {
 };
 
 pub const Provider = struct {
-    name: provider.SupportedProviders,
+    name: provider.ModelProvider,
     apiKey: ?[]const u8,
     url: []const u8,
     defaultModel: []const u8,
@@ -74,7 +74,7 @@ pub const Provider = struct {
 };
 
 pub const Config = struct {
-    provider: provider.SupportedProviders = .lmstudio,
+    provider: provider.ModelProvider = .lmstudio,
     providerUrl: []const u8 = default_lm_studio_url,
     apiKey: []const u8 = "",
     model: []const u8 = "",

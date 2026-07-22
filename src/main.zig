@@ -20,7 +20,7 @@ const provider = @import("providers/provider.zig");
 const sigint = @import("core/sigint.zig");
 const tools = @import("tools");
 const welcome = @import("tui/welcome.zig");
-const SupportedProviders = provider.SupportedProviders;
+const ModelProvider = provider.ModelProvider;
 
 const ReconfigurePrompt = struct {
     changed: bool = false,
@@ -70,7 +70,7 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     var prov: provider.Provider = undefined;
-    var selected_provider: SupportedProviders = undefined;
+    var selected_provider: ModelProvider = undefined;
     var provider_url: []const u8 = undefined;
     var model_key: []const u8 = undefined;
     try initializeProviderAndModel(
@@ -141,14 +141,14 @@ pub fn main(init: std.process.Init) !void {
     try runChatLoop(&ctx);
 }
 
-fn providerHasFixedUrl(selectedProvider: provider.SupportedProviders) bool {
+fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
     return selectedProvider == .opencode_zen or
         selectedProvider == .opencode_go or
         selectedProvider == .copilot or
         selectedProvider == .mock;
 }
 
-fn defaultProviderUrl(selectedProvider: provider.SupportedProviders) []const u8 {
+fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .opencode_zen) return opencode_zen.default_base_url;
     if (selectedProvider == .opencode_go) return opencode_go.default_base_url;
     if (selectedProvider == .copilot) return copilot.default_base_url;
@@ -316,7 +316,7 @@ fn initializeProviderAndModel(
     stdout_writer: *std.Io.Writer,
     random: std.Random,
     prov: *provider.Provider,
-    selected_provider: *SupportedProviders,
+    selected_provider: *ModelProvider,
     provider_url: *[]const u8,
     model_key: *[]const u8,
 ) !void {
@@ -438,7 +438,7 @@ const ChatLoopContext = struct {
     random: std.Random,
     history: *prompt_history.History,
     prov: *provider.Provider,
-    model_provider: *SupportedProviders,
+    model_provider: *ModelProvider,
     provider_url: *[]const u8,
     model_key: *[]const u8,
     full_tool_definitions: *std.ArrayList(openai.ToolDefinition),
@@ -768,15 +768,15 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
     }
 }
 
-fn effectiveProvider(parsed: cli.Options, cfg: config.Config) SupportedProviders {
+fn effectiveProvider(parsed: cli.Options, cfg: config.Config) ModelProvider {
     if (parsed.provider) |p| {
-        const parsed_enum = std.meta.stringToEnum(provider.SupportedProviders, p);
+        const parsed_enum = std.meta.stringToEnum(provider.ModelProvider, p);
         if (parsed_enum) |val| return val;
     }
     return cfg.provider;
 }
 
-fn baseUrlFor(model_provider: SupportedProviders, parsed: cli.Options, cfg: config.Config) []const u8 {
+fn baseUrlFor(model_provider: ModelProvider, parsed: cli.Options, cfg: config.Config) []const u8 {
     if (providerHasFixedUrl(model_provider)) return defaultProviderUrl(model_provider);
     if (parsed.url) |url| return url;
     if (cfg.provider == model_provider and cfg.providerUrl.len > 0) {
@@ -785,7 +785,7 @@ fn baseUrlFor(model_provider: SupportedProviders, parsed: cli.Options, cfg: conf
     return config.default_lm_studio_url;
 }
 
-fn requiresApiKey(selected_provider: SupportedProviders) bool {
+fn requiresApiKey(selected_provider: ModelProvider) bool {
     return selected_provider == .opencode_zen or
         selected_provider == .opencode_go;
 }
@@ -857,7 +857,7 @@ fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
 
 fn createProvider(
     is_mock: bool,
-    prov: SupportedProviders,
+    prov: ModelProvider,
     url: []const u8,
     api_key: []const u8,
     arena: std.mem.Allocator,
