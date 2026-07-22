@@ -1,18 +1,20 @@
 const std = @import("std");
 const zz = @import("zigzag");
 const input = @import("input.zig");
+const provider = @import("../providers/provider.zig");
+const SupportedProvider = provider.SupportedProviders;
 
 pub const ProviderOption = struct {
-    id: []const u8,
+    id: SupportedProvider,
     display_name: []const u8,
 };
 
 pub const default_providers = [_]ProviderOption{
-    .{ .id = "lmstudio", .display_name = "LM Studio" },
-    .{ .id = "opencode", .display_name = "OpenCode Zen" },
-    .{ .id = "opencode-go", .display_name = "OpenCode Go" },
-    .{ .id = "copilot", .display_name = "GitHub Copilot" },
-    .{ .id = "mock", .display_name = "Mock" },
+    .{ .id = .lmstudio, .display_name = "LM Studio" },
+    .{ .id = .opencode_zen, .display_name = "OpenCode Zen" },
+    .{ .id = .opencode_go, .display_name = "OpenCode Go" },
+    .{ .id = .copilot, .display_name = "GitHub Copilot" },
+    .{ .id = .mock, .display_name = "Mock" },
 };
 
 var provider_pick_list: []const ProviderOption = &default_providers;
@@ -35,7 +37,7 @@ pub const Widget = struct {
             .selected = null,
         };
         for (provider_pick_list) |p| {
-            const id = ctx.persistent_allocator.dupe(u8, p.id) catch continue;
+            const id = ctx.persistent_allocator.dupe(u8, @tagName(p.id)) catch continue;
             const display_name = ctx.persistent_allocator.dupe(u8, p.display_name) catch {
                 ctx.persistent_allocator.free(id);
                 continue;
@@ -86,7 +88,7 @@ pub fn selectProviderInteractive(
     arena: std.mem.Allocator,
     io: std.Io,
     init: std.process.Init,
-) !?[]const u8 {
+) !?SupportedProvider {
     setProviders(&default_providers);
     var program = zz.Program(Widget).init(init.gpa, io, init.environ_map);
     defer program.deinit();
@@ -105,13 +107,14 @@ pub fn selectProviderInteractive(
     };
 
     const picked = program.model.selected orelse return null;
-    return try arena.dupe(u8, picked);
+    const e = std.meta.stringToEnum(SupportedProvider, picked) orelse return null;
+    return e;
 }
 
 pub fn selectProviderText(
     arena: std.mem.Allocator,
     io: std.Io,
-) !?[]const u8 {
+) !?SupportedProvider {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
@@ -131,7 +134,7 @@ pub fn selectProviderText(
 
     const idx = std.fmt.parseInt(usize, line, 10) catch null;
     if (idx) |i| {
-        if (i > 0 and i <= provider_pick_list.len) return try arena.dupe(u8, provider_pick_list[i - 1].id);
+        if (i > 0 and i <= provider_pick_list.len) return provider_pick_list[i - 1].id;
         try stdout_writer.print("Invalid provider number.\n", .{});
         try stdout_writer.flush();
         return null;
@@ -143,12 +146,18 @@ pub fn selectProviderText(
         return null;
     }
 
-    return try arena.dupe(u8, line);
+    if (std.meta.stringToEnum(SupportedProvider, line)) |val|
+        return val
+    else
+        return null;
 }
 
 fn findProviderById(id: []const u8) ?ProviderOption {
-    for (provider_pick_list) |p| {
-        if (std.mem.eql(u8, p.id, id)) return p;
+    const parsed = std.meta.stringToEnum(SupportedProvider, id);
+    if (parsed) |val| {
+        for (provider_pick_list) |p| {
+            if (p.id == val) return p;
+        }
     }
     return null;
 }
