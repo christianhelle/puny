@@ -397,8 +397,8 @@ fn emitDelay(speed: MockSpeed, io: std.Io) !void {
     switch (speed) {
         .instant => {},
         .normal => {
-            // ~10ms per token = ~100 tokens/sec
-            try io.sleep(.{ .nanoseconds = @as(i96, @intCast(std.time.ns_per_ms * 10)) }, .awake);
+            // ~2ms per token = ~1000  tokens/sec
+            try io.sleep(.{ .nanoseconds = @as(i96, @intCast(std.time.ns_per_ms * 2)) }, .awake);
         },
         .slow => {
             // ~100ms per token = ~10 tokens/sec
