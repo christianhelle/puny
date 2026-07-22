@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
+const provider = @import("../providers/provider.zig");
 const opencode_zen = @import("../providers/opencode_zen.zig");
 const opencode_go = @import("../providers/opencode_go.zig");
 const copilot = @import("../providers/copilot.zig");
@@ -56,15 +57,8 @@ pub const PromptsConfig = struct {
     }
 };
 
-pub const Providers = enum {
-    lmstudio,
-    opencode_zen,
-    opencode_go,
-    copilot,
-};
-
 pub const Provider = struct {
-    name: Providers,
+    name: provider.SupportedProviders,
     apiKey: ?[]const u8,
     url: []const u8,
     defaultModel: []const u8,
@@ -80,7 +74,7 @@ pub const Provider = struct {
 };
 
 pub const Config = struct {
-    provider: []const u8 = "lmstudio",
+    provider: provider.SupportedProviders = .lmstudio,
     providerUrl: []const u8 = default_lm_studio_url,
     apiKey: []const u8 = "",
     model: []const u8 = "",
@@ -98,7 +92,7 @@ pub const Config = struct {
 
     pub fn clone(self: Config, allocator: std.mem.Allocator) std.mem.Allocator.Error!Config {
         return .{
-            .provider = try allocator.dupe(u8, self.provider),
+            .provider = self.provider,
             .providerUrl = try allocator.dupe(u8, self.providerUrl),
             .apiKey = try allocator.dupe(u8, self.apiKey),
             .model = try allocator.dupe(u8, self.model),
@@ -107,7 +101,6 @@ pub const Config = struct {
     }
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
-        allocator.free(self.provider);
         allocator.free(self.providerUrl);
         allocator.free(self.apiKey);
         allocator.free(self.model);
@@ -234,7 +227,7 @@ test "round-trip default config via JSON" {
     var cloned = try parsed.value.clone(allocator);
     defer cloned.deinit(allocator);
 
-    try std.testing.expectEqualStrings("lmstudio", cloned.provider);
+    try std.testing.expectEqual(.lmstudio, cloned.provider);
     try std.testing.expectEqualStrings("http://127.0.0.1:1234", cloned.providerUrl);
     try std.testing.expectEqualStrings("", cloned.model);
 }
@@ -296,7 +289,7 @@ test "can deserialize valid config JSON" {
 test "can serialize config to JSON" {
     const allocator = std.testing.allocator;
     const cfg = Config{
-        .provider = "lmstudio",
+        .provider = .lmstudio,
         .providerUrl = "http://127.0.0.1:1234",
         .model = "google/gemma-4-e2b",
     };
