@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Migrate from deprecated API's ([#41](https://github.com/christianhelle/puny/pull/41)) ([@christianhelle](https://github.com/christianhelle/))
 - Generate Tool Schemas at Comptime ([#40](https://github.com/christianhelle/puny/pull/40)) ([@christianhelle](https://github.com/christianhelle/))
 - Memory and Resource usage Optimization ([#39](https://github.com/christianhelle/puny/pull/39)) ([@christianhelle](https://github.com/christianhelle/))
 - Show app memory usage in /stats ([#38](https://github.com/christianhelle/puny/pull/38)) ([@christianhelle](https://github.com/christianhelle/))
