@@ -5,9 +5,9 @@ pub fn dupeString(allocator: std.mem.Allocator, s: []const u8) std.mem.Allocator
     return try allocator.dupe(u8, s);
 }
 
-pub fn ownedSliceOrEmpty(list: *std.array_list.Managed(u8)) std.mem.Allocator.Error![]const u8 {
+pub fn ownedSliceOrEmpty(list: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
     if (list.items.len == 0) return "";
-    return try list.toOwnedSlice();
+    return try list.toOwnedSlice(allocator);
 }
 
 pub fn readFileAlloc(allocator: std.mem.Allocator, io: std.Io, path: []const u8, max_size: usize) ![]const u8 {
@@ -27,16 +27,16 @@ pub fn listDirectory(allocator: std.mem.Allocator, io: std.Io, path: []const u8)
     var dir = try cwd.openDir(io, path, .{ .iterate = true });
     defer dir.close(io);
 
-    var list = std.array_list.Managed(u8).init(allocator);
-    defer list.deinit();
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(allocator);
 
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
-        try list.appendSlice(entry.name);
-        try list.append('\n');
+        try list.appendSlice(allocator, entry.name);
+        try list.append(allocator, '\n');
     }
 
-    return ownedSliceOrEmpty(&list);
+    return ownedSliceOrEmpty(&list, allocator);
 }
 
 pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []const u8, cwd: ?[]const u8) ![]const u8 {
@@ -47,10 +47,10 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
         .stderr = .pipe,
     });
 
-    var stdout = std.array_list.Managed(u8).init(allocator);
-    defer stdout.deinit();
-    var stderr = std.array_list.Managed(u8).init(allocator);
-    defer stderr.deinit();
+    var stdout: std.ArrayList(u8) = .empty;
+    defer stdout.deinit(allocator);
+    var stderr: std.ArrayList(u8) = .empty;
+    defer stderr.deinit(allocator);
 
     if (child.stdout) |file| {
         var buffer: [4096]u8 = undefined;
@@ -58,7 +58,7 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
         while (true) {
             const n = try reader.interface.readSliceShort(&buffer);
             if (n == 0) break;
-            try stdout.appendSlice(buffer[0..n]);
+            try stdout.appendSlice(allocator, buffer[0..n]);
         }
     }
 
@@ -68,39 +68,39 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
         while (true) {
             const n = try reader.interface.readSliceShort(&buffer);
             if (n == 0) break;
-            try stderr.appendSlice(buffer[0..n]);
+            try stderr.appendSlice(allocator, buffer[0..n]);
         }
     }
 
     const term = try child.wait(io);
 
-    var result = std.array_list.Managed(u8).init(allocator);
-    defer result.deinit();
+    var result: std.ArrayList(u8) = .empty;
+    defer result.deinit(allocator);
 
     switch (term) {
         .exited => |code| {
-            try result.appendSlice("Exit code: ");
+            try result.appendSlice(allocator, "Exit code: ");
             var buf: [32]u8 = undefined;
             const n = try std.fmt.bufPrint(&buf, "{d}", .{code});
-            try result.appendSlice(n);
+            try result.appendSlice(allocator, n);
         },
         else => {
-            try result.appendSlice("Terminated\n");
+            try result.appendSlice(allocator, "Terminated\n");
         },
     }
 
     if (stdout.items.len > 0) {
-        try result.appendSlice("STDOUT:\n");
-        try result.appendSlice(stdout.items);
-        try result.append('\n');
+        try result.appendSlice(allocator, "STDOUT:\n");
+        try result.appendSlice(allocator, stdout.items);
+        try result.append(allocator, '\n');
     }
     if (stderr.items.len > 0) {
-        try result.appendSlice("STDERR:\n");
-        try result.appendSlice(stderr.items);
-        try result.append('\n');
+        try result.appendSlice(allocator, "STDERR:\n");
+        try result.appendSlice(allocator, stderr.items);
+        try result.append(allocator, '\n');
     }
 
-    return ownedSliceOrEmpty(&result);
+    return ownedSliceOrEmpty(&result, allocator);
 }
 
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
