@@ -50,7 +50,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !htt
     }
     arena.* = std.heap.ArenaAllocator.init(allocator);
 
-    var models = std.array_list.Managed(ModelInfo).init(arena.allocator());
+    var models: std.ArrayList(ModelInfo) = .empty;
 
     for (items) |item| {
         const id = if (item.object.get("id")) |v| v.string else continue;
@@ -59,7 +59,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !htt
         const owned_by = if (item.object.get("owned_by")) |v| v.string else "opencode";
         const arena_alloc = arena.allocator();
 
-        try models.append(.{
+        try models.append(arena_alloc, .{
             .id = try arena_alloc.dupe(u8, id),
             .owned_by = try arena_alloc.dupe(u8, owned_by),
         });
@@ -67,7 +67,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !htt
 
     const result = std.json.Parsed(ModelsList){
         .arena = arena,
-        .value = .{ .data = try models.toOwnedSlice() },
+        .value = .{ .data = try models.toOwnedSlice(arena.allocator()) },
     };
 
     return .{
@@ -237,7 +237,7 @@ const BlockType = enum {
 const AnthropicSseCallback = struct {
     allocator: std.mem.Allocator,
     callback: openai.StreamCallback,
-    block_types: std.array_list.Managed(BlockType),
+    block_types: std.ArrayList(BlockType),
     input_tokens: i64 = 0,
     observer: ?http_client.HttpObserver = null,
 
@@ -266,7 +266,7 @@ const AnthropicSseCallback = struct {
             const block_type = if (content_block.object.get("type")) |v| v.string else return;
 
             while (self.block_types.items.len <= index) {
-                try self.block_types.append(.text);
+                try self.block_types.append(self.allocator, .text);
             }
 
             if (std.mem.eql(u8, block_type, "tool_use")) {
@@ -410,7 +410,7 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
     }
 
-    const block_types = std.array_list.Managed(BlockType).init(allocator);
+    const block_types: std.ArrayList(BlockType) = .empty;
 
     var sse = AnthropicSseCallback{
         .allocator = allocator,
@@ -419,7 +419,7 @@ pub fn chatStreamingAnthropic(client: *http_client.Client, request: openai.ChatR
         .observer = client.http_observer,
     };
 
-    defer sse.block_types.deinit();
+    defer sse.block_types.deinit(allocator);
     http_client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
@@ -986,23 +986,23 @@ const TestEvent = union(enum) {
 
 const TestSseCallback = struct {
     allocator: std.mem.Allocator,
-    events: *std.array_list.Managed(TestEvent),
+    events: *std.ArrayList(TestEvent),
 
     pub fn event(ctx: *anyopaque, ev: openai.StreamEvent) !void {
         const self: *TestSseCallback = @ptrCast(@alignCast(ctx));
         switch (ev) {
-            .content => |v| try self.events.append(.{ .content = try self.allocator.dupe(u8, v) }),
-            .tool_call_start => |v| try self.events.append(.{ .tool_call_start = .{
+            .content => |v| try self.events.append(self.allocator, .{ .content = try self.allocator.dupe(u8, v) }),
+            .tool_call_start => |v| try self.events.append(self.allocator, .{ .tool_call_start = .{
                 .index = v.index,
                 .id = try self.allocator.dupe(u8, v.id),
                 .name = try self.allocator.dupe(u8, v.name),
             } }),
-            .tool_call_delta => |v| try self.events.append(.{ .tool_call_delta = .{
+            .tool_call_delta => |v| try self.events.append(self.allocator, .{ .tool_call_delta = .{
                 .index = v.index,
                 .arguments = try self.allocator.dupe(u8, v.arguments),
             } }),
-            .finish => |v| try self.events.append(.{ .finish = if (v) |reason| try self.allocator.dupe(u8, reason) else null }),
-            .usage => |v| try self.events.append(.{ .usage = v }),
+            .finish => |v| try self.events.append(self.allocator, .{ .finish = if (v) |reason| try self.allocator.dupe(u8, reason) else null }),
+            .usage => |v| try self.events.append(self.allocator, .{ .usage = v }),
         }
     }
 };
@@ -1012,7 +1012,7 @@ test "AnthropicSseCallback emits content and usage events" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    var events = std.array_list.Managed(TestEvent).init(allocator);
+    var events = std.ArrayList(TestEvent).empty;
 
     var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
     const callback = openai.StreamCallback{
@@ -1022,7 +1022,7 @@ test "AnthropicSseCallback emits content and usage events" {
         },
     };
 
-    const block_types = std.array_list.Managed(BlockType).init(allocator);
+    const block_types = std.ArrayList(BlockType).empty;
 
     var sse = AnthropicSseCallback{
         .allocator = allocator,
@@ -1050,7 +1050,7 @@ test "AnthropicSseCallback emits tool call events" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    var events = std.array_list.Managed(TestEvent).init(allocator);
+    var events = std.ArrayList(TestEvent).empty;
 
     var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
     const callback = openai.StreamCallback{
@@ -1060,7 +1060,7 @@ test "AnthropicSseCallback emits tool call events" {
         },
     };
 
-    const block_types = std.array_list.Managed(BlockType).init(allocator);
+    const block_types = std.ArrayList(BlockType).empty;
 
     var sse = AnthropicSseCallback{
         .allocator = allocator,
@@ -1188,7 +1188,7 @@ test "GoogleSseCallback emits content and usage events" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    var events = std.array_list.Managed(TestEvent).init(allocator);
+    var events = std.ArrayList(TestEvent).empty;
 
     var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
     const callback = openai.StreamCallback{
@@ -1217,7 +1217,7 @@ test "GoogleSseCallback emits tool call events" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    var events = std.array_list.Managed(TestEvent).init(allocator);
+    var events = std.ArrayList(TestEvent).empty;
 
     var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
     const callback = openai.StreamCallback{
