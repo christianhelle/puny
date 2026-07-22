@@ -4,113 +4,114 @@ const openai = @import("../providers/openai.zig");
 const max_value_length = 120;
 
 pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8 {
-    var output = std.array_list.Managed(u8).init(allocator);
-    errdefer output.deinit();
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
 
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, tool_call.function.arguments, .{}) catch {
-        try output.appendSlice("Calling ");
-        try appendJsonString(&output, tool_call.function.name);
-        try output.appendSlice(" (invalid arguments: ");
-        try appendJsonString(&output, tool_call.function.arguments);
-        try output.append(')');
-        return output.toOwnedSlice();
+        try output.appendSlice(allocator, "Calling ");
+        try appendJsonString(&output, allocator, tool_call.function.name);
+        try output.appendSlice(allocator, " (invalid arguments: ");
+        try appendJsonString(&output, allocator, tool_call.function.arguments);
+        try output.append(allocator, ')');
+        return output.toOwnedSlice(allocator);
     };
     defer parsed.deinit();
 
-    if (!try renderKnown(&output, tool_call.function.name, parsed.value)) {
+    if (!try renderKnown(&output, allocator, tool_call.function.name, parsed.value)) {
         try appendGeneric(&output, allocator, tool_call.function.name, parsed.value);
     }
-    return output.toOwnedSlice();
+    return output.toOwnedSlice(allocator);
 }
 
 fn renderKnown(
-    output: *std.array_list.Managed(u8),
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
     name: []const u8,
     args: std.json.Value,
 ) !bool {
     if (std.mem.eql(u8, name, "read_file")) {
         const path = getString(args, "path") orelse return false;
-        try output.appendSlice("Reading ");
-        try appendJsonString(output, path);
+        try output.appendSlice(allocator, "Reading ");
+        try appendJsonString(output, allocator, path);
         return true;
     }
 
     if (std.mem.eql(u8, name, "write_file")) {
         const path = getString(args, "path") orelse return false;
         const content = getString(args, "content") orelse return false;
-        try output.appendSlice("Writing ");
+        try output.appendSlice(allocator, "Writing ");
         if (content.len == 0) {
-            try output.appendSlice("an empty file to ");
+            try output.appendSlice(allocator, "an empty file to ");
         } else {
-            try appendCount(output, lineCount(content), "line", "lines");
-            try output.appendSlice(" (");
-            try appendCount(output, content.len, "byte", "bytes");
-            try output.appendSlice(") to ");
+            try appendCount(output, allocator, lineCount(content), "line", "lines");
+            try output.appendSlice(allocator, " (");
+            try appendCount(output, allocator, content.len, "byte", "bytes");
+            try output.appendSlice(allocator, ") to ");
         }
-        try appendJsonString(output, path);
+        try appendJsonString(output, allocator, path);
         return true;
     }
 
     if (std.mem.eql(u8, name, "list_directory")) {
         const path = getString(args, "path") orelse return false;
-        try output.appendSlice("Listing ");
-        try appendJsonString(output, path);
+        try output.appendSlice(allocator, "Listing ");
+        try appendJsonString(output, allocator, path);
         return true;
     }
 
     if (std.mem.eql(u8, name, "execute_shell")) {
         const command = getString(args, "command") orelse return false;
-        try output.appendSlice("Running ");
-        try appendJsonString(output, command);
+        try output.appendSlice(allocator, "Running ");
+        try appendJsonString(output, allocator, command);
         if (getString(args, "working_directory")) |working_directory| {
-            try output.appendSlice(" in ");
-            try appendJsonString(output, working_directory);
+            try output.appendSlice(allocator, " in ");
+            try appendJsonString(output, allocator, working_directory);
         }
         return true;
     }
 
     if (std.mem.eql(u8, name, "grep_search")) {
         const query = getString(args, "query") orelse return false;
-        try output.appendSlice("Searching for ");
-        try appendJsonString(output, query);
-        try output.appendSlice(" in ");
+        try output.appendSlice(allocator, "Searching for ");
+        try appendJsonString(output, allocator, query);
+        try output.appendSlice(allocator, " in ");
         if (getString(args, "path")) |path| {
-            try appendJsonString(output, path);
+            try appendJsonString(output, allocator, path);
         } else {
-            try output.appendSlice("current directory");
+            try output.appendSlice(allocator, "current directory");
         }
         if (getBool(args, "case_sensitive") == true) {
-            try output.appendSlice(" (case-sensitive)");
+            try output.appendSlice(allocator, " (case-sensitive)");
         }
         return true;
     }
 
     if (std.mem.eql(u8, name, "git_status")) {
-        try output.appendSlice("Checking git status");
+        try output.appendSlice(allocator, "Checking git status");
         if (getString(args, "path")) |path| {
-            try output.appendSlice(" for ");
-            try appendJsonString(output, path);
+            try output.appendSlice(allocator, " for ");
+            try appendJsonString(output, allocator, path);
         }
         return true;
     }
 
     if (std.mem.eql(u8, name, "git_diff")) {
-        try output.appendSlice("Showing ");
+        try output.appendSlice(allocator, "Showing ");
         if (getBool(args, "staged") == true) {
-            try output.appendSlice("staged ");
+            try output.appendSlice(allocator, "staged ");
         }
-        try output.appendSlice("git diff");
+        try output.appendSlice(allocator, "git diff");
         if (getString(args, "path")) |path| {
-            try output.appendSlice(" for ");
-            try appendJsonString(output, path);
+            try output.appendSlice(allocator, " for ");
+            try appendJsonString(output, allocator, path);
         }
         return true;
     }
 
     if (std.mem.eql(u8, name, "web_fetch")) {
         const url = getString(args, "url") orelse return false;
-        try output.appendSlice("Fetching ");
-        try appendJsonString(output, url);
+        try output.appendSlice(allocator, "Fetching ");
+        try appendJsonString(output, allocator, url);
         return true;
     }
 
@@ -118,35 +119,35 @@ fn renderKnown(
 }
 
 fn appendGeneric(
-    output: *std.array_list.Managed(u8),
+    output: *std.ArrayList(u8),
     allocator: std.mem.Allocator,
     name: []const u8,
     args: std.json.Value,
 ) !void {
-    try output.appendSlice("Calling ");
-    try appendJsonString(output, name);
+    try output.appendSlice(allocator, "Calling ");
+    try appendJsonString(output, allocator, name);
 
     if (args == .object) {
         var iterator = args.object.iterator();
         if (iterator.next() == null) {
-            try output.appendSlice(" with no arguments");
+            try output.appendSlice(allocator, " with no arguments");
             return;
         }
 
-        try output.appendSlice(" with ");
+        try output.appendSlice(allocator, " with ");
         var first = true;
         iterator = args.object.iterator();
         while (iterator.next()) |entry| {
-            if (!first) try output.appendSlice(", ");
+            if (!first) try output.appendSlice(allocator, ", ");
             first = false;
-            try output.appendSlice(entry.key_ptr.*);
-            try output.append('=');
+            try output.appendSlice(allocator, entry.key_ptr.*);
+            try output.append(allocator, '=');
             try appendJsonValue(output, allocator, entry.value_ptr.*);
         }
         return;
     }
 
-    try output.appendSlice(" with ");
+    try output.appendSlice(allocator, " with ");
     try appendJsonValue(output, allocator, args);
 }
 
@@ -162,8 +163,8 @@ fn getBool(args: std.json.Value, key: []const u8) ?bool {
     return if (value == .bool) value.bool else null;
 }
 
-fn appendJsonString(output: *std.array_list.Managed(u8), value: []const u8) !void {
-    try output.append('"');
+fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
+    try output.append(allocator, '"');
 
     var index: usize = 0;
     var display_length: usize = 1;
@@ -194,59 +195,60 @@ fn appendJsonString(output: *std.array_list.Managed(u8), value: []const u8) !voi
         }
 
         if (display_length + escaped_display_length + 1 > max_value_length) {
-            try output.appendSlice("...");
-            try output.append('"');
+            try output.appendSlice(allocator, "...");
+            try output.append(allocator, '"');
             return;
         }
 
-        try output.appendSlice(escaped);
+        try output.appendSlice(allocator, escaped);
         display_length += escaped_display_length;
         index = next_index;
     }
 
-    try output.append('"');
+    try output.append(allocator, '"');
 }
 
 fn appendJsonValue(
-    output: *std.array_list.Managed(u8),
+    output: *std.ArrayList(u8),
     allocator: std.mem.Allocator,
     value: std.json.Value,
 ) !void {
     if (value == .string) {
-        try appendJsonString(output, value.string);
+        try appendJsonString(output, allocator, value.string);
         return;
     }
 
     var json = std.Io.Writer.Allocating.init(allocator);
     defer json.deinit();
     try std.json.Stringify.value(value, .{}, &json.writer);
-    try appendCapped(output, json.written());
+    try appendCapped(output, allocator, json.written());
 }
 
-fn appendCapped(output: *std.array_list.Managed(u8), value: []const u8) !void {
+fn appendCapped(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
     var index: usize = 0;
     var display_length: usize = 0;
     while (index < value.len and display_length < max_value_length) {
         const width = std.unicode.utf8ByteSequenceLength(value[index]) catch 1;
         const next_index = @min(value.len, index + width);
-        try output.appendSlice(value[index..next_index]);
+        try output.appendSlice(allocator, value[index..next_index]);
         index = next_index;
         display_length += 1;
     }
-    if (index < value.len) try output.appendSlice("...");
+    if (index < value.len) try output.appendSlice(allocator, "...");
 }
 
 fn appendCount(
-    output: *std.array_list.Managed(u8),
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
     value: usize,
     singular: []const u8,
     plural: []const u8,
 ) !void {
     var buffer: [32]u8 = undefined;
     const number = try std.fmt.bufPrint(&buffer, "{d}", .{value});
-    try output.appendSlice(number);
-    try output.append(' ');
-    try output.appendSlice(if (value == 1) singular else plural);
+    try output.appendSlice(allocator, number);
+    try output.append(allocator, ' ');
+    try output.appendSlice(allocator, if (value == 1) singular else plural);
 }
 
 fn lineCount(content: []const u8) usize {
