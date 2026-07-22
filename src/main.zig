@@ -324,7 +324,14 @@ fn initializeProviderAndModel(
     provider_url.* = if (parsed.mock) "-" else baseUrlFor(selected_provider.*, parsed, cfg.*);
     const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
 
-    if (!parsed.mock and requiresApiKey(selected_provider.*) and api_key.len == 0) {
+    // When the provider is Copilot and the apiKey came from config (not explicitly
+    // provided via CLI or env), ignore it if it doesn't look like a valid GitHub
+    // OAuth token. This prevents stale keys from other providers from breaking
+    // Copilot's auth flow.
+    const is_implicit_key = parsed.api_key == null and parsed.api_key_file == null and init.environ_map.get("PUNY_API_KEY") == null;
+    const effective_api_key = if (selected_provider.* == .copilot and is_implicit_key and api_key.len > 0 and !std.mem.startsWith(u8, api_key, "gho_")) "" else api_key;
+
+    if (!parsed.mock and requiresApiKey(selected_provider.*) and effective_api_key.len == 0) {
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
         const stderr_writer = &stderr_file_writer.interface;
@@ -345,7 +352,7 @@ fn initializeProviderAndModel(
         break :blk null;
     };
 
-    prov.* = createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io);
+    prov.* = createProvider(parsed.mock, selected_provider.*, provider_url.*, effective_api_key, provider_arena, io);
     errdefer prov.deinit();
     if (!parsed.mock) try ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
@@ -535,8 +542,12 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (result.cancelled) return;
     if (!result.changed) return;
 
-    try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
     const new_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
+    // When switching to Copilot, clear any stale API key from a different provider
+    if (new_provider_name == .copilot and old_provider_name != .copilot) {
+        ctx.cfg.apiKey = "";
+    }
+    try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
     const new_provider_url = if (ctx.parsed.mock) "-" else baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
     const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
 
@@ -607,7 +618,9 @@ fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void 
 
 fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) !void {
     // If a provider ID was given, validate it; otherwise show the picker
-    const picked_provider = if (provider_id) |id| {
+    const picked_provider = if (provider_id) |id| blk: {
+        const parsed_enum = std.meta.stringToEnum(provider.ModelProvider, id);
+        if (parsed_enum) |val| break :blk val;
         try ctx.stdout_writer.print("\nUnknown provider '{s}'.\n", .{id});
         try ctx.stdout_writer.flush();
         return;
@@ -635,6 +648,11 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
         ctx.cfg.providerUrl = try ctx.arena.dupe(u8, new_provider_url);
     } else {
         ctx.cfg.providerUrl = try ctx.arena.dupe(u8, new_provider_url);
+    }
+
+    // When switching to Copilot, clear any stale API key from a different provider
+    if (picked_provider == .copilot and current_provider != .copilot) {
+        ctx.cfg.apiKey = "";
     }
 
     // Save the updated config
