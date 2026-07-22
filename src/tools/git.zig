@@ -7,11 +7,11 @@ const GitStatusParams = struct {
 };
 
 fn gitStatus(allocator: std.mem.Allocator, io: std.Io, params: GitStatusParams) ![]const u8 {
-    var argv = std.array_list.Managed([]const u8).init(allocator);
-    defer argv.deinit();
-    try argv.appendSlice(&[_][]const u8{ "git", "status", "--short", "--branch" });
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &[_][]const u8{ "git", "status", "--short", "--branch" });
     if (params.path) |path| {
-        try argv.append(path);
+        try argv.append(allocator, path);
     }
     return helpers.runCommand(allocator, io, argv.items, null);
 }
@@ -22,17 +22,17 @@ const GitDiffParams = struct {
 };
 
 fn gitDiff(allocator: std.mem.Allocator, io: std.Io, params: GitDiffParams) ![]const u8 {
-    var argv = std.array_list.Managed([]const u8).init(allocator);
-    defer argv.deinit();
-    try argv.appendSlice(&[_][]const u8{ "git", "diff" });
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &[_][]const u8{ "git", "diff" });
     if (params.staged) |staged| {
         if (staged) {
-            try argv.append("--staged");
+            try argv.append(allocator, "--staged");
         }
     }
     if (params.path) |path| {
-        try argv.append("--");
-        try argv.append(path);
+        try argv.append(allocator, "--");
+        try argv.append(allocator, path);
     }
     return helpers.runCommand(allocator, io, argv.items, null);
 }
