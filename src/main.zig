@@ -20,6 +20,7 @@ const provider = @import("providers/provider.zig");
 const sigint = @import("core/sigint.zig");
 const tools = @import("tools");
 const welcome = @import("tui/welcome.zig");
+const SupportedProviders = provider.SupportedProviders;
 
 const ReconfigurePrompt = struct {
     changed: bool = false,
@@ -69,7 +70,7 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     var prov: provider.Provider = undefined;
-    var provider_name: []const u8 = undefined;
+    var selected_provider: SupportedProviders = undefined;
     var provider_url: []const u8 = undefined;
     var model_key: []const u8 = undefined;
     try initializeProviderAndModel(
@@ -82,7 +83,7 @@ pub fn main(init: std.process.Init) !void {
         stdout_writer,
         random,
         &prov,
-        &provider_name,
+        &selected_provider,
         &provider_url,
         &model_key,
     );
@@ -123,7 +124,7 @@ pub fn main(init: std.process.Init) !void {
         .random = random,
         .history = &history,
         .prov = &prov,
-        .provider_name = &provider_name,
+        .model_provider = &selected_provider,
         .provider_url = &provider_url,
         .model_key = &model_key,
         .full_tool_definitions = &full_tool_definitions,
@@ -140,26 +141,18 @@ pub fn main(init: std.process.Init) !void {
     try runChatLoop(&ctx);
 }
 
-fn isValidProvider(name: []const u8) bool {
-    return std.mem.eql(u8, name, "lmstudio") or
-        std.mem.eql(u8, name, "opencode") or
-        std.mem.eql(u8, name, "opencode-go") or
-        std.mem.eql(u8, name, "copilot") or
-        std.mem.eql(u8, name, "mock");
+fn providerHasFixedUrl(selectedProvider: provider.SupportedProviders) bool {
+    return selectedProvider == .opencode_zen or
+        selectedProvider == .opencode_go or
+        selectedProvider == .copilot or
+        selectedProvider == .mock;
 }
 
-fn providerHasFixedUrl(provider_name: []const u8) bool {
-    return std.mem.eql(u8, provider_name, "opencode") or
-        std.mem.eql(u8, provider_name, "opencode-go") or
-        std.mem.eql(u8, provider_name, "copilot") or
-        std.mem.eql(u8, provider_name, "mock");
-}
-
-fn defaultProviderUrl(provider_name: []const u8) []const u8 {
-    if (std.mem.eql(u8, provider_name, "opencode")) return opencode_zen.default_base_url;
-    if (std.mem.eql(u8, provider_name, "opencode-go")) return opencode_go.default_base_url;
-    if (std.mem.eql(u8, provider_name, "copilot")) return copilot.default_base_url;
-    if (std.mem.eql(u8, provider_name, "mock")) return "-";
+fn defaultProviderUrl(selectedProvider: provider.SupportedProviders) []const u8 {
+    if (selectedProvider == .opencode_zen) return opencode_zen.default_base_url;
+    if (selectedProvider == .opencode_go) return opencode_go.default_base_url;
+    if (selectedProvider == .copilot) return copilot.default_base_url;
+    if (selectedProvider == .mock) return "-";
     return config.default_lm_studio_url;
 }
 
@@ -202,7 +195,7 @@ fn promptReconfigure(
 
     var result = ReconfigurePrompt{};
 
-    try stdout_writer.print("Current provider: {s}\n", .{cfg.provider});
+    try stdout_writer.print("Current provider: {s}\n", .{@tagName(cfg.provider)});
     try stdout_writer.flush();
 
     const picked_provider = try provider_picker.selectProviderInteractive(arena, io, init) orelse {
@@ -211,10 +204,10 @@ fn promptReconfigure(
         return .{ .cancelled = true };
     };
 
-    var provider_name: []const u8 = cfg.provider;
+    var provider_name = cfg.provider;
     var provider_changed = false;
-    if (!std.mem.eql(u8, picked_provider, cfg.provider)) {
-        cfg.provider = try arena.dupe(u8, picked_provider);
+    if (picked_provider == cfg.provider) {
+        cfg.provider = picked_provider;
         provider_name = cfg.provider;
         provider_changed = true;
         result.changed = true;
@@ -323,21 +316,21 @@ fn initializeProviderAndModel(
     stdout_writer: *std.Io.Writer,
     random: std.Random,
     prov: *provider.Provider,
-    provider_name: *[]const u8,
+    selected_provider: *SupportedProviders,
     provider_url: *[]const u8,
     model_key: *[]const u8,
 ) !void {
-    provider_name.* = effectiveProvider(parsed, cfg.*);
-    provider_url.* = if (parsed.mock) "-" else baseUrlFor(provider_name.*, parsed, cfg.*);
+    selected_provider.* = effectiveProvider(parsed, cfg.*);
+    provider_url.* = if (parsed.mock) "-" else baseUrlFor(selected_provider.*, parsed, cfg.*);
     const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
 
-    if (!parsed.mock and requiresApiKey(provider_name.*) and api_key.len == 0) {
+    if (!parsed.mock and requiresApiKey(selected_provider.*) and api_key.len == 0) {
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
         const stderr_writer = &stderr_file_writer.interface;
         stderr_writer.print(
             "Provider '{s}' requires an API key. Set one with --api-key, PUNY_API_KEY, or --reconfigure.\n",
-            .{providerDisplayName(provider_name.*)},
+            .{provider.getProviderDisplayName(selected_provider.*)},
         ) catch {};
         stderr_writer.flush() catch {};
         return error.MissingApiKey;
@@ -352,7 +345,7 @@ fn initializeProviderAndModel(
         break :blk null;
     };
 
-    prov.* = createProvider(parsed.mock, provider_name.*, provider_url.*, api_key, provider_arena, io);
+    prov.* = createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io);
     errdefer prov.deinit();
     if (!parsed.mock) try ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
@@ -395,7 +388,7 @@ fn initializeProviderAndModel(
     };
 
     try welcome.print(stdout_writer, .{
-        .provider_name = if (parsed.mock) "Mock" else providerDisplayName(provider_name.*),
+        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider.*),
         .provider_url = provider_url.*,
         .model_key = model_key.*,
         .oneshot = parsed.oneshot,
@@ -445,7 +438,7 @@ const ChatLoopContext = struct {
     random: std.Random,
     history: *prompt_history.History,
     prov: *provider.Provider,
-    provider_name: *[]const u8,
+    model_provider: *SupportedProviders,
     provider_url: *[]const u8,
     model_key: *[]const u8,
     full_tool_definitions: *std.ArrayList(openai.ToolDefinition),
@@ -547,12 +540,12 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     const new_provider_url = if (ctx.parsed.mock) "-" else baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
     const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
 
-    if (!ctx.parsed.mock and !std.mem.eql(u8, old_provider_name, new_provider_name)) {
+    if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         ctx.prov.deinit();
         ctx.prov.* = createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
         if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
-        ctx.provider_name.* = new_provider_name;
+        ctx.model_provider.* = new_provider_name;
         ctx.provider_url.* = new_provider_url;
 
         const model_skip_validation =
@@ -583,7 +576,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     try welcome.printSummary(
         ctx.stdout_writer,
         .{
-            .provider_name = if (ctx.parsed.mock) "Mock" else providerDisplayName(ctx.provider_name.*),
+            .provider_name = if (ctx.parsed.mock) "Mock" else provider.getProviderDisplayName(ctx.model_provider.*),
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
         },
@@ -614,10 +607,7 @@ fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void 
 
 fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) !void {
     // If a provider ID was given, validate it; otherwise show the picker
-    const picked_provider = if (provider_id) |id| blk: {
-        if (isValidProvider(id)) {
-            break :blk id;
-        }
+    const picked_provider = if (provider_id) |id| {
         try ctx.stdout_writer.print("\nUnknown provider '{s}'.\n", .{id});
         try ctx.stdout_writer.flush();
         return;
@@ -632,14 +622,14 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
 
     // Check if provider actually changed
     const current_provider = effectiveProvider(ctx.parsed, ctx.cfg.*);
-    if (std.mem.eql(u8, picked_provider, current_provider)) {
-        try ctx.stdout_writer.print("\nAlready using provider {s}.\n", .{providerDisplayName(picked_provider)});
+    if (picked_provider == current_provider) {
+        try ctx.stdout_writer.print("\nAlready using provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
         try ctx.stdout_writer.flush();
         return;
     }
 
     // Update the config
-    ctx.cfg.provider = try ctx.arena.dupe(u8, picked_provider);
+    ctx.cfg.provider = picked_provider;
     const new_provider_url = defaultProviderUrl(picked_provider);
     if (!providerHasFixedUrl(picked_provider)) {
         ctx.cfg.providerUrl = try ctx.arena.dupe(u8, new_provider_url);
@@ -656,7 +646,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
     ctx.prov.* = createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
     if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
     if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
-    ctx.provider_name.* = picked_provider;
+    ctx.model_provider.* = picked_provider;
     ctx.provider_url.* = new_provider_url;
 
     // Show model picker for the new provider
@@ -681,13 +671,13 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
     try welcome.printSummary(
         ctx.stdout_writer,
         .{
-            .provider_name = if (ctx.parsed.mock) "Mock" else providerDisplayName(ctx.provider_name.*),
+            .provider_name = if (ctx.parsed.mock) "Mock" else provider.getProviderDisplayName(ctx.model_provider.*),
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
         },
     );
 
-    try ctx.stdout_writer.print("Switched to provider {s}.\n", .{providerDisplayName(picked_provider)});
+    try ctx.stdout_writer.print("Switched to provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
     try ctx.stdout_writer.flush();
 }
 
@@ -745,7 +735,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
 
                 const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
-                ctx.prov.* = createProvider(ctx.parsed.mock, ctx.provider_name.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+                ctx.prov.* = createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
                 if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                 ctx.history.clear();
@@ -778,33 +768,26 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
     }
 }
 
-fn effectiveProvider(parsed: cli.Options, cfg: config.Config) []const u8 {
-    if (parsed.provider) |p| return p;
-    if (cfg.provider.len > 0) return cfg.provider;
-    return "lmstudio";
+fn effectiveProvider(parsed: cli.Options, cfg: config.Config) SupportedProviders {
+    if (parsed.provider) |p| {
+        const parsed_enum = std.meta.stringToEnum(provider.SupportedProviders, p);
+        if (parsed_enum) |val| return val;
+    }
+    return cfg.provider;
 }
 
-fn baseUrlFor(provider_name: []const u8, parsed: cli.Options, cfg: config.Config) []const u8 {
-    if (providerHasFixedUrl(provider_name)) return defaultProviderUrl(provider_name);
+fn baseUrlFor(model_provider: SupportedProviders, parsed: cli.Options, cfg: config.Config) []const u8 {
+    if (providerHasFixedUrl(model_provider)) return defaultProviderUrl(model_provider);
     if (parsed.url) |url| return url;
-    if (std.mem.eql(u8, cfg.provider, provider_name) and cfg.providerUrl.len > 0) {
+    if (cfg.provider == model_provider and cfg.providerUrl.len > 0) {
         return cfg.providerUrl;
     }
     return config.default_lm_studio_url;
 }
 
-fn requiresApiKey(provider_name: []const u8) bool {
-    return std.mem.eql(u8, provider_name, "opencode") or
-        std.mem.eql(u8, provider_name, "opencode-go");
-}
-
-fn providerDisplayName(provider_name: []const u8) []const u8 {
-    if (std.mem.eql(u8, provider_name, "opencode")) return "OpenCode Zen";
-    if (std.mem.eql(u8, provider_name, "opencode-go")) return "OpenCode Go";
-    if (std.mem.eql(u8, provider_name, "lmstudio")) return "LM Studio";
-    if (std.mem.eql(u8, provider_name, "copilot")) return "GitHub Copilot";
-    if (std.mem.eql(u8, provider_name, "mock")) return "Mock";
-    return provider_name;
+fn requiresApiKey(selected_provider: SupportedProviders) bool {
+    return selected_provider == .opencode_zen or
+        selected_provider == .opencode_go;
 }
 
 const DebugLog = struct {
@@ -872,26 +855,40 @@ fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
     log.print("{s}\n", .{data});
 }
 
-fn createProvider(is_mock: bool, provider_name: []const u8, url: []const u8, api_key: []const u8, arena: std.mem.Allocator, io: std.Io) provider.Provider {
-    if (is_mock or std.mem.eql(u8, provider_name, "mock")) return .{ .mock = mock.MockClient.init(arena, io) };
-    if (std.mem.eql(u8, provider_name, "opencode")) {
-        var c = http_client.Client.init(arena, io, api_key);
-        c.withBaseUrl(url);
-        return .{ .opencode = c };
+fn createProvider(
+    is_mock: bool,
+    prov: SupportedProviders,
+    url: []const u8,
+    api_key: []const u8,
+    arena: std.mem.Allocator,
+    io: std.Io,
+) provider.Provider {
+    if (is_mock) return .{ .mock = mock.MockClient.init(arena, io) };
+    switch (prov) {
+        .lmstudio => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .lmstudio = c };
+        },
+        .opencode_zen => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .opencode = c };
+        },
+        .opencode_go => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .opencode_go = c };
+        },
+        .copilot => {
+            var c = copilot.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .copilot = c };
+        },
+        .mock => {
+            return .{ .mock = mock.MockClient.init(arena, io) };
+        },
     }
-    if (std.mem.eql(u8, provider_name, "opencode-go")) {
-        var c = http_client.Client.init(arena, io, api_key);
-        c.withBaseUrl(url);
-        return .{ .opencode_go = c };
-    }
-    if (std.mem.eql(u8, provider_name, "copilot")) {
-        var c = copilot.Client.init(arena, io, api_key);
-        c.withBaseUrl(url);
-        return .{ .copilot = c };
-    }
-    var c = http_client.Client.init(arena, io, api_key);
-    c.withBaseUrl(url);
-    return .{ .lmstudio = c };
 }
 
 test "createProvider returns mock for mock flag or provider name" {
@@ -1006,10 +1003,10 @@ test "effectiveProvider precedence" {
 test "baseUrlFor uses CLI url for lmstudio only" {
     const cfg = config.Config{};
     const parsed = cli.Options{ .url = "http://cli.example" };
-    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor("lmstudio", parsed, cfg));
-    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor("opencode", parsed, cfg));
-    try std.testing.expectEqualStrings(opencode_go.default_base_url, baseUrlFor("opencode-go", parsed, cfg));
-    try std.testing.expectEqualStrings(copilot.default_base_url, baseUrlFor("copilot", parsed, cfg));
+    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.lmstudio, parsed, cfg));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, parsed, cfg));
+    try std.testing.expectEqualStrings(opencode_go.default_base_url, baseUrlFor(.opencode_go, parsed, cfg));
+    try std.testing.expectEqualStrings(copilot.default_base_url, baseUrlFor(.copilot, parsed, cfg));
     try std.testing.expectEqualStrings("-", baseUrlFor("mock", parsed, cfg));
 }
 
@@ -1038,32 +1035,12 @@ test "requiresApiKey only for opencode and opencode-go" {
     try std.testing.expect(!requiresApiKey("mock"));
 }
 
-test "providerDisplayName maps known providers" {
-    try std.testing.expectEqualStrings("LM Studio", providerDisplayName("lmstudio"));
-    try std.testing.expectEqualStrings("OpenCode Zen", providerDisplayName("opencode"));
-    try std.testing.expectEqualStrings("OpenCode Go", providerDisplayName("opencode-go"));
-    try std.testing.expectEqualStrings("GitHub Copilot", providerDisplayName("copilot"));
-    try std.testing.expectEqualStrings("Mock", providerDisplayName("mock"));
-    try std.testing.expectEqualStrings("custom", providerDisplayName("custom"));
-}
-
-test "isValidProvider accepts lmstudio, opencode, opencode-go, copilot and mock" {
-    try std.testing.expect(isValidProvider("lmstudio"));
-    try std.testing.expect(isValidProvider("opencode"));
-    try std.testing.expect(isValidProvider("opencode-go"));
-    try std.testing.expect(isValidProvider("copilot"));
-    try std.testing.expect(isValidProvider("mock"));
-    try std.testing.expect(!isValidProvider("openai"));
-    try std.testing.expect(!isValidProvider(""));
-}
-
 test "defaultProviderUrl returns provider-specific defaults" {
-    try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("lmstudio"));
-    try std.testing.expectEqualStrings(opencode_zen.default_base_url, defaultProviderUrl("opencode"));
-    try std.testing.expectEqualStrings(opencode_go.default_base_url, defaultProviderUrl("opencode-go"));
-    try std.testing.expectEqualStrings(copilot.default_base_url, defaultProviderUrl("copilot"));
+    try std.testing.expectEqualStrings(config.default_lm_studio_url, defaultProviderUrl(.lmstudio));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, defaultProviderUrl(.opencode_zen));
+    try std.testing.expectEqualStrings(opencode_go.default_base_url, defaultProviderUrl(.opencode_go));
+    try std.testing.expectEqualStrings(copilot.default_base_url, defaultProviderUrl(.copilot));
     try std.testing.expectEqualStrings("-", defaultProviderUrl("mock"));
-    try std.testing.expectEqualStrings("http://127.0.0.1:1234", defaultProviderUrl("unknown"));
 }
 
 test "providerHasFixedUrl for opencode, opencode-go, copilot and mock" {
