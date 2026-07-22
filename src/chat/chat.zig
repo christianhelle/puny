@@ -37,7 +37,7 @@ pub const ModelEntry = struct {
 
 pub const SessionStats = struct {
     allocator: std.mem.Allocator,
-    models: std.array_list.Managed(ModelEntry),
+    models: std.ArrayList(ModelEntry),
     active_model_index: ?usize = null,
     start_time: std.Io.Clock.Timestamp,
 
@@ -51,13 +51,13 @@ pub const SessionStats = struct {
     pub fn init(allocator: std.mem.Allocator, io: std.Io) SessionStats {
         return .{
             .allocator = allocator,
-            .models = std.array_list.Managed(ModelEntry).init(allocator),
+            .models = .empty,
             .start_time = std.Io.Clock.Timestamp.now(io, .awake),
         };
     }
 
     pub fn deinit(self: *SessionStats) void {
-        self.models.deinit();
+        self.models.deinit(self.allocator);
     }
 
     fn activeModelStats(self: *@This()) *PerModelStats {
@@ -73,7 +73,7 @@ pub const SessionStats = struct {
                 break;
             }
         } else {
-            self.models.append(.{ .model_key = model_key, .stats = .{} }) catch unreachable;
+            self.models.append(self.allocator, .{ .model_key = model_key, .stats = .{} }) catch unreachable;
             self.active_model_index = self.models.items.len - 1;
         }
 
@@ -193,7 +193,7 @@ pub const SessionStats = struct {
 const PartialToolCall = struct {
     id: []const u8,
     name: []const u8,
-    args: std.array_list.Managed(u8),
+    args: std.ArrayList(u8),
 };
 
 pub const OpenAiAccumulator = struct {
@@ -203,9 +203,9 @@ pub const OpenAiAccumulator = struct {
     session_stats: *SessionStats,
     has_header: bool,
     lines_printed: usize,
-    content: std.array_list.Managed(u8),
+    content: std.ArrayList(u8),
     partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
-    tool_calls: std.array_list.Managed(openai.ToolCall),
+    tool_calls: std.ArrayList(openai.ToolCall),
     usage: ?openai.TurnUsage,
     turn_start: std.Io.Clock.Timestamp,
     first_token_recorded: bool,
@@ -219,9 +219,9 @@ pub const OpenAiAccumulator = struct {
             .session_stats = session_stats,
             .has_header = false,
             .lines_printed = 0,
-            .content = std.array_list.Managed(u8).init(allocator),
+            .content = .empty,
             .partial_calls = .{},
-            .tool_calls = std.array_list.Managed(openai.ToolCall).init(allocator),
+            .tool_calls = .empty,
             .usage = null,
             .turn_start = std.Io.Clock.Timestamp.now(io, .awake),
             .first_token_recorded = false,
@@ -230,13 +230,13 @@ pub const OpenAiAccumulator = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        self.content.deinit();
+        self.content.deinit(self.allocator);
         var it = self.partial_calls.iterator();
         while (it.next()) |entry| {
-            entry.value_ptr.args.deinit();
+            entry.value_ptr.args.deinit(self.allocator);
         }
         self.partial_calls.deinit(self.allocator);
-        self.tool_calls.deinit();
+        self.tool_calls.deinit(self.allocator);
     }
 
     pub fn hasToolCalls(self: *const @This()) bool {
@@ -314,7 +314,7 @@ pub const OpenAiAccumulator = struct {
                     gop.value_ptr.* = .{
                         .id = try self.allocator.dupe(u8, tc.id),
                         .name = try self.allocator.dupe(u8, tc.name),
-                        .args = std.array_list.Managed(u8).init(self.allocator),
+                        .args = .empty,
                     };
                 }
             },
@@ -323,7 +323,7 @@ pub const OpenAiAccumulator = struct {
                 self.recordFirstToken();
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(tc.arguments.len, 4)), null);
                 if (self.partial_calls.getPtr(tc.index)) |partial| {
-                    try partial.args.appendSlice(tc.arguments);
+                    try partial.args.appendSlice(self.allocator, tc.arguments);
                 }
             },
             .finish => {
@@ -338,11 +338,11 @@ pub const OpenAiAccumulator = struct {
     fn finalizeToolCalls(self: *@This()) !void {
         var it = self.partial_calls.iterator();
         while (it.next()) |entry| {
-            try self.tool_calls.append(.{
+            try self.tool_calls.append(self.allocator, .{
                 .id = entry.value_ptr.id,
                 .function = .{
                     .name = entry.value_ptr.name,
-                    .arguments = try tools.ownedSliceOrEmpty(&entry.value_ptr.args),
+                    .arguments = try tools.ownedSliceOrEmpty(&entry.value_ptr.args, self.allocator),
                 },
             });
         }
@@ -396,7 +396,7 @@ pub fn runTurn(
     session_stats: *SessionStats,
     random: std.Random,
     model_key: []const u8,
-    messages: *std.array_list.Managed(openai.Message),
+    messages: *std.ArrayList(openai.Message),
     tool_definitions: []const openai.ToolDefinition,
     indicator_opt: ?*indicator.ThinkingIndicator,
 ) !TurnResult {
