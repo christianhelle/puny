@@ -1028,11 +1028,11 @@ test "baseUrlFor returns provider defaults" {
 }
 
 test "requiresApiKey only for opencode and opencode-go" {
-    try std.testing.expect(!requiresApiKey("lmstudio"));
-    try std.testing.expect(requiresApiKey("opencode"));
-    try std.testing.expect(requiresApiKey("opencode-go"));
-    try std.testing.expect(!requiresApiKey("copilot"));
-    try std.testing.expect(!requiresApiKey("mock"));
+    try std.testing.expect(!requiresApiKey(.lmstudio));
+    try std.testing.expect(requiresApiKey(.opencode_zen));
+    try std.testing.expect(requiresApiKey(.opencode_go));
+    try std.testing.expect(!requiresApiKey(.copilot));
+    try std.testing.expect(!requiresApiKey(.mock));
 }
 
 test "defaultProviderUrl returns provider-specific defaults" {
@@ -1040,13 +1040,13 @@ test "defaultProviderUrl returns provider-specific defaults" {
     try std.testing.expectEqualStrings(opencode_zen.default_base_url, defaultProviderUrl(.opencode_zen));
     try std.testing.expectEqualStrings(opencode_go.default_base_url, defaultProviderUrl(.opencode_go));
     try std.testing.expectEqualStrings(copilot.default_base_url, defaultProviderUrl(.copilot));
-    try std.testing.expectEqualStrings("-", defaultProviderUrl("mock"));
+    try std.testing.expectEqualStrings("-", defaultProviderUrl(.mock));
 }
 
 test "providerHasFixedUrl for opencode, opencode-go, copilot and mock" {
-    try std.testing.expect(providerHasFixedUrl("opencode"));
-    try std.testing.expect(providerHasFixedUrl("opencode-go"));
-    try std.testing.expect(providerHasFixedUrl("copilot"));
-    try std.testing.expect(providerHasFixedUrl("mock"));
-    try std.testing.expect(!providerHasFixedUrl("lmstudio"));
+    try std.testing.expect(providerHasFixedUrl(.opencode_zen));
+    try std.testing.expect(providerHasFixedUrl(.opencode_go));
+    try std.testing.expect(providerHasFixedUrl(.copilot));
+    try std.testing.expect(providerHasFixedUrl(.mock));
+    try std.testing.expect(!providerHasFixedUrl(.lmstudio));
 }
