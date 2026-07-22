@@ -341,7 +341,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
     arena.* = std.heap.ArenaAllocator.init(allocator);
     const arena_alloc = arena.allocator();
 
-    var models = std.array_list.Managed(ModelInfo).init(arena_alloc);
+    var models: std.ArrayList(ModelInfo) = .empty;
 
     for (data.array.items) |item| {
         if (item != .object) continue;
@@ -353,7 +353,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
         const name = if (item.object.get("name")) |v| v.string else id;
         const vendor = if (item.object.get("vendor")) |v| v.string else "github-copilot";
 
-        try models.append(.{
+        try models.append(arena_alloc, .{
             .id = try arena_alloc.dupe(u8, id),
             .name = try arena_alloc.dupe(u8, name),
             .vendor = try arena_alloc.dupe(u8, vendor),
@@ -363,7 +363,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
 
     const result = std.json.Parsed(ModelsList){
         .arena = arena,
-        .value = .{ .data = try models.toOwnedSlice() },
+        .value = .{ .data = try models.toOwnedSlice(arena_alloc) },
     };
 
     return .{
