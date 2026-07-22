@@ -7,7 +7,7 @@ const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const models = @import("models.zig");
 
-pub const SupportedProviders = enum {
+pub const ModelProvider = enum {
     lmstudio,
     opencode_zen,
     opencode_go,
@@ -15,7 +15,7 @@ pub const SupportedProviders = enum {
     mock,
 };
 
-pub fn getProviderDisplayName(selected_provider: SupportedProviders) []const u8 {
+pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
     return switch (selected_provider) {
         .lmstudio => "LM Studio",
         .opencode_zen => "OpenCode Zen",
