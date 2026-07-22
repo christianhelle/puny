@@ -66,7 +66,7 @@ pub const Config = struct {
     apiKey: []const u8 = "",
     model: []const u8 = "",
     prompts: PromptsConfig = .{},
-    //providerList: std.ArrayList(Provider),
+    providers: std.ArrayList(Provider) = .empty,
 
     pub fn default() Config {
         return .{};
@@ -79,6 +79,7 @@ pub const Config = struct {
             .apiKey = try allocator.dupe(u8, self.apiKey),
             .model = try allocator.dupe(u8, self.model),
             .prompts = try self.prompts.clone(allocator),
+            .providers = try self.providers.clone(allocator),
         };
     }
 
