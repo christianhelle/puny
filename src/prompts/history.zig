@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 pub const History = struct {
     allocator: std.mem.Allocator,
-    entries: std.ArrayListUnmanaged([]const u8),
+    entries: std.ArrayList([]const u8),
     path: []const u8,
     browsing_index: ?usize,
     saved_current: ?[]const u8,
