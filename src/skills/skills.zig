@@ -141,16 +141,22 @@ pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
     }
 }
 
+fn trimCr(maybe_cr: []const u8) []const u8 {
+    if (maybe_cr.len > 0 and maybe_cr[maybe_cr.len - 1] == '\r') return maybe_cr[0 .. maybe_cr.len - 1];
+    return maybe_cr;
+}
+
 fn parseFrontmatterDescription(content: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, content, '\n');
-    const first = lines.next() orelse return null;
+    const first = trimCr(lines.next() orelse return null);
     if (!std.mem.eql(u8, first, "---")) return null;
 
     var desc_buf: std.ArrayList(u8) = .empty;
     defer desc_buf.deinit(allocator);
 
     var in_folded = false;
-    while (lines.next()) |line| {
+    while (lines.next()) |raw_line| {
+        const line = trimCr(raw_line);
         if (std.mem.eql(u8, line, "---")) break;
         if (in_folded) {
             if (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) {
@@ -304,6 +310,47 @@ test "fullScan handles missing SKILL.md gracefully" {
     try std.testing.expect(registry.fully_scanned);
     const record = registry.findByName("empty-dir").?;
     try std.testing.expect(record.description == null);
+}
+
+test "fullScan parses frontmatter with CRLF line endings" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "win-skill", .default_dir);
+    const content = "---\r\nname: win-skill\r\ndescription: >\r\n  Works on Windows\r\n  with CRLF endings\r\n---\r\nbody text\r\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "win-skill/SKILL.md", .data = content });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    try std.testing.expect(registry.fully_scanned);
+    const record = registry.findByName("win-skill").?;
+    try std.testing.expectEqualStrings("Works on Windows with CRLF endings", record.description.?);
+}
+
+test "fullScan parses single-line description with CRLF" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "simple", .default_dir);
+    const content = "---\r\nname: simple\r\ndescription: A simple skill\r\n---\r\nbody\r\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "simple/SKILL.md", .data = content });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    const record = registry.findByName("simple").?;
+    try std.testing.expectEqualStrings("A simple skill", record.description.?);
 }
 
 test "fullScan parses multi-line folded description" {
