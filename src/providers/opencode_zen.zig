@@ -1105,6 +1105,45 @@ test "AnthropicSseCallback emits tool call events" {
     try std.testing.expectEqual(@as(i64, 15), events.items[4].usage.output_tokens);
 }
 
+test "AnthropicSseCallback emits thinking delta as reasoning events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const block_types = std.ArrayList(BlockType).empty;
+
+    var sse = AnthropicSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .block_types = block_types,
+    };
+
+    try sse.event("{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"text\":\"\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"text\":\"Let me think\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"text\":\" about this...\"}}");
+    try sse.event("{\"type\":\"content_block_stop\",\"index\":0}");
+    try sse.event("{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Here is the answer\"}}");
+    try sse.event("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}");
+
+    try std.testing.expectEqual(@as(usize, 5), events.items.len);
+    try std.testing.expectEqualStrings("Let me think", events.items[0].reasoning);
+    try std.testing.expectEqualStrings(" about this...", events.items[1].reasoning);
+    try std.testing.expectEqualStrings("Here is the answer", events.items[2].content);
+    try std.testing.expectEqualStrings("end_turn", events.items[3].finish.?);
+    try std.testing.expectEqual(@as(i64, 10), events.items[4].usage.output_tokens);
+}
+
 test "googleRequestPayload converts OpenAI request" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -1262,4 +1301,31 @@ test "GoogleSseCallback emits tool call events" {
     try std.testing.expectEqualStrings("STOP", events.items[2].finish.?);
     try std.testing.expectEqual(@as(i64, 5), events.items[3].usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 15), events.items[3].usage.output_tokens);
+}
+
+test "GoogleSseCallback emits thought parts as reasoning events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    var sse = GoogleSseCallback{ .allocator = allocator, .callback = callback };
+
+    try sse.event("{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Let me reason\",\"thought\":true},{\"text\":\"Here is the answer\"}]},\"finishReason\":\"STOP\",\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":20}}");
+
+    try std.testing.expectEqual(@as(usize, 4), events.items.len);
+    try std.testing.expectEqualStrings("Let me reason", events.items[0].reasoning);
+    try std.testing.expectEqualStrings("Here is the answer", events.items[1].content);
+    try std.testing.expectEqualStrings("STOP", events.items[2].finish.?);
+    try std.testing.expectEqual(@as(i64, 10), events.items[3].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 20), events.items[3].usage.output_tokens);
 }
