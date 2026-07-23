@@ -303,8 +303,8 @@ fn checkCancellation(token: ?*CancellationToken) !void {
 // Server-sent events parsing
 ///////////////////////////////////////////
 
-const max_sse_line_size = 8 * 1024;
-const max_sse_event_size = 64 * 1024;
+const max_sse_line_size = 256 * 1024;
+const max_sse_event_size = 1024 * 1024;
 
 pub fn parseSseBytes(allocator: std.mem.Allocator, bytes: []const u8, callback: anytype, cancellation_token: ?*CancellationToken) !void {
     var reader: std.Io.Reader = .fixed(bytes);
