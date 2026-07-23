@@ -153,7 +153,9 @@ pub fn main(init: std.process.Init) !void {
         .stdin_buffer = &stdin_buffer,
         .debug_log = if (debug_log) |*log| log else null,
         .skill_registry = &skill_registry,
+        .loaded_skills = .{},
     };
+    defer ctx.loaded_skills.deinit(arena);
 
     try runChatLoop(&ctx);
 }
@@ -471,6 +473,7 @@ const ChatLoopContext = struct {
     stdin_buffer: *[4096]u8,
     debug_log: ?*DebugLog,
     skill_registry: *skills.Registry,
+    loaded_skills: std.StringHashMapUnmanaged(void),
 };
 
 fn readUserInput(ctx: *ChatLoopContext) !UserInput {
@@ -732,12 +735,16 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
 
         if (command == .prompt) {
             for (ctx.skill_registry.records.items) |*r| {
-                if (std.mem.indexOf(u8, user_message, r.name)) |_| {
-                    const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
-                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-                    try ctx.stdout_writer.print("\n{s}[Loaded skill: {s}]{s}\n", .{ ansi.dim, r.name, ansi.reset });
-                    try ctx.stdout_writer.flush();
-                }
+                if (ctx.loaded_skills.contains(r.name)) continue;
+                const match_pos = std.mem.indexOf(u8, user_message, r.name) orelse continue;
+                if (match_pos > 0 and std.ascii.isAlphanumeric(user_message[match_pos - 1])) continue;
+                const end = match_pos + r.name.len;
+                if (end < user_message.len and std.ascii.isAlphanumeric(user_message[end])) continue;
+                const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
+                try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
+                try ctx.stdout_writer.print("\n{s}[Loaded skill: {s}]{s}\n", .{ ansi.dim, r.name, ansi.reset });
+                try ctx.stdout_writer.flush();
+                ctx.loaded_skills.put(ctx.arena, r.name, {}) catch {};
             }
         }
 
@@ -772,6 +779,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                 ctx.history.clear();
+                ctx.loaded_skills.clearRetainingCapacity();
 
                 try ctx.stdout_writer.print(" OK\n", .{});
                 try ctx.stdout_writer.flush();
