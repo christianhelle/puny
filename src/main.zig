@@ -797,7 +797,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 if (!ctx.skill_registry.fully_scanned) {
                     try ctx.skill_registry.fullScan(ctx.io);
                 }
-                try ctx.stdout_writer.print("\nAvailable skills:\n", .{});
+                try ctx.stdout_writer.print("\n\nAvailable skills:\n\n", .{});
                 if (ctx.skill_registry.count() == 0) {
                     try ctx.stdout_writer.print("  (none found)\n", .{});
                 } else {
