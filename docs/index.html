@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Puny — Minimal AI Coding Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="/puny/" class="nav-brand">
+        <span class="emoji">🤏</span>
+        Puny
+      </a>
+      <ul class="nav-menu">
+        <li><a href="#features" class="nav-link">Features</a></li>
+        <li><a href="#installation" class="nav-link">Installation</a></li>
+        <li><a href="#usage" class="nav-link">Usage</a></li>
+        <li><a href="https://github.com/christianhelle/puny" class="nav-link external">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-title">
+          <span class="emoji">🤏</span>
+          Puny
+        </div>
+        <p class="hero-subtitle">A minimal AI coding agent for the terminal. Chat with an LLM and give it tools to read, edit, search, and inspect your codebase.</p>
+        <div class="hero-buttons">
+          <a href="#installation" class="btn btn-primary">Install Now</a>
+          <a href="https://github.com/christianhelle/puny" class="btn btn-secondary">View on GitHub ↗</a>
+        </div>
+      </div>
+
+      <div class="hero-demo">
+        <div class="terminal">
+          <div class="terminal-header">
+            <div class="terminal-buttons">
+              <span class="btn-close"></span>
+              <span class="btn-minimize"></span>
+              <span class="btn-maximize"></span>
+            </div>
+            <div class="terminal-title">puny</div>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line">
+              <span class="prompt">$</span><span class="output"> puny</span>
+            </div>
+            <div class="terminal-line">
+              <span class="output">🤏 Puny v0.1.0</span>
+            </div>
+            <div class="terminal-line">
+              <span class="output success">✅ Connected to LM Studio (local)</span>
+            </div>
+            <div class="terminal-line">
+              <span class="prompt">Prompt:</span><span class="output"> Explain what this project does</span>
+            </div>
+            <div class="terminal-line">
+              <span class="output">Puny is a minimal AI coding agent for the terminal...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="features">
+    <div class="container">
+      <h2 class="section-title">Features</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <span class="feature-icon">🧠</span>
+          <h3>Multiple Providers</h3>
+          <p>LM Studio, OpenCode Zen, OpenCode Go, and GitHub Copilot</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🔧</span>
+          <h3>Tool Calling</h3>
+          <p>Read, write, and list files, run shell commands, search code, check git status, and fetch web pages</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">📦</span>
+          <h3>Skills System</h3>
+          <p>Load reusable prompt-engineering skills from markdown files</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">💬</span>
+          <h3>Interactive Chat</h3>
+          <p>Multi-turn conversations with conversation history</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🎯</span>
+          <h3>Model Picker</h3>
+          <p>Interactive model selection on startup</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🐳</span>
+          <h3>Docker</h3>
+          <p>Published as a container image to Docker Hub and GHCR</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="installation" class="installation">
+    <div class="container">
+      <h2 class="section-title">Installation</h2>
+
+      <div class="install-card featured">
+        <div class="install-header">
+          <h2>Quick Install</h2>
+          <span class="badge recommended">Recommended</span>
+        </div>
+        <p>One-command installation that automatically detects your platform, downloads the latest release, and adds it to your PATH.</p>
+        <div class="install-platforms">
+          <div class="platform-section">
+            <h4>Linux / macOS</h4>
+            <div class="install-code">
+              <code>curl -fsSL https://christianhelle.com/puny/install | bash</code>
+            </div>
+          </div>
+          <div class="platform-section">
+            <h4>Windows (PowerShell)</h4>
+            <div class="install-code">
+              <code>irm https://christianhelle.com/puny/install.ps1 | iex</code>
+            </div>
+          </div>
+        </div>
+        <div class="install-notes">
+          <h3>Custom installation directory</h3>
+          <div class="platform-section">
+            <h4>Linux / macOS</h4>
+            <div class="install-code">
+              <code>INSTALL_DIR=$HOME/.local/bin curl -fsSL https://christianhelle.com/puny/install | bash</code>
+            </div>
+          </div>
+          <div class="platform-section">
+            <h4>Windows</h4>
+            <div class="install-code">
+              <code>$install = irm https://christianhelle.com/puny/install.ps1<br>&amp; ([scriptblock]::Create($install)) -InstallDir "$env:USERPROFILE\bin"</code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="install-options">
+        <div class="install-card">
+          <div class="install-header">
+            <h3>Build from Source</h3>
+            <span class="badge development">Dev</span>
+          </div>
+          <p>Requires <a href="https://ziglang.org/">Zig</a> 0.16.0 or later.</p>
+          <div class="install-code">
+            <code>git clone https://github.com/christianhelle/puny.git<br>cd puny<br>zig build</code>
+          </div>
+          <p>The compiled binary is written to <code>zig-out/bin/puny</code>.</p>
+        </div>
+
+        <div class="install-card">
+          <div class="install-header">
+            <h3>Docker</h3>
+            <span class="badge recommended">Container</span>
+          </div>
+          <p>Puny is published as a container image.</p>
+          <div class="install-code">
+            <code>docker pull christianhelle/puny:latest</code>
+          </div>
+          <div class="install-code">
+            <code>docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="usage" class="features">
+    <div class="container">
+      <h2 class="section-title">Usage</h2>
+      <div class="features-grid" style="grid-template-columns: 1fr;">
+        <div class="install-card">
+          <h3>Quick Start with LM Studio</h3>
+          <p>Start LM Studio, load a model with tool-calling support, then:</p>
+          <div class="install-code">
+            <code>puny</code>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3>OpenCode Zen</h3>
+          <div class="install-code">
+            <code>puny --provider opencode --api-key YOUR_API_KEY</code>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3>OpenCode Go</h3>
+          <div class="install-code">
+            <code>puny --provider opencode-go --api-key YOUR_API_KEY</code>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3>GitHub Copilot</h3>
+          <div class="install-code">
+            <code>puny --provider copilot</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-section">
+          <h4>Puny</h4>
+          <p>A minimal AI coding agent for the terminal, written in Zig.</p>
+        </div>
+        <div class="footer-section">
+          <h4>Links</h4>
+          <ul>
+            <li><a href="https://github.com/christianhelle/puny">GitHub</a></li>
+            <li><a href="https://github.com/christianhelle/puny/releases">Releases</a></li>
+            <li><a href="https://christianhelle.com">christianhelle.com</a></li>
+          </ul>
+        </div>
+        <div class="footer-section">
+          <h4>License</h4>
+          <p>MIT License</p>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2026 Puny. Built with Zig.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
