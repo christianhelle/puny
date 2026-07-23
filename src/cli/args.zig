@@ -14,6 +14,7 @@ pub const Options = struct {
     reconfigure: bool = false,
     debug: bool = false,
     show_thinking: bool = false,
+    upgrade: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -75,6 +76,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.show_thinking = true;
         } else if (std.mem.eql(u8, arg, "--debug")) {
             opts.debug = true;
+        } else if (std.mem.eql(u8, arg, "--upgrade") or std.mem.eql(u8, arg, "-U")) {
+            opts.upgrade = true;
         } else {
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
@@ -133,6 +136,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --reconfigure           Re-run first-run setup and update config
         \\      --show-thinking         Show reasoning/thinking output from the model
         \\      --debug                 Log HTTP requests and responses to puny_debug.log
+        \\  -U, --upgrade               Upgrade to the latest release via install script
         \\  -h, --help                  Show this help text
         \\  -V, --version               Print version
         \\
@@ -211,6 +215,24 @@ test "parseArgs flag overrides PUNY_PROVIDER env" {
     const args = &[_][:0]const u8{ "puny", "--provider", "opencode" };
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expectEqualStrings("opencode", opts.provider.?);
+}
+
+test "parseArgs sets upgrade from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--upgrade" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.upgrade);
+}
+
+test "parseArgs sets upgrade from short flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "-U" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.upgrade);
 }
 
 test "parseArgs sets debug from flag" {

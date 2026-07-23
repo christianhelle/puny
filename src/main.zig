@@ -37,6 +37,11 @@ pub fn main(init: std.process.Init) !void {
     const args_slice = try init.minimal.args.toSlice(arena);
     const parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
+    if (parsed.upgrade) {
+        try runUpgrade(arena, io);
+        return;
+    }
+
     var debug_buffer: [4096]u8 = undefined;
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
@@ -173,6 +178,29 @@ fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .copilot) return copilot.default_base_url;
     if (selectedProvider == .mock) return "-";
     return config.default_lm_studio_url;
+}
+
+fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+    const stderr_writer = &stderr_file_writer.interface;
+
+    try stderr_writer.print("Upgrading Puny via install script...\n", .{});
+    try stderr_writer.flush();
+
+    const argv: []const []const u8 = if (comptime @import("builtin").os.tag == .windows)
+        &[_][]const u8{ "powershell", "-Command", try std.fmt.allocPrint(arena, "irm https://christianhelle.com/puny/install.ps1 | iex", .{}) }
+    else
+        &[_][]const u8{ "sh", "-c", "curl -fsSL https://christianhelle.com/puny/install | sh" };
+
+    var child = try std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .inherit,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    });
+
+    _ = try child.wait(io);
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
