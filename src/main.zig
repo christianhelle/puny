@@ -339,7 +339,7 @@ fn initializeProviderAndModel(
 
     const reconfigure_force_picker = parsed.reconfigure and !parsed.model_explicit;
     const configured_model: ?[]const u8 = blk: {
-        const raw = if (reconfigure_force_picker) null else parsed.model orelse cfg.model;
+        const raw = if (reconfigure_force_picker) null else parsed.model orelse cfg.providerEntry(selected_provider.*).model;
         if (raw) |id| {
             if (http_client.isValidUtf8(id)) break :blk id;
         }
