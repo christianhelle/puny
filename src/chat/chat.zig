@@ -210,6 +210,7 @@ pub const OpenAiAccumulator = struct {
     turn_start: std.Io.Clock.Timestamp,
     first_token_recorded: bool,
     has_streamed_output: bool,
+    show_thinking: bool,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats) OpenAiAccumulator {
         return .{
@@ -226,6 +227,7 @@ pub const OpenAiAccumulator = struct {
             .turn_start = std.Io.Clock.Timestamp.now(io, .awake),
             .first_token_recorded = false,
             .has_streamed_output = false,
+            .show_thinking = false,
         };
     }
 
@@ -307,6 +309,20 @@ pub const OpenAiAccumulator = struct {
                 }
                 self.lines_printed += countNewlines(text);
                 try self.content.appendSlice(self.allocator, text);
+            },
+            .reasoning => |text| {
+                if (self.show_thinking) {
+                    self.recordFirstToken();
+                    if (self.stdout) |stdout| {
+                        if (!self.has_header) {
+                            self.has_header = true;
+                            try stdout.print("\n", .{});
+                        }
+                        try stdout.print("{s}{s}{s}", .{ ansi.dim, text, ansi.reset });
+                        try stdout.flush();
+                    }
+                    self.lines_printed += countNewlines(text);
+                }
             },
             .tool_call_start => |tc| {
                 const gop = try self.partial_calls.getOrPut(self.allocator, tc.index);
@@ -394,6 +410,7 @@ pub fn runTurn(
     io: std.Io,
     stdout_writer: *std.Io.Writer,
     session_stats: *SessionStats,
+    show_thinking: bool,
     random: std.Random,
     model_key: []const u8,
     messages: *std.ArrayList(openai.Message),
@@ -411,6 +428,7 @@ pub fn runTurn(
     session_stats.beginTurn(model_key, input_estimate);
 
     var accumulator = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
+    accumulator.show_thinking = show_thinking;
     defer accumulator.deinit();
     const callback = accumulator.streamCallback();
 

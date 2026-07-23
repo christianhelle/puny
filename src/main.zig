@@ -498,6 +498,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
             ctx.io,
             ctx.stdout_writer,
             ctx.session_stats,
+            ctx.parsed.show_thinking,
             ctx.random,
             ctx.model_key.*,
             ctx.messages,
@@ -737,7 +738,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 ctx.session_stats.deinit();
                 ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
 
-    const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+                const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
                 ctx.prov.* = createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
                 if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 

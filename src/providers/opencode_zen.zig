@@ -231,6 +231,7 @@ fn writeAnthropicMessage(writer: anytype, msg: openai.Message) !void {
 
 const BlockType = enum {
     text,
+    thinking,
     tool_use,
 };
 
@@ -276,6 +277,8 @@ const AnthropicSseCallback = struct {
                 if (id.len > 0 and name.len > 0) {
                     try self.callback.emit(.{ .tool_call_start = .{ .index = index, .id = id, .name = name } });
                 }
+            } else if (std.mem.eql(u8, block_type, "thinking")) {
+                self.block_types.items[index] = .thinking;
             } else {
                 self.block_types.items[index] = .text;
             }
@@ -295,6 +298,13 @@ const AnthropicSseCallback = struct {
                     if (std.mem.eql(u8, delta_type, "text_delta")) {
                         if (delta.object.get("text")) |text| {
                             try self.callback.emit(.{ .content = text.string });
+                        }
+                    }
+                },
+                .thinking => {
+                    if (std.mem.eql(u8, delta_type, "thinking_delta")) {
+                        if (delta.object.get("text")) |text| {
+                            try self.callback.emit(.{ .reasoning = text.string });
                         }
                     }
                 },
@@ -796,6 +806,17 @@ const GoogleSseCallback = struct {
     }
 
     fn handlePart(self: *@This(), part: std.json.ObjectMap) !void {
+        if (part.get("thought")) |thought| {
+            if (thought == .bool and thought.bool) {
+                if (part.get("text")) |text| {
+                    if (text == .string) {
+                        try self.callback.emit(.{ .reasoning = text.string });
+                    }
+                }
+                return;
+            }
+        }
+
         if (part.get("text")) |text| {
             if (text == .string) {
                 try self.callback.emit(.{ .content = text.string });
@@ -978,6 +999,7 @@ test "anthropicRequestPayload converts OpenAI request" {
 
 const TestEvent = union(enum) {
     content: []const u8,
+    reasoning: []const u8,
     tool_call_start: struct { index: usize, id: []const u8, name: []const u8 },
     tool_call_delta: struct { index: usize, arguments: []const u8 },
     finish: ?[]const u8,
@@ -992,6 +1014,7 @@ const TestSseCallback = struct {
         const self: *TestSseCallback = @ptrCast(@alignCast(ctx));
         switch (ev) {
             .content => |v| try self.events.append(self.allocator, .{ .content = try self.allocator.dupe(u8, v) }),
+            .reasoning => |v| try self.events.append(self.allocator, .{ .reasoning = try self.allocator.dupe(u8, v) }),
             .tool_call_start => |v| try self.events.append(self.allocator, .{ .tool_call_start = .{
                 .index = v.index,
                 .id = try self.allocator.dupe(u8, v.id),
