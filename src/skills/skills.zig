@@ -54,7 +54,60 @@ pub const Registry = struct {
         }
         return null;
     }
+
+    pub fn fullScan(self: *Registry, io: std.Io) !void {
+        for (self.records.items) |*r| {
+            const skill_path = try std.fs.path.join(self.allocator, &.{ r.dir_path, "SKILL.md" });
+            defer self.allocator.free(skill_path);
+
+            const content = std.Io.Dir.cwd().readFileAlloc(io, skill_path, self.allocator, std.Io.Limit.limited(1024 * 1024)) catch |err| switch (err) {
+                error.FileNotFound => continue,
+                else => |e| return e,
+            };
+            defer self.allocator.free(content);
+
+            if (parseFrontmatterDescription(content, self.allocator)) |desc| {
+                r.description = desc;
+            }
+        }
+        self.fully_scanned = true;
+    }
 };
+
+fn parseFrontmatterDescription(content: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, content, '\n');
+    const first = lines.next() orelse return null;
+    if (!std.mem.eql(u8, first, "---")) return null;
+
+    var desc_buf: std.ArrayList(u8) = .empty;
+    defer desc_buf.deinit(allocator);
+
+    var in_folded = false;
+    while (lines.next()) |line| {
+        if (std.mem.eql(u8, line, "---")) break;
+        if (in_folded) {
+            if (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) {
+                const trimmed = std.mem.trimStart(u8, line, " \t");
+                if (desc_buf.items.len > 0) {
+                    desc_buf.append(allocator, ' ') catch {};
+                }
+                desc_buf.appendSlice(allocator, trimmed) catch {};
+                continue;
+            }
+            in_folded = false;
+        }
+        if (std.mem.startsWith(u8, line, "description: >")) {
+            in_folded = true;
+        } else if (std.mem.startsWith(u8, line, "description: ")) {
+            const desc = line["description: ".len..];
+            return allocator.dupe(u8, desc) catch null;
+        }
+    }
+
+    if (desc_buf.items.len == 0) return null;
+    const result = allocator.dupe(u8, desc_buf.items) catch null;
+    return result;
+}
 
 test "init creates empty registry" {
     var registry = Registry.init(std.testing.allocator);
@@ -124,4 +177,85 @@ test "findByName returns null for unknown name" {
     defer registry.deinit();
 
     try std.testing.expect(registry.findByName("nope") == null);
+}
+
+fn writeSkillFile(io: std.Io, tmp: anytype, name: []const u8, frontmatter_name: []const u8, description_lines: []const []const u8, body: []const u8) !void {
+    try tmp.dir.createDir(io, name, .default_dir);
+
+    var lines: std.ArrayList(u8) = .empty;
+    defer lines.deinit(std.testing.allocator);
+    try lines.appendSlice(std.testing.allocator, "---\nname: ");
+    try lines.appendSlice(std.testing.allocator, frontmatter_name);
+    try lines.appendSlice(std.testing.allocator, "\ndescription: >\n");
+    for (description_lines) |line| {
+        try lines.appendSlice(std.testing.allocator, "  ");
+        try lines.appendSlice(std.testing.allocator, line);
+        try lines.appendSlice(std.testing.allocator, "\n");
+    }
+    try lines.appendSlice(std.testing.allocator, "---\n");
+    try lines.appendSlice(std.testing.allocator, body);
+
+    var skill_path_buf: [256]u8 = undefined;
+    const skill_path = try std.fmt.bufPrint(&skill_path_buf, "{s}/SKILL.md", .{name});
+
+    try tmp.dir.writeFile(io, .{ .sub_path = skill_path, .data = lines.items });
+}
+
+test "fullScan populates descriptions from frontmatter" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try writeSkillFile(std.testing.io, tmp, "my-skill", "my-skill", &.{"Does something useful."}, "This is the skill content\nwith multiple lines.");
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    try std.testing.expect(registry.fully_scanned);
+    const record = registry.findByName("my-skill").?;
+    try std.testing.expectEqualStrings("Does something useful.", record.description.?);
+}
+
+test "fullScan handles missing SKILL.md gracefully" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "empty-dir", .default_dir);
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    try std.testing.expect(registry.fully_scanned);
+    const record = registry.findByName("empty-dir").?;
+    try std.testing.expect(record.description == null);
+}
+
+test "fullScan parses multi-line folded description" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try writeSkillFile(std.testing.io, tmp, "alba-testing", "alba-testing", &.{
+        "Expert knowledge of Alba, a class library for integration testing.",
+        "Covers AlbaHost creation, Scenario-based HTTP testing.",
+    }, "These are the instructions.");
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    const record = registry.findByName("alba-testing").?;
+    try std.testing.expectEqualStrings("Expert knowledge of Alba, a class library for integration testing. Covers AlbaHost creation, Scenario-based HTTP testing.", record.description.?);
 }
