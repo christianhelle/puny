@@ -13,6 +13,7 @@ pub const Options = struct {
     mock: bool = false,
     reconfigure: bool = false,
     debug: bool = false,
+    show_thinking: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -70,6 +71,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.prompt = args[i];
         } else if (std.mem.eql(u8, arg, "--reconfigure")) {
             opts.reconfigure = true;
+        } else if (std.mem.eql(u8, arg, "--show-thinking")) {
+            opts.show_thinking = true;
         } else if (std.mem.eql(u8, arg, "--debug")) {
             opts.debug = true;
         } else {
@@ -101,6 +104,12 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         }
     }
 
+    if (!opts.show_thinking) {
+        if (environ_map.get("PUNY_SHOW_THINKING")) |value| {
+            opts.show_thinking = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
+        }
+    }
+
     return opts;
 }
 
@@ -122,6 +131,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -1, --oneshot, --one-shot   Exit after processing the prompt (requires --prompt)
         \\  -M, --mock                  Use mock provider (no LM Studio required)
         \\      --reconfigure           Re-run first-run setup and update config
+        \\      --show-thinking         Show reasoning/thinking output from the model
         \\      --debug                 Log HTTP requests and responses to puny_debug.log
         \\  -h, --help                  Show this help text
         \\  -V, --version               Print version
@@ -160,6 +170,33 @@ test "parseArgs falls back to PUNY_PROVIDER env" {
     const args = &[_][:0]const u8{"puny"};
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expectEqualStrings("opencode", opts.provider.?);
+}
+
+test "parseArgs sets show_thinking from flag" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--show-thinking" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.show_thinking);
+}
+
+test "parseArgs falls back to PUNY_SHOW_THINKING env" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_SHOW_THINKING", "true");
+
+    const args = &[_][:0]const u8{"puny"};
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.show_thinking);
 }
 
 test "parseArgs flag overrides PUNY_PROVIDER env" {
