@@ -23,6 +23,79 @@ Puny lets you chat with an LLM and gives it a curated set of coding tools so it 
   - Check git status and diff
   - Fetch web pages
 
+## Installation
+
+### Quick Install (Recommended)
+
+**Linux/macOS:**
+
+```bash
+curl -fsSL https://christianhelle.com/puny/install | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://christianhelle.com/puny/install.ps1 | iex
+```
+
+The install scripts automatically detect your platform and architecture, download the latest release from GitHub, and install the binary.
+
+**Custom installation directory:**
+
+```bash
+# Linux/macOS
+INSTALL_DIR=$HOME/.local/bin curl -fsSL https://christianhelle.com/puny/install | bash
+
+# Windows
+$install = irm https://christianhelle.com/puny/install.ps1
+& ([scriptblock]::Create($install)) -InstallDir "C:\Tools"
+```
+
+**Pin a specific version:**
+
+```bash
+# Linux/macOS
+VERSION=v0.1.0 curl -fsSL https://christianhelle.com/puny/install | bash
+
+# Windows
+$install = irm https://christianhelle.com/puny/install.ps1
+& ([scriptblock]::Create($install)) -Version "v0.1.0"
+```
+
+### Upgrade
+
+If Puny is already installed, upgrade to the latest version:
+
+```bash
+puny --upgrade
+```
+
+This re-runs the install script for your platform.
+
+### Build from source
+
+Requires [Zig](https://ziglang.org/) 0.16.0 or later.
+
+```bash
+git clone https://github.com/christianhelle/puny.git
+cd puny
+zig build
+```
+
+The compiled binary is written to `zig-out/bin/puny`.
+
+### Docker
+
+Puny is published as a container image to both Docker Hub and GitHub Container Registry.
+
+```bash
+docker pull christianhelle/puny:latest
+docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny
+```
+
+See the [Docker section](#docker-1) below for detailed usage.
+
 ## Quick start
 
 ### LM Studio
@@ -412,6 +485,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--reconfigure`            | Re-run first-run setup and update config                   |
 | `--show-thinking`          | Show reasoning/thinking output from the model              |
 | `--debug`                  | Log HTTP requests and responses to `puny_debug.log`        |
+| `-U`, `--upgrade`          | Upgrade to the latest release via install script            |
 | `-h`, `--help`             | Show help text                                             |
 | `-V`, `--version`          | Print version                                              |
 
