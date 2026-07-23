@@ -81,15 +81,12 @@ pub const Provider = struct {
 
 pub const Config = struct {
     provider: provider.ModelProvider = .lmstudio,
-    providerUrl: []const u8 = default_lm_studio_url,
-    apiKey: []const u8 = "",
-    model: []const u8 = "",
     prompts: PromptsConfig = .{},
     providers: [4]Provider = [4]Provider{
-        .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = "", .model = "" },
-        .{ .name = .opencode_zen, .url = opencode_zen.default_base_url, .apiKey = "", .model = "" },
-        .{ .name = .opencode_go, .url = opencode_go.default_base_url, .apiKey = "", .model = "" },
-        .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = "", .model = "" },
+        .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = null, .model = "" },
+        .{ .name = .opencode_zen, .url = opencode_zen.default_base_url, .apiKey = null, .model = "" },
+        .{ .name = .opencode_go, .url = opencode_go.default_base_url, .apiKey = null, .model = "" },
+        .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = null, .model = "" },
     },
 
     pub fn default() Config {
@@ -123,18 +120,12 @@ pub const Config = struct {
         }
         return .{
             .provider = self.provider,
-            .providerUrl = try allocator.dupe(u8, self.providerUrl),
-            .apiKey = try allocator.dupe(u8, self.apiKey),
-            .model = try allocator.dupe(u8, self.model),
             .prompts = try self.prompts.clone(allocator),
             .providers = providers,
         };
     }
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
-        allocator.free(self.providerUrl);
-        allocator.free(self.apiKey);
-        allocator.free(self.model);
         for (&self.providers) |*p| p.deinit(allocator);
         self.prompts.deinit(allocator);
     }
@@ -197,8 +188,9 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
 
     // Steal the parser's arena: strings live in the arena, not in a clone
     var cfg = parsed.value;
-    if (!isValidUtf8(cfg.model)) {
-        cfg.model = "";
+    const model = cfg.providerEntry(cfg.provider).model;
+    if (!isValidUtf8(model)) {
+        cfg.providerEntry(cfg.provider).model = "";
     }
     const arena = parsed.arena.*;
     allocator.destroy(parsed.arena);
@@ -260,8 +252,8 @@ test "round-trip default config via JSON" {
     defer cloned.deinit(allocator);
 
     try std.testing.expectEqual(.lmstudio, cloned.provider);
-    try std.testing.expectEqualStrings("http://127.0.0.1:1234", cloned.providerUrl);
-    try std.testing.expectEqualStrings("", cloned.model);
+    try std.testing.expectEqualStrings("http://127.0.0.1:1234", cloned.providerEntryConst(.lmstudio).url);
+    try std.testing.expectEqualStrings("", cloned.providerEntryConst(.lmstudio).model);
 }
 
 test "resolvePrompt applies prefix, suffix, and override" {
@@ -320,11 +312,11 @@ test "can deserialize valid config JSON" {
 
 test "can serialize config to JSON" {
     const allocator = std.testing.allocator;
-    const cfg = Config{
+    var cfg = Config{
         .provider = .lmstudio,
-        .providerUrl = "http://127.0.0.1:1234",
-        .model = "google/gemma-4-e2b",
     };
+    cfg.providerEntry(.lmstudio).url = "http://127.0.0.1:1234";
+    cfg.providerEntry(.lmstudio).model = "google/gemma-4-e2b";
 
     const buffer = try std.json.Stringify.valueAlloc(allocator, cfg, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
