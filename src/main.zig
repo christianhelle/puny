@@ -206,7 +206,7 @@ fn promptReconfigure(
 
     var provider_name = cfg.provider;
     var provider_changed = false;
-    if (picked_provider == cfg.provider) {
+    if (picked_provider != cfg.provider) {
         cfg.provider = picked_provider;
         provider_name = cfg.provider;
         provider_changed = true;
