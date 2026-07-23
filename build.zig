@@ -101,17 +101,6 @@ fn addPunyExecutable(
         .optimize = optimize,
     });
     exe.root_module.addImport("zigzag", zigzag.module("zigzag"));
-    exe.root_module.addImport("tools", b.createModule(.{
-        .root_source_file = b.path("src/tools/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    }));
-
-    exe.root_module.addImport("skills", b.createModule(.{
-        .root_source_file = b.path("src/skills/skills.zig"),
-        .target = target,
-        .optimize = optimize,
-    }));
 
     if (target.result.os.tag == .windows) {
         exe.root_module.linkSystemLibrary("psapi", .{});
