@@ -435,6 +435,7 @@ pub fn runTurn(
         .messages = messages.items,
         .tools = tool_definitions,
         .stream = true,
+        .reasoning = show_thinking,
     };
 
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
