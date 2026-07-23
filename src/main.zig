@@ -294,7 +294,7 @@ fn ensureCopilotAuth(
     const token = (try copilot.deviceLogin(client, stdout_writer)) orelse return error.MissingApiKey;
     client.setGithubToken(token);
 
-    cfg.apiKey = try arena.dupe(u8, token);
+    cfg.providerEntry(.copilot).apiKey = try arena.dupe(u8, token);
     config.save(arena, io, cfg.*, init.environ_map) catch |err| {
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
