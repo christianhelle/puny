@@ -104,6 +104,7 @@ pub const ChatRequest = struct {
     tools: []const ToolDefinition,
     stream: bool = true,
     temperature: ?f64 = null,
+    reasoning: bool = false,
 };
 
 pub const StreamEvent = union(enum) {
