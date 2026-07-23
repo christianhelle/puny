@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Fix reasoning line tracking, Anthropic thinking field, and Google thinkingConfig ([#44](https://github.com/christianhelle/puny/pull/44)) ([@christianhelle](https://github.com/christianhelle/))
 - Suppress reasoning/thinking output by default and add --show-thinking to allow it ([#43](https://github.com/christianhelle/puny/pull/43)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor Config: per-provider apiKey, model, and URL ([#42](https://github.com/christianhelle/puny/pull/42)) ([@christianhelle](https://github.com/christianhelle/))
 - Migrate from deprecated API's ([#41](https://github.com/christianhelle/puny/pull/41)) ([@christianhelle](https://github.com/christianhelle/))
