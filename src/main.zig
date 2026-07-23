@@ -803,9 +803,9 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 } else {
                     for (ctx.skill_registry.records.items) |r| {
                         if (r.description) |desc| {
-                            try ctx.stdout_writer.print("  {s} — {s}\n", .{ r.name, desc });
+                            try ctx.stdout_writer.print("{s}{s}{s}\n{s}\n\n", .{ ansi.bright, r.name, ansi.reset, desc });
                         } else {
-                            try ctx.stdout_writer.print("  {s}\n", .{r.name});
+                            try ctx.stdout_writer.print("{s}{s}{s}\n", .{ ansi.bright, r.name, ansi.reset });
                         }
                     }
                 }
