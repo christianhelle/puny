@@ -1225,6 +1225,28 @@ test "googleRequestPayload converts OpenAI request" {
     const declarations = tools[0].object.get("functionDeclarations").?.array.items;
     try std.testing.expectEqualStrings("read_file", declarations[0].object.get("name").?.string);
     try std.testing.expect(declarations[0].object.get("parameters") != null);
+    try std.testing.expect(generation_config.get("thinkingConfig") == null);
+}
+
+test "googleRequestPayload includes thinkingConfig when reasoning is enabled" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{},
+        .tools = &.{},
+        .reasoning = true,
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const generation_config = parsed.value.object.get("generationConfig").?.object;
+    const thinking_config = generation_config.get("thinkingConfig").?.object;
+    try std.testing.expectEqual(true, thinking_config.get("includeThoughts").?.bool);
 }
 
 test "googleToolNameForId prefers the nearest prior assistant tool call" {
