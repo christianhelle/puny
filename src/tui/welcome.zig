@@ -44,6 +44,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         try printCommand(writer, "/build [task]", "Switch to build mode");
         try printCommand(writer, "/model [id]", "Switch to another model");
         try printCommand(writer, "/provider [name]", "Switch to another provider");
+        try printCommand(writer, "/skills", "List global and repository skills");
         try writer.print("\n", .{});
         if (info.prefilled) {
             try writer.print("{s}Prefilled prompt will be sent automatically. Type /quit to exit.{s}\n", .{ ansi.dim, ansi.reset });
