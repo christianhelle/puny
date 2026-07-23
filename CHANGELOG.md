@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Suppress reasoning/thinking output by default and add --show-thinking to allow it ([#43](https://github.com/christianhelle/puny/pull/43)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor Config: per-provider apiKey, model, and URL ([#42](https://github.com/christianhelle/puny/pull/42)) ([@christianhelle](https://github.com/christianhelle/))
 - Migrate from deprecated API's ([#41](https://github.com/christianhelle/puny/pull/41)) ([@christianhelle](https://github.com/christianhelle/))
 - Generate Tool Schemas at Comptime ([#40](https://github.com/christianhelle/puny/pull/40)) ([@christianhelle](https://github.com/christianhelle/))
