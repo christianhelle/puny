@@ -17,6 +17,7 @@ pub fn select(
     init: std.process.Init,
     skip_validation: bool,
     cfg: ?*config.Config,
+    current_provider: provider.ModelProvider,
     environ_map: *const std.process.Environ.Map,
     random: std.Random,
 ) !?[]const u8 {
@@ -40,7 +41,7 @@ pub fn select(
 
     if (cfg) |c| {
         if (client.isValidUtf8(key)) {
-            c.model = key;
+            c.providerEntry(current_provider).model = key;
             config.save(arena, io, c.*, environ_map) catch |err| {
             var stderr_buffer: [1024]u8 = undefined;
             var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
@@ -127,10 +128,11 @@ pub fn switchModel(
     skip_validation: bool,
     stdout_writer: *std.Io.Writer,
     cfg: ?*config.Config,
+    current_provider: provider.ModelProvider,
     environ_map: *const std.process.Environ.Map,
     random: std.Random,
 ) !?[]const u8 {
-    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg, environ_map, random)) orelse {
+    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg, current_provider, environ_map, random)) orelse {
         if (model_id != null) {
             try stdout_writer.print("\nModel not found.\n", .{});
             try stdout_writer.flush();
