@@ -573,8 +573,9 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
             ctx.model_key.* = new_key;
         }
     } else {
-        ctx.prov.setUrlAndKey(ctx.cfg.providerUrl, ctx.cfg.apiKey);
-        ctx.provider_url.* = ctx.cfg.providerUrl;
+        const entry = ctx.cfg.providerEntry(new_provider_name);
+        ctx.prov.setUrlAndKey(entry.url, entry.apiKey orelse "");
+        ctx.provider_url.* = entry.url;
     }
 
     try welcome.printSummary(
@@ -636,11 +637,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
     // Update the config
     ctx.cfg.provider = picked_provider;
     const new_provider_url = defaultProviderUrl(picked_provider);
-    if (!providerHasFixedUrl(picked_provider)) {
-        ctx.cfg.providerUrl = try ctx.arena.dupe(u8, new_provider_url);
-    } else {
-        ctx.cfg.providerUrl = try ctx.arena.dupe(u8, new_provider_url);
-    }
+    ctx.cfg.providerEntry(picked_provider).url = try ctx.arena.dupe(u8, new_provider_url);
 
     // Save the updated config
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
