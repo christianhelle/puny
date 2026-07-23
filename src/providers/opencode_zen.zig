@@ -303,8 +303,8 @@ const AnthropicSseCallback = struct {
                 },
                 .thinking => {
                     if (std.mem.eql(u8, delta_type, "thinking_delta")) {
-                        if (delta.object.get("text")) |text| {
-                            try self.callback.emit(.{ .reasoning = text.string });
+                        if (delta.object.get("thinking")) |thinking| {
+                            try self.callback.emit(.{ .reasoning = thinking.string });
                         }
                     }
                 },
