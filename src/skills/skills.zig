@@ -55,6 +55,29 @@ pub const Registry = struct {
         return null;
     }
 
+    pub fn buildListing(self: *Registry, allocator: std.mem.Allocator) ![]const u8 {
+        var buf = std.ArrayList(u8).empty;
+        errdefer buf.deinit(allocator);
+
+        try buf.appendSlice(allocator, "<available_skills>\n");
+        for (self.records.items) |r| {
+            if (r.description) |desc| {
+                try buf.appendSlice(allocator, "  <skill>\n    <name>");
+                try buf.appendSlice(allocator, r.name);
+                try buf.appendSlice(allocator, "</name>\n    <description>");
+                try buf.appendSlice(allocator, desc);
+                try buf.appendSlice(allocator, "</description>\n  </skill>\n");
+            } else {
+                try buf.appendSlice(allocator, "  <skill>\n    <name>");
+                try buf.appendSlice(allocator, r.name);
+                try buf.appendSlice(allocator, "</name>\n  </skill>\n");
+            }
+        }
+        try buf.appendSlice(allocator, "</available_skills>");
+
+        return buf.toOwnedSlice(allocator);
+    }
+
     pub fn loadContent(self: *Registry, io: std.Io, name: []const u8, allocator: std.mem.Allocator) ![]const u8 {
         const record = self.findByName(name) orelse return error.SkillNotFound;
         const skill_path = try std.fs.path.join(self.allocator, &.{ record.dir_path, "SKILL.md" });
@@ -320,4 +343,46 @@ test "loadContent returns error for unknown skill" {
 
     const body = registry.loadContent(std.testing.io, "nonexistent", std.testing.allocator);
     try std.testing.expectError(error.SkillNotFound, body);
+}
+
+test "buildListing shows names only before fullScan" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "alpha", .default_dir);
+    try tmp.dir.createDir(std.testing.io, "beta", .default_dir);
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+
+    const listing = try registry.buildListing(std.testing.allocator);
+    defer std.testing.allocator.free(listing);
+    try std.testing.expect(std.mem.indexOf(u8, listing, "alpha") != null);
+    try std.testing.expect(std.mem.indexOf(u8, listing, "beta") != null);
+    try std.testing.expect(std.mem.indexOf(u8, listing, "<available_skills>") != null);
+}
+
+test "buildListing includes descriptions after fullScan" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "my-skill", .default_dir);
+    const content = "---\nname: my-skill\ndescription: >\n  Does something useful\n---\nbody";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "my-skill/SKILL.md", .data = content });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    const listing = try registry.buildListing(std.testing.allocator);
+    defer std.testing.allocator.free(listing);
+    try std.testing.expect(std.mem.indexOf(u8, listing, "Does something useful") != null);
 }
