@@ -311,6 +311,18 @@ pub const OpenAiAccumulator = struct {
                 try self.content.appendSlice(self.allocator, text);
             },
             .reasoning => |text| {
+                {
+                    var debug_buf: [512]u8 = undefined;
+                    var debug_fw: std.Io.File.Writer = .init(.stderr(), self.io, &debug_buf);
+                    const debug_w = &debug_fw.interface;
+                    debug_w.print("DEBUG reasoning(show={}, stdout={any}, len={}, preview='{s}')\n", .{
+                        self.show_thinking,
+                        self.stdout,
+                        text.len,
+                        if (text.len > 0) text[0..@min(text.len, 40)] else "",
+                    }) catch {};
+                    debug_w.flush() catch {};
+                }
                 if (self.show_thinking) {
                     self.recordFirstToken();
                     if (self.stdout) |stdout| {
