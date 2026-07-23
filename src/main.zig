@@ -742,7 +742,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 if (end < user_message.len and std.ascii.isAlphanumeric(user_message[end])) continue;
                 const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
                 try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-                try ctx.stdout_writer.print("\n{s}[Loaded skill: {s}]{s}\n", .{ ansi.dim, r.name, ansi.reset });
+                try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
                 try ctx.stdout_writer.flush();
                 ctx.loaded_skills.put(ctx.arena, r.name, {}) catch {};
             }
@@ -842,7 +842,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 };
 
                 try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-                try ctx.stdout_writer.print("\n{s}Loaded skill: {s}{s}\n", .{ ansi.bright, skill_name, ansi.reset });
+                try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
                 try ctx.stdout_writer.flush();
 
                 const has_text = if (user_text) |text| std.mem.trim(u8, text, " \t\r\n").len > 0 else false;
