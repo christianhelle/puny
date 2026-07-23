@@ -87,8 +87,8 @@ pub const Config = struct {
     prompts: PromptsConfig = .{},
     providers: [4]Provider = [4]Provider{
         .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = "", .model = "" },
-        .{ .name = .opencode_zen, .url = opencode_go.default_base_url, .apiKey = "", .model = "" },
-        .{ .name = .opencode_go, .url = opencode_zen.default_base_url, .apiKey = "", .model = "" },
+        .{ .name = .opencode_zen, .url = opencode_zen.default_base_url, .apiKey = "", .model = "" },
+        .{ .name = .opencode_go, .url = opencode_go.default_base_url, .apiKey = "", .model = "" },
         .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = "", .model = "" },
     },
 
