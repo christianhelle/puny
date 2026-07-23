@@ -90,10 +90,14 @@ pub const Registry = struct {
         const content = try std.Io.Dir.cwd().readFileAlloc(io, skill_path, allocator, std.Io.Limit.limited(1024 * 1024));
         defer allocator.free(content);
 
-        if (content.len < 4 or !std.mem.startsWith(u8, content, "---\n")) return allocator.dupe(u8, content);
+        if (content.len < 4) return allocator.dupe(u8, content);
+        if (!std.mem.startsWith(u8, content, "---\n") and !std.mem.startsWith(u8, content, "---\r\n")) return allocator.dupe(u8, content);
 
-        const body_start = std.mem.indexOf(u8, content[4..], "\n---") orelse return allocator.dupe(u8, content);
-        const body = content[4 + body_start + "\n---".len ..];
+        const delim = if (std.mem.startsWith(u8, content, "---\r\n")) "\r\n---" else "\n---";
+        const header_len: usize = if (std.mem.startsWith(u8, content, "---\r\n")) 5 else 4;
+
+        const body_start = std.mem.indexOf(u8, content[header_len..], delim) orelse return allocator.dupe(u8, content);
+        const body = content[header_len + body_start + delim.len ..];
         return allocator.dupe(u8, body);
     }
 
