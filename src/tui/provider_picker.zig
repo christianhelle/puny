@@ -14,7 +14,6 @@ pub const default_providers = [_]ProviderOption{
     .{ .id = .opencode_zen, .display_name = "OpenCode Zen" },
     .{ .id = .opencode_go, .display_name = "OpenCode Go" },
     .{ .id = .copilot, .display_name = "GitHub Copilot" },
-    .{ .id = .mock, .display_name = "Mock" },
 };
 
 var provider_pick_list: []const ProviderOption = &default_providers;
