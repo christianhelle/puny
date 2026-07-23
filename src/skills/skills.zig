@@ -130,6 +130,10 @@ pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
         .argv = &.{ "git", "rev-parse", "--show-toplevel" },
         .stdout_limit = .limited(4096),
         .stderr_limit = .limited(16),
+        .timeout = .{ .duration = .{
+            .raw = .{ .nanoseconds = 5_000_000_000 },
+            .clock = .awake,
+        } },
     }) catch return null;
 
     defer allocator.free(result.stdout);
