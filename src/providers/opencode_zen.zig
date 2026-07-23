@@ -733,6 +733,9 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
         try w.writeAll(",\"temperature\":");
         try std.json.Stringify.value(temp, .{}, w);
     }
+    if (request.reasoning) {
+        try w.writeAll(",\"thinkingConfig\":{\"includeThoughts\":true}");
+    }
     try w.writeByte('}');
 
     try w.writeByte('}');
