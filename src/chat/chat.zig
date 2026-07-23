@@ -211,6 +211,8 @@ pub const OpenAiAccumulator = struct {
     first_token_recorded: bool,
     has_streamed_output: bool,
     show_thinking: bool,
+    reasoning_lines_printed: usize,
+    reasoning_shown: bool,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats) OpenAiAccumulator {
         return .{
@@ -228,6 +230,8 @@ pub const OpenAiAccumulator = struct {
             .first_token_recorded = false,
             .has_streamed_output = false,
             .show_thinking = false,
+            .reasoning_lines_printed = 0,
+            .reasoning_shown = false,
         };
     }
 
@@ -298,6 +302,14 @@ pub const OpenAiAccumulator = struct {
             .content => |text| {
                 self.has_streamed_output = true;
                 self.recordFirstToken();
+                if (self.reasoning_shown) {
+                    self.reasoning_shown = false;
+                    if (self.stdout) |stdout| {
+                        try stdout.print("\n", .{});
+                        try stdout.flush();
+                    }
+                    self.lines_printed += 1;
+                }
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(text.len, 4)), null);
                 if (self.stdout) |stdout| {
                     if (!self.has_header) {
@@ -312,7 +324,8 @@ pub const OpenAiAccumulator = struct {
             },
             .reasoning => |text| {
                 if (self.show_thinking) {
-                    self.recordFirstToken();
+                    self.has_streamed_output = true;
+                    self.reasoning_shown = true;
                     if (self.stdout) |stdout| {
                         if (!self.has_header) {
                             self.has_header = true;
@@ -321,7 +334,7 @@ pub const OpenAiAccumulator = struct {
                         try stdout.print("{s}{s}{s}", .{ ansi.dim, text, ansi.reset });
                         try stdout.flush();
                     }
-                    self.lines_printed += countNewlines(text);
+                    self.reasoning_lines_printed += countNewlines(text);
                 }
             },
             .tool_call_start => |tc| {
