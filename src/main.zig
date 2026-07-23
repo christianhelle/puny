@@ -322,7 +322,7 @@ fn initializeProviderAndModel(
 ) !void {
     selected_provider.* = effectiveProvider(parsed, cfg.*);
     provider_url.* = if (parsed.mock) "-" else baseUrlFor(selected_provider.*, parsed, cfg.*);
-    const api_key = try resolveApiKey(arena, io, parsed, cfg.*, init.environ_map.get("PUNY_API_KEY"));
+    const api_key = try resolveApiKey(arena, io, parsed, cfg.*, selected_provider.*, init.environ_map.get("PUNY_API_KEY"));
 
     if (!parsed.mock and requiresApiKey(selected_provider.*) and api_key.len == 0) {
         var stderr_buffer: [1024]u8 = undefined;
@@ -538,7 +538,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
     const new_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
     const new_provider_url = if (ctx.parsed.mock) "-" else baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
-    const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
 
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         ctx.prov.deinit();
@@ -641,7 +641,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
 
     // Re-create the provider
-    const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
     ctx.prov.deinit();
     ctx.prov.* = createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
     if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
@@ -734,7 +734,7 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 ctx.session_stats.deinit();
                 ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
 
-                const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
                 ctx.prov.* = createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
                 if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
@@ -910,6 +910,7 @@ fn resolveApiKey(
     io: std.Io,
     parsed: cli.Options,
     cfg: config.Config,
+    effective_provider: provider.ModelProvider,
     api_key_env: ?[]const u8,
 ) ![]const u8 {
     if (parsed.api_key) |key| return key;
@@ -922,7 +923,7 @@ fn resolveApiKey(
 
     if (api_key_env) |key| return key;
 
-    return cfg.apiKey;
+    return cfg.providerEntryConst(effective_provider).apiKey orelse "";
 }
 
 fn printExit(
@@ -944,9 +945,10 @@ test "resolveApiKey uses CLI key over env and config" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    const cfg = config.Config{ .apiKey = "config-key" };
+    var cfg = config.Config{};
+    cfg.providerEntry(.lmstudio).apiKey = "config-key";
     const parsed = cli.Options{ .api_key = "cli-key" };
-    const key = try resolveApiKey(allocator, undefined, parsed, cfg, "env-key");
+    const key = try resolveApiKey(allocator, undefined, parsed, cfg, .lmstudio, "env-key");
     try std.testing.expectEqualStrings("cli-key", key);
 }
 
@@ -955,9 +957,10 @@ test "resolveApiKey uses env key over config" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    const cfg = config.Config{ .apiKey = "config-key" };
+    var cfg = config.Config{};
+    cfg.providerEntry(.lmstudio).apiKey = "config-key";
     const parsed = cli.Options{};
-    const key = try resolveApiKey(allocator, undefined, parsed, cfg, "env-key");
+    const key = try resolveApiKey(allocator, undefined, parsed, cfg, .lmstudio, "env-key");
     try std.testing.expectEqualStrings("env-key", key);
 }
 
@@ -966,9 +969,10 @@ test "resolveApiKey falls back to config key" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    const cfg = config.Config{ .apiKey = "config-key" };
+    var cfg = config.Config{};
+    cfg.providerEntry(.lmstudio).apiKey = "config-key";
     const parsed = cli.Options{};
-    const key = try resolveApiKey(allocator, undefined, parsed, cfg, null);
+    const key = try resolveApiKey(allocator, undefined, parsed, cfg, .lmstudio, null);
     try std.testing.expectEqualStrings("config-key", key);
 }
 
@@ -985,7 +989,7 @@ test "resolveApiKey reads and trims api key file" {
 
     const cfg = config.Config{};
     const parsed = cli.Options{ .api_key_file = path };
-    const key = try resolveApiKey(allocator, std.testing.io, parsed, cfg, "env-key");
+    const key = try resolveApiKey(allocator, std.testing.io, parsed, cfg, .lmstudio, "env-key");
     try std.testing.expectEqualStrings("file-key", key);
 }
 
