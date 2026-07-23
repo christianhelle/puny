@@ -55,6 +55,21 @@ pub const Registry = struct {
         return null;
     }
 
+    pub fn loadContent(self: *Registry, io: std.Io, name: []const u8, allocator: std.mem.Allocator) ![]const u8 {
+        const record = self.findByName(name) orelse return error.SkillNotFound;
+        const skill_path = try std.fs.path.join(self.allocator, &.{ record.dir_path, "SKILL.md" });
+        defer self.allocator.free(skill_path);
+
+        const content = try std.Io.Dir.cwd().readFileAlloc(io, skill_path, allocator, std.Io.Limit.limited(1024 * 1024));
+        defer allocator.free(content);
+
+        if (content.len < 4 or !std.mem.startsWith(u8, content, "---\n")) return allocator.dupe(u8, content);
+
+        const body_start = std.mem.indexOf(u8, content[4..], "\n---") orelse return allocator.dupe(u8, content);
+        const body = content[4 + body_start + "\n---".len ..];
+        return allocator.dupe(u8, body);
+    }
+
     pub fn fullScan(self: *Registry, io: std.Io) !void {
         for (self.records.items) |*r| {
             const skill_path = try std.fs.path.join(self.allocator, &.{ r.dir_path, "SKILL.md" });
@@ -258,4 +273,51 @@ test "fullScan parses multi-line folded description" {
 
     const record = registry.findByName("alba-testing").?;
     try std.testing.expectEqualStrings("Expert knowledge of Alba, a class library for integration testing. Covers AlbaHost creation, Scenario-based HTTP testing.", record.description.?);
+}
+
+test "loadContent returns body without frontmatter" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "my-skill", .default_dir);
+    const content = "---\nname: my-skill\ndescription: >\n  A test skill\n---\n\nThis is the skill body\nwith multiple lines.\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "my-skill/SKILL.md", .data = content });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+
+    const body = try registry.loadContent(std.testing.io, "my-skill", std.testing.allocator);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualStrings("\n\nThis is the skill body\nwith multiple lines.\n", body);
+}
+
+test "loadContent returns full file when no frontmatter" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "plain", .default_dir);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "plain/SKILL.md", .data = "Just plain text\nno frontmatter" });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+
+    const body = try registry.loadContent(std.testing.io, "plain", std.testing.allocator);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualStrings("Just plain text\nno frontmatter", body);
+}
+
+test "loadContent returns error for unknown skill" {
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const body = registry.loadContent(std.testing.io, "nonexistent", std.testing.allocator);
+    try std.testing.expectError(error.SkillNotFound, body);
 }
