@@ -843,15 +843,16 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
 
                 try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
                 try ctx.stdout_writer.print("\n{s}Loaded skill: {s}{s}\n", .{ ansi.bright, skill_name, ansi.reset });
-
-                if (user_text) |text| {
-                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = text });
-                    try ctx.stdout_writer.print(" {s}\n", .{text});
-                }
                 try ctx.stdout_writer.flush();
 
-                const turn_result = try runChatTurn(ctx);
-                if (turn_result == .exit) return;
+                const has_text = if (user_text) |text| std.mem.trim(u8, text, " \t\r\n").len > 0 else false;
+                if (has_text) {
+                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = user_text.? });
+                    try ctx.stdout_writer.print(" {s}\n", .{user_text.?});
+                    try ctx.stdout_writer.flush();
+                    const turn_result = try runChatTurn(ctx);
+                    if (turn_result == .exit) return;
+                }
                 continue;
             },
             .run_chat_turn => {},
