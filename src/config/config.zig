@@ -61,15 +61,21 @@ pub const Provider = struct {
     name: provider.ModelProvider,
     apiKey: ?[]const u8,
     url: []const u8,
-    defaultModel: []const u8,
+    model: []const u8,
 
     pub fn clone(self: Provider, allocator: std.mem.Allocator) std.mem.Allocator.Error!Provider {
         return .{
-            .name = try allocator.dupe(u8, self.name),
+            .name = self.name,
             .apiKey = if (self.apiKey) |value| try allocator.dupe(u8, value) else null,
             .url = try allocator.dupe(u8, self.url),
-            .defaultModel = try allocator.dupe(u8, self.defaultModel),
+            .model = try allocator.dupe(u8, self.model),
         };
+    }
+
+    pub fn deinit(self: *Provider, allocator: std.mem.Allocator) void {
+        if (self.apiKey) |key| allocator.free(key);
+        allocator.free(self.url);
+        allocator.free(self.model);
     }
 };
 
@@ -80,23 +86,48 @@ pub const Config = struct {
     model: []const u8 = "",
     prompts: PromptsConfig = .{},
     providers: [4]Provider = [4]Provider{
-        .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = "", .defaultModel = "" },
-        .{ .name = .opencode_zen, .url = opencode_go.default_base_url, .apiKey = "", .defaultModel = "" },
-        .{ .name = .opencode_go, .url = opencode_zen.default_base_url, .apiKey = "", .defaultModel = "" },
-        .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = "", .defaultModel = "" },
+        .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = "", .model = "" },
+        .{ .name = .opencode_zen, .url = opencode_go.default_base_url, .apiKey = "", .model = "" },
+        .{ .name = .opencode_go, .url = opencode_zen.default_base_url, .apiKey = "", .model = "" },
+        .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = "", .model = "" },
     },
 
     pub fn default() Config {
         return .{};
     }
 
+    pub fn providerEntry(self: *Config, kind: provider.ModelProvider) *Provider {
+        return switch (kind) {
+            .lmstudio => &self.providers[0],
+            .opencode_zen => &self.providers[1],
+            .opencode_go => &self.providers[2],
+            .copilot => &self.providers[3],
+            .mock => unreachable,
+        };
+    }
+
+    pub fn providerEntryConst(self: *const Config, kind: provider.ModelProvider) *const Provider {
+        return switch (kind) {
+            .lmstudio => &self.providers[0],
+            .opencode_zen => &self.providers[1],
+            .opencode_go => &self.providers[2],
+            .copilot => &self.providers[3],
+            .mock => unreachable,
+        };
+    }
+
     pub fn clone(self: Config, allocator: std.mem.Allocator) std.mem.Allocator.Error!Config {
+        var providers: [4]Provider = undefined;
+        for (&self.providers, &providers) |src, *dst| {
+            dst.* = try src.clone(allocator);
+        }
         return .{
             .provider = self.provider,
             .providerUrl = try allocator.dupe(u8, self.providerUrl),
             .apiKey = try allocator.dupe(u8, self.apiKey),
             .model = try allocator.dupe(u8, self.model),
             .prompts = try self.prompts.clone(allocator),
+            .providers = providers,
         };
     }
 
@@ -104,6 +135,7 @@ pub const Config = struct {
         allocator.free(self.providerUrl);
         allocator.free(self.apiKey);
         allocator.free(self.model);
+        for (&self.providers) |*p| p.deinit(allocator);
         self.prompts.deinit(allocator);
     }
 
