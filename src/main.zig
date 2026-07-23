@@ -363,6 +363,7 @@ fn initializeProviderAndModel(
         init,
         skip_validation,
         cfg,
+        selected_provider.*,
         init.environ_map,
         random,
     )) orelse blk: {
@@ -380,6 +381,7 @@ fn initializeProviderAndModel(
             init,
             false,
             cfg,
+            selected_provider.*,
             init.environ_map,
             random,
         )) orelse {
@@ -562,6 +564,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
             ctx.init,
             model_skip_validation,
             ctx.cfg,
+            new_provider_name,
             ctx.init.environ_map,
             ctx.random,
         );
@@ -599,6 +602,7 @@ fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void 
         model_skip_validation,
         ctx.stdout_writer,
         ctx.cfg,
+        ctx.model_provider.*,
         ctx.init.environ_map,
         ctx.random,
     )) |new_key| {
@@ -660,6 +664,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
         ctx.init,
         model_skip_validation,
         ctx.cfg,
+        picked_provider,
         ctx.init.environ_map,
         ctx.random,
     );
