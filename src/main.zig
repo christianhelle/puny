@@ -779,9 +779,8 @@ fn effectiveProvider(parsed: cli.Options, cfg: config.Config) ModelProvider {
 fn baseUrlFor(model_provider: ModelProvider, parsed: cli.Options, cfg: config.Config) []const u8 {
     if (providerHasFixedUrl(model_provider)) return defaultProviderUrl(model_provider);
     if (parsed.url) |url| return url;
-    if (cfg.provider == model_provider and cfg.providerUrl.len > 0) {
-        return cfg.providerUrl;
-    }
+    const entry = cfg.providerEntryConst(model_provider);
+    if (entry.url.len > 0) return entry.url;
     return config.default_lm_studio_url;
 }
 
@@ -1014,13 +1013,11 @@ test "baseUrlFor uses CLI url for lmstudio only" {
     try std.testing.expectEqualStrings("-", baseUrlFor(.mock, parsed, cfg));
 }
 
-test "baseUrlFor uses config url only when provider matches config" {
-    const cfg_lmstudio = config.Config{ .provider = .lmstudio, .providerUrl = "http://config-lmstudio" };
-    try std.testing.expectEqualStrings("http://config-lmstudio", baseUrlFor(.lmstudio, .{}, cfg_lmstudio));
-    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, .{}, cfg_lmstudio));
-
-    const cfg_opencode = config.Config{ .provider = .opencode_zen, .providerUrl = "http://config-opencode" };
-    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, .{}, cfg_opencode));
+test "baseUrlFor uses per-provider url" {
+    var cfg = config.Config{};
+    cfg.providerEntry(.lmstudio).url = "http://config-lmstudio";
+    try std.testing.expectEqualStrings("http://config-lmstudio", baseUrlFor(.lmstudio, .{}, cfg));
+    try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, .{}, cfg));
 }
 
 test "baseUrlFor returns provider defaults" {
