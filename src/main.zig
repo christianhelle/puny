@@ -103,7 +103,7 @@ pub fn main(init: std.process.Init) !void {
 
     var skill_registry = skills.Registry.init(arena);
     defer skill_registry.deinit();
-    if (skills.homeDir(arena, init.environ_map)) |home| {
+    if (try skills.homeDir(arena, init.environ_map)) |home| {
         const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
         try skill_registry.lightScan(io, global_path);
     }
@@ -730,6 +730,17 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
             .cfg = ctx.cfg,
         });
 
+        if (command == .prompt) {
+            for (ctx.skill_registry.records.items) |*r| {
+                if (std.mem.indexOf(u8, user_message, r.name)) |_| {
+                    const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
+                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
+                    try ctx.stdout_writer.print("\n{s}[Loaded skill: {s}]{s}\n", .{ ansi.dim, r.name, ansi.reset });
+                    try ctx.stdout_writer.flush();
+                }
+            }
+        }
+
         if (command == .prompt and !ctx.parsed.oneshot) {
             try ctx.history.add(user_message);
             try ctx.history.save(ctx.io);
@@ -800,6 +811,33 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 }
                 try ctx.stdout_writer.print("\nUse /<skill-name> to load a skill.\n", .{});
                 try ctx.stdout_writer.flush();
+                continue;
+            },
+            .load_skill => |full_text| {
+                const space = std.mem.indexOfScalar(u8, full_text, ' ');
+                const skill_name = if (space) |s| full_text[0..s] else full_text;
+                const user_text = if (space) |s| std.mem.trimStart(u8, full_text[s..], " ") else null;
+
+                const content = ctx.skill_registry.loadContent(ctx.io, skill_name, ctx.messages_arena.allocator()) catch |err| switch (err) {
+                    error.SkillNotFound => {
+                        try ctx.stdout_writer.print("\nUnknown skill: {s}. Use /skills to list available skills.\n", .{skill_name});
+                        try ctx.stdout_writer.flush();
+                        continue;
+                    },
+                    else => |e| return e,
+                };
+
+                try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
+                try ctx.stdout_writer.print("\n{s}Loaded skill: {s}{s}\n", .{ ansi.bright, skill_name, ansi.reset });
+
+                if (user_text) |text| {
+                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = text });
+                    try ctx.stdout_writer.print(" {s}\n", .{text});
+                }
+                try ctx.stdout_writer.flush();
+
+                const turn_result = try runChatTurn(ctx);
+                if (turn_result == .exit) return;
                 continue;
             },
             .run_chat_turn => {},
