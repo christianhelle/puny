@@ -155,10 +155,9 @@ pub const LoadResult = struct {
     arena: ?std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *LoadResult, allocator: std.mem.Allocator) void {
+        _ = allocator;
         if (self.arena) |*a| {
             a.deinit();
-        } else {
-            self.config.deinit(allocator);
         }
     }
 };
