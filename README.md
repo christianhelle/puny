@@ -15,6 +15,7 @@ Puny lets you chat with an LLM and gives it a curated set of coding tools so it 
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
+- **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
   - Read, write, and list files in your project
   - Run shell commands
@@ -287,6 +288,95 @@ Once saved, Puny uses the stored provider and key on subsequent runs, so you onl
 
 `--url` and `PUNY_PROVIDER_URL` only affect LM Studio; OpenCode Zen always uses `https://opencode.ai/zen` and GitHub Copilot always uses `https://api.githubcopilot.com`.
 
+The config file stores per-provider settings (URL, API key, and last-selected model) so you can switch between providers without re-entering credentials.
+
+## Skills
+
+Puny can load reusable prompt-engineering skills from markdown files. Skills are
+keyword-triggered instructions that get injected into the system prompt so the model
+knows how to behave for a specific task.
+
+### Skill locations
+
+Puny scans two directories for skills:
+
+- **Global**: `~/.agents/skills/` — skills available across all repositories
+- **Repository**: `<repo-root>/.agents/skills/` — project-specific skills (auto-detected via `git rev-parse --show-toplevel`)
+
+Each subdirectory inside these paths is treated as a skill. The skill's name is the
+directory name.
+
+### Skill structure
+
+A skill directory must contain a `SKILL.md` file. The file can optionally start with
+YAML frontmatter for a description:
+
+```markdown
+---
+name: my-skill
+description: >
+  Expert knowledge of MyTool for integration testing.
+  Covers setup, configuration, and common patterns.
+---
+
+# MyTool Instructions
+
+When asked about MyTool, follow these guidelines...
+```
+
+The body after the frontmatter (or the entire file if no frontmatter exists) is the
+skill content that gets injected into the system prompt when the skill is loaded.
+
+### Loading a skill
+
+Skills are loaded on demand by typing `/<skill-name>` in the chat prompt. For example,
+given a skill directory named `nano-commits`:
+
+```text
+Prompt: /nano-commits
+```
+
+Puny loads the `SKILL.md` content and injects it into the conversation. The skill name
+is matched as a standalone word (e.g. `/nano-commits` loads the `nano-commits` skill).
+
+### Listing available skills
+
+Use `/skills` to list all discovered skills from both global and repository locations:
+
+```text
+Prompt: /skills
+
+Available skills:
+
+  nano-commits
+  grill-me
+  ocpp-2.0.1  — Expert knowledge of OCPP 2.0.1 protocol
+```
+
+Skills with a `description` field in their frontmatter show a description next to
+their name.
+
+### How skills work
+
+When Puny starts, it scans both skill directories and builds a registry. Available
+skills and their descriptions (if scanned) are injected into the system prompt as an
+`<available_skills>` block:
+
+```xml
+<available_skills>
+  <skill>
+    <name>nano-commits</name>
+    <description>Commit often. One logical change per commit.</description>
+  </skill>
+</available_skills>
+```
+
+When you load a skill with `/<name>`, Puny reads the `SKILL.md` body, strips the
+frontmatter, and adds the content as a system message. The model can then follow
+the skill's instructions for the remainder of the conversation.
+
+Skills stay loaded for the session. To clear all loaded skills, use `/reset`.
+
 ## Tool calling
 
 Puny sends a list of available tools to the model on every request. When the model decides to call a tool, Puny executes it automatically and feeds the result back into the conversation.
@@ -320,21 +410,39 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `-1`, `--oneshot`          | Exit after processing the prompt (requires `--prompt`)     |
 | `-M`, `--mock`             | Use mock provider (no backend required)                    |
 | `--reconfigure`            | Re-run first-run setup and update config                   |
+| `--show-thinking`          | Show reasoning/thinking output from the model              |
+| `--debug`                  | Log HTTP requests and responses to `puny_debug.log`        |
 | `-h`, `--help`             | Show help text                                             |
 | `-V`, `--version`          | Print version                                              |
+
+### Environment variables
+
+| Variable                 | Description                                        |
+| ------------------------ | -------------------------------------------------- |
+| `PUNY_PROVIDER`          | Default provider name (overrides config)           |
+| `PUNY_PROVIDER_URL`      | LM Studio endpoint URL (overrides config/CLI)      |
+| `PUNY_API_KEY`           | Provider API token (overrides config, session only)|
+| `PUNY_MODEL`             | Default model identifier (overrides config)        |
+| `PUNY_MOCK`              | Set to `1` or `true` to enable mock provider       |
+| `PUNY_SHOW_THINKING`     | Set to `1` or `true` to show reasoning output      |
+| `GITHUB_COPILOT_OAUTH_TOKEN` | GitHub OAuth token for Copilot provider        |
 
 ### Interactive commands
 
 While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
-- `/reset` — clear the conversation history
+- `/reset` — clear the conversation history and unload all skills
 - `/stats` — show session statistics and memory usage
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description)
 - `/build [task]` — switch to build mode (optionally with a task description)
 - `/model [id]` — switch to another model; shows the model picker if no ID is given
 - `/provider [name]` — switch to another provider without reconfiguring everything; shows the provider picker if no name is given, then opens the model picker for the new provider
+- `/skills` — list all available global and repository skills
+
+Any unrecognized slash command (e.g. `/nano-commits`, `/grill-me`) is treated as a
+skill name and loads the matching skill if found.
 
 ## Build from source
 
@@ -362,6 +470,13 @@ Start without a running AI backend:
 zig build run -- --mock
 ```
 
+You can also set the `PUNY_MOCK` environment variable:
+
+```bash
+export PUNY_MOCK=1
+zig build run
+```
+
 The mock provider returns canned responses and simulates tool calls based on keywords in your prompt:
 
 | Prompt contains            | Mock response                                 |
@@ -378,6 +493,31 @@ Use `--model` to skip the model picker in mock mode:
 ```bash
 zig build run -- --mock --model mock-model --prompt "search for something" --oneshot
 ```
+
+### Show thinking/reasoning output
+
+To see the model's internal reasoning (thinking) output, use `--show-thinking`:
+
+```bash
+puny --show-thinking
+```
+
+Or set the `PUNY_SHOW_THINKING` environment variable:
+
+```bash
+export PUNY_SHOW_THINKING=true
+puny
+```
+
+### HTTP debug logging
+
+To log all HTTP requests and responses to `puny_debug.log`, use `--debug`:
+
+```bash
+puny --debug
+```
+
+The debug log captures request payloads, response headers, and SSE chunks for troubleshooting.
 
 ## License
 
