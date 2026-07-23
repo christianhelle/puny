@@ -213,16 +213,17 @@ fn promptReconfigure(
         result.changed = true;
     }
 
+    const entry = cfg.providerEntry(provider_name);
     const provider_url_is_fixed = providerHasFixedUrl(provider_name);
     if (provider_url_is_fixed) {
         const fixed_url = defaultProviderUrl(provider_name);
-        cfg.providerUrl = try arena.dupe(u8, fixed_url);
+        entry.url = try arena.dupe(u8, fixed_url);
         result.changed = true;
         try stdout_writer.print("Provider URL is fixed at {s}\n", .{fixed_url});
         try stdout_writer.flush();
     } else {
         line_alloc.clearRetainingCapacity();
-        try stdout_writer.print("Current provider URL: {s}\n", .{cfg.providerUrl});
+        try stdout_writer.print("Current provider URL: {s}\n", .{entry.url});
         try stdout_writer.print(
             "Enter new provider URL (default: {s}; press Enter for default): ",
             .{defaultProviderUrl(provider_name)},
@@ -240,16 +241,16 @@ fn promptReconfigure(
 
         const default_url = defaultProviderUrl(provider_name);
         if (new_url.len > 0) {
-            cfg.providerUrl = try arena.dupe(u8, new_url);
+            entry.url = try arena.dupe(u8, new_url);
             result.changed = true;
         } else if (provider_changed) {
-            cfg.providerUrl = try arena.dupe(u8, default_url);
+            entry.url = try arena.dupe(u8, default_url);
             result.changed = true;
         }
     }
 
     line_alloc.clearRetainingCapacity();
-    const key_status = if (cfg.apiKey.len > 0) "set" else "none";
+    const key_status = if (entry.apiKey) |_| "set" else "none";
     try stdout_writer.print("Current API key: ({s})\n", .{key_status});
     try stdout_writer.print("Enter new API key (press Enter to keep, '-' to clear): ", .{});
     try stdout_writer.flush();
@@ -264,10 +265,10 @@ fn promptReconfigure(
     };
 
     if (std.mem.eql(u8, new_key, "-")) {
-        cfg.apiKey = "";
+        entry.apiKey = null;
         result.changed = true;
     } else if (new_key.len > 0) {
-        cfg.apiKey = try arena.dupe(u8, new_key);
+        entry.apiKey = try arena.dupe(u8, new_key);
         result.changed = true;
     }
 
