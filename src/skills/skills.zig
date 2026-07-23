@@ -112,6 +112,30 @@ pub const Registry = struct {
     }
 };
 
+pub fn homeDir(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) !?[]const u8 {
+    const home = environ_map.get("HOME") orelse environ_map.get("USERPROFILE") orelse return null;
+    return try allocator.dupe(u8, home);
+}
+
+pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
+    const result = std.process.run(allocator, io, .{
+        .argv = &.{ "git", "rev-parse", "--show-toplevel" },
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(16),
+    }) catch return null;
+
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    switch (result.term) {
+        .exited => |code| {
+            if (code == 0) return try allocator.dupe(u8, std.mem.trim(u8, result.stdout, " \t\n\r"));
+            return null;
+        },
+        else => return null,
+    }
+}
+
 fn parseFrontmatterDescription(content: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, content, '\n');
     const first = lines.next() orelse return null;
@@ -364,6 +388,39 @@ test "buildListing shows names only before fullScan" {
     try std.testing.expect(std.mem.indexOf(u8, listing, "alpha") != null);
     try std.testing.expect(std.mem.indexOf(u8, listing, "beta") != null);
     try std.testing.expect(std.mem.indexOf(u8, listing, "<available_skills>") != null);
+}
+
+test "findGitRepoRoot does not crash" {
+    const result = try findGitRepoRoot(std.testing.allocator, std.testing.io);
+    if (result) |r| std.testing.allocator.free(r);
+}
+
+test "homeDir returns HOME from environ map" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", "/home/testuser");
+
+    const result = try homeDir(std.testing.allocator, &env);
+    defer if (result) |r| std.testing.allocator.free(r);
+    try std.testing.expectEqualStrings("/home/testuser", result.?);
+}
+
+test "homeDir returns USERPROFILE if HOME not set" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("USERPROFILE", "C:\\Users\\test");
+
+    const result = try homeDir(std.testing.allocator, &env);
+    defer if (result) |r| std.testing.allocator.free(r);
+    try std.testing.expectEqualStrings("C:\\Users\\test", result.?);
+}
+
+test "homeDir returns null when no home vars set" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const result = try homeDir(std.testing.allocator, &env);
+    try std.testing.expect(result == null);
 }
 
 test "buildListing includes descriptions after fullScan" {
