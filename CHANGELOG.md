@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Refactor Config: per-provider apiKey, model, and URL ([#42](https://github.com/christianhelle/puny/pull/42)) ([@christianhelle](https://github.com/christianhelle/))
 - Migrate from deprecated API's ([#41](https://github.com/christianhelle/puny/pull/41)) ([@christianhelle](https://github.com/christianhelle/))
 - Generate Tool Schemas at Comptime ([#40](https://github.com/christianhelle/puny/pull/40)) ([@christianhelle](https://github.com/christianhelle/))
 - Memory and Resource usage Optimization ([#39](https://github.com/christianhelle/puny/pull/39)) ([@christianhelle](https://github.com/christianhelle/))
