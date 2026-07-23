@@ -51,7 +51,8 @@ pub const ChatOutputItem = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "message")) {
             return .{ .message = try std.json.parseFromValueLeaky(MessageOutput, allocator, source, options) };
@@ -70,7 +71,8 @@ pub const ChatOutputItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .message => |value| try jw.write(value),
+        switch (self) {
+            .message => |value| try jw.write(value),
             .tool_call => |value| try jw.write(value),
             .reasoning => |value| try jw.write(value),
             .invalid_tool_call => |value| try jw.write(value),
@@ -188,7 +190,8 @@ pub const ChatRequestIntegrationsItem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(PluginIntegration, allocator, source, options)) |value| {
@@ -201,7 +204,8 @@ pub const ChatRequestIntegrationsItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .plugin_integration => |value| try jw.write(value),
             .ephemeral_mcp_integration => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -223,7 +227,8 @@ pub const ChatRequestInput = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const ChatInputItem, allocator, source, options)) |value| {
@@ -233,7 +238,8 @@ pub const ChatRequestInput = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .chat_input_item_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -304,7 +310,8 @@ pub const LoadModelResponseLoadConfig = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(LlmLoadConfig, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(LlmLoadConfig, allocator, source, options)) |value| {
             return .{ .llm_load_config = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(EmbeddingLoadConfig, allocator, source, options)) |value| {
@@ -314,7 +321,8 @@ pub const LoadModelResponseLoadConfig = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .llm_load_config => |value| try jw.write(value),
+        switch (self) {
+            .llm_load_config => |value| try jw.write(value),
             .embedding_load_config => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -346,7 +354,8 @@ pub const ChatInputItem = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "message")) {
             return .{ .message = try std.json.parseFromValueLeaky(TextInput, allocator, source, options) };
@@ -359,7 +368,8 @@ pub const ChatInputItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .message => |value| try jw.write(value),
+        switch (self) {
+            .message => |value| try jw.write(value),
             .image => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -382,11 +392,9 @@ pub const ToolCallOutput = struct {
     provider_info: ProviderInfo,
 };
 
-
 ///////////////////////////////////////////
 // Generated Zig API client from OpenAPI
 ///////////////////////////////////////////
-
 
 pub fn Owned(comptime T: type) type {
     return struct {
@@ -924,7 +932,7 @@ pub fn getDownloadStatusRaw(client: *Client, job_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/api/v1/models/download/status/{s}", .{client.base_url, job_id});
+    try uri_buf.writer.print("{s}/api/v1/models/download/status/{s}", .{ client.base_url, job_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1125,4 +1133,3 @@ pub const resources = struct {
 };
 
 pub const api = resources.api;
-

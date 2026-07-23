@@ -35,7 +35,7 @@ fn readFileToBuffer(io: std.Io, path: []const u8, buf: []u8) ![]u8 {
 
 fn parseKbField(data: []const u8, marker: []const u8) !u64 {
     const start = std.mem.indexOf(u8, data, marker) orelse return error.MissingProcField;
-    const after_marker = data[start + marker.len..];
+    const after_marker = data[start + marker.len ..];
 
     var i: usize = 0;
     while (i < after_marker.len and (after_marker[i] == ' ' or after_marker[i] == '\t')) : (i += 1) {}
@@ -43,7 +43,8 @@ fn parseKbField(data: []const u8, marker: []const u8) !u64 {
 
     var j: usize = 0;
     while (j < num_start.len and num_start[j] != ' ' and num_start[j] != '\t' and
-        num_start[j] != '\n' and num_start[j] != '\r') : (j += 1) {}
+        num_start[j] != '\n' and num_start[j] != '\r') : (j += 1)
+    {}
     const num_str = num_start[0..j];
 
     return try std.fmt.parseInt(u64, num_str, 10);
