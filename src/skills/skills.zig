@@ -11,7 +11,6 @@ pub const Registry = struct {
     records: std.ArrayList(SkillRecord),
     fully_scanned: bool,
 
-
     pub fn init(allocator: std.mem.Allocator) Registry {
         return .{
             .allocator = allocator,

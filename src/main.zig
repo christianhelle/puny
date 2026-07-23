@@ -18,8 +18,8 @@ const prompt_history = @import("prompts/history.zig");
 const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
 const sigint = @import("core/sigint.zig");
-const skills = @import("skills");
-const tools = @import("tools");
+const skills = @import("skills/skills.zig");
+const tools = @import("tools/root.zig");
 const welcome = @import("tui/welcome.zig");
 const ModelProvider = provider.ModelProvider;
 
