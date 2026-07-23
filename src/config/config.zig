@@ -154,8 +154,7 @@ pub const LoadResult = struct {
     had_error: bool = false,
     arena: ?std.heap.ArenaAllocator = null,
 
-    pub fn deinit(self: *LoadResult, allocator: std.mem.Allocator) void {
-        _ = allocator;
+    pub fn deinit(self: *LoadResult) void {
         if (self.arena) |*a| {
             a.deinit();
         }
