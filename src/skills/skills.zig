@@ -55,6 +55,10 @@ pub const Registry = struct {
         return null;
     }
 
+    pub fn count(self: *Registry) usize {
+        return self.records.items.len;
+    }
+
     pub fn buildListing(self: *Registry, allocator: std.mem.Allocator) ![]const u8 {
         var buf = std.ArrayList(u8).empty;
         errdefer buf.deinit(allocator);

@@ -18,6 +18,7 @@ const prompt_history = @import("prompts/history.zig");
 const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
 const sigint = @import("core/sigint.zig");
+const skills = @import("skills");
 const tools = @import("tools");
 const welcome = @import("tui/welcome.zig");
 const ModelProvider = provider.ModelProvider;
@@ -100,10 +101,25 @@ pub fn main(init: std.process.Init) !void {
 
     var planning_mode = false;
 
+    var skill_registry = skills.Registry.init(arena);
+    defer skill_registry.deinit();
+    if (skills.homeDir(arena, init.environ_map)) |home| {
+        const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
+        try skill_registry.lightScan(io, global_path);
+    }
+    if (try skills.findGitRepoRoot(arena, io)) |repo_root| {
+        const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
+        try skill_registry.lightScan(io, repo_path);
+    }
+
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
     const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
     try messages.append(messages_arena, .{ .system = system_prompt });
+    if (skill_registry.count() > 0) {
+        const skills_block = try skill_registry.buildListing(messages_arena);
+        try messages.append(messages_arena, .{ .system = skills_block });
+    }
 
     var pending_prompt: ?[]const u8 = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
     var session_stats = chat.SessionStats.init(arena, io);
@@ -136,6 +152,7 @@ pub fn main(init: std.process.Init) !void {
         .line_alloc = &line_alloc,
         .stdin_buffer = &stdin_buffer,
         .debug_log = if (debug_log) |*log| log else null,
+        .skill_registry = &skill_registry,
     };
 
     try runChatLoop(&ctx);
@@ -453,6 +470,7 @@ const ChatLoopContext = struct {
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: *[4096]u8,
     debug_log: ?*DebugLog,
+    skill_registry: *skills.Registry,
 };
 
 fn readUserInput(ctx: *ChatLoopContext) !UserInput {
