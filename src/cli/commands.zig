@@ -15,6 +15,8 @@ pub const Command = union(enum) {
     build: ?[]const u8,
     model: ?[]const u8,
     provider: ?[]const u8,
+    skills,
+    skill: []const u8,
     prompt: []const u8,
 };
 
@@ -27,6 +29,8 @@ pub const Action = union(enum) {
     reconfigure,
     switch_model: ?[]const u8,
     switch_provider: ?[]const u8,
+    list_skills,
+    load_skill: []const u8,
 };
 
 pub const Context = struct {
@@ -80,6 +84,12 @@ pub fn parse(user_message: []const u8) Command {
         }
         return .{ .provider = null };
     }
+
+    if (std.mem.eql(u8, user_message, "/skills"))
+        return .skills;
+
+    if (user_message.len > 0 and user_message[0] == '/')
+        return .{ .skill = user_message[1..] };
 
     return .{ .prompt = user_message };
 }
@@ -145,6 +155,10 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             return .{ .switch_provider = provider_id };
         },
 
+        .skills => return .list_skills,
+
+        .skill => |name_text| return .{ .load_skill = name_text },
+
         .prompt => |text| {
             try ctx.messages.append(ctx.messages_alloc, .{ .user = try ctx.messages_alloc.dupe(u8, text) });
             return .run_chat_turn;
@@ -158,6 +172,7 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqual(Command.reset, parse("/reset"));
     try std.testing.expectEqual(Command.stats, parse("/stats"));
     try std.testing.expectEqual(Command.config, parse("/config"));
+    try std.testing.expectEqual(Command.skills, parse("/skills"));
 
     try std.testing.expectEqualDeep(Command{ .plan = null }, parse("/plan"));
     try std.testing.expectEqualDeep(Command{ .plan = "do thing" }, parse("/plan do thing"));
@@ -170,6 +185,9 @@ test "parse recognizes all slash commands" {
 
     try std.testing.expectEqualDeep(Command{ .provider = null }, parse("/provider"));
     try std.testing.expectEqualDeep(Command{ .provider = "opencode" }, parse("/provider opencode"));
+
+    try std.testing.expectEqualDeep(Command{ .skill = "grill-me" }, parse("/grill-me"));
+    try std.testing.expectEqualDeep(Command{ .skill = "nano-commits" }, parse("/nano-commits"));
 
     try std.testing.expectEqualDeep(Command{ .prompt = "hello" }, parse("hello"));
 }
