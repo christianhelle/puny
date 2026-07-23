@@ -828,8 +828,14 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
 
                 const content = ctx.skill_registry.loadContent(ctx.io, skill_name, ctx.messages_arena.allocator()) catch |err| switch (err) {
                     error.SkillNotFound => {
-                        try ctx.stdout_writer.print("\nUnknown skill: {s}. Use /skills to list available skills.\n", .{skill_name});
-                        try ctx.stdout_writer.flush();
+                        const prompt = full_text;
+                        try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = prompt });
+                        if (!ctx.parsed.oneshot) {
+                            try ctx.history.add(prompt);
+                            try ctx.history.save(ctx.io);
+                        }
+                        const turn_result = try runChatTurn(ctx);
+                        if (turn_result == .exit) return;
                         continue;
                     },
                     else => |e| return e,
