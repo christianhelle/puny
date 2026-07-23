@@ -782,6 +782,26 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                 try handleSwitchProviderCommand(ctx, provider_id);
                 continue;
             },
+            .list_skills => {
+                if (!ctx.skill_registry.fully_scanned) {
+                    try ctx.skill_registry.fullScan(ctx.io);
+                }
+                try ctx.stdout_writer.print("\nAvailable skills:\n", .{});
+                if (ctx.skill_registry.count() == 0) {
+                    try ctx.stdout_writer.print("  (none found)\n", .{});
+                } else {
+                    for (ctx.skill_registry.records.items) |r| {
+                        if (r.description) |desc| {
+                            try ctx.stdout_writer.print("  {s} — {s}\n", .{ r.name, desc });
+                        } else {
+                            try ctx.stdout_writer.print("  {s}\n", .{r.name});
+                        }
+                    }
+                }
+                try ctx.stdout_writer.print("\nUse /<skill-name> to load a skill.\n", .{});
+                try ctx.stdout_writer.flush();
+                continue;
+            },
             .run_chat_turn => {},
         }
 
