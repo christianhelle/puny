@@ -108,6 +108,7 @@ pub const ChatRequest = struct {
 
 pub const StreamEvent = union(enum) {
     content: []const u8,
+    reasoning: []const u8,
     tool_call_start: struct {
         index: usize,
         id: []const u8,
@@ -146,6 +147,7 @@ const DeltaToolCall = struct {
 const DeltaChoice = struct {
     delta: struct {
         content: ?[]const u8 = null,
+        reasoning_content: ?[]const u8 = null,
         role: ?[]const u8 = null,
         tool_calls: ?[]const DeltaToolCall = null,
     },
@@ -179,6 +181,10 @@ pub const SseCallback = struct {
         defer parsed.deinit();
 
         for (parsed.value.choices) |choice| {
+            if (choice.delta.reasoning_content) |rc| {
+                try self.callback.emit(.{ .reasoning = rc });
+            }
+
             if (choice.delta.content) |content| {
                 try self.callback.emit(.{ .content = content });
             }
