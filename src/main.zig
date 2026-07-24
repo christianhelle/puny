@@ -851,6 +851,11 @@ fn runChatLoop(ctx: *ChatLoopContext) !void {
                         }
                     }
                 }
+                if (ctx.parsed.oneshot) {
+                    try ctx.stdout_writer.print("\n", .{});
+                    try ctx.stdout_writer.flush();
+                    return;
+                }
                 try ctx.stdout_writer.print("\nUse /<skill-name> to load a skill.\n", .{});
                 try ctx.stdout_writer.flush();
                 continue;
