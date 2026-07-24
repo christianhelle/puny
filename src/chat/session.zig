@@ -376,7 +376,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
         }
     } else {
         const entry = ctx.cfg.providerEntry(new_provider_name);
-        ctx.prov.setConfig(.{ .base_url = entry.url, .api_key = entry.apiKey orelse "" });
+        ctx.prov.setConfig(.{ .base_url = entry.url, .api_key = entry.apiKey });
         ctx.provider_url.* = entry.url;
     }
 

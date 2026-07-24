@@ -16,8 +16,8 @@ pub const ModelProvider = enum {
 };
 
 pub const ClientConfig = struct {
-    base_url: []const u8 = "",
-    api_key: []const u8 = "",
+    base_url: ?[]const u8 = null,
+    api_key: ?[]const u8 = null,
     http_observer: ?client.HttpObserver = null,
 };
 

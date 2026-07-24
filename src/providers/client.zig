@@ -118,8 +118,8 @@ pub const Client = struct {
     }
 
     pub fn setConfig(self: *Client, config: anytype) void {
-        self.withBaseUrl(config.base_url);
-        self.api_key = config.api_key;
+        if (config.base_url) |url| self.withBaseUrl(url);
+        if (config.api_key) |key| self.api_key = key;
         if (config.http_observer) |obs| self.http_observer = obs;
     }
 };

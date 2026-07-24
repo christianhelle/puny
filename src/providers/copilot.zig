@@ -64,8 +64,8 @@ pub const Client = struct {
     }
 
     pub fn setConfig(self: *Client, config: anytype) void {
-        self.withBaseUrl(config.base_url);
-        if (config.api_key.len > 0) self.setGithubToken(config.api_key);
+        if (config.base_url) |url| self.withBaseUrl(url);
+        if (config.api_key) |key| self.setGithubToken(key);
         if (config.http_observer) |obs| self.inner.http_observer = obs;
     }
 };
