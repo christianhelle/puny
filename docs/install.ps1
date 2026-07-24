@@ -122,8 +122,6 @@ function Get-LatestRelease
 
 function Get-ArchiveName
 {
-  param([string]$ResolvedVersion)
-
   return "puny-windows-x86_64.zip"
 }
 
@@ -134,7 +132,7 @@ function Install-Puny
     [string]$TargetDir
   )
 
-  $archiveName = Get-ArchiveName -ResolvedVersion $ResolvedVersion
+  $archiveName = Get-ArchiveName
   $downloadUrl = "https://github.com/$GitHubRepo/releases/download/$ResolvedVersion/$archiveName"
   $tempDir = Join-Path $env:TEMP "puny-install-$(Get-Random)"
   $archivePath = Join-Path $tempDir $archiveName
