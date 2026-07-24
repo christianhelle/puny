@@ -56,6 +56,11 @@ pub const MockClient = struct {
         _ = self;
     }
 
+    pub fn setConfig(self: *MockClient, config: anytype) void {
+        _ = self;
+        _ = config;
+    }
+
     pub fn listModels(self: *MockClient) !client.Owned(ModelsList) {
         const json =
             \\{"models":[
