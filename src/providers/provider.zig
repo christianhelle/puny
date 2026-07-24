@@ -99,7 +99,7 @@ pub const Provider = union(enum) {
         switch (self.*) {
             .lmstudio, .opencode, .opencode_go => |*c| c.setConfig(config),
             .copilot => |*c| c.setConfig(config),
-            .mock => {},
+            .mock => |*c| c.setConfig(config),
         }
     }
 };
