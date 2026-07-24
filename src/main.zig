@@ -193,20 +193,12 @@ fn runUpgrade(io: std.Io) !void {
     else
         &[_][]const u8{ "bash", "-c", "curl -fsSL https://christianhelle.com/puny/install | bash" };
 
-    var child = try std.process.spawn(io, .{
+    _ = try std.process.spawn(io, .{
         .argv = argv,
-        .stdin = .inherit,
-        .stdout = .inherit,
-        .stderr = .inherit,
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
     });
-
-    const term = try child.wait(io);
-    switch (term) {
-        .exited => |code| {
-            if (code != 0) return error.UpgradeFailed;
-        },
-        else => return error.UpgradeFailed,
-    }
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
