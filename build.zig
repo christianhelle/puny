@@ -47,6 +47,7 @@ pub fn build(b: *std.Build) !void {
         "x86_64-macos",
         "aarch64-macos",
         "x86_64-windows-gnu",
+        "aarch64-windows-gnu",
     };
 
     for (cross_targets) |triple| {
