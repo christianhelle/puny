@@ -234,5 +234,5 @@ body {
   .section-title { font-size: 2rem; }
   .features-grid { grid-template-columns: 1fr; }
   .install-options { grid-template-columns: 1fr; }
-  .nav-menu { gap: 1rem; }
+  .nav-menu { gap: 1rem; flex-wrap: wrap; }
 }
