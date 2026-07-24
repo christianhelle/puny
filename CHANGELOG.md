@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Allow /skills in one-shot mode ([#48](https://github.com/christianhelle/puny/pull/48)) ([@christianhelle](https://github.com/christianhelle/))
 - Setup Snapcraft distribution ([#47](https://github.com/christianhelle/puny/pull/47)) ([@christianhelle](https://github.com/christianhelle/))
 - Add install scripts, docs site, GitHub Pages, and --upgrade flag ([#46](https://github.com/christianhelle/puny/pull/46)) ([@christianhelle](https://github.com/christianhelle/))
 - Add support for skills ([#45](https://github.com/christianhelle/puny/pull/45)) ([@christianhelle](https://github.com/christianhelle/))
