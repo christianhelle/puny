@@ -335,13 +335,13 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
         return;
     }
 
-    const old_provider_name = ctx.model_provider.*;
+    const old_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
     const result = try promptReconfigure(ctx.arena, ctx.io, ctx.init, ctx.stdout_writer, ctx.cfg);
     if (result.cancelled) return;
     if (!result.changed) return;
 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
-    const new_provider_name = ctx.cfg.provider;
+    const new_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
     const new_provider_url = if (ctx.parsed.mock) "-" else baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
     const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
 
@@ -376,7 +376,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
         }
     } else {
         const entry = ctx.cfg.providerEntry(new_provider_name);
-        ctx.prov.setConfig(.{ .base_url = entry.url, .api_key = entry.apiKey });
+        ctx.prov.setConfig(.{ .base_url = entry.url, .api_key = entry.apiKey orelse "" });
         ctx.provider_url.* = entry.url;
     }
 
