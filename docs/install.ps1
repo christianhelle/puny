@@ -122,6 +122,12 @@ function Get-LatestRelease
 
 function Get-ArchiveName
 {
+  $arch = $env:PROCESSOR_ARCHITECTURE
+  if ($arch -ne "AMD64")
+  {
+    throw "Unsupported Windows architecture: $arch. Only x86_64 is currently supported."
+  }
+
   return "puny-windows-x86_64.zip"
 }
 
