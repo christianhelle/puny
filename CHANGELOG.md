@@ -2,7 +2,8 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
+### Features
+- make --upgrade fire-and-forget to avoid upgrade failure when binary is in use ([#50](https://github.com/christianhelle/puny/pull/50)) ([@christianhelle](https://github.com/christianhelle/))
 - Add support for Windows ARM64 ([#49](https://github.com/christianhelle/puny/pull/49)) ([@christianhelle](https://github.com/christianhelle/))
 
 
