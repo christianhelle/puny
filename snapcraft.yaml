@@ -1,6 +1,7 @@
 name: puny
 base: core22
 version: git
+icon: docs/icon.png
 title: puny
 summary: A tiny, natively compiled, single binary AI coding agent
 license: MIT
