@@ -116,6 +116,12 @@ pub const Client = struct {
     pub fn withBaseUrl(self: *Client, base_url: []const u8) void {
         self.base_url = base_url;
     }
+
+    pub fn setConfig(self: *Client, config: anytype) void {
+        self.withBaseUrl(config.base_url);
+        self.api_key = config.api_key;
+        if (config.http_observer) |obs| self.http_observer = obs;
+    }
 };
 
 fn isQueryChar(c: u8) bool {

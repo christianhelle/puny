@@ -15,6 +15,12 @@ pub const ModelProvider = enum {
     mock,
 };
 
+pub const ClientConfig = struct {
+    base_url: []const u8 = "",
+    api_key: []const u8 = "",
+    http_observer: ?client.HttpObserver = null,
+};
+
 pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
     return switch (selected_provider) {
         .lmstudio => "LM Studio",
@@ -89,29 +95,10 @@ pub const Provider = union(enum) {
         };
     }
 
-    pub fn setUrlAndKey(self: *Provider, url: []const u8, key: []const u8) void {
+    pub fn setConfig(self: *Provider, config: ClientConfig) void {
         switch (self.*) {
-            .lmstudio => |*c| {
-                c.withBaseUrl(url);
-                c.api_key = key;
-            },
-            .opencode, .opencode_go => |*c| {
-                c.withBaseUrl(url);
-                c.api_key = key;
-            },
-            .copilot => |*c| {
-                c.withBaseUrl(url);
-                c.setGithubToken(key);
-            },
-            .mock => {},
-        }
-    }
-
-    pub fn setHttpObserver(self: *Provider, observer: client.HttpObserver) void {
-        switch (self.*) {
-            .lmstudio => |*c| c.http_observer = observer,
-            .opencode, .opencode_go => |*c| c.http_observer = observer,
-            .copilot => |*c| c.inner.http_observer = observer,
+            .lmstudio, .opencode, .opencode_go => |*c| c.setConfig(config),
+            .copilot => |*c| c.setConfig(config),
             .mock => {},
         }
     }

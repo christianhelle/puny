@@ -376,7 +376,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
         }
     } else {
         const entry = ctx.cfg.providerEntry(new_provider_name);
-        ctx.prov.setUrlAndKey(entry.url, entry.apiKey orelse "");
+        ctx.prov.setConfig(.{ .base_url = entry.url, .api_key = entry.apiKey orelse "" });
         ctx.provider_url.* = entry.url;
     }
 
@@ -703,7 +703,7 @@ pub fn ensureCopilotAuth(
 }
 
 pub fn attachHttpDebugObserver(prov: *provider.Provider, debug_log: *DebugLog) void {
-    prov.setHttpObserver(httpDebugObserver(debug_log));
+    prov.setConfig(.{ .http_observer = httpDebugObserver(debug_log) });
 }
 
 fn httpDebugObserver(debug_log: *DebugLog) http_client.HttpObserver {

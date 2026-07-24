@@ -62,6 +62,12 @@ pub const Client = struct {
         self.copilot_token = null;
         self.copilot_token_expires_at = 0;
     }
+
+    pub fn setConfig(self: *Client, config: anytype) void {
+        self.withBaseUrl(config.base_url);
+        if (config.api_key.len > 0) self.setGithubToken(config.api_key);
+        if (config.http_observer) |obs| self.inner.http_observer = obs;
+    }
 };
 
 fn httpRequest(
