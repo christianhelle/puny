@@ -39,14 +39,13 @@ curl -fsSL https://christianhelle.com/puny/install | bash
 irm https://christianhelle.com/puny/install.ps1 | iex
 ```
 
-The install scripts automatically detect your platform and architecture, download the latest release from GitHub, and install the binary.
+The install scripts download the latest release from GitHub and install the binary (Linux/macOS detects x86_64 and aarch64; Windows currently installs the x86_64 build).
 
 **Custom installation directory:**
 
 ```bash
 # Linux/macOS
-INSTALL_DIR=$HOME/.local/bin curl -fsSL https://christianhelle.com/puny/install | bash
-
+curl -fsSL https://christianhelle.com/puny/install | bash -s -- --dir "$HOME/.local/bin"
 # Windows
 $install = irm https://christianhelle.com/puny/install.ps1
 & ([scriptblock]::Create($install)) -InstallDir "C:\Tools"
