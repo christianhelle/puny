@@ -184,7 +184,7 @@ body {
   font-family: var(--mono); font-size: 0.875rem; overflow-x: auto;
 }
 
-.install-code code { color: #d4d4d4; white-space: pre-line; word-break: break-word; display: block; line-height: 1.6; }
+.install-code code { color: #d4d4d4; white-space: pre-line; overflow-wrap: anywhere; display: block; line-height: 1.6; }
 
 .install-card p { color: var(--text-muted); font-size: 0.875rem; }
 .install-card p a { color: var(--primary); text-decoration: none; }
