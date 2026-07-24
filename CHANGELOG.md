@@ -2,6 +2,12 @@
 
 ## [Unreleased Changes]
 
+### Merged Pull Requests
+- Add support for Windows ARM64 ([#49](https://github.com/christianhelle/puny/pull/49)) ([@christianhelle](https://github.com/christianhelle/))
+
+
+## [v0.2.0](https://github.com/christianhelle/puny/releases/tag/v0.2.0) (2026-07-24)
+
 ### Features
 - Allow /skills in one-shot mode ([#48](https://github.com/christianhelle/puny/pull/48)) ([@christianhelle](https://github.com/christianhelle/))
 - Setup Snapcraft distribution ([#47](https://github.com/christianhelle/puny/pull/47)) ([@christianhelle](https://github.com/christianhelle/))
