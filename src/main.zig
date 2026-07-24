@@ -191,7 +191,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
     const argv: []const []const u8 = if (comptime @import("builtin").os.tag == .windows)
         &[_][]const u8{ "powershell", "-Command", try std.fmt.allocPrint(arena, "irm https://christianhelle.com/puny/install.ps1 | iex", .{}) }
     else
-        &[_][]const u8{ "sh", "-c", "curl -fsSL https://christianhelle.com/puny/install | sh" };
+        &[_][]const u8{ "bash", "-c", "curl -fsSL https://christianhelle.com/puny/install | bash" };
 
     var child = try std.process.spawn(io, .{
         .argv = argv,
@@ -200,7 +200,13 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
         .stderr = .inherit,
     });
 
-    _ = try child.wait(io);
+    const term = try child.wait(io);
+    switch (term) {
+        .exited => |code| {
+            if (code != 0) return error.UpgradeFailed;
+        },
+        else => return error.UpgradeFailed,
+    }
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
