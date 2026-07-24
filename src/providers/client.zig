@@ -80,6 +80,12 @@ pub fn ApiResult(comptime T: type) type {
     };
 }
 
+pub const ClientConfig = struct {
+    base_url: ?[]const u8 = null,
+    api_key: ?[]const u8 = null,
+    http_observer: ?HttpObserver = null,
+};
+
 pub const HttpObserver = struct {
     ctx: ?*anyopaque,
     onRequest: ?*const fn (ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void,
@@ -117,7 +123,7 @@ pub const Client = struct {
         self.base_url = base_url;
     }
 
-    pub fn setConfig(self: *Client, config: anytype) void {
+    pub fn setConfig(self: *Client, config: ClientConfig) void {
         if (config.base_url) |url| self.withBaseUrl(url);
         if (config.api_key) |key| self.api_key = key;
         if (config.http_observer) |obs| self.http_observer = obs;

@@ -15,11 +15,7 @@ pub const ModelProvider = enum {
     mock,
 };
 
-pub const ClientConfig = struct {
-    base_url: ?[]const u8 = null,
-    api_key: ?[]const u8 = null,
-    http_observer: ?client.HttpObserver = null,
-};
+pub const ClientConfig = client.ClientConfig;
 
 pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
     return switch (selected_provider) {

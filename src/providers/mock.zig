@@ -56,7 +56,7 @@ pub const MockClient = struct {
         _ = self;
     }
 
-    pub fn setConfig(self: *MockClient, config: anytype) void {
+    pub fn setConfig(self: *MockClient, config: client.ClientConfig) void {
         _ = self;
         _ = config;
     }
