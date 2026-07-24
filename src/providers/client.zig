@@ -478,3 +478,26 @@ test "isValidUtf8 accepts ASCII and rejects invalid bytes" {
     try std.testing.expect(!isValidUtf8(&.{0xaa}));
     try std.testing.expect(!isValidUtf8(&.{ 0xc0, 0x80 }));
 }
+
+test "setConfig applies non-null fields and preserves null ones" {
+    var client = Client{
+        .allocator = undefined,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "old-key",
+        .base_url = "http://old.url",
+        .http_observer = null,
+    };
+
+    client.setConfig(.{ .base_url = "http://new.url" });
+    try std.testing.expectEqualStrings("http://new.url", client.base_url);
+    try std.testing.expectEqualStrings("old-key", client.api_key);
+
+    client.setConfig(.{ .api_key = "new-key" });
+    try std.testing.expectEqualStrings("new-key", client.api_key);
+    try std.testing.expectEqualStrings("http://new.url", client.base_url);
+
+    client.setConfig(.{});
+    try std.testing.expectEqualStrings("http://new.url", client.base_url);
+    try std.testing.expectEqualStrings("new-key", client.api_key);
+}
