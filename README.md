@@ -533,6 +533,12 @@ Run the test suite:
 zig build test
 ```
 
+Run the regression test suite:
+
+```bash
+zig build test-regression
+```
+
 ## Development / testing
 
 ### Mock mode (no LM Studio, OpenCode Zen, or Github Copilot required)
