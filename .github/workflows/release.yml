@@ -33,6 +33,10 @@ jobs:
             target: x86_64-windows
             binary_name: puny.exe
             archive_name: puny-windows-x86_64.zip
+          - os: windows-latest
+            target: aarch64-windows
+            binary_name: puny.exe
+            archive_name: puny-windows-aarch64.zip
           - os: macos-latest
             target: x86_64-macos
             binary_name: puny
