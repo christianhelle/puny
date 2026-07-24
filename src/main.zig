@@ -38,7 +38,7 @@ pub fn main(init: std.process.Init) !void {
     const parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
     if (parsed.upgrade) {
-        try runUpgrade(arena, io);
+        try runUpgrade(io);
         return;
     }
 
@@ -180,7 +180,7 @@ fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     return config.default_lm_studio_url;
 }
 
-fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
+fn runUpgrade(io: std.Io) !void {
     var stderr_buffer: [1024]u8 = undefined;
     var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
     const stderr_writer = &stderr_file_writer.interface;
@@ -189,7 +189,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
     try stderr_writer.flush();
 
     const argv: []const []const u8 = if (comptime @import("builtin").os.tag == .windows)
-        &[_][]const u8{ "powershell", "-Command", try std.fmt.allocPrint(arena, "irm https://christianhelle.com/puny/install.ps1 | iex", .{}) }
+        &[_][]const u8{ "powershell", "-Command", "irm https://christianhelle.com/puny/install.ps1 | iex" }
     else
         &[_][]const u8{ "bash", "-c", "curl -fsSL https://christianhelle.com/puny/install | bash" };
 
