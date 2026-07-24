@@ -90,8 +90,6 @@ pub fn main(init: std.process.Init) !void {
     var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
     defer planning_tool_definitions.deinit(arena);
 
-    var stdin_buffer: [4096]u8 = undefined;
-
     var planning_mode = false;
 
     var skill_registry = skills.Registry.init(arena);
@@ -114,15 +112,11 @@ pub fn main(init: std.process.Init) !void {
         try messages.append(messages_arena, .{ .system = skills_block });
     }
 
-    var pending_prompt: ?[]const u8 = if (parsed.prompt) |p| try arena.dupe(u8, p) else null;
     var session_stats = chat.SessionStats.init(arena, io);
     defer session_stats.deinit();
     sigint.register() catch {};
 
-    var line_alloc: std.Io.Writer.Allocating = .init(arena);
-    defer line_alloc.deinit();
-
-    var ctx = session.ChatLoopContext{
+    const ctx = session.ChatLoopContext{
         .arena = arena,
         .messages_arena = &messages_arena_state,
         .io = io,
@@ -140,15 +134,10 @@ pub fn main(init: std.process.Init) !void {
         .planning_tool_definitions = &planning_tool_definitions,
         .messages = &messages,
         .planning_mode = &planning_mode,
-        .pending_prompt = &pending_prompt,
         .session_stats = &session_stats,
-        .line_alloc = &line_alloc,
-        .stdin_buffer = &stdin_buffer,
         .debug_log = if (debug_log) |*log| log else null,
         .skill_registry = &skill_registry,
-        .loaded_skills = .{},
     };
-    defer ctx.loaded_skills.deinit(arena);
 
     var chat_session = session.ChatSession.init(ctx);
     try chat_session.run();
@@ -325,5 +314,3 @@ test "requiresApiKey only for opencode and opencode-go" {
     try std.testing.expect(!requiresApiKey(.copilot));
     try std.testing.expect(!requiresApiKey(.mock));
 }
-
-

@@ -66,13 +66,9 @@ pub const ChatLoopContext = struct {
     planning_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
-    pending_prompt: *?[]const u8,
     session_stats: *chat.SessionStats,
-    line_alloc: *std.Io.Writer.Allocating,
-    stdin_buffer: *[4096]u8,
     debug_log: ?*DebugLog,
     skill_registry: *skills.Registry,
-    loaded_skills: std.StringHashMapUnmanaged(void),
 };
 
 pub const ChatSession = struct {
@@ -84,13 +80,22 @@ pub const ChatSession = struct {
 
     pub fn run(self: *ChatSession) !void {
         const ctx = &self.ctx;
+        var line_alloc = std.Io.Writer.Allocating.init(ctx.arena);
+        defer line_alloc.deinit();
+        var stdin_buffer: [4096]u8 = undefined;
+        var pending_prompt: ?[]const u8 = null;
+        if (ctx.parsed.prompt) |p| {
+            pending_prompt = try ctx.arena.dupe(u8, p);
+        }
+        var loaded_skills = std.StringHashMapUnmanaged(void){};
+        defer loaded_skills.deinit(ctx.arena);
         while (true) {
             if (sigint.isTriggered()) {
                 printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
                 return;
             }
 
-            const user_input = try readUserInput(ctx);
+            const user_input = try readUserInput(ctx, &pending_prompt, &line_alloc, &stdin_buffer);
             const user_message = switch (user_input) {
                 .message => |text| text,
                 .continue_loop => continue,
@@ -112,7 +117,7 @@ pub const ChatSession = struct {
 
             if (command == .prompt) {
                 for (ctx.skill_registry.records.items) |*r| {
-                    if (ctx.loaded_skills.contains(r.name)) continue;
+                    if (loaded_skills.contains(r.name)) continue;
                     const match_pos = std.mem.indexOf(u8, user_message, r.name) orelse continue;
                     if (match_pos > 0 and std.ascii.isAlphanumeric(user_message[match_pos - 1])) continue;
                     const end = match_pos + r.name.len;
@@ -121,7 +126,7 @@ pub const ChatSession = struct {
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
                     try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
                     try ctx.stdout_writer.flush();
-                    ctx.loaded_skills.put(ctx.arena, r.name, {}) catch {};
+                    loaded_skills.put(ctx.arena, r.name, {}) catch {};
                 }
             }
 
@@ -156,7 +161,7 @@ pub const ChatSession = struct {
                     if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                     ctx.history.clear();
-                    ctx.loaded_skills.clearRetainingCapacity();
+                    loaded_skills.clearRetainingCapacity();
 
                     try ctx.stdout_writer.print(" OK\n", .{});
                     try ctx.stdout_writer.flush();
@@ -246,13 +251,18 @@ pub const ChatSession = struct {
     }
 };
 
-fn readUserInput(ctx: *ChatLoopContext) !UserInput {
-    if (ctx.pending_prompt.*) |p| {
-        ctx.pending_prompt.* = null;
+fn readUserInput(
+    ctx: *ChatLoopContext,
+    pending_prompt: *?[]const u8,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdin_buffer: *[4096]u8,
+) !UserInput {
+    if (pending_prompt.*) |p| {
+        pending_prompt.* = null;
         return .{ .message = p };
     }
 
-    const maybe_input = input.readLine(ctx.io, ctx.stdout_writer, ctx.line_alloc, ctx.stdin_buffer, ctx.history) catch |err| {
+    const maybe_input = input.readLine(ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history) catch |err| {
         if (sigint.isTriggered()) {
             printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
             return .exit;
