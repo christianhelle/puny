@@ -377,6 +377,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     } else {
         ctx.prov.setConfig(.{ .base_url = new_provider_url, .api_key = new_api_key });
         ctx.provider_url.* = new_provider_url;
+        if (!ctx.parsed.mock) try ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
     }
 
     try welcome.printSummary(
