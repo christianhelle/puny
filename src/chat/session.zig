@@ -335,13 +335,13 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
         return;
     }
 
-    const old_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
+    const old_provider_name = ctx.model_provider.*;
     const result = try promptReconfigure(ctx.arena, ctx.io, ctx.init, ctx.stdout_writer, ctx.cfg);
     if (result.cancelled) return;
     if (!result.changed) return;
 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
-    const new_provider_name = effectiveProvider(ctx.parsed, ctx.cfg.*);
+    const new_provider_name = ctx.cfg.provider;
     const new_provider_url = if (ctx.parsed.mock) "-" else baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
     const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
 
@@ -427,7 +427,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
         break :blk picked;
     };
 
-    const current_provider = effectiveProvider(ctx.parsed, ctx.cfg.*);
+    const current_provider = ctx.model_provider.*;
     if (picked_provider == current_provider) {
         try ctx.stdout_writer.print("\nAlready using provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
         try ctx.stdout_writer.flush();
