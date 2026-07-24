@@ -375,9 +375,8 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
             ctx.model_key.* = new_key;
         }
     } else {
-        const entry = ctx.cfg.providerEntry(new_provider_name);
-        ctx.prov.setConfig(.{ .base_url = entry.url, .api_key = entry.apiKey });
-        ctx.provider_url.* = entry.url;
+        ctx.prov.setConfig(.{ .base_url = new_provider_url, .api_key = new_api_key });
+        ctx.provider_url.* = new_provider_url;
     }
 
     try welcome.printSummary(
