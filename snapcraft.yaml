@@ -1,0 +1,79 @@
+name: puny
+base: core22
+version: git
+title: puny
+summary: A tiny, natively compiled, single binary AI coding agent
+license: MIT
+source-code:
+  - https://github.com/christianhelle/puny
+website:
+  - https://christianhelle.com/puny
+  - https://github.com/christianhelle/puny
+contact:
+  - https://christianhelle.com
+  - https://github.com/christianhelle
+issues:
+  - https://github.com/christianhelle/puny/issues
+donation:
+  - https://paypal.me/christianhelle
+  - https://buymeacoffee.com/christianhelle
+  - https://github.com/sponsors/christianhelle
+description: |
+  A minimal AI coding agent for the terminal that currently supports the following model providers:
+
+  - [LM Studio](https://lmstudio.ai/)
+  - [OpenCode Zen](https://opencode.ai/zen)
+  - [OpenCode Go](https://opencode.ai/go)
+  - [GitHub Copilot](https://github.com/features/copilot)
+
+  Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
+
+  **Features**
+
+  - **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
+  - **Interactive model picker**: choose the model to load when Puny starts.
+  - **Multi-turn chat**: keeps the conversation history across messages.
+  - **Tool calling**: the LLM can use built-in tools to work with your project.
+  - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
+  - **Built-in tools**:
+    - Read, write, and list files in your project
+    - Run shell commands
+    - Search your codebase
+    - Check git status and diff
+    - Fetch web pages
+
+grade: stable
+confinement: strict
+
+apps:
+  puny:
+    command: bin/puny
+    plugs:
+      - home
+      - network
+      - removable-media
+
+parts:
+  zig:
+    plugin: nil
+    build-packages:
+      - curl
+      - tar
+      - xz-utils
+    override-build: |
+      set -eu
+      ZIG_VERSION=0.16.0
+      curl -fsSLo zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+      mkdir -p "$SNAPCRAFT_PART_INSTALL/zig"
+      tar -xJf zig.tar.xz --strip-components=1 -C "$SNAPCRAFT_PART_INSTALL/zig"
+
+  puny:
+    after: [zig]
+    plugin: nil
+    source: .
+    override-build: |
+      export PATH="$SNAPCRAFT_STAGE/zig:$PATH"
+      zig version
+      zig build -Doptimize=ReleaseSmall
+      mkdir -p $SNAPCRAFT_PART_INSTALL/bin
+      cp zig-out/bin/puny $SNAPCRAFT_PART_INSTALL/bin/
