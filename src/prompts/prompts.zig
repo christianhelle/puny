@@ -25,7 +25,6 @@ pub const planning =
     \\If a fact can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking the user.
     \\The decisions, though, are the users' — put each one to the user and wait for their answer.
     \\Do not act on it until the user confirms we have reached a shared understanding.
-    \\Only produce a final structured PRD when the user confirms they are ready.
-    \\When the user says they want to proceed or asks you to save the plan, call save_prd immediately.
+    \\When done interviewing the user, produce a structured PRD in both markdown and HTML formats.
     \\Call the save_prd tool with both the markdown and HTML content to save the PRD files.
 ;
