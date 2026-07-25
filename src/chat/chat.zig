@@ -499,8 +499,6 @@ pub fn runTurn(
             try stdout_writer.flush();
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
-            try stdout_writer.print("\n{s}{s}{s}", .{ ansi.dim, result, ansi.reset });
-            try stdout_writer.flush();
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
         }
 
