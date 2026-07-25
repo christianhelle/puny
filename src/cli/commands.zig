@@ -15,6 +15,8 @@ pub const Command = union(enum) {
     build: ?[]const u8,
     model: ?[]const u8,
     provider: ?[]const u8,
+    sessions,
+    prune,
     skills,
     skill: []const u8,
     prompt: []const u8,
@@ -29,6 +31,8 @@ pub const Action = union(enum) {
     reconfigure,
     switch_model: ?[]const u8,
     switch_provider: ?[]const u8,
+    list_sessions,
+    prune_sessions,
     list_skills,
     load_skill: []const u8,
 };
@@ -84,6 +88,12 @@ pub fn parse(user_message: []const u8) Command {
         }
         return .{ .provider = null };
     }
+
+    if (std.mem.eql(u8, user_message, "/sessions"))
+        return .sessions;
+
+    if (std.mem.eql(u8, user_message, "/prune"))
+        return .prune;
 
     if (std.mem.eql(u8, user_message, "/skills"))
         return .skills;
@@ -155,6 +165,10 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             return .{ .switch_provider = provider_id };
         },
 
+        .sessions => return .list_sessions,
+
+        .prune => return .prune_sessions,
+
         .skills => return .list_skills,
 
         .skill => |name_text| return .{ .load_skill = name_text },
@@ -172,6 +186,8 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqual(Command.reset, parse("/reset"));
     try std.testing.expectEqual(Command.stats, parse("/stats"));
     try std.testing.expectEqual(Command.config, parse("/config"));
+    try std.testing.expectEqual(Command.sessions, parse("/sessions"));
+    try std.testing.expectEqual(Command.prune, parse("/prune"));
     try std.testing.expectEqual(Command.skills, parse("/skills"));
 
     try std.testing.expectEqualDeep(Command{ .plan = null }, parse("/plan"));
@@ -502,6 +518,52 @@ test "dispatch provider without text returns switch provider with null" {
     });
 
     try std.testing.expectEqualDeep(Action{ .switch_provider = null }, action);
+}
+
+test "dispatch sessions returns list_sessions" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.sessions, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.list_sessions, action);
+}
+
+test "dispatch prune returns prune_sessions" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.prune, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.prune_sessions, action);
 }
 
 test "dispatch prompt appends user message and runs chat turn" {
