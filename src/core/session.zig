@@ -1,5 +1,41 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const tool_schema = @import("../tools/schema.zig");
+const helpers = @import("../tools/helpers.zig");
+
+const Tool = tool_schema.Tool;
+
+var prd_path_global: []const u8 = "";
+var html_path_global: []const u8 = "";
+
+pub fn setSessionPaths(prd: []const u8, html: []const u8) void {
+    prd_path_global = prd;
+    html_path_global = html;
+}
+
+const SavePrdParams = struct {
+    markdown: []const u8,
+    html: []const u8,
+};
+
+fn savePrdSchema(allocator: std.mem.Allocator) !std.json.Value {
+    return tool_schema.ToolDefinition("save_prd", "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.", SavePrdParams).schema(allocator);
+}
+
+pub const save_prd_tool = Tool{
+    .name = "save_prd",
+    .description = "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.",
+    .schema = savePrdSchema,
+    .execute = struct {
+        pub fn exec(allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) ![]const u8 {
+            const parsed = try std.json.parseFromValue(SavePrdParams, allocator, args, .{});
+            defer parsed.deinit();
+            try helpers.writeFile(io, prd_path_global, parsed.value.markdown);
+            try helpers.writeFile(io, html_path_global, parsed.value.html);
+            return "PRD saved successfully.";
+        }
+    }.exec,
+};
 
 pub const SessionInfo = struct {
     id: []const u8,
@@ -19,6 +55,7 @@ pub const Session = struct {
         const prd_path = try std.fs.path.join(arena, &.{ dir, "plan.md" });
         const html_path = try std.fs.path.join(arena, &.{ dir, "plan.html" });
         try createSessionDir(io, dir);
+        setSessionPaths(prd_path, html_path);
         return .{
             .id = id,
             .base = try arena.dupe(u8, base_dir),
