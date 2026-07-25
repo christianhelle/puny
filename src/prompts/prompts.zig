@@ -26,5 +26,5 @@ pub const planning =
     \\The decisions, though, are the users' — put each one to the user and wait for their answer.
     \\Do not act on it until the user confirms we have reached a shared understanding.
     \\Only produce a final structured PRD when the user confirms they are ready.
-    \\Once ready, output the PRD as your final message. The system will save it to the session PRD file automatically.
+    \\Once ready, call the save_prd tool with the markdown and HTML content to save the PRD files.
 ;
