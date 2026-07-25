@@ -147,20 +147,27 @@ test "generateUuid produces unique values" {
     try std.testing.expect(!std.mem.eql(u8, a, b));
 }
 
+fn testBaseDir(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
+    return try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions" });
+}
+
+fn cleanupTestDir(io: std.Io, path: []const u8) void {
+    std.Io.Dir.cwd().deleteTree(io, path) catch {};
+}
+
 test "Session.init creates directory with correct paths" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
 
-    // Get the absolute path of the temp dir to use as base_dir
-    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
-    defer std.testing.allocator.free(cwd);
-    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ cwd, &tmp.sub_path });
-    defer std.testing.allocator.free(base_dir);
-
-    const session = try Session.init(std.testing.allocator, base_dir, random, std.testing.io);
+    const session = try Session.init(std.testing.allocator, test_dir, random, std.testing.io);
     defer {
         std.testing.allocator.free(session.id);
         std.testing.allocator.free(session.base);
@@ -172,7 +179,6 @@ test "Session.init creates directory with correct paths" {
     try std.testing.expect(std.mem.endsWith(u8, session.dir, session.id));
     try std.testing.expect(std.mem.endsWith(u8, session.prd_path, "plan.md"));
 
-    // Verify sessions/<uuid>/ directory was created
     var session_dir = try std.Io.Dir.cwd().openDir(std.testing.io, session.dir, .{});
     session_dir.close(std.testing.io);
 }
@@ -190,18 +196,16 @@ fn createTestSessionDir(io: std.Io, base_dir: []const u8, uuid: []const u8, has_
 }
 
 test "listSessions returns discovered sessions" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
 
-    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
-    defer std.testing.allocator.free(cwd);
-    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ cwd, &tmp.sub_path });
-    defer std.testing.allocator.free(base_dir);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111", true);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-222", false);
 
-    try createTestSessionDir(std.testing.io, base_dir, "abc-111", true);
-    try createTestSessionDir(std.testing.io, base_dir, "abc-222", false);
-
-    const sessions = try listSessions(std.testing.allocator, std.testing.io, base_dir);
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
     defer {
         for (sessions) |s| std.testing.allocator.free(s.id);
         std.testing.allocator.free(sessions);
@@ -211,21 +215,19 @@ test "listSessions returns discovered sessions" {
 }
 
 test "pruneSessions removes all but current" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
 
-    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
-    defer std.testing.allocator.free(cwd);
-    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ cwd, &tmp.sub_path });
-    defer std.testing.allocator.free(base_dir);
+    try createTestSessionDir(std.testing.io, test_dir, "current-1", true);
+    try createTestSessionDir(std.testing.io, test_dir, "old-1", true);
+    try createTestSessionDir(std.testing.io, test_dir, "old-2", false);
 
-    try createTestSessionDir(std.testing.io, base_dir, "current-1", true);
-    try createTestSessionDir(std.testing.io, base_dir, "old-1", true);
-    try createTestSessionDir(std.testing.io, base_dir, "old-2", false);
+    try pruneSessions(std.testing.allocator, std.testing.io, test_dir, "current-1");
 
-    try pruneSessions(std.testing.allocator, std.testing.io, base_dir, "current-1");
-
-    const sessions = try listSessions(std.testing.allocator, std.testing.io, base_dir);
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
     defer {
         for (sessions) |s| std.testing.allocator.free(s.id);
         std.testing.allocator.free(sessions);
