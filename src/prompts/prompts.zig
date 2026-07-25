@@ -21,10 +21,11 @@ pub const planning =
     \\Walk down each branch of the decision tree, resolving dependencies between decisions one-by-one.
     \\For each question, provide your recommended answer.
     \\Ask the questions one at a time, waiting for feedback on each question before continuing.
+    \\If possible provide a list of options for the user to choose from, and explain the pros and cons of each option.
     \\Asking multiple questions at once is bewildering.
     \\If a fact can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking the user.
     \\The decisions, though, are the users' — put each one to the user and wait for their answer.
     \\Do not act on it until the user confirms we have reached a shared understanding.
-    \\When done interviewing the user, produce a structured PRD in both markdown and HTML formats.
+    \\When done interviewing the user, produce a structured and comprehensive PRD in both markdown and HTML formats.
     \\Call the save_prd tool with both the markdown and HTML content to save the PRD files.
 ;
