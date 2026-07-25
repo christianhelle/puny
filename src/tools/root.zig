@@ -33,6 +33,9 @@ pub fn dispatch(name: []const u8) ?Tool {
     inline for (registry) |tool| {
         if (std.mem.eql(u8, tool.name, name)) return tool;
     }
+    inline for (planning_registry) |tool| {
+        if (std.mem.eql(u8, tool.name, name)) return tool;
+    }
     return null;
 }
 
@@ -79,5 +82,6 @@ test "dispatch returns known tools" {
     try std.testing.expect(dispatch("git_status") != null);
     try std.testing.expect(dispatch("git_diff") != null);
     try std.testing.expect(dispatch("web_fetch") != null);
+    try std.testing.expect(dispatch("save_prd") != null);
     try std.testing.expect(dispatch("unknown_tool") == null);
 }
