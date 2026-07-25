@@ -6,11 +6,16 @@ const sigint = @import("../../core/sigint.zig");
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
+const VK_LEFT: u16 = 0x25;
+const VK_RIGHT: u16 = 0x27;
+
 pub fn readLineWindows(
     io: std.Io,
     stdout_writer: *std.Io.Writer,
-    line_alloc: *std.Io.Writer.Allocating,
+    line_buffer: *std.ArrayList(u8),
+    cursor: *usize,
     history: ?*prompt_history.History,
+    allocator: std.mem.Allocator,
 ) !common.ReadLineResult {
     if (comptime builtin.os.tag != .windows) unreachable;
 
@@ -33,11 +38,11 @@ pub fn readLineWindows(
         switch (vk) {
             windows.VK_RETURN => {
                 first_esc_ts = null;
-                return .{ .submitted = line_alloc.written() };
+                return .{ .submitted = line_buffer.items };
             },
             windows.VK_BACK => {
                 first_esc_ts = null;
-                try common.backspace(line_alloc, stdout_writer);
+                try common.backspaceAndRedraw(line_buffer, cursor, stdout_writer);
             },
             windows.VK_ESCAPE => {
                 const now = std.Io.Timestamp.now(io, .awake);
@@ -49,11 +54,19 @@ pub fn readLineWindows(
             },
             windows.VK_UP => {
                 first_esc_ts = null;
-                try common.historyPrevious(line_alloc, stdout_writer, history);
+                try common.historyPreviousAndRedraw(line_buffer, cursor, stdout_writer, history, allocator);
             },
             windows.VK_DOWN => {
                 first_esc_ts = null;
-                try common.historyNext(line_alloc, stdout_writer, history);
+                try common.historyNextAndRedraw(line_buffer, cursor, stdout_writer, history, allocator);
+            },
+            VK_LEFT => {
+                first_esc_ts = null;
+                try common.moveCursorLeft(line_buffer, cursor, stdout_writer);
+            },
+            VK_RIGHT => {
+                first_esc_ts = null;
+                try common.moveCursorRight(line_buffer, cursor, stdout_writer);
             },
             else => {
                 first_esc_ts = null;
@@ -63,7 +76,7 @@ pub fn readLineWindows(
                     return .interrupted;
                 }
                 if (ch >= 32 and ch < 127) {
-                    try common.appendAndEcho(@intCast(ch), line_alloc, stdout_writer);
+                    try common.insertAndRedraw(@intCast(ch), line_buffer, cursor, stdout_writer, allocator);
                 }
             },
         }
