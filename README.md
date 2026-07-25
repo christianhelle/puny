@@ -14,6 +14,7 @@ Puny lets you chat with an LLM and gives it a curated set of coding tools so it 
 - **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
+- **Session management**: each run and `/reset` creates a new UUID-identified session, with PRDs saved to the session folder.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
 - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
@@ -505,17 +506,34 @@ Tools execute **automatically without confirmation**. This includes file writes 
 While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
-- `/reset` — clear the conversation history and unload all skills
+- `/reset` — clear the conversation, start a new session, and unload all skills
 - `/stats` — show session statistics and memory usage
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
-- `/plan [task]` — enter planning mode (optionally with a task description)
+- `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`
 - `/build [task]` — switch to build mode (optionally with a task description)
 - `/model [id]` — switch to another model; shows the model picker if no ID is given
 - `/provider [name]` — switch to another provider without reconfiguring everything; shows the provider picker if no name is given, then opens the model picker for the new provider
+- `/sessions` — list all saved sessions, showing their UUID and whether they have a `plan.md`
+- `/prune` — delete all session directories except the current one
 - `/skills` — list all available global and repository skills
 
 Any unrecognized slash command (e.g. `/nano-commits`, `/grill-me`) is treated as a
 skill name and loads the matching skill if found.
+
+### Sessions
+
+Each Puny session is identified by a UUID. A new session is created every time you
+start Puny or run `/reset`. The session ID is shown in the welcome screen and in
+the `/stats` header.
+
+Sessions are stored at `~/.config/puny/sessions/<uuid>/` (Linux/macOS) or
+`%APPDATA%\puny\sessions\<uuid>\` (Windows). Each session folder can contain a
+`plan.md` file produced by the model during `/plan` mode.
+
+In planning mode the model can only read files, list directories, search code,
+check git status/diff, and fetch web pages — plus write the session PRD file
+using `write_file`. This lets the model save the final PRD to `plan.md` in the
+session folder without being able to modify your project files.
 
 ## Build from source
 
