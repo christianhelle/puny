@@ -115,6 +115,11 @@ fn renderKnown(
         return true;
     }
 
+    if (std.mem.eql(u8, name, "save_prd")) {
+        try output.appendSlice(allocator, "Saving the plan...");
+        return true;
+    }
+
     return false;
 }
 
