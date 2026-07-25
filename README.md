@@ -531,9 +531,9 @@ Sessions are stored at `~/.config/puny/sessions/<uuid>/` (Linux/macOS) or
 `plan.md` file produced by the model during `/plan` mode.
 
 In planning mode the model can only read files, list directories, search code,
-check git status/diff, and fetch web pages — plus write the session PRD file
-using `write_file`. This lets the model save the final PRD to `plan.md` in the
-session folder without being able to modify your project files.
+check git status/diff, and fetch web pages — no write or shell access. When
+the model produces a final PRD as its response, Puny saves it automatically
+to `plan.md` in the session folder.
 
 ## Build from source
 

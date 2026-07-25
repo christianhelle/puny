@@ -348,12 +348,41 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         turn_complete = result.turn_complete;
     }
 
+    if (turn_complete and ctx.planning_mode.*) {
+        try savePlanningPrd(ctx);
+    }
+
     if (ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});
         return .exit;
     }
 
     return .continue_loop;
+}
+
+fn savePlanningPrd(ctx: *ChatLoopContext) !void {
+    const last = ctx.messages.items[ctx.messages.items.len - 1];
+    const content = switch (last) {
+        .assistant => |a| a.content,
+        else => null,
+    };
+    const text = content orelse return;
+    if (text.len == 0) return;
+
+    const cwd = std.Io.Dir.cwd();
+    const file = cwd.createFile(ctx.io, ctx.session.prd_path, .{}) catch |err| {
+        try ctx.stdout_writer.print("\n{s}Warning: could not save PRD to {s}: {s}{s}\n", .{ ansi.dim, ctx.session.prd_path, @errorName(err), ansi.reset });
+        try ctx.stdout_writer.flush();
+        return;
+    };
+    defer file.close(ctx.io);
+    file.writeStreamingAll(ctx.io, text) catch |err| {
+        try ctx.stdout_writer.print("\n{s}Warning: could not write PRD: {s}{s}\n", .{ ansi.dim, @errorName(err), ansi.reset });
+        try ctx.stdout_writer.flush();
+        return;
+    };
+    try ctx.stdout_writer.print("\n{s}PRD saved to {s}{s}\n", .{ ansi.dim, ctx.session.prd_path, ansi.reset });
+    try ctx.stdout_writer.flush();
 }
 
 fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
