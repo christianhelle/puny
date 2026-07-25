@@ -6,6 +6,7 @@ pub const Info = struct {
     provider_name: []const u8,
     provider_url: []const u8,
     model_key: []const u8,
+    session_id: []const u8 = "",
     oneshot: bool = false,
     prefilled: bool = false,
 };
@@ -44,6 +45,8 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         try printCommand(writer, "/build [task]", "Switch to build mode");
         try printCommand(writer, "/model [id]", "Switch to another model");
         try printCommand(writer, "/provider [name]", "Switch to another provider");
+        try printCommand(writer, "/sessions", "List saved sessions");
+        try printCommand(writer, "/prune", "Remove old sessions");
         try printCommand(writer, "/skills", "List global and repository skills");
         try writer.print("\n", .{});
         if (info.prefilled) {
@@ -51,6 +54,10 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         } else {
             try writer.print("{s}Type a prompt and press Enter to start chatting.{s}\n", .{ ansi.dim, ansi.reset });
         }
+    }
+
+    if (info.session_id.len > 0) {
+        try writer.print("{s}Session:{s} {s}\n", .{ ansi.dim, ansi.reset, info.session_id });
     }
 
     try writer.flush();
@@ -73,6 +80,7 @@ test "print writes banner, provider, model, commands and hint" {
         .provider_name = "LM Studio",
         .provider_url = "http://127.0.0.1:1234",
         .model_key = "test-model",
+        .session_id = "abc-123",
     });
 
     const text = out.written();
@@ -80,6 +88,7 @@ test "print writes banner, provider, model, commands and hint" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "LM Studio"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "http://127.0.0.1:1234"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "test-model"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "abc-123"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/config"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/plan"));

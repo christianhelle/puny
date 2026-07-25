@@ -3,6 +3,7 @@ const ansi = @import("../tui/ansi.zig");
 const chat = @import("chat.zig");
 const cli = @import("../cli/args.zig");
 const commands = @import("../cli/commands.zig");
+const core_session = @import("../core/session.zig");
 const config = @import("../config/config.zig");
 const indicator = @import("../tui/indicator.zig");
 const input = @import("../tui/input.zig");
@@ -66,6 +67,7 @@ pub const ChatLoopContext = struct {
     planning_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
+    session: *core_session.Session,
     session_stats: *chat.SessionStats,
     debug_log: ?*DebugLog,
     skill_registry: *skills.Registry,
@@ -169,6 +171,27 @@ pub const ChatSession = struct {
                 },
                 .print_stats => {
                     try ctx.session_stats.print(ctx.io, ctx.stdout_writer);
+                    continue;
+                },
+                .list_sessions => {
+                    const sessions = try core_session.listSessions(ctx.arena, ctx.io, ctx.session.base);
+                    try ctx.stdout_writer.print("\n{s}Saved sessions:{s}\n", .{ ansi.bright, ansi.reset });
+                    if (sessions.len == 0) {
+                        try ctx.stdout_writer.print("  (none)\n", .{});
+                    } else {
+                        for (sessions) |s| {
+                            const prd_mark = if (s.has_prd) "  (has plan.md)" else "";
+                            const current_mark = if (std.mem.eql(u8, s.id, ctx.session.id)) "  <-- current" else "";
+                            try ctx.stdout_writer.print("  {s}{s}{s}\n", .{ s.id, prd_mark, current_mark });
+                        }
+                    }
+                    try ctx.stdout_writer.flush();
+                    continue;
+                },
+                .prune_sessions => {
+                    try core_session.pruneSessions(ctx.arena, ctx.io, ctx.session.base, ctx.session.id);
+                    try ctx.stdout_writer.print("\nCleaned up old sessions. Current session preserved.\n", .{});
+                    try ctx.stdout_writer.flush();
                     continue;
                 },
                 .reconfigure => {

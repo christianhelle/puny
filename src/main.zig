@@ -5,6 +5,7 @@ const config = @import("config/config.zig");
 const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
+const core_sess = @import("core/session.zig");
 const prompt_history = @import("prompts/history.zig");
 const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
@@ -63,6 +64,9 @@ pub fn main(init: std.process.Init) !void {
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
 
+    const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
+    var current_session = try core_sess.Session.init(arena, base_dir, random, io);
+
     var prov: provider.Provider = undefined;
     var selected_provider: ModelProvider = undefined;
     var provider_url: []const u8 = undefined;
@@ -81,6 +85,14 @@ pub fn main(init: std.process.Init) !void {
         &provider_url,
         &model_key,
     );
+    try welcome.print(stdout_writer, .{
+        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
+        .provider_url = provider_url,
+        .model_key = model_key,
+        .session_id = current_session.id,
+        .oneshot = parsed.oneshot,
+        .prefilled = parsed.prompt != null,
+    });
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
     defer prov.deinit();
 
@@ -134,6 +146,7 @@ pub fn main(init: std.process.Init) !void {
         .planning_tool_definitions = &planning_tool_definitions,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .session = &current_session,
         .session_stats = &session_stats,
         .debug_log = if (debug_log) |*log| log else null,
         .skill_registry = &skill_registry,
@@ -273,13 +286,6 @@ fn initializeProviderAndModel(
         };
     };
 
-    try welcome.print(stdout_writer, .{
-        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider.*),
-        .provider_url = provider_url.*,
-        .model_key = model_key.*,
-        .oneshot = parsed.oneshot,
-        .prefilled = parsed.prompt != null,
-    });
 }
 
 fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefinition) {
