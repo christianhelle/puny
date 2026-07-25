@@ -1,6 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const SessionInfo = struct {
+    id: []const u8,
+    has_prd: bool,
+};
+
 pub const Session = struct {
     id: []const u8,
     dir: []const u8,
@@ -35,6 +40,54 @@ fn configPunyDir(arena: std.mem.Allocator, environ_map: *const std.process.Envir
 fn createSessionDir(io: std.Io, dir: []const u8) !void {
     const cwd = std.Io.Dir.cwd();
     try cwd.createDirPath(io, dir);
+}
+
+pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) ![]SessionInfo {
+    var tmp_arena = std.heap.ArenaAllocator.init(arena);
+    defer tmp_arena.deinit();
+    const tmp = tmp_arena.allocator();
+
+    const sessions_dir_path = try std.fs.path.join(tmp, &.{ base_dir, "sessions" });
+    var sessions_dir = std.Io.Dir.cwd().openDir(io, sessions_dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return &[_]SessionInfo{},
+        else => |e| return e,
+    };
+    defer sessions_dir.close(io);
+
+    var list: std.ArrayList(SessionInfo) = .empty;
+    errdefer list.deinit(arena);
+
+    var it = sessions_dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .directory) continue;
+        const id = try arena.dupe(u8, entry.name);
+
+        const prd_path = try std.fs.path.join(tmp, &.{ sessions_dir_path, id, "plan.md" });
+        const has_prd = hasFile(io, prd_path);
+
+        try list.append(arena, .{ .id = id, .has_prd = has_prd });
+    }
+
+    return list.toOwnedSlice(arena);
+}
+
+fn hasFile(io: std.Io, path: []const u8) bool {
+    var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return false;
+    file.close(io);
+    return true;
+}
+
+pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, current_id: []const u8) !void {
+    var tmp_arena = std.heap.ArenaAllocator.init(arena);
+    defer tmp_arena.deinit();
+    const tmp = tmp_arena.allocator();
+
+    const sessions = try listSessions(tmp, io, base_dir);
+    for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, current_id)) continue;
+        const dir_path = try std.fs.path.join(tmp, &.{ base_dir, "sessions", s.id });
+        std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
+    }
 }
 
 pub fn generateUuid(random: std.Random, arena: std.mem.Allocator) ![]const u8 {
@@ -115,6 +168,64 @@ test "Session.init creates directory with correct paths" {
     // Verify sessions/<uuid>/ directory was created
     var session_dir = try std.Io.Dir.cwd().openDir(std.testing.io, session.dir, .{});
     session_dir.close(std.testing.io);
+}
+
+fn createTestSessionDir(io: std.Io, base_dir: []const u8, uuid: []const u8, has_prd: bool) !void {
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ base_dir, "sessions", uuid });
+    defer std.testing.allocator.free(dir);
+    try createSessionDir(io, dir);
+    if (has_prd) {
+        const prd_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "plan.md" });
+        defer std.testing.allocator.free(prd_path);
+        var file = try std.Io.Dir.cwd().createFile(io, prd_path, .{});
+        file.close(io);
+    }
+}
+
+test "listSessions returns discovered sessions" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ cwd, &tmp.sub_path });
+    defer std.testing.allocator.free(base_dir);
+
+    try createTestSessionDir(std.testing.io, base_dir, "abc-111", true);
+    try createTestSessionDir(std.testing.io, base_dir, "abc-222", false);
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, base_dir);
+    defer {
+        for (sessions) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+}
+
+test "pruneSessions removes all but current" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ cwd, &tmp.sub_path });
+    defer std.testing.allocator.free(base_dir);
+
+    try createTestSessionDir(std.testing.io, base_dir, "current-1", true);
+    try createTestSessionDir(std.testing.io, base_dir, "old-1", true);
+    try createTestSessionDir(std.testing.io, base_dir, "old-2", false);
+
+    try pruneSessions(std.testing.allocator, std.testing.io, base_dir, "current-1");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, base_dir);
+    defer {
+        for (sessions) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("current-1", sessions[0].id);
 }
 
 test "sessionBaseDir extracts from environ map" {
