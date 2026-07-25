@@ -11,17 +11,20 @@ pub const Session = struct {
     base: []const u8,
     dir: []const u8,
     prd_path: []const u8,
+    html_path: []const u8,
 
     pub fn init(arena: std.mem.Allocator, base_dir: []const u8, random: std.Random, io: std.Io) !Session {
         const id = try generateUuid(random, arena);
         const dir = try std.fs.path.join(arena, &.{ base_dir, "sessions", id });
         const prd_path = try std.fs.path.join(arena, &.{ dir, "plan.md" });
+        const html_path = try std.fs.path.join(arena, &.{ dir, "plan.html" });
         try createSessionDir(io, dir);
         return .{
             .id = id,
             .base = try arena.dupe(u8, base_dir),
             .dir = dir,
             .prd_path = prd_path,
+            .html_path = html_path,
         };
     }
 };
@@ -173,11 +176,13 @@ test "Session.init creates directory with correct paths" {
         std.testing.allocator.free(session.base);
         std.testing.allocator.free(session.dir);
         std.testing.allocator.free(session.prd_path);
+        std.testing.allocator.free(session.html_path);
     }
 
     try std.testing.expectEqual(@as(usize, 36), session.id.len);
     try std.testing.expect(std.mem.endsWith(u8, session.dir, session.id));
     try std.testing.expect(std.mem.endsWith(u8, session.prd_path, "plan.md"));
+    try std.testing.expect(std.mem.endsWith(u8, session.html_path, "plan.html"));
 
     var session_dir = try std.Io.Dir.cwd().openDir(std.testing.io, session.dir, .{});
     session_dir.close(std.testing.io);
