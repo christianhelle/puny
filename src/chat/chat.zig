@@ -40,6 +40,7 @@ pub const SessionStats = struct {
     models: std.ArrayList(ModelEntry),
     active_model_index: ?usize = null,
     start_time: std.Io.Clock.Timestamp,
+    session_id: []const u8 = "",
 
     // Per-turn streaming state used to reconcile estimates with final usage.
     current_turn_input: i64 = 0,
@@ -156,7 +157,12 @@ pub const SessionStats = struct {
         const elapsed_ns = self.start_time.raw.durationTo(now.raw).nanoseconds;
         const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s;
 
-        try writer.print("\n\n{s}─── Session Stats ───{s}\n", .{ ansi.dim, ansi.reset });
+        const session_label = if (self.session_id.len > 0)
+            try std.fmt.allocPrint(self.allocator, "─── Session: {s} ───", .{self.session_id})
+        else
+            try std.fmt.allocPrint(self.allocator, "─── Session Stats ───", .{});
+        defer self.allocator.free(session_label);
+        try writer.print("\n\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
         try writer.print("  Turns:               {d}\n", .{self.totalTurns()});
         for (self.models.items) |entry| {
             const stats = entry.stats;
