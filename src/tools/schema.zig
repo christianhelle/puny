@@ -111,6 +111,13 @@ test "schema generation" {
     try std.testing.expectEqual(@as(usize, 4), required.items.len);
 }
 
+pub const Tool = struct {
+    name: []const u8,
+    description: []const u8,
+    schema: *const fn (allocator: std.mem.Allocator) std.mem.Allocator.Error!std.json.Value,
+    execute: *const fn (allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) anyerror![]const u8,
+};
+
 const AllOptionalParams = struct {
     path: ?[]const u8 = null,
     staged: ?bool = null,

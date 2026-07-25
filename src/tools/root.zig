@@ -3,15 +3,9 @@ const std = @import("std");
 pub const schema = @import("schema.zig");
 const helpers = @import("helpers.zig");
 
+pub const Tool = schema.Tool;
 pub const dupeString = helpers.dupeString;
 pub const ownedSliceOrEmpty = helpers.ownedSliceOrEmpty;
-
-pub const Tool = struct {
-    name: []const u8,
-    description: []const u8,
-    schema: *const fn (allocator: std.mem.Allocator) std.mem.Allocator.Error!std.json.Value,
-    execute: *const fn (allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) anyerror![]const u8,
-};
 
 pub fn defineTool(
     comptime name: []const u8,
@@ -47,6 +41,7 @@ const shell = @import("shell.zig");
 const search = @import("search.zig");
 const git = @import("git.zig");
 const web = @import("web.zig");
+const core_session = @import("../core/session.zig");
 
 pub const registry = blk: {
     @setEvalBranchQuota(10000);
@@ -71,6 +66,7 @@ pub const planning_registry = blk: {
         web.web_fetch,
         git.git_status,
         git.git_diff,
+        core_session.save_prd_tool,
     };
 };
 
