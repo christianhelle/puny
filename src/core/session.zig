@@ -22,6 +22,15 @@ fn savePrdSchema(allocator: std.mem.Allocator) !std.json.Value {
     return tool_schema.ToolDefinition("save_prd", "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.", SavePrdParams).schema(allocator);
 }
 
+fn resolvePath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    if (std.fs.path.isAbsolute(path)) {
+        return allocator.dupe(u8, path);
+    }
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd_path);
+    return std.fs.path.join(allocator, &.{ cwd_path, path });
+}
+
 pub const save_prd_tool = Tool{
     .name = "save_prd",
     .description = "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.",
@@ -36,7 +45,9 @@ pub const save_prd_tool = Tool{
             var html_file = try std.Io.Dir.cwd().createFile(io, html_path_global, .{});
             defer html_file.close(io);
             try html_file.writeStreamingAll(io, html.string);
-            return std.fmt.allocPrint(allocator, "PRD saved to {s} and {s}", .{ prd_path_global, html_path_global });
+            const abs_md = try resolvePath(allocator, io, prd_path_global);
+            const abs_html = try resolvePath(allocator, io, html_path_global);
+            return std.fmt.allocPrint(allocator, "PRD saved to {s} and {s}", .{ abs_md, abs_html });
         }
     }.exec,
 };
