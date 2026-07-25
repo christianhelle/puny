@@ -28,7 +28,6 @@ pub const save_prd_tool = Tool{
     .schema = savePrdSchema,
     .execute = struct {
         pub fn exec(allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) ![]const u8 {
-            _ = allocator;
             const markdown = args.object.get("markdown") orelse return error.MissingMarkdown;
             const html = args.object.get("html") orelse return error.MissingHtml;
             var md_file = try std.Io.Dir.cwd().createFile(io, prd_path_global, .{});
@@ -37,7 +36,7 @@ pub const save_prd_tool = Tool{
             var html_file = try std.Io.Dir.cwd().createFile(io, html_path_global, .{});
             defer html_file.close(io);
             try html_file.writeStreamingAll(io, html.string);
-            return "PRD saved successfully.";
+            return std.fmt.allocPrint(allocator, "PRD saved to {s} and {s}", .{ prd_path_global, html_path_global });
         }
     }.exec,
 };
