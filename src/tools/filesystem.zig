@@ -1,6 +1,7 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
+const core_session = @import("../core/session.zig");
 
 const ReadFileParams = struct {
     path: []const u8,
@@ -16,6 +17,9 @@ const WriteFileParams = struct {
 };
 
 fn writeFile(allocator: std.mem.Allocator, io: std.Io, params: WriteFileParams) ![]const u8 {
+    if (core_session.isWriteBlocked()) {
+        return "Write blocked: app is in planning mode. Exit planning mode with /build or use save_prd to save the PRD.";
+    }
     _ = allocator;
     try helpers.writeFile(io, params.path, params.content);
     return "File written successfully.";
