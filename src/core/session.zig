@@ -22,18 +22,6 @@ fn savePrdSchema(allocator: std.mem.Allocator) !std.json.Value {
     return tool_schema.ToolDefinition("save_prd", "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.", SavePrdParams).schema(allocator);
 }
 
-fn sessionWriteFile(io: std.Io, path: []const u8, content: []const u8) !void {
-    var file = try std.Io.Dir.cwd().createFile(io, path, .{});
-    defer file.close(io);
-    try file.writeStreamingAll(io, content);
-}
-
-fn sessionFileExists(io: std.Io, path: []const u8) bool {
-    var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return false;
-    file.close(io);
-    return true;
-}
-
 pub const save_prd_tool = Tool{
     .name = "save_prd",
     .description = "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.",
@@ -43,11 +31,13 @@ pub const save_prd_tool = Tool{
             _ = allocator;
             const markdown = args.object.get("markdown") orelse return error.MissingMarkdown;
             const html = args.object.get("html") orelse return error.MissingHtml;
-            try sessionWriteFile(io, prd_path_global, markdown.string);
-            try sessionWriteFile(io, html_path_global, html.string);
-            const md_ok = sessionFileExists(io, prd_path_global);
-            const html_ok = sessionFileExists(io, html_path_global);
-            return std.fmt.allocPrint(std.heap.page_allocator, "PRD saved to {s} (exists:{}) and {s} (exists:{})", .{ prd_path_global, md_ok, html_path_global, html_ok });
+            var md_file = try std.Io.Dir.cwd().createFile(io, prd_path_global, .{});
+            defer md_file.close(io);
+            try md_file.writeStreamingAll(io, markdown.string);
+            var html_file = try std.Io.Dir.cwd().createFile(io, html_path_global, .{});
+            defer html_file.close(io);
+            try html_file.writeStreamingAll(io, html.string);
+            return "PRD saved successfully.";
         }
     }.exec,
 };
