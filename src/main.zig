@@ -314,3 +314,7 @@ test "requiresApiKey only for opencode and opencode-go" {
     try std.testing.expect(!requiresApiKey(.copilot));
     try std.testing.expect(!requiresApiKey(.mock));
 }
+
+test "include core session tests" {
+    _ = @import("core/session.zig");
+}
