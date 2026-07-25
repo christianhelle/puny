@@ -63,6 +63,11 @@
             </div>
             <div class="terminal-line">
               <span class="output">&nbsp;&nbsp;</span><span class="output bright">Model:</span><span class="output">    deepseek-v4-flash-free</span>
+              <br />
+            </div>
+            <div class="terminal-line"></div>
+            <div class="terminal-line">
+              <span class="output">&nbsp;&nbsp;</span><span class="output dim">Session: 550e8400-e29b-41d4-a716-446655440000</span>
               <br /><br />
             </div>
             <div class="terminal-line"></div>
@@ -86,6 +91,12 @@
             </div>
             <div class="terminal-line">
               <span class="output">&nbsp;&nbsp;</span><span class="output green">/build [task]</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Switch to build mode</span>
+            </div>
+            <div class="terminal-line">
+              <span class="output">&nbsp;&nbsp;</span><span class="output green">/sessions</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; List saved sessions</span>
+            </div>
+            <div class="terminal-line">
+              <span class="output">&nbsp;&nbsp;</span><span class="output green">/prune</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Remove old sessions</span>
             </div>
             <div class="terminal-line">
               <span class="output">&nbsp;&nbsp;</span><span class="output green">/model [id]</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Switch to another model</span>
@@ -136,7 +147,7 @@
         <div class="feature-card">
           <span class="feature-icon">💬</span>
           <h3>Interactive Chat</h3>
-          <p>Multi-turn conversations with conversation history</p>
+          <p>Multi-turn conversations with session management and PRD export</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon">🎯</span>
@@ -227,6 +238,10 @@
     <div class="container">
       <h2 class="section-title">Usage</h2>
       <div class="features-grid" style="grid-template-columns: 1fr;">
+        <div class="install-card">
+          <h3>Sessions</h3>
+          <p>Each session is identified by a UUID. A new session is created on every start and <code>/reset</code>. Use <code>/sessions</code> to list saved sessions and <code>/prune</code> to clean up old ones. In <code>/plan</code> mode, the model saves the final PRD as both <code>plan.md</code> and <code>plan.html</code> to the session folder via the <code>save_prd</code> tool.</p>
+        </div>
         <div class="install-card">
           <h3>Quick Start with LM Studio</h3>
           <p>Start LM Studio, load a model with tool-calling support, then:</p>
