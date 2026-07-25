@@ -124,7 +124,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             const planning_prompt = try ctx.cfg.resolvePrompt(ctx.messages_alloc, "planning", prompts.planning);
             try ctx.messages.append(ctx.messages_alloc, .{ .system = planning_prompt });
             if (ctx.session_prd_path.len > 0) {
-                const prd_hint = try std.fmt.allocPrint(ctx.messages_alloc, "The session PRD file is at: {s}. Your final PRD response will be saved there automatically.", .{ctx.session_prd_path});
+                const prd_hint = try std.fmt.allocPrint(ctx.messages_alloc, "Session PRD path: {s}. Use the save_prd tool when ready to write the final PRD.", .{ctx.session_prd_path});
                 try ctx.messages.append(ctx.messages_alloc, .{ .system = prd_hint });
             }
             if (text) |t| {
