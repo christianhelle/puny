@@ -1,3 +1,6 @@
+const std = @import("std");
+const builtin = @import("builtin");
+
 /// C0 control character byte values (0x00-0x1F) and DEL (0x7F).
 ///
 /// Names follow the standard ASCII abbreviations so the code reads like a
@@ -58,6 +61,27 @@ pub const cursor_down = "\x1b[{d}B";
 
 /// Clear from the cursor to the end of the current line (CSI K).
 pub const clear_to_end_of_line = "\x1b[K";
+
+/// Clear from cursor to end of screen (CSI 0 J).
+pub const clear_to_end_of_screen = "\x1b[J";
+
+/// Return cursor to home position (top-left) and clear screen.
+pub const clear_screen_and_home = "\x1b[2J\x1b[H";
+
+/// Save cursor position (SCP).
+pub const save_cursor = "\x1b[s";
+
+/// Restore cursor position (RCP).
+pub const restore_cursor = "\x1b[u";
+
+pub fn terminalWidth() usize {
+    if (comptime builtin.os.tag != .windows) {
+        var wsz: std.posix.winsize = undefined;
+        const result = std.posix.system.ioctl(std.posix.STDIN_FILENO, std.posix.T.IOCGWINSZ, @intFromPtr(&wsz));
+        if (result == 0 and wsz.col > 0) return wsz.col;
+    }
+    return 80;
+}
 
 /// Returns true for C0 control characters that the prompt input loop ignores.
 pub fn isIgnoredControlByte(byte: u8) bool {
