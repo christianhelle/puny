@@ -22,17 +22,32 @@ fn savePrdSchema(allocator: std.mem.Allocator) !std.json.Value {
     return tool_schema.ToolDefinition("save_prd", "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.", SavePrdParams).schema(allocator);
 }
 
+fn sessionWriteFile(io: std.Io, path: []const u8, content: []const u8) !void {
+    var file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, content);
+}
+
+fn sessionFileExists(io: std.Io, path: []const u8) bool {
+    var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return false;
+    file.close(io);
+    return true;
+}
+
 pub const save_prd_tool = Tool{
     .name = "save_prd",
     .description = "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.",
     .schema = savePrdSchema,
     .execute = struct {
         pub fn exec(allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) ![]const u8 {
-            const parsed = try std.json.parseFromValue(SavePrdParams, allocator, args, .{});
-            defer parsed.deinit();
-            try helpers.writeFile(io, prd_path_global, parsed.value.markdown);
-            try helpers.writeFile(io, html_path_global, parsed.value.html);
-            return "PRD saved successfully.";
+            _ = allocator;
+            const markdown = args.object.get("markdown") orelse return error.MissingMarkdown;
+            const html = args.object.get("html") orelse return error.MissingHtml;
+            try sessionWriteFile(io, prd_path_global, markdown.string);
+            try sessionWriteFile(io, html_path_global, html.string);
+            const md_ok = sessionFileExists(io, prd_path_global);
+            const html_ok = sessionFileExists(io, html_path_global);
+            return std.fmt.allocPrint(std.heap.page_allocator, "PRD saved to {s} (exists:{}) and {s} (exists:{})", .{ prd_path_global, md_ok, html_path_global, html_ok });
         }
     }.exec,
 };
