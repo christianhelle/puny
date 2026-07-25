@@ -8,6 +8,16 @@ const Tool = tool_schema.Tool;
 var prd_path_global: []const u8 = "";
 var html_path_global: []const u8 = "";
 
+var write_blocked_global: bool = false;
+
+pub fn setWriteBlocked(blocked: bool) void {
+    write_blocked_global = blocked;
+}
+
+pub fn isWriteBlocked() bool {
+    return write_blocked_global;
+}
+
 pub fn setSessionPaths(prd: []const u8, html: []const u8) void {
     prd_path_global = prd;
     html_path_global = html;

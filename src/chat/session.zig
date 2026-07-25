@@ -117,6 +117,7 @@ pub const ChatSession = struct {
                 .cfg = ctx.cfg,
                 .session_prd_path = ctx.session.prd_path,
             });
+            core_session.setWriteBlocked(ctx.planning_mode.*);
 
             if (command == .prompt) {
                 for (ctx.skill_registry.records.items) |*r| {
@@ -153,6 +154,7 @@ pub const ChatSession = struct {
                     _ = ctx.messages_arena.reset(.free_all);
                     ctx.messages.* = .empty;
                     ctx.planning_mode.* = false;
+                    core_session.setWriteBlocked(false);
                     const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
 
