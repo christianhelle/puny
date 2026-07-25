@@ -80,8 +80,9 @@ pub const ChatSession = struct {
 
     pub fn run(self: *ChatSession) !void {
         const ctx = &self.ctx;
-        var line_alloc = std.Io.Writer.Allocating.init(ctx.arena);
-        defer line_alloc.deinit();
+        var line_buffer: std.ArrayList(u8) = .empty;
+        defer line_buffer.deinit(ctx.arena);
+        var cursor: usize = 0;
         var stdin_buffer: [4096]u8 = undefined;
         var pending_prompt: ?[]const u8 = null;
         if (ctx.parsed.prompt) |p| {
@@ -95,7 +96,7 @@ pub const ChatSession = struct {
                 return;
             }
 
-            const user_input = try readUserInput(ctx, &pending_prompt, &line_alloc, &stdin_buffer);
+            const user_input = try readUserInput(ctx, &pending_prompt, &line_buffer, &cursor, &stdin_buffer, ctx.arena);
             const user_message = switch (user_input) {
                 .message => |text| text,
                 .continue_loop => continue,
@@ -254,15 +255,17 @@ pub const ChatSession = struct {
 fn readUserInput(
     ctx: *ChatLoopContext,
     pending_prompt: *?[]const u8,
-    line_alloc: *std.Io.Writer.Allocating,
+    line_buffer: *std.ArrayList(u8),
+    cursor: *usize,
     stdin_buffer: *[4096]u8,
+    allocator: std.mem.Allocator,
 ) !UserInput {
     if (pending_prompt.*) |p| {
         pending_prompt.* = null;
         return .{ .message = p };
     }
 
-    const maybe_input = input.readLine(ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history) catch |err| {
+    const maybe_input = input.readLine(ctx.io, ctx.stdout_writer, line_buffer, cursor, stdin_buffer, ctx.history, allocator) catch |err| {
         if (sigint.isTriggered()) {
             printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
             return .exit;
