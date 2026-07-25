@@ -155,8 +155,11 @@ pub const ChatSession = struct {
                     const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
 
+                    ctx.session.* = try core_session.Session.init(ctx.arena, ctx.session.base, ctx.random, ctx.io);
+
                     ctx.session_stats.deinit();
                     ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
+                    ctx.session_stats.session_id = ctx.session.id;
 
                     const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
                     ctx.prov.* = createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
@@ -166,6 +169,7 @@ pub const ChatSession = struct {
                     loaded_skills.clearRetainingCapacity();
 
                     try ctx.stdout_writer.print(" OK\n", .{});
+                    try ctx.stdout_writer.print("New session: {s}\n", .{ctx.session.id});
                     try ctx.stdout_writer.flush();
                     continue;
                 },

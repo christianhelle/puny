@@ -125,6 +125,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var session_stats = chat.SessionStats.init(arena, io);
+    session_stats.session_id = current_session.id;
     defer session_stats.deinit();
     sigint.register() catch {};
 
