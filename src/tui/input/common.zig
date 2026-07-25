@@ -125,6 +125,7 @@ pub fn redrawPrompt(line_buffer: *const std.ArrayList(u8), cursor: usize, stdout
     const text = line_buffer.items;
 
     try stdout_writer.writeAll(terminal.restore_cursor);
+    try stdout_writer.writeAll("\r");
     try stdout_writer.writeAll(terminal.clear_to_end_of_screen);
     try stdout_writer.print("Prompt: {s}", .{text});
 
