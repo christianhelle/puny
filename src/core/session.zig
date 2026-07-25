@@ -1,4 +1,41 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+pub const Session = struct {
+    id: []const u8,
+    dir: []const u8,
+    prd_path: []const u8,
+
+    pub fn init(arena: std.mem.Allocator, base_dir: []const u8, random: std.Random, io: std.Io) !Session {
+        const id = try generateUuid(random, arena);
+        const dir = try std.fs.path.join(arena, &.{ base_dir, "sessions", id });
+        const prd_path = try std.fs.path.join(arena, &.{ dir, "plan.md" });
+        try createSessionDir(io, dir);
+        return .{ .id = id, .dir = dir, .prd_path = prd_path };
+    }
+};
+
+pub fn sessionBaseDir(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+    const path = try configPunyDir(arena, environ_map);
+    return path;
+}
+
+fn configPunyDir(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+    if (comptime builtin.os.tag == .windows) {
+        const base = environ_map.get("APPDATA") orelse environ_map.get("USERPROFILE") orelse return error.NoConfigDir;
+        return std.fs.path.join(arena, &.{ base, "puny" });
+    }
+    if (environ_map.get("XDG_CONFIG_HOME")) |base| {
+        return std.fs.path.join(arena, &.{ base, "puny" });
+    }
+    const home = environ_map.get("HOME") orelse return error.NoConfigDir;
+    return std.fs.path.join(arena, &.{ home, ".config", "puny" });
+}
+
+fn createSessionDir(io: std.Io, dir: []const u8) !void {
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, dir);
+}
 
 pub fn generateUuid(random: std.Random, arena: std.mem.Allocator) ![]const u8 {
     var bytes: [16]u8 = undefined;
@@ -49,4 +86,51 @@ test "generateUuid produces unique values" {
     defer std.testing.allocator.free(b);
 
     try std.testing.expect(!std.mem.eql(u8, a, b));
+}
+
+test "Session.init creates directory with correct paths" {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Get the absolute path of the temp dir to use as base_dir
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ cwd, &tmp.sub_path });
+    defer std.testing.allocator.free(base_dir);
+
+    const session = try Session.init(std.testing.allocator, base_dir, random, std.testing.io);
+    defer {
+        std.testing.allocator.free(session.id);
+        std.testing.allocator.free(session.dir);
+        std.testing.allocator.free(session.prd_path);
+    }
+
+    try std.testing.expectEqual(@as(usize, 36), session.id.len);
+    try std.testing.expect(std.mem.endsWith(u8, session.dir, session.id));
+    try std.testing.expect(std.mem.endsWith(u8, session.prd_path, "plan.md"));
+
+    // Verify sessions/<uuid>/ directory was created
+    var session_dir = try std.Io.Dir.cwd().openDir(std.testing.io, session.dir, .{});
+    session_dir.close(std.testing.io);
+}
+
+test "sessionBaseDir extracts from environ map" {
+    const allocator = std.testing.allocator;
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    if (comptime builtin.os.tag == .windows) {
+        try env.put("USERPROFILE", "C:\\Users\\test");
+        const dir = try sessionBaseDir(allocator, &env);
+        defer allocator.free(dir);
+        try std.testing.expectEqualStrings("C:\\Users\\test\\puny", dir);
+    } else {
+        try env.put("HOME", "/tmp/test-home");
+        const dir = try sessionBaseDir(allocator, &env);
+        defer allocator.free(dir);
+        try std.testing.expectEqualStrings("/tmp/test-home/.config/puny", dir);
+    }
 }
