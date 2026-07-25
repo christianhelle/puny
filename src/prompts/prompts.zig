@@ -26,4 +26,5 @@ pub const planning =
     \\The decisions, though, are the users' — put each one to the user and wait for their answer.
     \\Do not act on it until the user confirms we have reached a shared understanding.
     \\Only produce a structured PRD when the user confirms they are ready.
+    \\Exception: you may use write_file to save the PRD to the session directory. You will be told the exact file path.
 ;

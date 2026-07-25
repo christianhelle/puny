@@ -115,6 +115,7 @@ pub const ChatSession = struct {
                 .planning_mode = ctx.planning_mode,
                 .oneshot = ctx.parsed.oneshot,
                 .cfg = ctx.cfg,
+                .session_prd_path = ctx.session.prd_path,
             });
 
             if (command == .prompt) {
