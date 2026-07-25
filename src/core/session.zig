@@ -8,6 +8,7 @@ pub const SessionInfo = struct {
 
 pub const Session = struct {
     id: []const u8,
+    base: []const u8,
     dir: []const u8,
     prd_path: []const u8,
 
@@ -16,7 +17,12 @@ pub const Session = struct {
         const dir = try std.fs.path.join(arena, &.{ base_dir, "sessions", id });
         const prd_path = try std.fs.path.join(arena, &.{ dir, "plan.md" });
         try createSessionDir(io, dir);
-        return .{ .id = id, .dir = dir, .prd_path = prd_path };
+        return .{
+            .id = id,
+            .base = try arena.dupe(u8, base_dir),
+            .dir = dir,
+            .prd_path = prd_path,
+        };
     }
 };
 
@@ -157,6 +163,7 @@ test "Session.init creates directory with correct paths" {
     const session = try Session.init(std.testing.allocator, base_dir, random, std.testing.io);
     defer {
         std.testing.allocator.free(session.id);
+        std.testing.allocator.free(session.base);
         std.testing.allocator.free(session.dir);
         std.testing.allocator.free(session.prd_path);
     }
