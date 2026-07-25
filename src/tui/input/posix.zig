@@ -72,7 +72,11 @@ pub fn readLinePosix(
             },
             terminal.control.ht => {
                 first_esc_ts = null;
-                try common.insertAndRedraw('\t', line_buffer, cursor, stdout_writer, allocator);
+                if (cursor.* == line_buffer.items.len) {
+                    try common.appendChar('\t', line_buffer, cursor, stdout_writer, allocator);
+                } else {
+                    try common.insertAndRedraw('\t', line_buffer, cursor, stdout_writer, allocator);
+                }
             },
             terminal.control.nak => {
                 first_esc_ts = null;
@@ -82,7 +86,11 @@ pub fn readLinePosix(
                 first_esc_ts = null;
             } else {
                 first_esc_ts = null;
-                try common.insertAndRedraw(byte, line_buffer, cursor, stdout_writer, allocator);
+                if (cursor.* == line_buffer.items.len) {
+                    try common.appendChar(byte, line_buffer, cursor, stdout_writer, allocator);
+                } else {
+                    try common.insertAndRedraw(byte, line_buffer, cursor, stdout_writer, allocator);
+                }
             },
         }
     }

@@ -135,7 +135,14 @@ pub fn redrawPrompt(line_buffer: *const std.ArrayList(u8), cursor: usize, stdout
     if (lines_from_bottom > 0) {
         try stdout_writer.print("\x1b[{d}A", .{lines_from_bottom});
     }
-    try stdout_writer.print("\x1b[{d}G", .{pos.col});
+    try stdout_writer.print("\x1b[{d}G", .{pos.col + 1});
+    try stdout_writer.flush();
+}
+
+pub fn appendChar(char: u8, line_buffer: *std.ArrayList(u8), cursor: *usize, stdout_writer: *std.Io.Writer, allocator: std.mem.Allocator) !void {
+    try line_buffer.append(allocator, char);
+    cursor.* += 1;
+    try stdout_writer.writeByte(char);
     try stdout_writer.flush();
 }
 
@@ -187,7 +194,7 @@ pub fn moveCursorLeft(line_buffer: *const std.ArrayList(u8), cursor: *usize, std
     if (new_pos.row < old_pos.row) {
         try stdout_writer.writeAll("\x1b[A");
     }
-    try stdout_writer.print("\x1b[{d}G", .{new_pos.col});
+    try stdout_writer.print("\x1b[{d}G", .{new_pos.col + 1});
     try stdout_writer.flush();
 }
 
@@ -200,7 +207,7 @@ pub fn moveCursorRight(line_buffer: *const std.ArrayList(u8), cursor: *usize, st
     if (new_pos.row > old_pos.row) {
         try stdout_writer.writeAll("\x1b[B");
     }
-    try stdout_writer.print("\x1b[{d}G", .{new_pos.col});
+    try stdout_writer.print("\x1b[{d}G", .{new_pos.col + 1});
     try stdout_writer.flush();
 }
 
@@ -214,7 +221,7 @@ pub fn moveCursorToStart(line_buffer: *const std.ArrayList(u8), cursor: *usize, 
     if (rows_up > 0) {
         try stdout_writer.print("\x1b[{d}A", .{rows_up});
     }
-    try stdout_writer.print("\x1b[{d}G", .{new_pos.col});
+    try stdout_writer.print("\x1b[{d}G", .{new_pos.col + 1});
     try stdout_writer.flush();
 }
 
@@ -229,7 +236,7 @@ pub fn moveCursorToEnd(line_buffer: *const std.ArrayList(u8), cursor: *usize, st
     if (rows_down > 0) {
         try stdout_writer.print("\x1b[{d}B", .{rows_down});
     }
-    try stdout_writer.print("\x1b[{d}G", .{new_pos.col});
+    try stdout_writer.print("\x1b[{d}G", .{new_pos.col + 1});
     try stdout_writer.flush();
 }
 
