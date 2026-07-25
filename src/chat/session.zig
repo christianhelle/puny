@@ -435,7 +435,7 @@ fn mdToHtml(arena: std.mem.Allocator, md: []const u8) ![]const u8 {
     var lines = std.mem.splitSequence(u8, md, "\n");
 
     while (lines.next()) |raw_line| {
-        const line = std.mem.trimRight(u8, raw_line, " \t\r");
+        const line = std.mem.trim(u8, raw_line, " \t\r");
 
         if (std.mem.startsWith(u8, line, "```")) {
             if (in_code_block) {
@@ -452,7 +452,7 @@ fn mdToHtml(arena: std.mem.Allocator, md: []const u8) ![]const u8 {
 
         if (in_code_block) {
             try html.appendSlice(arena, escapeHtml(arena, line));
-            try html.appendByte(arena, '\n');
+            try html.append(arena, '\n');
             continue;
         }
 
