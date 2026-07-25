@@ -46,6 +46,7 @@ pub const Context = struct {
     planning_mode: *bool,
     oneshot: bool,
     cfg: *const config.Config,
+    session_prd_path: []const u8 = "",
 };
 
 pub fn parse(user_message: []const u8) Command {
@@ -122,6 +123,10 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             ctx.planning_mode.* = true;
             const planning_prompt = try ctx.cfg.resolvePrompt(ctx.messages_alloc, "planning", prompts.planning);
             try ctx.messages.append(ctx.messages_alloc, .{ .system = planning_prompt });
+            if (ctx.session_prd_path.len > 0) {
+                const prd_hint = try std.fmt.allocPrint(ctx.messages_alloc, "The session PRD file is at: {s}. Use write_file to save your PRD there when ready.", .{ctx.session_prd_path});
+                try ctx.messages.append(ctx.messages_alloc, .{ .system = prd_hint });
+            }
             if (text) |t| {
                 try ctx.messages.append(ctx.messages_alloc, .{ .user = try ctx.messages_alloc.dupe(u8, t) });
                 try ctx.stdout_writer.print("\n{s}Entering planning mode: {s}{s}\n", .{ ansi.bright, t, ansi.reset });
