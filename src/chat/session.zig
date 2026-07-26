@@ -93,6 +93,8 @@ pub const ChatSession = struct {
         defer loaded_skills.deinit(ctx.arena);
         while (true) {
             if (sigint.isTriggered()) {
+                saveMessages(ctx) catch {};
+                saveSessionMeta(ctx) catch {};
                 printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
                 return;
             }
@@ -141,11 +143,16 @@ pub const ChatSession = struct {
 
             switch (action) {
                 .exit => {
+                    saveMessages(ctx) catch {};
+                    saveSessionMeta(ctx) catch {};
                     printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
                     return;
                 },
                 .continue_ => continue,
                 .full_reset => {
+                    try saveMessages(ctx);
+                    try saveSessionMeta(ctx);
+
                     try ctx.stdout_writer.print(" Performing full memory reset...", .{});
                     try ctx.stdout_writer.flush();
 
@@ -187,9 +194,15 @@ pub const ChatSession = struct {
                         try ctx.stdout_writer.print("  (none)\n", .{});
                     } else {
                         for (sessions) |s| {
+                            const has_conv = if (s.has_conversation) "  (conversation)" else "";
                             const prd_mark = if (s.has_prd) "  (has plan.md)" else "";
                             const current_mark = if (std.mem.eql(u8, s.id, ctx.session.id)) "  <-- current" else "";
-                            try ctx.stdout_writer.print("  {s}{s}{s}\n", .{ s.id, prd_mark, current_mark });
+                            const first_prompt_hint = if (s.first_prompt) |p| blk: {
+                                const preview = if (p.len > 40) p[0..40] else p;
+                                break :blk std.fmt.allocPrint(ctx.arena, "  \"{s}...\"", .{preview}) catch "";
+                            } else "";
+                            try ctx.stdout_writer.print("  {s}{s}{s}{s}{s}\n", .{ s.id, has_conv, prd_mark, current_mark, first_prompt_hint });
+                            if (s.first_prompt) |p| ctx.arena.free(p);
                         }
                     }
                     try ctx.stdout_writer.flush();
@@ -199,6 +212,63 @@ pub const ChatSession = struct {
                     try core_session.pruneSessions(ctx.arena, ctx.io, ctx.session.base, ctx.session.id);
                     try ctx.stdout_writer.print("\nCleaned up old sessions. Current session preserved.\n", .{});
                     try ctx.stdout_writer.flush();
+                    continue;
+                },
+                .restore_session => |session_id| {
+                    const base = ctx.session.base;
+                    const found = if (session_id) |sid| try core_session.findSessionByPrefix(ctx.arena, ctx.io, base, sid) else blk: {
+                        const sessions = try core_session.listSessions(ctx.arena, ctx.io, base);
+                        var conv_count: usize = 0;
+                        for (sessions) |s| {
+                            if (s.has_conversation) conv_count += 1;
+                        }
+                        if (conv_count == 0) {
+                            try ctx.stdout_writer.print("\nNo saved conversations found.\n", .{});
+                            try ctx.stdout_writer.flush();
+                        } else if (conv_count == 1) {
+                            for (sessions) |s| {
+                                if (s.has_conversation) break :blk s;
+                            }
+                        }
+                        break :blk null;
+                    };
+
+                    if (found) |s| {
+                        try ctx.stdout_writer.print("\nRestoring session {s}...\n", .{s.id});
+                        try ctx.stdout_writer.flush();
+
+                        ctx.prov.deinit();
+                        ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
+                        _ = ctx.messages_arena.reset(.free_all);
+                        ctx.messages.* = .empty;
+
+                        const dir = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ base, "sessions", s.id });
+                        defer ctx.messages_arena.allocator().free(dir);
+                        try loadMessagesIntoContext(ctx, dir);
+
+                        ctx.planning_mode.* = s.planning_mode;
+                        core_session.setWriteBlocked(ctx.planning_mode.*);
+
+                        const prd_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "plan.md" });
+                        const html_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "plan.html" });
+                        ctx.session.* = try core_session.Session.fromDir(ctx.arena, s.id, base, dir, prd_path, html_path);
+                        core_session.setSessionPaths(prd_path, html_path);
+
+                        ctx.session_stats.deinit();
+                        ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
+                        ctx.session_stats.session_id = ctx.session.id;
+
+                        const new_api_key = try resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+                        ctx.prov.* = createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+                        if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
+
+                        ctx.history.clear();
+                        try ctx.stdout_writer.print("Session restored. {d} messages loaded.\n", .{ctx.messages.items.len});
+                        try ctx.stdout_writer.flush();
+                    } else {
+                        try ctx.stdout_writer.print("\n{s}No matching session found.{s}\n", .{ ansi.dim, ansi.reset });
+                        try ctx.stdout_writer.flush();
+                    }
                     continue;
                 },
                 .reconfigure => {
@@ -281,6 +351,82 @@ pub const ChatSession = struct {
     }
 };
 
+fn saveMessages(ctx: *ChatLoopContext) !void {
+    const dir = ctx.session.dir;
+    const cwd = std.Io.Dir.cwd();
+    cwd.createDirPath(ctx.io, dir) catch {};
+
+    const msg_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json" });
+    defer ctx.messages_arena.allocator().free(msg_path);
+    const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), ctx.messages.items, .{ .whitespace = .indent_2 });
+    defer ctx.messages_arena.allocator().free(buffer);
+    var file = cwd.createFile(ctx.io, msg_path, .{}) catch |err| {
+        std.log.warn("failed to save messages: {s}", .{@errorName(err)});
+        return;
+    };
+    defer file.close(ctx.io);
+    file.writeStreamingAll(ctx.io, buffer) catch |err| {
+        std.log.warn("failed to write messages: {s}", .{@errorName(err)});
+    };
+    file.writeStreamingAll(ctx.io, "\n") catch {};
+}
+
+fn saveSessionMeta(ctx: *ChatLoopContext) !void {
+    const dir = ctx.session.dir;
+    const meta_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "session.json" });
+    defer ctx.messages_arena.allocator().free(meta_path);
+
+    var first_prompt: ?[]const u8 = null;
+    for (ctx.messages.items) |m| {
+        if (m == .user) {
+            first_prompt = m.user;
+            break;
+        }
+    }
+
+    const meta = std.json.Value{ .object = std.StringHashMap(std.json.Value).init(ctx.messages_arena.allocator()) };
+    try meta.object.put("planning_mode", std.json.Value{ .bool = ctx.planning_mode.* });
+    if (first_prompt) |p| {
+        try meta.object.put("first_prompt", std.json.Value{ .string = p });
+    }
+
+    const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), meta, .{ .whitespace = .indent_2 });
+    defer ctx.messages_arena.allocator().free(buffer);
+    const cwd = std.Io.Dir.cwd();
+    var file = cwd.createFile(ctx.io, meta_path, .{}) catch |err| {
+        std.log.warn("failed to save session meta: {s}", .{@errorName(err)});
+        return;
+    };
+    defer file.close(ctx.io);
+    file.writeStreamingAll(ctx.io, buffer) catch {};
+    file.writeStreamingAll(ctx.io, "\n") catch {};
+}
+
+fn loadMessagesIntoContext(ctx: *ChatLoopContext, dir: []const u8) !void {
+    const cwd = std.Io.Dir.cwd();
+    const msg_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json" });
+    defer ctx.messages_arena.allocator().free(msg_path);
+
+    const data = cwd.readFileAlloc(ctx.io, msg_path, ctx.messages_arena.allocator(), std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => {
+            try ctx.stdout_writer.print("Session has no saved conversation.\n", .{});
+            try ctx.stdout_writer.flush();
+            return;
+        },
+        else => |e| return e,
+    };
+    defer ctx.messages_arena.allocator().free(data);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, ctx.messages_arena.allocator(), data, .{});
+    defer parsed.deinit();
+
+    const arr = parsed.value.array;
+    for (arr) |item| {
+        const msg = try openai.Message.fromJsonValue(ctx.messages_arena.allocator(), item);
+        try ctx.messages.append(ctx.messages_arena.allocator(), msg);
+    }
+}
+
 fn readUserInput(
     ctx: *ChatLoopContext,
     pending_prompt: *?[]const u8,
@@ -349,6 +495,9 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
         turn_complete = result.turn_complete;
     }
+
+    try saveMessages(ctx);
+    try saveSessionMeta(ctx);
 
     if (ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});

@@ -101,6 +101,16 @@ pub const Session = struct {
             .html_path = html_path,
         };
     }
+
+    pub fn fromDir(arena: std.mem.Allocator, id: []const u8, base_dir: []const u8, dir: []const u8, prd_path: []const u8, html_path: []const u8) !Session {
+        return .{
+            .id = try arena.dupe(u8, id),
+            .base = try arena.dupe(u8, base_dir),
+            .dir = try arena.dupe(u8, dir),
+            .prd_path = try arena.dupe(u8, prd_path),
+            .html_path = try arena.dupe(u8, html_path),
+        };
+    }
 };
 
 pub fn sessionBaseDir(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
