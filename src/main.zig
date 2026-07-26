@@ -146,7 +146,11 @@ pub fn main(init: std.process.Init) !void {
                         const msg = try openai.Message.fromJsonValue(messages_arena, item);
                         try messages.append(messages_arena, msg);
                     }
-                    current_session = try core_sess.Session.fromDir(arena, s.id, base_dir, dir,
+                    current_session = try core_sess.Session.fromDir(
+                        arena,
+                        s.id,
+                        base_dir,
+                        dir,
                         try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
                         try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
                     );
@@ -186,7 +190,11 @@ pub fn main(init: std.process.Init) !void {
                             const msg = try openai.Message.fromJsonValue(messages_arena, item);
                             try messages.append(messages_arena, msg);
                         }
-                        current_session = try core_sess.Session.fromDir(arena, s.id, base_dir, dir,
+                        current_session = try core_sess.Session.fromDir(
+                            arena,
+                            s.id,
+                            base_dir,
+                            dir,
                             try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
                             try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
                         );
