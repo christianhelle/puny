@@ -91,6 +91,60 @@ pub const Message = union(enum) {
         }
         try jw.endObject();
     }
+
+    pub fn fromJsonValue(allocator: std.mem.Allocator, value: std.json.Value) !Message {
+        const obj = value.object;
+        const role = obj.get("role").?.string;
+
+        if (std.mem.eql(u8, role, "system")) {
+            return .{ .system = try allocator.dupe(u8, obj.get("content").?.string) };
+        }
+
+        if (std.mem.eql(u8, role, "user")) {
+            return .{ .user = try allocator.dupe(u8, obj.get("content").?.string) };
+        }
+
+        if (std.mem.eql(u8, role, "assistant")) {
+            const content = if (obj.get("content")) |c| switch (c) {
+                .null => null,
+                .string => |s| s,
+                else => null,
+            } else null;
+
+            var tool_calls: ?[]ToolCall = null;
+            if (obj.get("tool_calls")) |tc_arr| {
+                const arr = tc_arr.array;
+                var list = try std.ArrayList(ToolCall).initCapacity(allocator, arr.len);
+                for (arr) |tc_val| {
+                    const tc_obj = tc_val.object;
+                    const func_obj = tc_obj.get("function").?.object;
+                    list.appendAssumeCapacity(.{
+                        .id = try allocator.dupe(u8, tc_obj.get("id").?.string),
+                        .type = try allocator.dupe(u8, tc_obj.get("type").?.string),
+                        .function = .{
+                            .name = try allocator.dupe(u8, func_obj.get("name").?.string),
+                            .arguments = try allocator.dupe(u8, func_obj.get("arguments").?.string),
+                        },
+                    });
+                }
+                tool_calls = list.toOwnedSlice(allocator);
+            }
+
+            return .{ .assistant = .{
+                .content = if (content) |c| try allocator.dupe(u8, c) else null,
+                .tool_calls = tool_calls,
+            } };
+        }
+
+        if (std.mem.eql(u8, role, "tool")) {
+            return .{ .tool = .{
+                .tool_call_id = try allocator.dupe(u8, obj.get("tool_call_id").?.string),
+                .content = try allocator.dupe(u8, obj.get("content").?.string),
+            } };
+        }
+
+        return error.UnknownRole;
+    }
 };
 
 pub const ToolDefinition = struct {
@@ -219,7 +273,7 @@ pub const SseCallback = struct {
                 .tokens_per_second = usage.tokens_per_second,
                 .time_to_first_token_seconds = usage.time_to_first_token_seconds,
             } });
-        }
+    }
     }
 };
 
@@ -383,6 +437,40 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 
     try w.writeByte('}');
 
     return buf.toOwnedSlice();
+}
+
+test "message JSON round-trip all variants" {
+    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const messages = [_]Message{
+        .{ .system = "You are a helpful assistant." },
+        .{ .user = "Hello!" },
+        .{ .assistant = .{ .content = "Hi there!" } },
+        .{ .assistant = .{ .content = null, .tool_calls = &[_]ToolCall{
+            .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+        } } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } },
+        .{ .assistant = .{ .content = "Done reading." } },
+    };
+
+    var buf: std.Io.Writer.Allocating = .init(a);
+    defer buf.deinit();
+    try std.json.Stringify.value(&messages, .{}, &buf.writer);
+
+    const parsed_val = try std.json.parseFromSlice(std.json.Value, a, buf.written(), .{});
+    defer parsed_val.deinit();
+
+    const arr = parsed_val.value.array;
+    try std.testing.expectEqual(@as(usize, messages.len), arr.len);
+
+    for (messages, arr, 0..) |expected, item, i| {
+        const parsed = try Message.fromJsonValue(a, item);
+        try std.testing.expectEqualDeep(expected, parsed);
+        _ = i;
+    }
 }
 
 test "message JSON conversion" {
