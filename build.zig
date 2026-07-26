@@ -78,6 +78,21 @@ pub fn build(b: *std.Build) !void {
     run_regression.addArtifactArg(exe);
     run_regression.addFileArg(b.path("tests/regression.json"));
     test_regression_step.dependOn(&run_regression.step);
+
+    const integration_checker = b.addExecutable(.{
+        .name = "integration_checker",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/integration_checker.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+
+    const run_integration = b.addRunArtifact(integration_checker);
+    run_integration.addArtifactArg(exe);
+    run_integration.addFileArg(b.path("tests/integration.json"));
+    const test_integration_step = b.step("test-integration", "Run integration tests against opencode_go/deepseek-v4-flash");
+    test_integration_step.dependOn(&run_integration.step);
 }
 
 fn addPunyExecutable(
