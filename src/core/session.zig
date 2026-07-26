@@ -207,6 +207,11 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
         });
     }
 
+    std.mem.sort(SessionInfo, list.items, {}, struct {
+        fn less(_: void, a: SessionInfo, b: SessionInfo) bool {
+            return std.mem.lessThan(u8, a.id, b.id);
+        }
+    }.less);
     return list.toOwnedSlice(arena);
 }
 

@@ -198,8 +198,11 @@ pub const ChatSession = struct {
                             const prd_mark = if (s.has_prd) "  (has plan.md)" else "";
                             const current_mark = if (std.mem.eql(u8, s.id, ctx.session.id)) "  <-- current" else "";
                             const first_prompt_hint = if (s.first_prompt) |p| blk: {
-                                const preview = if (p.len > 40) p[0..40] else p;
-                                break :blk std.fmt.allocPrint(ctx.arena, "  \"{s}...\"", .{preview}) catch "";
+                                if (p.len > 40) {
+                                    break :blk std.fmt.allocPrint(ctx.arena, "  \"{s}...\"", .{p[0..40]}) catch "";
+                                } else {
+                                    break :blk std.fmt.allocPrint(ctx.arena, "  \"{s}\"", .{p}) catch "";
+                                }
                             } else "";
                             try ctx.stdout_writer.print("  {s}{s}{s}{s}{s}\n", .{ s.id, has_conv, prd_mark, current_mark, first_prompt_hint });
                             if (s.first_prompt) |p| ctx.arena.free(p);
@@ -229,6 +232,9 @@ pub const ChatSession = struct {
                             for (sessions) |s| {
                                 if (s.has_conversation) break :blk s;
                             }
+                        } else {
+                            try ctx.stdout_writer.print("\n{d} sessions have saved conversations. Use /resume <id> to choose one.\n", .{conv_count});
+                            try ctx.stdout_writer.flush();
                         }
                         break :blk null;
                     };
@@ -249,10 +255,15 @@ pub const ChatSession = struct {
                         ctx.planning_mode.* = s.planning_mode;
                         core_session.setWriteBlocked(ctx.planning_mode.*);
 
-                        const prd_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "plan.md" });
-                        const html_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "plan.html" });
-                        ctx.session.* = try core_session.Session.fromDir(ctx.arena, s.id, base, dir, prd_path, html_path);
-                        core_session.setSessionPaths(prd_path, html_path);
+                        ctx.session.* = try core_session.Session.fromDir(
+                            ctx.arena,
+                            s.id,
+                            base,
+                            dir,
+                            try std.fs.path.join(ctx.arena, &.{ dir, "plan.md" }),
+                            try std.fs.path.join(ctx.arena, &.{ dir, "plan.html" }),
+                        );
+                        core_session.setSessionPaths(ctx.session.prd_path, ctx.session.html_path);
 
                         ctx.session_stats.deinit();
                         ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
@@ -357,19 +368,36 @@ fn saveMessages(ctx: *ChatLoopContext) !void {
     const cwd = std.Io.Dir.cwd();
     cwd.createDirPath(ctx.io, dir) catch {};
 
+    const tmp_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json.tmp" });
+    defer ctx.messages_arena.allocator().free(tmp_path);
     const msg_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json" });
     defer ctx.messages_arena.allocator().free(msg_path);
     const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), ctx.messages.items, .{ .whitespace = .indent_2 });
     defer ctx.messages_arena.allocator().free(buffer);
-    var file = cwd.createFile(ctx.io, msg_path, .{}) catch |err| {
-        std.log.warn("failed to save messages: {s}", .{@errorName(err)});
+
+    var file = cwd.createFile(ctx.io, tmp_path, .{}) catch |err| {
+        std.log.warn("failed to create temp file: {s}", .{@errorName(err)});
         return;
     };
-    defer file.close(ctx.io);
+    errdefer {
+        file.close(ctx.io);
+        cwd.deleteFile(ctx.io, tmp_path) catch {};
+    }
+
     file.writeStreamingAll(ctx.io, buffer) catch |err| {
         std.log.warn("failed to write messages: {s}", .{@errorName(err)});
+        return;
     };
-    file.writeStreamingAll(ctx.io, "\n") catch {};
+    file.writeStreamingAll(ctx.io, "\n") catch |err| {
+        std.log.warn("failed to write newline: {s}", .{@errorName(err)});
+        return;
+    };
+    file.close(ctx.io);
+
+    std.Io.Dir.renameAbsolute(tmp_path, msg_path, ctx.io) catch |err| {
+        std.log.warn("failed to rename messages file: {s}", .{@errorName(err)});
+        std.Io.Dir.cwd().deleteFile(ctx.io, tmp_path) catch {};
+    };
 }
 
 fn saveSessionMeta(ctx: *ChatLoopContext) !void {
@@ -437,8 +465,6 @@ pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Messag
             .assistant => |assistant| {
                 if (assistant.content) |content| {
                     try writer.print("{s}\n", .{content});
-                } else {
-                    try writer.print("\n", .{});
                 }
             },
             else => {},
