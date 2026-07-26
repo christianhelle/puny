@@ -527,7 +527,9 @@ start Puny or run `/reset`. The session ID is shown in the welcome screen and in
 the `/stats` header.
 
 Sessions are stored at `~/.config/puny/sessions/<uuid>/` (Linux/macOS) or
-`%APPDATA%\puny\sessions\<uuid>\` (Windows). Each session folder can contain a
+`%APPDATA%\puny\sessions\<uuid>\` (Windows). The base directory is configurable:
+use `$XDG_CONFIG_HOME/puny` when set on Linux/macOS, and on Windows fall back to
+`%USERPROFILE%\puny` when `%APPDATA%` is unavailable. Each session folder can contain a
 `plan.md` file produced by the model during `/plan` mode.
 
 In planning mode the model can only read files, list directories, search code,
