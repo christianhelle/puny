@@ -14,7 +14,7 @@ Puny lets you chat with an LLM and gives it a curated set of coding tools so it 
 - **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
-- **Session management**: each run and `/reset` creates a new UUID-identified session, with PRDs saved to the session folder.
+- **Session management**: each run and `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
 - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
@@ -484,6 +484,8 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `-M`, `--mock`             | Use mock provider (no backend required)                    |
 | `--reconfigure`            | Re-run first-run setup and update config                   |
 | `--show-thinking`          | Show reasoning/thinking output from the model              |
+| `--session <id>`           | Resume a previous session by UUID or unique prefix         |
+| `--resume`                 | Resume the most recent session with a saved conversation   |
 | `--debug`                  | Log HTTP requests and responses to `puny_debug.log`        |
 | `-U`, `--upgrade`          | Upgrade to the latest release via install script            |
 | `-h`, `--help`             | Show help text                                             |
@@ -513,7 +515,8 @@ While in a chat session:
 - `/build [task]` — switch to build mode (optionally with a task description)
 - `/model [id]` — switch to another model; shows the model picker if no ID is given
 - `/provider [name]` — switch to another provider without reconfiguring everything; shows the provider picker if no name is given, then opens the model picker for the new provider
-- `/sessions` — list all saved sessions, showing their UUID and whether they have a `plan.md`
+- `/sessions` — list all saved sessions, showing their UUID, whether they have a `plan.md` or saved conversation, and a preview of the first user message
+- `/resume [id]` — list saved sessions and pick one to restore, or restore a specific session by UUID prefix
 - `/prune` — delete all session directories except the current one
 - `/skills` — list all available global and repository skills
 
@@ -526,17 +529,54 @@ Each Puny session is identified by a UUID. A new session is created every time y
 start Puny or run `/reset`. The session ID is shown in the welcome screen and in
 the `/stats` header.
 
+#### Storage
+
 Sessions are stored at `~/.config/puny/sessions/<uuid>/` (Linux/macOS) or
 `%APPDATA%\puny\sessions\<uuid>\` (Windows). The base directory is configurable:
 use `$XDG_CONFIG_HOME/puny` when set on Linux/macOS, and on Windows fall back to
-`%USERPROFILE%\puny` when `%APPDATA%` is unavailable. Each session folder can contain a
-`plan.md` file produced by the model during `/plan` mode.
+`%USERPROFILE%\puny` when `%APPDATA%` is unavailable. Each session folder can contain:
+
+| File | Description |
+|------|-------------|
+| `plan.md` | PRD markdown produced by the model during `/plan` mode |
+| `plan.html` | HTML version of the PRD |
+| `messages.json` | Full conversation history, saved automatically after every turn |
+| `session.json` | Session metadata (planning mode, first user prompt) |
+
+#### Conversation persistence
+
+The entire conversation is saved to `messages.json` in the session folder after
+every completed chat turn. It is also saved automatically when you exit the
+session (`/quit`, `Ctrl+C`) or run `/reset`. Tool call results are included in
+the save so the restored session has the full context.
+
+#### Restoring a session
+
+You can resume a previous session in several ways:
+
+- **CLI flag**: `puny --session <uuid-or-prefix>` loads a specific session by
+  UUID or unique prefix. Use `--session` with a partial UUID for prefix matching
+  (e.g. `puny --session abc-12` matches `abc-1234-...`).
+- **CLI flag**: `puny --resume` resumes the most recent session with a saved
+  conversation. If multiple sessions have saved conversations, a hint is printed.
+- **Interactive**: `/resume` inside a chat session lists all saved sessions
+  that have conversations and lets you pick one to restore. You can also pass
+  a prefix: `/resume abc-12`.
+- **In-session restore**: Calling `/resume` replaces the current conversation
+  with the saved one, keeping the same provider and model configuration.
+
+When a session is restored, the system prompt, skills blocks, and planning mode
+are restored exactly as they were saved — the conversation picks up where it
+left off.
+
+#### Planning mode
 
 In planning mode the model can only read files, list directories, search code,
 check git status/diff, and fetch web pages — plus use the `save_prd` tool to
 write the final PRD. When the user confirms readiness, the model calls
 `save_prd` with markdown and HTML content, which writes both `plan.md` and
-`plan.html` to the session folder.
+`plan.html` to the session folder. Planning mode state is persisted in
+`session.json` and restored when the session is resumed.
 
 ## Build from source
 
