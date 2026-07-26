@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Introduce Sessions and update Planning Mode to create a PRD in HTML and Markdown formats ([#53](https://github.com/christianhelle/puny/pull/53)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract ClientConfig for provider dispatch ([#52](https://github.com/christianhelle/puny/pull/52)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract chat loop from main.zig into ChatSession module ([#51](https://github.com/christianhelle/puny/pull/51)) ([@christianhelle](https://github.com/christianhelle/))
 - make --upgrade fire-and-forget to avoid upgrade failure when binary is in use ([#50](https://github.com/christianhelle/puny/pull/50)) ([@christianhelle](https://github.com/christianhelle/))
