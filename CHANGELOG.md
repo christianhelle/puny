@@ -3,6 +3,12 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add integration tests against OpenCode Go ([#56](https://github.com/christianhelle/puny/pull/56)) ([@christianhelle](https://github.com/christianhelle/))
+
+
+## [v0.2.1](https://github.com/christianhelle/puny/releases/tag/v0.2.1) (2026-07-26)
+
+### Features
 - Add --prune CLI flag for session pruning ([#55](https://github.com/christianhelle/puny/pull/55)) ([@christianhelle](https://github.com/christianhelle/))
 - Add support for restoring Sessions ([#54](https://github.com/christianhelle/puny/pull/54)) ([@christianhelle](https://github.com/christianhelle/))
 - Make --upgrade fire-and-forget to avoid upgrade failure when binary is in use ([#50](https://github.com/christianhelle/puny/pull/50)) ([@christianhelle](https://github.com/christianhelle/))
