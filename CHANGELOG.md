@@ -3,10 +3,11 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add support for restoring Sessions ([#54](https://github.com/christianhelle/puny/pull/54)) ([@christianhelle](https://github.com/christianhelle/))
+- Make --upgrade fire-and-forget to avoid upgrade failure when binary is in use ([#50](https://github.com/christianhelle/puny/pull/50)) ([@christianhelle](https://github.com/christianhelle/))
 - Introduce Sessions and update Planning Mode to create a PRD in HTML and Markdown formats ([#53](https://github.com/christianhelle/puny/pull/53)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract ClientConfig for provider dispatch ([#52](https://github.com/christianhelle/puny/pull/52)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract chat loop from main.zig into ChatSession module ([#51](https://github.com/christianhelle/puny/pull/51)) ([@christianhelle](https://github.com/christianhelle/))
-- make --upgrade fire-and-forget to avoid upgrade failure when binary is in use ([#50](https://github.com/christianhelle/puny/pull/50)) ([@christianhelle](https://github.com/christianhelle/))
 - Add support for Windows ARM64 ([#49](https://github.com/christianhelle/puny/pull/49)) ([@christianhelle](https://github.com/christianhelle/))
 
 
