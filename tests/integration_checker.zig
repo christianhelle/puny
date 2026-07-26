@@ -5,12 +5,18 @@ const Spec = struct {
     tests: []const TestCase,
 };
 
+const Evidence = struct {
+    file_exists: []const []const u8 = &.{},
+    extract_paths_from_output: bool = false,
+};
+
 const TestCase = struct {
     name: []const u8,
     args: []const []const u8,
     min_output_length: usize = 0,
     expect: []const []const u8 = &.{},
     not_expect: []const []const u8 = &.{},
+    evidence: ?Evidence = null,
 };
 
 pub fn main(init: std.process.Init) !u8 {
@@ -142,6 +148,29 @@ fn runTest(
         }
     }
 
+    if (test_case.evidence) |evidence| {
+        for (evidence.file_exists) |path| {
+            if (!fileExists(io, path)) {
+                std.debug.print("FAILED\n    evidence file not found: '{s}'\n", .{path});
+                printStderr(result.stderr);
+                return false;
+            }
+        }
+        if (evidence.extract_paths_from_output) {
+            var lines_iter = std.mem.splitScalar(u8, result.stdout, '\n');
+            while (lines_iter.next()) |line| {
+                if (std.mem.indexOf(u8, line, " - ")) |idx| {
+                    const path = std.mem.trim(u8, line[idx + 3 ..], " \t\r");
+                    if (path.len > 0 and looksLikeAbsolutePath(path) and !fileExists(io, path)) {
+                        std.debug.print("FAILED\n    evidence file not found: '{s}'\n", .{path});
+                        printStderr(result.stderr);
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
     return true;
 }
 
@@ -149,6 +178,24 @@ fn printStderr(stderr: []const u8) void {
     if (stderr.len > 0) {
         std.debug.print("  stderr: {s}\n", .{stderr});
     }
+}
+
+fn fileExists(io: std.Io, path: []const u8) bool {
+    var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return false;
+    file.close(io);
+    return true;
+}
+
+fn looksLikeAbsolutePath(path: []const u8) bool {
+    if (path.len == 0) return false;
+    if (path[0] == '/' or path[0] == '\\') return true;
+    if (path.len >= 3) {
+        const c = path[0];
+        if ((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z')) {
+            if (path[1] == ':') return true;
+        }
+    }
+    return false;
 }
 
 fn buildArgv(

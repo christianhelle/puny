@@ -30,7 +30,9 @@
         "Read the file src/main.zig"
       ],
       "min_output_length": 1,
-      "expect": [],
+      "expect": [
+        "const std = @import"
+      ],
       "not_expect": [
         "Error:",
         "Chat failed",
@@ -44,7 +46,9 @@
         "Search for 'pub fn' in the source code of src/main.zig"
       ],
       "min_output_length": 1,
-      "expect": [],
+      "expect": [
+        "pub fn"
+      ],
       "not_expect": [
         "Error:",
         "Chat failed",
@@ -58,7 +62,10 @@
         "Run 'echo hello world' in the shell"
       ],
       "min_output_length": 1,
-      "expect": [],
+      "expect": [
+        "Exit code: 0",
+        "hello world"
+      ],
       "not_expect": [
         "Error:",
         "Chat failed",
@@ -72,12 +79,18 @@
         "/plan testing save_prd tool. create an empty plan with no details"
       ],
       "min_output_length": 1,
-      "expect": [],
+      "expect": [
+        "plan.md",
+        "plan.html"
+      ],
       "not_expect": [
         "Error:",
         "Chat failed",
         "Failed"
-      ]
+      ],
+      "evidence": {
+        "extract_paths_from_output": true
+      }
     }
   ]
 }
