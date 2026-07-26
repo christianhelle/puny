@@ -142,7 +142,7 @@ pub fn main(init: std.process.Init) !void {
                         return;
                     };
                     const parsed_val = try std.json.parseFromSlice(std.json.Value, messages_arena, data, .{});
-                    for (parsed_val.value.array) |item| {
+                    for (parsed_val.value.array.items) |item| {
                         const msg = try openai.Message.fromJsonValue(messages_arena, item);
                         try messages.append(messages_arena, msg);
                     }
@@ -181,7 +181,7 @@ pub fn main(init: std.process.Init) !void {
                         file.close(io);
                         const data = try std.Io.Dir.cwd().readFileAlloc(io, msg_path, messages_arena, std.Io.Limit.limited(10 * 1024 * 1024));
                         const parsed_val = try std.json.parseFromSlice(std.json.Value, messages_arena, data, .{});
-                        for (parsed_val.value.array) |item| {
+                        for (parsed_val.value.array.items) |item| {
                             const msg = try openai.Message.fromJsonValue(messages_arena, item);
                             try messages.append(messages_arena, msg);
                         }

@@ -114,8 +114,8 @@ pub const Message = union(enum) {
             var tool_calls: ?[]ToolCall = null;
             if (obj.get("tool_calls")) |tc_arr| {
                 const arr = tc_arr.array;
-                var list = try std.ArrayList(ToolCall).initCapacity(allocator, arr.len);
-                for (arr) |tc_val| {
+                var list = try std.ArrayList(ToolCall).initCapacity(allocator, arr.items.len);
+                for (arr.items) |tc_val| {
                     const tc_obj = tc_val.object;
                     const func_obj = tc_obj.get("function").?.object;
                     list.appendAssumeCapacity(.{
@@ -127,7 +127,7 @@ pub const Message = union(enum) {
                         },
                     });
                 }
-                tool_calls = list.toOwnedSlice(allocator);
+                tool_calls = try list.toOwnedSlice(allocator);
             }
 
             return .{ .assistant = .{
