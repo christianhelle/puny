@@ -431,11 +431,11 @@ pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Messag
     for (messages) |msg| {
         switch (msg) {
             .user => |content| {
-                try writer.print("  {s}YOU:{s}  ", .{ ansi.bright, ansi.reset });
+                try writer.print("\n{s}YOU:{s}  ", .{ ansi.bright, ansi.reset });
                 try writer.print("{s}\n", .{content});
             },
             .assistant => |assistant| {
-                try writer.print("  {s}AI:{s}   ", .{ ansi.bright, ansi.reset });
+                try writer.print("{s}AI:{s}   ", .{ ansi.bright, ansi.reset });
                 if (assistant.content) |content| {
                     try writer.print("{s}\n", .{content});
                 } else {
