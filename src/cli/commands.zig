@@ -17,6 +17,7 @@ pub const Command = union(enum) {
     provider: ?[]const u8,
     sessions,
     prune,
+    resume_session: ?[]const u8,
     skills,
     skill: []const u8,
     prompt: []const u8,
@@ -33,6 +34,7 @@ pub const Action = union(enum) {
     switch_provider: ?[]const u8,
     list_sessions,
     prune_sessions,
+    restore_session: ?[]const u8,
     list_skills,
     load_skill: []const u8,
 };
@@ -98,6 +100,13 @@ pub fn parse(user_message: []const u8) Command {
 
     if (std.mem.eql(u8, user_message, "/skills"))
         return .skills;
+
+    if (std.mem.eql(u8, user_message, "/resume") or std.mem.startsWith(u8, user_message, "/resume ")) {
+        if (user_message.len > "/resume ".len) {
+            return .{ .resume_session = user_message["/resume ".len..] };
+        }
+        return .{ .resume_session = null };
+    }
 
     if (user_message.len > 0 and user_message[0] == '/')
         return .{ .skill = user_message[1..] };
@@ -174,6 +183,15 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
 
         .prune => return .prune_sessions,
 
+        .resume_session => |session_id| {
+            if (ctx.oneshot) {
+                try ctx.stdout_writer.print("\n/resume not available in oneshot mode.\n", .{});
+                try ctx.stdout_writer.flush();
+                return .continue_;
+            }
+            return .{ .restore_session = session_id };
+        },
+
         .skills => return .list_skills,
 
         .skill => |name_text| return .{ .load_skill = name_text },
@@ -194,6 +212,9 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqual(Command.sessions, parse("/sessions"));
     try std.testing.expectEqual(Command.prune, parse("/prune"));
     try std.testing.expectEqual(Command.skills, parse("/skills"));
+
+    try std.testing.expectEqualDeep(Command{ .resume_session = null }, parse("/resume"));
+    try std.testing.expectEqualDeep(Command{ .resume_session = "abc-123" }, parse("/resume abc-123"));
 
     try std.testing.expectEqualDeep(Command{ .plan = null }, parse("/plan"));
     try std.testing.expectEqualDeep(Command{ .plan = "do thing" }, parse("/plan do thing"));
