@@ -286,7 +286,6 @@ fn initializeProviderAndModel(
             return;
         };
     };
-
 }
 
 fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefinition) {
