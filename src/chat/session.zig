@@ -428,40 +428,24 @@ fn loadMessagesIntoContext(ctx: *ChatLoopContext, dir: []const u8) !void {
 }
 
 pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Message) !void {
-    for (messages, 0..) |msg, i| {
+    for (messages) |msg| {
         switch (msg) {
-            .system => |content| {
-                try writer.print("  {s}SYSM{s} {d}: ", .{ ansi.bright, ansi.reset, i });
-                if (content.len > 200) {
-                    try writer.print("{s}...\n", .{content[0..200]});
-                } else {
-                    try writer.print("{s}\n", .{content});
-                }
-            },
             .user => |content| {
-                try writer.print("  {s}YOU{s} {d}: ", .{ ansi.bright, ansi.reset, i });
+                try writer.print("  {s}YOU:{s}  ", .{ ansi.bright, ansi.reset });
                 try writer.print("{s}\n", .{content});
             },
             .assistant => |assistant| {
-                try writer.print("  {s}AI{s}  {d}: ", .{ ansi.bright, ansi.reset, i });
+                try writer.print("  {s}AI:{s}   ", .{ ansi.bright, ansi.reset });
                 if (assistant.content) |content| {
-                    if (content.len > 200) {
-                        try writer.print("{s}...\n", .{content[0..200]});
-                    } else {
-                        try writer.print("{s}\n", .{content});
-                    }
+                    try writer.print("{s}\n", .{content});
                 }
                 if (assistant.tool_calls) |tool_calls| {
                     for (tool_calls) |tc| {
-                        try writer.print("    tool: {s}({s})\n", .{ tc.function.name, tc.function.arguments });
+                        try writer.print("    [{s}]\n", .{tc.function.name});
                     }
                 }
             },
-            .tool => |tool| {
-                try writer.print("  {s}TOOL{s} {d}: ", .{ ansi.bright, ansi.reset, i });
-                const preview = if (tool.content.len > 100) tool.content[0..100] else tool.content;
-                try writer.print("{s} ({s})\n", .{ tool.tool_call_id, preview });
-            },
+            else => {},
         }
     }
 }
