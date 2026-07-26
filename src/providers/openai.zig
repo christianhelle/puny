@@ -93,37 +93,52 @@ pub const Message = union(enum) {
     }
 
     pub fn fromJsonValue(allocator: std.mem.Allocator, value: std.json.Value) !Message {
-        const obj = value.object;
-        const role = obj.get("role").?.string;
+        const obj = if (value == .object) value.object else return error.InvalidMessage;
+        const role_val = obj.get("role") orelse return error.InvalidMessage;
+        const role = if (role_val == .string) role_val.string else return error.InvalidMessage;
 
         if (std.mem.eql(u8, role, "system")) {
-            return .{ .system = try allocator.dupe(u8, obj.get("content").?.string) };
+            const content_val = obj.get("content") orelse return error.InvalidMessage;
+            if (content_val != .string) return error.InvalidMessage;
+            return .{ .system = try allocator.dupe(u8, content_val.string) };
         }
 
         if (std.mem.eql(u8, role, "user")) {
-            return .{ .user = try allocator.dupe(u8, obj.get("content").?.string) };
+            const content_val = obj.get("content") orelse return error.InvalidMessage;
+            if (content_val != .string) return error.InvalidMessage;
+            return .{ .user = try allocator.dupe(u8, content_val.string) };
         }
 
         if (std.mem.eql(u8, role, "assistant")) {
             const content = if (obj.get("content")) |c| switch (c) {
                 .null => null,
                 .string => |s| s,
-                else => null,
+                else => return error.InvalidMessage,
             } else null;
 
             var tool_calls: ?[]ToolCall = null;
-            if (obj.get("tool_calls")) |tc_arr| {
-                const arr = tc_arr.array;
+            if (obj.get("tool_calls")) |tc_arr_val| {
+                if (tc_arr_val != .array) return error.InvalidMessage;
+                const arr = tc_arr_val.array;
                 var list = try std.ArrayList(ToolCall).initCapacity(allocator, arr.items.len);
                 for (arr.items) |tc_val| {
+                    if (tc_val != .object) return error.InvalidMessage;
                     const tc_obj = tc_val.object;
-                    const func_obj = tc_obj.get("function").?.object;
+                    const id_val = tc_obj.get("id") orelse return error.InvalidMessage;
+                    if (id_val != .string) return error.InvalidMessage;
+                    const func_val = tc_obj.get("function") orelse return error.InvalidMessage;
+                    if (func_val != .object) return error.InvalidMessage;
+                    const func_obj = func_val.object;
+                    const name_val = func_obj.get("name") orelse return error.InvalidMessage;
+                    if (name_val != .string) return error.InvalidMessage;
+                    const args_val = func_obj.get("arguments") orelse return error.InvalidMessage;
+                    if (args_val != .string) return error.InvalidMessage;
                     list.appendAssumeCapacity(.{
-                        .id = try allocator.dupe(u8, tc_obj.get("id").?.string),
-                        .type = try allocator.dupe(u8, tc_obj.get("type").?.string),
+                        .id = try allocator.dupe(u8, id_val.string),
+                        .type = try allocator.dupe(u8, "function"),
                         .function = .{
-                            .name = try allocator.dupe(u8, func_obj.get("name").?.string),
-                            .arguments = try allocator.dupe(u8, func_obj.get("arguments").?.string),
+                            .name = try allocator.dupe(u8, name_val.string),
+                            .arguments = try allocator.dupe(u8, args_val.string),
                         },
                     });
                 }
@@ -137,9 +152,13 @@ pub const Message = union(enum) {
         }
 
         if (std.mem.eql(u8, role, "tool")) {
+            const tcid_val = obj.get("tool_call_id") orelse return error.InvalidMessage;
+            if (tcid_val != .string) return error.InvalidMessage;
+            const content_val = obj.get("content") orelse return error.InvalidMessage;
+            if (content_val != .string) return error.InvalidMessage;
             return .{ .tool = .{
-                .tool_call_id = try allocator.dupe(u8, obj.get("tool_call_id").?.string),
-                .content = try allocator.dupe(u8, obj.get("content").?.string),
+                .tool_call_id = try allocator.dupe(u8, tcid_val.string),
+                .content = try allocator.dupe(u8, content_val.string),
             } };
         }
 

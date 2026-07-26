@@ -116,102 +116,68 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var session_restored = false;
-
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
+
+    if (parsed.session) |sid| {
+        if (core_sess.findSessionByPrefix(arena, io, base_dir, sid)) |maybe_s| {
+            if (maybe_s) |s| {
+                session_restored = try restoreSessionAtStartup(
+                    arena,
+                    messages_arena,
+                    io,
+                    base_dir,
+                    s,
+                    &current_session,
+                    &planning_mode,
+                    &messages,
+                    stdout_writer,
+                );
+            } else {
+                try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
+                try stdout_writer.flush();
+            }
+        } else |_| {}
+    } else if (parsed.do_resume) {
+        if (core_sess.listSessions(arena, io, base_dir)) |sessions| {
+            var conv_count: usize = 0;
+            var found: ?core_sess.SessionInfo = null;
+            for (sessions) |s| {
+                if (s.has_conversation) {
+                    conv_count += 1;
+                    found = s;
+                }
+            }
+            if (conv_count == 1) {
+                if (found) |s| {
+                    session_restored = try restoreSessionAtStartup(
+                        arena,
+                        messages_arena,
+                        io,
+                        base_dir,
+                        s,
+                        &current_session,
+                        &planning_mode,
+                        &messages,
+                        stdout_writer,
+                    );
+                }
+            } else if (conv_count > 1) {
+                try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_count});
+                try stdout_writer.flush();
+            } else {
+                try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
+                try stdout_writer.flush();
+            }
+        } else |_| {}
+    }
+
     if (!session_restored) {
         const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
         try messages.append(messages_arena, .{ .system = system_prompt });
         if (skill_registry.count() > 0) {
             const skills_block = try skill_registry.buildListing(messages_arena);
             try messages.append(messages_arena, .{ .system = skills_block });
-        }
-    }
-
-    if (!session_restored and (parsed.session != null or parsed.do_resume)) {
-        if (parsed.session) |sid| {
-            if (try core_sess.findSessionByPrefix(arena, io, base_dir, sid)) |s| {
-                const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", s.id });
-                const msg_path = try std.fs.path.join(messages_arena, &.{ dir, "messages.json" });
-                const file_open = std.Io.Dir.cwd().openFile(io, msg_path, .{});
-                if (file_open) |file| {
-                    file.close(io);
-                    const data = std.Io.Dir.cwd().readFileAlloc(io, msg_path, messages_arena, std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| {
-                        try stdout_writer.print("Could not read messages: {s}. Starting fresh.\n", .{@errorName(err)});
-                        try stdout_writer.flush();
-                        return;
-                    };
-                    const parsed_val = try std.json.parseFromSlice(std.json.Value, messages_arena, data, .{});
-                    for (parsed_val.value.array.items) |item| {
-                        const msg = try openai.Message.fromJsonValue(messages_arena, item);
-                        try messages.append(messages_arena, msg);
-                    }
-                    current_session = try core_sess.Session.fromDir(
-                        arena,
-                        s.id,
-                        base_dir,
-                        dir,
-                        try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
-                        try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
-                    );
-                    planning_mode = s.planning_mode;
-                    session_restored = true;
-                    try stdout_writer.print("Restored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
-                    try session.printConversation(stdout_writer, messages.items);
-                    try stdout_writer.flush();
-                } else |_| {
-                    try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{s.id});
-                    try stdout_writer.flush();
-                }
-            } else {
-                try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
-                try stdout_writer.flush();
-            }
-        } else if (parsed.do_resume) {
-            const sessions = try core_sess.listSessions(arena, io, base_dir);
-            var conv_sessions: usize = 0;
-            var found_s: ?core_sess.SessionInfo = null;
-            for (sessions) |s| {
-                if (s.has_conversation) {
-                    conv_sessions += 1;
-                    found_s = s;
-                }
-            }
-            if (conv_sessions == 1) {
-                if (found_s) |s| {
-                    const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", s.id });
-                    const msg_path = try std.fs.path.join(messages_arena, &.{ dir, "messages.json" });
-                    const file_open = std.Io.Dir.cwd().openFile(io, msg_path, .{});
-                    if (file_open) |file| {
-                        file.close(io);
-                        const data = try std.Io.Dir.cwd().readFileAlloc(io, msg_path, messages_arena, std.Io.Limit.limited(10 * 1024 * 1024));
-                        const parsed_val = try std.json.parseFromSlice(std.json.Value, messages_arena, data, .{});
-                        for (parsed_val.value.array.items) |item| {
-                            const msg = try openai.Message.fromJsonValue(messages_arena, item);
-                            try messages.append(messages_arena, msg);
-                        }
-                        current_session = try core_sess.Session.fromDir(
-                            arena,
-                            s.id,
-                            base_dir,
-                            dir,
-                            try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
-                            try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
-                        );
-                        planning_mode = s.planning_mode;
-                        session_restored = true;
-                        try stdout_writer.print("Restored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
-                        try session.printConversation(stdout_writer, messages.items);
-                        try stdout_writer.flush();
-                    } else |_| {}
-                }
-            } else if (conv_sessions > 1) {
-                try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_sessions});
-                try stdout_writer.flush();
-            } else {
-                try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
-                try stdout_writer.flush();
-            }
         }
     }
 
@@ -276,6 +242,57 @@ fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.pro
         if (err != error.FileNotFound) return err;
     };
     return history;
+}
+
+fn restoreSessionAtStartup(
+    arena: std.mem.Allocator,
+    msg_alloc: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    s: core_sess.SessionInfo,
+    current_session: *core_sess.Session,
+    planning_mode: *bool,
+    messages: *std.ArrayList(openai.Message),
+    stdout_writer: *std.Io.Writer,
+) !bool {
+    const dir = try std.fs.path.join(msg_alloc, &.{ base_dir, "sessions", s.id });
+    defer msg_alloc.free(dir);
+
+    const msg_path = try std.fs.path.join(msg_alloc, &.{ dir, "messages.json" });
+    defer msg_alloc.free(msg_path);
+
+    var file = std.Io.Dir.cwd().openFile(io, msg_path, .{}) catch {
+        try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{s.id});
+        try stdout_writer.flush();
+        return false;
+    };
+    defer file.close(io);
+
+    const data = try std.Io.Dir.cwd().readFileAlloc(io, msg_path, msg_alloc, std.Io.Limit.limited(10 * 1024 * 1024));
+    defer msg_alloc.free(data);
+
+    const parsed_val = try std.json.parseFromSlice(std.json.Value, msg_alloc, data, .{});
+    defer parsed_val.deinit();
+
+    for (parsed_val.value.array.items) |item| {
+        if (openai.Message.fromJsonValue(msg_alloc, item)) |msg| {
+            try messages.append(msg_alloc, msg);
+        } else |_| {}
+    }
+
+    current_session.* = try core_sess.Session.fromDir(
+        arena,
+        s.id,
+        base_dir,
+        dir,
+        try std.fs.path.join(msg_alloc, &.{ dir, "plan.md" }),
+        try std.fs.path.join(msg_alloc, &.{ dir, "plan.html" }),
+    );
+    planning_mode.* = s.planning_mode;
+    try stdout_writer.print("Restored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
+    try session.printConversation(stdout_writer, messages.items);
+    try stdout_writer.flush();
+    return true;
 }
 
 fn runStartupReconfigure(
