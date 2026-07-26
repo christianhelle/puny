@@ -15,6 +15,8 @@ pub const Options = struct {
     debug: bool = false,
     show_thinking: bool = false,
     upgrade: bool = false,
+    session: ?[]const u8 = null,
+    do_resume: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -76,6 +78,12 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.show_thinking = true;
         } else if (std.mem.eql(u8, arg, "--debug")) {
             opts.debug = true;
+        } else if (std.mem.eql(u8, arg, "--session")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.session = args[i];
+        } else if (std.mem.eql(u8, arg, "--resume")) {
+            opts.do_resume = true;
         } else if (std.mem.eql(u8, arg, "--upgrade") or std.mem.eql(u8, arg, "-U")) {
             opts.upgrade = true;
         } else {
@@ -135,6 +143,8 @@ pub fn printHelp(io: std.Io) void {
         \\  -M, --mock                  Use mock provider (no LM Studio required)
         \\      --reconfigure           Re-run first-run setup and update config
         \\      --show-thinking         Show reasoning/thinking output from the model
+        \\      --session <id>          Resume a previous session by ID or prefix
+        \\      --resume                Pick a session to resume interactively
         \\      --debug                 Log HTTP requests and responses to puny_debug.log
         \\  -U, --upgrade               Upgrade to the latest release via install script
         \\  -h, --help                  Show this help text
@@ -242,4 +252,22 @@ test "parseArgs sets debug from flag" {
     const args = &[_][:0]const u8{ "puny", "--debug" };
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expect(opts.debug);
+}
+
+test "parseArgs sets session from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--session", "abc-123" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqualStrings("abc-123", opts.session.?);
+}
+
+test "parseArgs sets resume from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--resume" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.do_resume);
 }
