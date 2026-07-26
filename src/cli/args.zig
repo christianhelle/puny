@@ -275,3 +275,22 @@ test "parseArgs sets resume from flag" {
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expect(opts.do_resume);
 }
+
+test "parseArgs sets prune from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--prune" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.prune);
+}
+
+test "parseArgs sets prune with session" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--prune", "--session", "abc-123" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.prune);
+    try std.testing.expectEqualStrings("abc-123", opts.session.?);
+}
