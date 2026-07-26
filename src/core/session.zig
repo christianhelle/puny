@@ -66,9 +66,17 @@ pub const save_prd_tool = Tool{
     }.exec,
 };
 
+pub const SessionMeta = struct {
+    planning_mode: bool,
+    first_prompt: ?[]const u8,
+};
+
 pub const SessionInfo = struct {
     id: []const u8,
     has_prd: bool,
+    has_conversation: bool,
+    planning_mode: bool,
+    first_prompt: ?[]const u8,
 };
 
 pub const Session = struct {
@@ -117,6 +125,38 @@ fn createSessionDir(io: std.Io, dir: []const u8) !void {
     try cwd.createDirPath(io, dir);
 }
 
+pub fn messagesPath(allocator: std.mem.Allocator, sessions_dir: []const u8, id: []const u8) ![]const u8 {
+    return std.fs.path.join(allocator, &.{ sessions_dir, id, "messages.json" });
+}
+
+pub fn sessionMetaPath(allocator: std.mem.Allocator, sessions_dir: []const u8, id: []const u8) ![]const u8 {
+    return std.fs.path.join(allocator, &.{ sessions_dir, id, "session.json" });
+}
+
+fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !SessionMeta {
+    const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(1024)) catch |err| switch (err) {
+        error.FileNotFound => return SessionMeta{ .planning_mode = false, .first_prompt = null },
+        else => |e| return e,
+    };
+    defer allocator.free(data);
+
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, data, .{}) catch |err| {
+        std.log.warn("failed to parse session meta at {s}: {s}", .{ path, @errorName(err) });
+        return SessionMeta{ .planning_mode = false, .first_prompt = null };
+    };
+    defer parsed.deinit();
+
+    const obj = parsed.value.object;
+    const planning_mode = if (obj.get("planning_mode")) |v| v.bool else false;
+    const first_prompt = if (obj.get("first_prompt")) |v| switch (v) {
+        .null => null,
+        .string => |s| try allocator.dupe(u8, s),
+        else => null,
+    } else null;
+
+    return SessionMeta{ .planning_mode = planning_mode, .first_prompt = first_prompt };
+}
+
 pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) ![]SessionInfo {
     var tmp_arena = std.heap.ArenaAllocator.init(arena);
     defer tmp_arena.deinit();
@@ -140,7 +180,21 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
         const prd_path = try std.fs.path.join(tmp, &.{ sessions_dir_path, id, "plan.md" });
         const has_prd = hasFile(io, prd_path);
 
-        try list.append(arena, .{ .id = id, .has_prd = has_prd });
+        const msg_path = try messagesPath(tmp, sessions_dir_path, id);
+        const has_conversation = hasFile(io, msg_path);
+
+        const meta_path = try sessionMetaPath(tmp, sessions_dir_path, id);
+        const meta = try readSessionMetaJson(io, tmp, meta_path);
+
+        const first_prompt = if (meta.first_prompt) |p| try arena.dupe(u8, p) else null;
+
+        try list.append(arena, .{
+            .id = id,
+            .has_prd = has_prd,
+            .has_conversation = has_conversation,
+            .planning_mode = meta.planning_mode,
+            .first_prompt = first_prompt,
+        });
     }
 
     return list.toOwnedSlice(arena);
@@ -163,6 +217,34 @@ pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8,
         const dir_path = try std.fs.path.join(tmp, &.{ base_dir, "sessions", s.id });
         std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
     }
+}
+
+pub fn findSessionByPrefix(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, prefix: []const u8) !?SessionInfo {
+    var tmp_arena = std.heap.ArenaAllocator.init(arena);
+    defer tmp_arena.deinit();
+    const tmp = tmp_arena.allocator();
+
+    const sessions = try listSessions(tmp, io, base_dir);
+    var matches: usize = 0;
+    for (sessions) |s| {
+        if (std.mem.startsWith(u8, s.id, prefix)) matches += 1;
+    }
+    if (matches != 1) return null;
+
+    for (sessions) |s| {
+        if (std.mem.startsWith(u8, s.id, prefix)) {
+            const id = try arena.dupe(u8, s.id);
+            const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
+            return SessionInfo{
+                .id = id,
+                .has_prd = s.has_prd,
+                .has_conversation = s.has_conversation,
+                .planning_mode = s.planning_mode,
+                .first_prompt = first_prompt,
+            };
+        }
+    }
+    return null;
 }
 
 pub fn generateUuid(random: std.Random, arena: std.mem.Allocator) ![]const u8 {
@@ -255,6 +337,10 @@ test "Session.init creates directory with correct paths" {
 }
 
 fn createTestSessionDir(io: std.Io, base_dir: []const u8, uuid: []const u8, has_prd: bool) !void {
+    return createTestSessionDirFull(io, base_dir, uuid, has_prd, false);
+}
+
+fn createTestSessionDirFull(io: std.Io, base_dir: []const u8, uuid: []const u8, has_prd: bool, has_conversation: bool) !void {
     const dir = try std.fs.path.join(std.testing.allocator, &.{ base_dir, "sessions", uuid });
     defer std.testing.allocator.free(dir);
     try createSessionDir(io, dir);
@@ -263,6 +349,17 @@ fn createTestSessionDir(io: std.Io, base_dir: []const u8, uuid: []const u8, has_
         defer std.testing.allocator.free(prd_path);
         var file = try std.Io.Dir.cwd().createFile(io, prd_path, .{});
         file.close(io);
+    }
+    if (has_conversation) {
+        const msg_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "messages.json" });
+        defer std.testing.allocator.free(msg_path);
+        var file = try std.Io.Dir.cwd().createFile(io, msg_path, .{});
+        file.close(io);
+        const meta_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "session.json" });
+        defer std.testing.allocator.free(meta_path);
+        var meta_file = try std.Io.Dir.cwd().createFile(io, meta_path, .{});
+        defer meta_file.close(io);
+        try meta_file.writeStreamingAll(io, "{\"planning_mode\":false,\"first_prompt\":\"hello\"}");
     }
 }
 
@@ -278,11 +375,41 @@ test "listSessions returns discovered sessions" {
 
     const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
     defer {
-        for (sessions) |s| std.testing.allocator.free(s.id);
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
         std.testing.allocator.free(sessions);
     }
 
     try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    try std.testing.expect(!sessions[0].has_conversation);
+    try std.testing.expect(!sessions[1].has_conversation);
+}
+
+test "listSessions detects conversation" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDirFull(std.testing.io, test_dir, "conv-1", false, true);
+    try createTestSessionDir(std.testing.io, test_dir, "plain-2", false);
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    try std.testing.expect(sessions[0].has_conversation);
+    try std.testing.expect(!sessions[1].has_conversation);
+    try std.testing.expectEqualStrings("hello", sessions[0].first_prompt.?);
 }
 
 test "pruneSessions removes all but current" {
@@ -300,12 +427,51 @@ test "pruneSessions removes all but current" {
 
     const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
     defer {
-        for (sessions) |s| std.testing.allocator.free(s.id);
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
         std.testing.allocator.free(sessions);
     }
 
     try std.testing.expectEqual(@as(usize, 1), sessions.len);
     try std.testing.expectEqualStrings("current-1", sessions[0].id);
+}
+
+test "findSessionByPrefix matches unique prefix" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111-aaa", false);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-222-bbb", false);
+
+    const found = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "abc-111");
+    try std.testing.expect(found != null);
+    try std.testing.expectEqualStrings("abc-111-aaa", found.?.id);
+    if (found) |s| {
+        std.testing.allocator.free(s.id);
+        if (s.first_prompt) |p| std.testing.allocator.free(p);
+    }
+}
+
+test "findSessionByPrefix returns null on ambiguous or no match" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111-aaa", false);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111-bbb", false);
+
+    const found = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "abc-111");
+    try std.testing.expect(found == null);
+
+    const none = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "xyz");
+    try std.testing.expect(none == null);
 }
 
 test "sessionBaseDir extracts from environ map" {
