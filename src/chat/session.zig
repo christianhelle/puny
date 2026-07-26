@@ -384,11 +384,11 @@ fn saveSessionMeta(ctx: *ChatLoopContext) !void {
         }
     }
 
-    const meta = std.json.Value{ .object = std.StringHashMap(std.json.Value).init(ctx.messages_arena.allocator()) };
-    try meta.object.put("planning_mode", std.json.Value{ .bool = ctx.planning_mode.* });
-    if (first_prompt) |p| {
-        try meta.object.put("first_prompt", std.json.Value{ .string = p });
-    }
+    const MetaStruct = struct {
+        planning_mode: bool,
+        first_prompt: ?[]const u8,
+    };
+    const meta = MetaStruct{ .planning_mode = ctx.planning_mode.*, .first_prompt = first_prompt };
 
     const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), meta, .{ .whitespace = .indent_2 });
     defer ctx.messages_arena.allocator().free(buffer);
@@ -420,8 +420,7 @@ fn loadMessagesIntoContext(ctx: *ChatLoopContext, dir: []const u8) !void {
     const parsed = try std.json.parseFromSlice(std.json.Value, ctx.messages_arena.allocator(), data, .{});
     defer parsed.deinit();
 
-    const arr = parsed.value.array;
-    for (arr) |item| {
+    for (parsed.value.array.items) |item| {
         const msg = try openai.Message.fromJsonValue(ctx.messages_arena.allocator(), item);
         try ctx.messages.append(ctx.messages_arena.allocator(), msg);
     }
