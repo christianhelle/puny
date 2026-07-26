@@ -14,6 +14,7 @@ pub const Options = struct {
     reconfigure: bool = false,
     debug: bool = false,
     show_thinking: bool = false,
+    prune: bool = false,
     upgrade: bool = false,
     session: ?[]const u8 = null,
     do_resume: bool = false,
@@ -84,6 +85,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.session = args[i];
         } else if (std.mem.eql(u8, arg, "--resume")) {
             opts.do_resume = true;
+        } else if (std.mem.eql(u8, arg, "--prune")) {
+            opts.prune = true;
         } else if (std.mem.eql(u8, arg, "--upgrade") or std.mem.eql(u8, arg, "-U")) {
             opts.upgrade = true;
         } else {
@@ -145,6 +148,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --show-thinking         Show reasoning/thinking output from the model
         \\      --session <id>          Resume a previous session by ID or prefix
         \\      --resume                Pick a session to resume interactively
+        \\      --prune                 Delete old sessions (use --session to keep one)
         \\      --debug                 Log HTTP requests and responses to puny_debug.log
         \\  -U, --upgrade               Upgrade to the latest release via install script
         \\  -h, --help                  Show this help text
