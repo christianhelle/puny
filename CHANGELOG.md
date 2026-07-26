@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add --prune CLI flag for session pruning ([#55](https://github.com/christianhelle/puny/pull/55)) ([@christianhelle](https://github.com/christianhelle/))
 - Add support for restoring Sessions ([#54](https://github.com/christianhelle/puny/pull/54)) ([@christianhelle](https://github.com/christianhelle/))
 - Make --upgrade fire-and-forget to avoid upgrade failure when binary is in use ([#50](https://github.com/christianhelle/puny/pull/50)) ([@christianhelle](https://github.com/christianhelle/))
 - Introduce Sessions and update Planning Mode to create a PRD in HTML and Markdown formats ([#53](https://github.com/christianhelle/puny/pull/53)) ([@christianhelle](https://github.com/christianhelle/))
