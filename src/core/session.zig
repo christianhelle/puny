@@ -417,9 +417,15 @@ test "listSessions detects conversation" {
     }
 
     try std.testing.expectEqual(@as(usize, 2), sessions.len);
-    try std.testing.expect(sessions[0].has_conversation);
-    try std.testing.expect(!sessions[1].has_conversation);
-    try std.testing.expectEqualStrings("hello", sessions[0].first_prompt.?);
+    const conv = for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, "conv-1")) break s;
+    } else unreachable;
+    const plain = for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, "plain-2")) break s;
+    } else unreachable;
+    try std.testing.expect(conv.has_conversation);
+    try std.testing.expect(!plain.has_conversation);
+    try std.testing.expectEqualStrings("hello", conv.first_prompt.?);
 }
 
 test "pruneSessions removes all but current" {
