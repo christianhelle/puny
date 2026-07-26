@@ -234,7 +234,7 @@ fn runUpgrade(io: std.Io) !void {
     var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
     const stderr_writer = &stderr_file_writer.interface;
 
-    try stderr_writer.print("Upgrading Puny via install script...\n", .{});
+    try stderr_writer.print("\nUpgrading Puny...\n", .{});
     try stderr_writer.flush();
 
     const argv: []const []const u8 = if (comptime @import("builtin").os.tag == .windows)
