@@ -486,6 +486,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--show-thinking`          | Show reasoning/thinking output from the model              |
 | `--session <id>`           | Resume a previous session by UUID or unique prefix         |
 | `--resume`                 | Resume the most recent session with a saved conversation   |
+| `--prune`                  | Delete old sessions (use with `--session` to keep one)     |
 | `--debug`                  | Log HTTP requests and responses to `puny_debug.log`        |
 | `-U`, `--upgrade`          | Upgrade to the latest release via install script            |
 | `-h`, `--help`             | Show help text                                             |
@@ -559,6 +560,8 @@ You can resume a previous session in several ways:
   (e.g. `puny --session abc-12` matches `abc-1234-...`).
 - **CLI flag**: `puny --resume` resumes the most recent session with a saved
   conversation. If multiple sessions have saved conversations, a hint is printed.
+- **CLI flag**: `puny --prune` deletes all session directories. Use
+  `puny --prune --session <uuid>` to delete all sessions except the one to keep.
 - **Interactive**: `/resume` inside a chat session lists all saved sessions
   that have conversations and lets you pick one to restore. You can also pass
   a prefix: `/resume abc-12`.
