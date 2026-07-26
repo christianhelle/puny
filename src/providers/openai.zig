@@ -273,7 +273,7 @@ pub const SseCallback = struct {
                 .tokens_per_second = usage.tokens_per_second,
                 .time_to_first_token_seconds = usage.time_to_first_token_seconds,
             } });
-    }
+        }
     }
 };
 
