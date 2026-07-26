@@ -31,6 +31,21 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (parsed.prune) {
+        var buf: [1024]u8 = undefined;
+        var out: std.Io.File.Writer = .init(.stdout(), io, &buf);
+        const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
+        const keep_id = parsed.session orelse "";
+        try core_sess.pruneSessions(arena, io, base_dir, keep_id);
+        if (keep_id.len > 0) {
+            try out.interface.print("Pruned all sessions except '{s}'.\n", .{keep_id});
+        } else {
+            try out.interface.print("Pruned all sessions.\n", .{});
+        }
+        try out.interface.flush();
+        return;
+    }
+
     var debug_buffer: [4096]u8 = undefined;
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
