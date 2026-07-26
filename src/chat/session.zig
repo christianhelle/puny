@@ -263,7 +263,8 @@ pub const ChatSession = struct {
                         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                         ctx.history.clear();
-                        try ctx.stdout_writer.print("Session restored. {d} messages loaded.\n", .{ctx.messages.items.len});
+                        try ctx.stdout_writer.print("Session restored — {d} messages:\n", .{ctx.messages.items.len});
+                        try printConversation(ctx.stdout_writer, ctx.messages.items);
                         try ctx.stdout_writer.flush();
                     } else {
                         try ctx.stdout_writer.print("\n{s}No matching session found.{s}\n", .{ ansi.dim, ansi.reset });
@@ -423,6 +424,45 @@ fn loadMessagesIntoContext(ctx: *ChatLoopContext, dir: []const u8) !void {
     for (parsed.value.array.items) |item| {
         const msg = try openai.Message.fromJsonValue(ctx.messages_arena.allocator(), item);
         try ctx.messages.append(ctx.messages_arena.allocator(), msg);
+    }
+}
+
+pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Message) !void {
+    for (messages, 0..) |msg, i| {
+        switch (msg) {
+            .system => |content| {
+                try writer.print("  {s}SYSM{s} {d}: ", .{ ansi.bright, ansi.reset, i });
+                if (content.len > 200) {
+                    try writer.print("{s}...\n", .{content[0..200]});
+                } else {
+                    try writer.print("{s}\n", .{content});
+                }
+            },
+            .user => |content| {
+                try writer.print("  {s}YOU{s} {d}: ", .{ ansi.bright, ansi.reset, i });
+                try writer.print("{s}\n", .{content});
+            },
+            .assistant => |assistant| {
+                try writer.print("  {s}AI{s}  {d}: ", .{ ansi.bright, ansi.reset, i });
+                if (assistant.content) |content| {
+                    if (content.len > 200) {
+                        try writer.print("{s}...\n", .{content[0..200]});
+                    } else {
+                        try writer.print("{s}\n", .{content});
+                    }
+                }
+                if (assistant.tool_calls) |tool_calls| {
+                    for (tool_calls) |tc| {
+                        try writer.print("    tool: {s}({s})\n", .{ tc.function.name, tc.function.arguments });
+                    }
+                }
+            },
+            .tool => |tool| {
+                try writer.print("  {s}TOOL{s} {d}: ", .{ ansi.bright, ansi.reset, i });
+                const preview = if (tool.content.len > 100) tool.content[0..100] else tool.content;
+                try writer.print("{s} ({s})\n", .{ tool.tool_call_id, preview });
+            },
+        }
     }
 }
 

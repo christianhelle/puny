@@ -152,7 +152,8 @@ pub fn main(init: std.process.Init) !void {
                     );
                     planning_mode = s.planning_mode;
                     session_restored = true;
-                    try stdout_writer.print("Restored session {s} with {d} messages.\n", .{ s.id, messages.items.len });
+                    try stdout_writer.print("Restored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
+                    try session.printConversation(stdout_writer, messages.items);
                     try stdout_writer.flush();
                 } else |_| {
                     try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{s.id});
@@ -191,7 +192,8 @@ pub fn main(init: std.process.Init) !void {
                         );
                         planning_mode = s.planning_mode;
                         session_restored = true;
-                        try stdout_writer.print("Restored session {s} with {d} messages.\n", .{ s.id, messages.items.len });
+                        try stdout_writer.print("Restored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
+                        try session.printConversation(stdout_writer, messages.items);
                         try stdout_writer.flush();
                     } else |_| {}
                 }
