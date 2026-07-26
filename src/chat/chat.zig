@@ -500,6 +500,12 @@ pub fn runTurn(
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
+
+            if (std.mem.eql(u8, tc.function.name, "save_prd")) {
+                try stdout_writer.print("\n{s}{s}{s}", .{ ansi.bright, result, ansi.reset });
+                try stdout_writer.flush();
+                tool_output_lines += 3;
+            }
         }
 
         const cursor_offset = content_cursor_offset + tool_output_lines;

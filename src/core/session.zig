@@ -57,7 +57,11 @@ pub const save_prd_tool = Tool{
             try html_file.writeStreamingAll(io, html.string);
             const abs_md = try resolvePath(allocator, io, prd_path_global);
             const abs_html = try resolvePath(allocator, io, html_path_global);
-            return std.fmt.allocPrint(allocator, "PRD saved to {s} and {s}", .{ abs_md, abs_html });
+            return std.fmt.allocPrint(
+                allocator,
+                " - {s}\n - {s}",
+                .{ abs_md, abs_html },
+            );
         }
     }.exec,
 };
