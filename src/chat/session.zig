@@ -438,11 +438,8 @@ pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Messag
                 try writer.print("  {s}AI:{s}   ", .{ ansi.bright, ansi.reset });
                 if (assistant.content) |content| {
                     try writer.print("{s}\n", .{content});
-                }
-                if (assistant.tool_calls) |tool_calls| {
-                    for (tool_calls) |tc| {
-                        try writer.print("    [{s}]\n", .{tc.function.name});
-                    }
+                } else {
+                    try writer.print("\n", .{});
                 }
             },
             else => {},
