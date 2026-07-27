@@ -124,10 +124,7 @@ pub const ChatSession = struct {
             if (command == .prompt) {
                 for (ctx.skill_registry.records.items) |*r| {
                     if (loaded_skills.contains(r.name)) continue;
-                    const match_pos = std.mem.indexOf(u8, user_message, r.name) orelse continue;
-                    if (match_pos > 0 and std.ascii.isAlphanumeric(user_message[match_pos - 1])) continue;
-                    const end = match_pos + r.name.len;
-                    if (end < user_message.len and std.ascii.isAlphanumeric(user_message[end])) continue;
+                    if (!skills.recordMatchesTrigger(r, user_message)) continue;
                     const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
                     try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });

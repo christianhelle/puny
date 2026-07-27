@@ -130,13 +130,7 @@ pub const Registry = struct {
 
     pub fn findTriggeredSkill(self: *Registry, text: []const u8) ?[]const u8 {
         for (self.records.items) |r| {
-            if (r.disable_model_invocation) continue;
-            if (textContainsWord(text, r.name)) return r.name;
-            if (r.triggers) |triggers| {
-                for (triggers) |trigger| {
-                    if (textContainsWord(text, trigger)) return r.name;
-                }
-            }
+            if (recordMatchesTrigger(&r, text)) return r.name;
         }
         return null;
     }
@@ -264,7 +258,18 @@ fn parseTriggerList(value: []const u8, allocator: std.mem.Allocator) ?[][]const 
     return list.toOwnedSlice(allocator);
 }
 
-fn textContainsWord(text: []const u8, word: []const u8) bool {
+pub fn recordMatchesTrigger(record: *const SkillRecord, text: []const u8) bool {
+    if (record.disable_model_invocation) return false;
+    if (textContainsWord(text, record.name)) return true;
+    if (record.triggers) |triggers| {
+        for (triggers) |trigger| {
+            if (textContainsWord(text, trigger)) return true;
+        }
+    }
+    return false;
+}
+
+pub fn textContainsWord(text: []const u8, word: []const u8) bool {
     if (word.len == 0) return false;
     const match_pos = std.mem.indexOf(u8, text, word) orelse return false;
     if (match_pos > 0 and std.ascii.isAlphanumeric(text[match_pos - 1])) return false;
