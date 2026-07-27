@@ -1,5 +1,5 @@
 const std = @import("std");
-const zz = @import("zigzag");
+const list_picker = @import("list_picker.zig");
 const client = @import("../providers/client.zig");
 
 var model_pick_list: []const client.Model = &.{};
@@ -8,63 +8,30 @@ pub fn setModels(models: []const client.Model) void {
     model_pick_list = models;
 }
 
-pub const Widget = struct {
-    list: zz.List([]const u8),
-    selected: ?[]const u8 = null,
+pub fn pickModel(
+    arena: std.mem.Allocator,
+    io: std.Io,
+) !?[]const u8 {
+    var items: std.ArrayList(list_picker.Item) = .empty;
+    defer items.deinit(arena);
 
-    pub const Msg = union(enum) {
-        key: zz.KeyEvent,
+    for (model_pick_list) |m| {
+        try items.append(arena, .{
+            .value = try arena.dupe(u8, m.id),
+            .label = try std.fmt.allocPrint(arena, "{s} — {s}", .{ m.id, m.display_name }),
+        });
+    }
+
+    return list_picker.selectFromList(arena, io, "Select a model (Use arrow keys to navigate, Enter to select, 'q' to quit):", items.items);
+}
+
+test "setModels stores and retrieves models" {
+    const models = [_]client.Model{
+        .{ .id = "model-a", .display_name = "Model A", .provider = "test", .context_length = 4096 },
+        .{ .id = "model-b", .display_name = "Model B", .provider = "test", .context_length = 8192 },
     };
-
-    pub fn init(self: *Widget, ctx: *zz.Context) zz.Cmd(Msg) {
-        self.* = .{
-            .list = zz.List([]const u8).init(ctx.persistent_allocator),
-            .selected = null,
-        };
-        for (model_pick_list) |m| {
-            const id = ctx.persistent_allocator.dupe(u8, m.id) catch continue;
-            const display_name = ctx.persistent_allocator.dupe(u8, m.display_name) catch {
-                ctx.persistent_allocator.free(id);
-                continue;
-            };
-            self.list.addItem(.init(id, display_name)) catch {
-                ctx.persistent_allocator.free(id);
-                ctx.persistent_allocator.free(display_name);
-            };
-        }
-        self.list.height = ctx.height -| 2;
-        return .none;
-    }
-
-    pub fn deinit(self: *Widget) void {
-        for (self.list.items.items) |item| {
-            self.list.allocator.free(item.value);
-            self.list.allocator.free(item.title);
-        }
-        self.list.deinit();
-    }
-
-    pub fn update(self: *Widget, msg: Msg, _: *zz.Context) zz.Cmd(Msg) {
-        switch (msg) {
-            .key => |k| {
-                if (k.key == .enter) {
-                    if (self.list.selectedItem()) |item| {
-                        self.selected = item.value;
-                        return .quit;
-                    }
-                } else if (k.key == .char and k.key.char == 'q') {
-                    return .quit;
-                } else {
-                    self.list.handleKey(k);
-                }
-            },
-        }
-        return .none;
-    }
-
-    pub fn view(self: *const Widget, ctx: *const zz.Context) []const u8 {
-        const header = "Select a model (Use arrow keys to navigate, Enter to select, 'q' to quit):\n";
-        const list_view = self.list.view(ctx.allocator) catch "Error rendering";
-        return std.fmt.allocPrint(ctx.allocator, "{s}{s}", .{ header, list_view }) catch "Error";
-    }
-};
+    setModels(&models);
+    try std.testing.expectEqual(@as(usize, 2), model_pick_list.len);
+    try std.testing.expectEqualStrings("model-a", model_pick_list[0].id);
+    try std.testing.expectEqualStrings("Model B", model_pick_list[1].display_name);
+}
