@@ -136,14 +136,14 @@ pub fn printHelp(io: std.Io) void {
         \\Usage: puny [options]
         \\
         \\Options:
-        \\      --provider <name>       Provider to use: lmstudio, opencode, opencode-go, copilot, or mock (env/config/CLI precedence)
+        \\      --provider <name>       Provider to use: lmstudio, opencode, opencode-go, or copilot (env/config/CLI precedence)
         \\  -u, --url <url>             LM Studio endpoint URL (config/env/CLI precedence)
         \\  -k, --api-key <key>         Provider API token (env/CLI precedence, session only)
         \\      --api-key-file <path>   Read API token from file
         \\  -m, --model <id>            Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>         Pre-fill prompt as first user message
         \\  -1, --oneshot, --one-shot   Exit after processing the prompt (requires --prompt)
-        \\  -M, --mock                  Use mock provider (no LM Studio required)
+        \\  -M, --mock                  Use mock provider (no network calls, for testing)
         \\      --reconfigure           Re-run first-run setup and update config
         \\      --show-thinking         Show reasoning/thinking output from the model
         \\      --session <id>          Resume a previous session by ID or prefix
