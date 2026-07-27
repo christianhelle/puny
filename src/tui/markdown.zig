@@ -807,6 +807,9 @@ test "Markdown renders table header in bright style" {
 test "displayWidth counts code points not bytes" {
     try std.testing.expectEqual(@as(usize, 3), displayWidth("abc"));
     try std.testing.expectEqual(@as(usize, 0), displayWidth(""));
+    try std.testing.expectEqual(@as(usize, 5), displayWidth("héllo"));
+    try std.testing.expectEqual(@as(usize, 4), displayWidth("中文"));
+    try std.testing.expectEqual(@as(usize, 2), displayWidth("😀"));
 }
 
 test "isTableLine detects pipe-delimited lines" {
