@@ -72,6 +72,7 @@ pub const planning_registry = blk: {
         git.git_status,
         git.git_diff,
         core_session.save_prd_tool,
+        skill_loader.load_skill,
     };
 };
 
