@@ -4,6 +4,8 @@ pub const SkillRecord = struct {
     name: []const u8,
     description: ?[]const u8,
     dir_path: []const u8,
+    triggers: ?[][]const u8,
+    disable_model_invocation: bool,
 };
 
 pub const Registry = struct {
@@ -23,6 +25,10 @@ pub const Registry = struct {
         for (self.records.items) |*r| {
             self.allocator.free(r.name);
             if (r.description) |d| self.allocator.free(d);
+            if (r.triggers) |t| {
+                for (t) |s| self.allocator.free(s);
+                self.allocator.free(t);
+            }
             self.allocator.free(r.dir_path);
         }
         self.records.deinit(self.allocator);
@@ -44,6 +50,8 @@ pub const Registry = struct {
                 .name = name,
                 .description = null,
                 .dir_path = full_dir_path,
+                .triggers = null,
+                .disable_model_invocation = false,
             });
         }
     }
@@ -112,11 +120,25 @@ pub const Registry = struct {
             };
             defer self.allocator.free(content);
 
-            if (parseFrontmatterDescription(content, self.allocator)) |desc| {
-                r.description = desc;
-            }
+            const fm = parseFrontmatter(content, self.allocator);
+            r.description = fm.description;
+            r.triggers = fm.triggers;
+            r.disable_model_invocation = fm.disable_model_invocation;
         }
         self.fully_scanned = true;
+    }
+
+    pub fn findTriggeredSkill(self: *Registry, text: []const u8) ?[]const u8 {
+        for (self.records.items) |r| {
+            if (r.disable_model_invocation) continue;
+            if (textContainsWord(text, r.name)) return r.name;
+            if (r.triggers) |triggers| {
+                for (triggers) |trigger| {
+                    if (textContainsWord(text, trigger)) return r.name;
+                }
+            }
+        }
+        return null;
     }
 };
 
@@ -153,18 +175,38 @@ fn trimCr(maybe_cr: []const u8) []const u8 {
     return maybe_cr;
 }
 
-fn parseFrontmatterDescription(content: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
+const Frontmatter = struct {
+    description: ?[]const u8 = null,
+    triggers: ?[][]const u8 = null,
+    disable_model_invocation: bool = false,
+};
+
+fn parseFrontmatter(content: []const u8, allocator: std.mem.Allocator) Frontmatter {
+    var result = Frontmatter{};
     var lines = std.mem.splitScalar(u8, content, '\n');
-    const first = trimCr(lines.next() orelse return null);
-    if (!std.mem.eql(u8, first, "---")) return null;
+    const first = trimCr(lines.next() orelse return result);
+    if (!std.mem.eql(u8, first, "---")) return result;
 
     var desc_buf: std.ArrayList(u8) = .empty;
     defer desc_buf.deinit(allocator);
 
     var in_folded = false;
+    var folded_key: ?[]const u8 = null;
+
+    const flush_folded = struct {
+        fn flush(r: *Frontmatter, buf: *std.ArrayList(u8), key: ?[]const u8, alloc: std.mem.Allocator) void {
+            if (key == null or buf.items.len == 0) return;
+            if (std.mem.eql(u8, key.?, "description")) {
+                if (r.description == null) {
+                    r.description = alloc.dupe(u8, buf.items) catch {};
+                }
+            }
+        }
+    }.flush;
+
     while (lines.next()) |raw_line| {
         const line = trimCr(raw_line);
-        if (std.mem.eql(u8, line, "---")) break;
+
         if (in_folded) {
             if (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) {
                 const trimmed = std.mem.trimStart(u8, line, " \t");
@@ -175,18 +217,60 @@ fn parseFrontmatterDescription(content: []const u8, allocator: std.mem.Allocator
                 continue;
             }
             in_folded = false;
+            flush_folded(&result, &desc_buf, folded_key, allocator);
+            folded_key = null;
         }
+
+        if (std.mem.eql(u8, line, "---")) break;
+
         if (std.mem.startsWith(u8, line, "description: >")) {
             in_folded = true;
+            folded_key = "description";
+            desc_buf.clearRetainingCapacity();
         } else if (std.mem.startsWith(u8, line, "description: ")) {
-            const desc = line["description: ".len..];
-            return allocator.dupe(u8, desc) catch null;
+            result.description = allocator.dupe(u8, line["description: ".len..]) catch null;
+        } else if (std.mem.startsWith(u8, line, "triggers: ")) {
+            result.triggers = parseTriggerList(line["triggers: ".len..], allocator);
+        } else if (std.mem.startsWith(u8, line, "disable-model-invocation: true")) {
+            result.disable_model_invocation = true;
+        } else if (std.mem.startsWith(u8, line, "disable-model-invocation: false")) {
+            result.disable_model_invocation = false;
         }
     }
 
-    if (desc_buf.items.len == 0) return null;
-    const result = allocator.dupe(u8, desc_buf.items) catch null;
+    if (in_folded) {
+        flush_folded(&result, &desc_buf, folded_key, allocator);
+    }
+
     return result;
+}
+
+fn parseTriggerList(value: []const u8, allocator: std.mem.Allocator) ?[][]const u8 {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    if (trimmed.len == 0) return null;
+
+    var list = std.ArrayList([]const u8).empty;
+    defer list.deinit(allocator);
+
+    var it = std.mem.splitScalar(u8, trimmed, ',');
+    while (it.next()) |item| {
+        const t = std.mem.trim(u8, item, " \t");
+        if (t.len > 0) {
+            list.append(allocator, allocator.dupe(u8, t) catch unreachable) catch {};
+        }
+    }
+
+    if (list.items.len == 0) return null;
+    return list.toOwnedSlice(allocator);
+}
+
+fn textContainsWord(text: []const u8, word: []const u8) bool {
+    if (word.len == 0) return false;
+    const match_pos = std.mem.indexOf(u8, text, word) orelse return false;
+    if (match_pos > 0 and std.ascii.isAlphanumeric(text[match_pos - 1])) return false;
+    const end = match_pos + word.len;
+    if (end < text.len and std.ascii.isAlphanumeric(text[end])) return false;
+    return true;
 }
 
 test "init creates empty registry" {
@@ -501,4 +585,129 @@ test "buildListing includes descriptions after fullScan" {
     const listing = try registry.buildListing(std.testing.allocator);
     defer std.testing.allocator.free(listing);
     try std.testing.expect(std.mem.indexOf(u8, listing, "Does something useful") != null);
+}
+
+test "fullScan populates triggers from frontmatter" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "my-skill", .default_dir);
+    const content = "---\nname: my-skill\ndescription: A skill\ntriggers: do the thing, run the thing\n---\nbody";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "my-skill/SKILL.md", .data = content });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    const record = registry.findByName("my-skill").?;
+    try std.testing.expect(record.triggers != null);
+    try std.testing.expectEqual(@as(usize, 2), record.triggers.?.len);
+    try std.testing.expectEqualStrings("do the thing", record.triggers.?[0]);
+    try std.testing.expectEqualStrings("run the thing", record.triggers.?[1]);
+}
+
+test "fullScan populates disable_model_invocation from frontmatter" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "manual-skill", .default_dir);
+    const content = "---\nname: manual-skill\ndescription: Manual only\ndisable-model-invocation: true\n---\nbody";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "manual-skill/SKILL.md", .data = content });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    const record = registry.findByName("manual-skill").?;
+    try std.testing.expect(record.disable_model_invocation);
+}
+
+test "findTriggeredSkill matches directory name" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "grill-me", .default_dir);
+    try tmp.dir.createDir(std.testing.io, "other-skill", .default_dir);
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+
+    const matched = registry.findTriggeredSkill("can you grill me on this");
+    try std.testing.expect(matched != null);
+    try std.testing.expectEqualStrings("grill-me", matched.?);
+}
+
+test "findTriggeredSkill matches trigger phrase" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "my-skill", .default_dir);
+    const content = "---\nname: my-skill\ndescription: Does stuff\ntriggers: do the thing, run it\n---\nbody";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "my-skill/SKILL.md", .data = content });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    const matched = registry.findTriggeredSkill("please do the thing now");
+    try std.testing.expect(matched != null);
+    try std.testing.expectEqualStrings("my-skill", matched.?);
+}
+
+test "findTriggeredSkill skips disabled skills" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "manual-skill", .default_dir);
+    const content = "---\nname: manual-skill\ndescription: Manual\ndisable-model-invocation: true\n---\nbody";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "manual-skill/SKILL.md", .data = content });
+
+    try tmp.dir.createDir(std.testing.io, "auto-skill", .default_dir);
+    const content2 = "---\nname: auto-skill\ndescription: Auto\n---\nbody";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "auto-skill/SKILL.md", .data = content2 });
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+    try registry.fullScan(std.testing.io);
+
+    const matched = registry.findTriggeredSkill("manual-skill");
+    try std.testing.expect(matched != null);
+    try std.testing.expectEqualStrings("auto-skill", matched.?);
+}
+
+test "findTriggeredSkill returns null when no match" {
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const matched = registry.findTriggeredSkill("hello world");
+    try std.testing.expect(matched == null);
+}
+
+test "textContainsWord matches whole words" {
+    try std.testing.expect(textContainsWord("hello world", "hello"));
+    try std.testing.expect(textContainsWord("hello world", "world"));
+    try std.testing.expect(!textContainsWord("hello world", "worl"));
+    try std.testing.expect(!textContainsWord("hello world", "ello"));
+    try std.testing.expect(textContainsWord("foo-bar baz", "foo-bar"));
+    try std.testing.expect(!textContainsWord("hello", ""));
 }
