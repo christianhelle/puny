@@ -369,7 +369,7 @@ fn renderDataRow(
 fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, terminal_width: usize) ![]const u8 {
     if (lines.len < 2) return error.TooFewTableLines;
     var rows = std.ArrayList([][]const u8).empty;
-    errdefer {
+    defer {
         for (rows.items) |row| allocator.free(row);
         rows.deinit(allocator);
     }
