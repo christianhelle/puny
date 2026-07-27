@@ -5,6 +5,22 @@ const bold_start = "\x1b[1m";
 const bold_end = "\x1b[22m";
 const cyan = "\x1b[36m";
 
+const Alignment = enum { left, center, right };
+
+const tc = struct {
+    const top_left: u8 = '┌';
+    const top: u8 = '─';
+    const top_junction: u8 = '┬';
+    const top_right: u8 = '┐';
+    const left: u8 = '│';
+    const separator_left: u8 = '├';
+    const separator: u8 = '┼';
+    const separator_right: u8 = '┤';
+    const bottom_left: u8 = '└';
+    const bottom_junction: u8 = '┴';
+    const bottom_right: u8 = '┘';
+};
+
 pub const Markdown = struct {
     pub fn init() Markdown {
         return .{};
@@ -129,6 +145,34 @@ fn trimLeft(s: []const u8, chars: []const u8) []const u8 {
         start += 1;
     }
     return s[start..];
+}
+
+fn isTableLine(line: []const u8) bool {
+    const trimmed = trimLeft(line, " \t");
+    if (trimmed.len < 2) return false;
+    if (trimmed[0] != '|') return false;
+    const end = trimRight(trimmed, " \t\r");
+    return end.len > 0 and end[end.len - 1] == '|';
+}
+
+fn stripOuterPipes(line: []const u8) []const u8 {
+    const trimmed = trimLeft(line, " \t");
+    var s = trimmed;
+    if (s.len > 0 and s[0] == '|') s = s[1..];
+    s = trimRight(s, " \t\r");
+    if (s.len > 0 and s[s.len - 1] == '|') s = s[0 .. s.len - 1];
+    return s;
+}
+
+fn displayWidth(text: []const u8) usize {
+    var width: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        width += 1;
+        i += seq_len;
+    }
+    return width;
 }
 
 fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
