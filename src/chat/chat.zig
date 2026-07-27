@@ -500,10 +500,6 @@ pub fn runTurn(
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
-
-            try stdout_writer.print("\n{s}", .{result});
-            try stdout_writer.flush();
-            tool_output_lines += countNewlines(result) + 1;
         }
 
         const cursor_offset = content_cursor_offset + tool_output_lines;

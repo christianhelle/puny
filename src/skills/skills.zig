@@ -174,6 +174,25 @@ pub fn getGlobalRegistry() ?*Registry {
     return global_registry;
 }
 
+var pending_skill_name: ?[]const u8 = null;
+var pending_skill_content: ?[]const u8 = null;
+
+pub fn takePendingSkill(allocator: std.mem.Allocator) ?struct { name: []const u8, content: []const u8 } {
+    const name = pending_skill_name orelse return null;
+    const content = pending_skill_content orelse return null;
+    pending_skill_name = null;
+    pending_skill_content = null;
+    return .{
+        .name = allocator.dupe(u8, name) catch return null,
+        .content = allocator.dupe(u8, content) catch return null,
+    };
+}
+
+pub fn setPendingSkill(name: []const u8, content: []const u8, allocator: std.mem.Allocator) void {
+    pending_skill_name = allocator.dupe(u8, name) catch return;
+    pending_skill_content = allocator.dupe(u8, content) catch return;
+}
+
 fn trimCr(maybe_cr: []const u8) []const u8 {
     if (maybe_cr.len > 0 and maybe_cr[maybe_cr.len - 1] == '\r') return maybe_cr[0 .. maybe_cr.len - 1];
     return maybe_cr;
