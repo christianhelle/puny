@@ -30,11 +30,19 @@ pub const Markdown = struct {
         var result = std.ArrayList(u8).empty;
         errdefer result.deinit(allocator);
 
-        var lines = std.mem.splitScalar(u8, text, '\n');
-        var in_code_block = false;
+        var all_lines = std.ArrayList([]const u8).init(allocator);
+        defer all_lines.deinit();
+        {
+            var line_iter = std.mem.splitScalar(u8, text, '\n');
+            while (line_iter.next()) |raw_line| {
+                try all_lines.append(trimRight(raw_line, " \t\r"));
+            }
+        }
 
-        while (lines.next()) |raw_line| {
-            const line = trimRight(raw_line, " \t\r");
+        var in_code_block = false;
+        var i: usize = 0;
+        while (i < all_lines.items.len) : (i += 1) {
+            const line = all_lines.items[i];
             if (in_code_block) {
                 if (std.mem.startsWith(u8, line, "```")) {
                     try result.appendSlice(allocator, ansi.reset);
@@ -102,6 +110,25 @@ pub const Markdown = struct {
                 try result.appendSlice(allocator, ansi.reset);
                 try result.appendSlice(allocator, try renderInline(allocator, content));
                 try result.appendSlice(allocator, "\n");
+                continue;
+            }
+
+            // Tables
+            if (isTableLine(line)) {
+                const start = i;
+                while (i + 1 < all_lines.items.len and isTableLine(all_lines.items[i + 1])) {
+                    i += 1;
+                }
+                const table_lines = all_lines.items[start .. i + 1];
+                if (renderTable(allocator, table_lines, 80)) |rendered| {
+                    try result.appendSlice(allocator, rendered);
+                    allocator.free(rendered);
+                } else |_| {
+                    for (table_lines) |tl| {
+                        try result.appendSlice(allocator, try renderInline(allocator, tl));
+                        try result.appendSlice(allocator, "\n");
+                    }
+                }
                 continue;
             }
 
