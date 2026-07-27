@@ -4,3 +4,5 @@ pub const bright = "\x1b[1;37m";
 pub const green = "\x1b[32m";
 pub const yellow = "\x1b[33m";
 pub const cyan = "\x1b[36m";
+pub const bold_start = "\x1b[1m";
+pub const bold_end = "\x1b[22m";

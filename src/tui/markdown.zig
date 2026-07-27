@@ -1,10 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
 
-const bold_start = "\x1b[1m";
-const bold_end = "\x1b[22m";
-const cyan = "\x1b[36m";
-
 const Alignment = enum { left, center, right };
 
 const tc = struct {
@@ -49,7 +45,7 @@ pub const Markdown = struct {
                     try result.appendSlice(allocator, "\n");
                     in_code_block = false;
                 } else {
-                    try result.appendSlice(allocator, cyan);
+                    try result.appendSlice(allocator, ansi.cyan);
                     try result.appendSlice(allocator, line);
                     try result.appendSlice(allocator, ansi.reset);
                     try result.appendSlice(allocator, "\n");
@@ -439,7 +435,7 @@ fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
         if (text[i] == '`') {
             const end = findMatchingBacktick(text, i + 1);
             if (end) |e| {
-                try result.appendSlice(allocator, cyan);
+                try result.appendSlice(allocator, ansi.cyan);
                 try result.appendSlice(allocator, text[i + 1 .. e]);
                 try result.appendSlice(allocator, ansi.reset);
                 i = e + 1;
@@ -451,9 +447,9 @@ fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
         if (i + 1 < text.len and text[i] == '*' and text[i + 1] == '*') {
             const end = findBoldEnd(text, i + 2);
             if (end) |e| {
-                try result.appendSlice(allocator, bold_start);
+                try result.appendSlice(allocator, ansi.bold_start);
                 try result.appendSlice(allocator, text[i + 2 .. e]);
-                try result.appendSlice(allocator, bold_end);
+                try result.appendSlice(allocator, ansi.bold_end);
                 i = e + 2;
                 continue;
             }
@@ -486,16 +482,16 @@ test "Markdown renders bold text" {
     var md = Markdown.init();
     const result = try md.render(std.testing.allocator, "Hello **world**");
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.indexOf(u8, result, bold_start) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, ansi.bold_start) != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "world") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, bold_end) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, ansi.bold_end) != null);
 }
 
 test "Markdown renders inline code" {
     var md = Markdown.init();
     const result = try md.render(std.testing.allocator, "Use `code` here");
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.indexOf(u8, result, cyan) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, ansi.cyan) != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "code") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, ansi.reset) != null);
 }
