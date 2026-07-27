@@ -8,17 +8,17 @@ const cyan = "\x1b[36m";
 const Alignment = enum { left, center, right };
 
 const tc = struct {
-    const top_left: u8 = '┌';
-    const top: u8 = '─';
-    const top_junction: u8 = '┬';
-    const top_right: u8 = '┐';
-    const left: u8 = '│';
-    const separator_left: u8 = '├';
-    const separator: u8 = '┼';
-    const separator_right: u8 = '┤';
-    const bottom_left: u8 = '└';
-    const bottom_junction: u8 = '┴';
-    const bottom_right: u8 = '┘';
+    const top_left = "┌";
+    const top = "─";
+    const top_junction = "┬";
+    const top_right = "┐";
+    const left = "│";
+    const separator_left = "├";
+    const separator = "┼";
+    const separator_right = "┤";
+    const bottom_left = "└";
+    const bottom_junction = "┴";
+    const bottom_right = "┘";
 };
 
 pub const Markdown = struct {
@@ -30,12 +30,12 @@ pub const Markdown = struct {
         var result = std.ArrayList(u8).empty;
         errdefer result.deinit(allocator);
 
-        var all_lines = std.ArrayList([]const u8).init(allocator);
-        defer all_lines.deinit();
+        var all_lines = std.ArrayList([]const u8).empty;
+        defer all_lines.deinit(allocator);
         {
             var line_iter = std.mem.splitScalar(u8, text, '\n');
             while (line_iter.next()) |raw_line| {
-                try all_lines.append(trimRight(raw_line, " \t\r"));
+                try all_lines.append(allocator, trimRight(raw_line, " \t\r"));
             }
         }
 
@@ -214,12 +214,12 @@ fn parseAlignment(cell: []const u8) Alignment {
 
 fn splitTableLine(allocator: std.mem.Allocator, line: []const u8) ![][]const u8 {
     const inner = stripOuterPipes(line);
-    var cells = std.ArrayList([]const u8).init(allocator);
+    var cells = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, inner, '|');
     while (it.next()) |cell| {
-        try cells.append(trimRight(cell, " \t"));
+        try cells.append(allocator, trimRight(cell, " \t"));
     }
-    return cells.toOwnedSlice();
+    return cells.toOwnedSlice(allocator);
 }
 
 fn capWidths(widths: []usize, terminal_width: usize) void {
@@ -247,7 +247,7 @@ fn wrapCell(allocator: std.mem.Allocator, text: []const u8, width: usize) ![][]c
         result[0] = text;
         return result;
     }
-    var segments = std.ArrayList([]const u8).init(allocator);
+    var segments = std.ArrayList([]const u8).empty;
     var start: usize = 0;
     while (start < text.len) {
         var end = start;
@@ -261,26 +261,26 @@ fn wrapCell(allocator: std.mem.Allocator, text: []const u8, width: usize) ![][]c
             end += seq_len;
         }
         if (end >= text.len) {
-            try segments.append(text[start..]);
+            try segments.append(allocator, text[start..]);
             break;
         }
         if (last_space) |sp| {
             if (sp > start) {
-                try segments.append(text[start..sp]);
+                try segments.append(allocator, text[start..sp]);
                 start = sp + 1;
                 continue;
             }
         }
         if (end > start) {
-            try segments.append(text[start..end]);
+            try segments.append(allocator, text[start..end]);
             start = end;
         } else {
             const seq_len = std.unicode.utf8ByteSequenceLength(text[start]) catch 1;
-            try segments.append(text[start .. start + seq_len]);
+            try segments.append(allocator, text[start .. start + seq_len]);
             start += seq_len;
         }
     }
-    return segments.toOwnedSlice();
+    return segments.toOwnedSlice(allocator);
 }
 
 fn renderBorderLine(
@@ -288,16 +288,16 @@ fn renderBorderLine(
     allocator: std.mem.Allocator,
     num_cols: usize,
     col_widths: []const usize,
-    left_char: u8,
-    junction_char: u8,
-    right_char: u8,
+    left_char: []const u8,
+    junction_char: []const u8,
+    right_char: []const u8,
 ) !void {
-    try result.append(allocator, left_char);
+    try result.appendSlice(allocator, left_char);
     for (col_widths, 0..) |w, i| {
-        for (0..w + 2) |_| try result.append(allocator, tc.top);
-        if (i < num_cols - 1) try result.append(allocator, junction_char);
+        for (0..w + 2) |_| try result.appendSlice(allocator, tc.top);
+        if (i < num_cols - 1) try result.appendSlice(allocator, junction_char);
     }
-    try result.append(allocator, right_char);
+    try result.appendSlice(allocator, right_char);
     try result.append(allocator, '\n');
 }
 
@@ -309,17 +309,17 @@ fn renderDataRow(
     col_widths: []const usize,
     is_header: bool,
 ) !void {
-    var wrapped = std.ArrayList([][]const u8).init(allocator);
+    var wrapped = std.ArrayList([][]const u8).empty;
     defer {
         for (wrapped.items) |sub| allocator.free(sub);
-        wrapped.deinit();
+        wrapped.deinit(allocator);
     }
     var max_sub_rows: usize = 1;
     const num_cols = col_widths.len;
     for (row, 0..) |cell, ci| {
         if (ci >= num_cols) break;
         const sub = try wrapCell(allocator, cell, col_widths[ci]);
-        try wrapped.append(sub);
+        try wrapped.append(allocator, sub);
         if (sub.len > max_sub_rows) max_sub_rows = sub.len;
     }
     for (wrapped.items) |*sub| {
@@ -332,7 +332,7 @@ fn renderDataRow(
         }
     }
     for (0..max_sub_rows) |sub_row| {
-        try result.append(allocator, tc.left);
+        try result.appendSlice(allocator, tc.left);
         try result.append(allocator, ' ');
         for (0..num_cols) |ci| {
             const cell = wrapped.items[ci][sub_row];
@@ -359,28 +359,28 @@ fn renderDataRow(
             if (is_header) try result.appendSlice(allocator, ansi.reset);
             if (ci < num_cols - 1) {
                 try result.append(allocator, ' ');
-                try result.append(allocator, tc.left);
+                try result.appendSlice(allocator, tc.left);
                 try result.append(allocator, ' ');
             }
         }
         try result.append(allocator, ' ');
-        try result.append(allocator, tc.left);
+        try result.appendSlice(allocator, tc.left);
         try result.append(allocator, '\n');
     }
 }
 
 fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, terminal_width: usize) ![]const u8 {
     if (lines.len < 2) return error.TooFewTableLines;
-    var rows = std.ArrayList([][]const u8).init(allocator);
+    var rows = std.ArrayList([][]const u8).empty;
     errdefer {
         for (rows.items) |row| allocator.free(row);
-        rows.deinit();
+        rows.deinit(allocator);
     }
     var max_cols: usize = 0;
     for (lines) |line| {
         const cells = try splitTableLine(allocator, line);
         if (cells.len > max_cols) max_cols = cells.len;
-        try rows.append(cells);
+        try rows.append(allocator, cells);
     }
     if (max_cols < 2) return error.TooFewColumns;
     for (rows.items) |*row| {
