@@ -16,8 +16,11 @@ fn loadSkill(allocator: std.mem.Allocator, io: std.Io, params: LoadSkillParams) 
     if (record.disable_model_invocation)
         return try std.fmt.allocPrint(allocator, "Skill '{s}' is not available for model invocation. Use /{s} to load it manually.", .{ params.skill_name, params.skill_name });
 
-    return reg.loadContent(io, params.skill_name, allocator) catch |err|
+    const content = reg.loadContent(io, params.skill_name, allocator) catch |err|
         return try std.fmt.allocPrint(allocator, "Error loading skill '{s}': {}", .{ params.skill_name, err });
+
+    skills.setPendingSkill(params.skill_name, content, allocator);
+    return try std.fmt.allocPrint(allocator, "Skill '{s}' loaded.", .{params.skill_name});
 }
 
 pub const load_skill = tools.defineTool(

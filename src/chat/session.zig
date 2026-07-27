@@ -534,6 +534,12 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
             break;
         }
 
+        if (skills.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
+            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = pending.content });
+            try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, pending.name, ansi.reset });
+            try ctx.stdout_writer.flush();
+        }
+
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
         turn_complete = result.turn_complete;
     }
