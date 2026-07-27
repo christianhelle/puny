@@ -202,7 +202,7 @@ fn parseFrontmatter(content: []const u8, allocator: std.mem.Allocator) Frontmatt
             if (key == null or buf.items.len == 0) return;
             if (std.mem.eql(u8, key.?, "description")) {
                 if (r.description == null) {
-                    r.description = alloc.dupe(u8, buf.items) catch {};
+                    r.description = alloc.dupe(u8, buf.items) catch null;
                 }
             }
         }
@@ -260,12 +260,16 @@ fn parseTriggerList(value: []const u8, allocator: std.mem.Allocator) ?[][]const 
     while (it.next()) |item| {
         const t = std.mem.trim(u8, item, " \t");
         if (t.len > 0) {
-            list.append(allocator, allocator.dupe(u8, t) catch unreachable) catch {};
+            const duped = allocator.dupe(u8, t) catch return null;
+            list.append(allocator, duped) catch {
+                allocator.free(duped);
+                return null;
+            };
         }
     }
 
     if (list.items.len == 0) return null;
-    return list.toOwnedSlice(allocator);
+    return list.toOwnedSlice(allocator) catch null;
 }
 
 pub fn recordMatchesTrigger(record: *const SkillRecord, text: []const u8) bool {
