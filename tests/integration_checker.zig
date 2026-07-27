@@ -157,7 +157,9 @@ fn runTest(
             }
         }
         if (evidence.extract_paths_from_output) {
-            var lines_iter = std.mem.splitScalar(u8, result.stdout, '\n');
+            const clean_stdout = try stripAnsi(allocator, result.stdout);
+            defer allocator.free(clean_stdout);
+            var lines_iter = std.mem.splitScalar(u8, clean_stdout, '\n');
             while (lines_iter.next()) |line| {
                 if (std.mem.indexOf(u8, line, " - ")) |idx| {
                     const path = std.mem.trim(u8, line[idx + 3 ..], " \t\r");
@@ -186,6 +188,42 @@ fn fileExists(io: std.Io, path: []const u8) bool {
     return true;
 }
 
+/// Strip ANSI escape sequences from a string.
+fn stripAnsi(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+    var out_len: usize = 0;
+    var i: usize = 0;
+    while (i < input.len) {
+        if (input[i] == 0x1b and i + 1 < input.len and input[i + 1] == '[') {
+            i += 2;
+            while (i < input.len) {
+                const c = input[i];
+                i += 1;
+                if ((c >= 0x40 and c <= 0x5a) or (c >= 0x61 and c <= 0x7a)) break;
+            }
+        } else {
+            out_len += 1;
+            i += 1;
+        }
+    }
+    var result = try allocator.alloc(u8, out_len);
+    out_len = 0;
+    i = 0;
+    while (i < input.len) {
+        if (input[i] == 0x1b and i + 1 < input.len and input[i + 1] == '[') {
+            i += 2;
+            while (i < input.len) {
+                const c = input[i];
+                i += 1;
+                if ((c >= 0x40 and c <= 0x5a) or (c >= 0x61 and c <= 0x7a)) break;
+            }
+        } else {
+            result[out_len] = input[i];
+            out_len += 1;
+            i += 1;
+        }
+    }
+    return result;
+}
 fn looksLikeAbsolutePath(path: []const u8) bool {
     if (path.len == 0) return false;
     if (path[0] == '/' or path[0] == '\\') return true;
