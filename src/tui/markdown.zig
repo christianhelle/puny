@@ -205,6 +205,18 @@ fn displayWidth(text: []const u8) usize {
     return width;
 }
 
+fn isSeparatorCell(cell: []const u8) bool {
+    const trimmed = trimRight(trimLeft(cell, " \t"), " \t");
+    if (trimmed.len == 0) return false;
+    for (trimmed) |c| {
+        switch (c) {
+            '-', ':' => continue,
+            else => return false,
+        }
+    }
+    return true;
+}
+
 fn parseAlignment(cell: []const u8) Alignment {
     const trimmed = trimRight(trimLeft(cell, " \t"), " \t");
     if (trimmed.len == 0) return .left;
@@ -399,10 +411,11 @@ fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, terminal
     var alignments = try allocator.alloc(Alignment, max_cols);
     defer allocator.free(alignments);
     @memset(alignments, .left);
-    if (lines.len >= 2) {
+    {
         const sep = rows.items[1];
         for (sep, 0..) |cell, i| {
             if (i >= max_cols) break;
+            if (!isSeparatorCell(cell)) return error.InvalidTableSeparator;
             alignments[i] = parseAlignment(cell);
         }
     }
