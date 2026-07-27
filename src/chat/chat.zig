@@ -9,7 +9,7 @@ const tool_display = @import("display.zig");
 const usage_estimator = @import("usage.zig");
 const cancel = @import("../core/cancel.zig");
 const memory = @import("../core/memory.zig");
-const zz = @import("zigzag");
+const markdown = @import("../tui/markdown.zig");
 
 fn countNewlines(text: []const u8) usize {
     var count: usize = 0;
@@ -390,7 +390,7 @@ pub const OpenAiAccumulator = struct {
         try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
         try stdout.flush();
 
-        var md = zz.Markdown.init();
+        var md = markdown.Markdown.init();
         const rendered = try md.render(self.allocator, self.content.items);
         defer self.allocator.free(rendered);
 
