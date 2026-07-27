@@ -93,6 +93,12 @@ pub fn build(b: *std.Build) !void {
     run_integration.addFileArg(b.path("tests/integration.json"));
     const test_integration_step = b.step("test-integration", "Run integration tests against opencode_go/deepseek-v4-flash");
     test_integration_step.dependOn(&run_integration.step);
+
+    const run_integration_zen = b.addRunArtifact(integration_checker);
+    run_integration_zen.addArtifactArg(exe);
+    run_integration_zen.addFileArg(b.path("tests/integration_opencode_zen.json"));
+    const test_integration_zen_step = b.step("test-integration-zen", "Run integration tests against opencode_zen/deepseek-v4-flash-free");
+    test_integration_zen_step.dependOn(&run_integration_zen.step);
 }
 
 fn addPunyExecutable(
