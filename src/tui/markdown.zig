@@ -141,7 +141,7 @@ pub const Markdown = struct {
             try result.appendSlice(allocator, "\n");
         }
 
-        return result.items;
+        return result.toOwnedSlice(allocator);
     }
 };
 
@@ -829,4 +829,22 @@ test "parseAlignment detects alignment from separator cells" {
     try std.testing.expectEqual(Alignment.center, parseAlignment(":---:"));
     try std.testing.expectEqual(Alignment.right, parseAlignment("---:"));
     try std.testing.expectEqual(Alignment.left, parseAlignment("----"));
+}
+
+test "render handles mixed text and table content" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator,
+        \\Here is some text.
+        \\
+        \\| A | B |
+        \\|---|---|
+        \\| 1 | 2 |
+        \\
+        \\More text here.
+    );
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(result.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┌") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "Here is some text") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "More text here") != null);
 }
