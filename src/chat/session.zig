@@ -840,6 +840,7 @@ pub fn resolveApiKey(
 
     if (api_key_env) |key| return key;
 
+    if (effective_provider == .mock) return "";
     return cfg.providerEntryConst(effective_provider).apiKey orelse "";
 }
 
