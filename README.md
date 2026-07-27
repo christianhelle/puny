@@ -9,6 +9,12 @@ A minimal AI coding agent for the terminal that currently supports the following
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
 
+## Screenshots
+
+| Welcome screen | Provider picker | Model picker |
+|---|---|---|
+| ![](docs/images/welcome.png) | ![](docs/images/change-provider.png) | ![](docs/images/change-model.png) |
+
 ## Features
 
 - **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
