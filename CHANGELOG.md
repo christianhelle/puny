@@ -2,6 +2,9 @@
 
 ## [Unreleased Changes]
 
+### Merged Pull Requests
+- Add markdown table rendering integration and regression tests ([#62](https://github.com/christianhelle/puny/pull/62)) ([@christianhelle](https://github.com/christianhelle/))
+
 ### Features
 - Improve markdown table renderer ([#61](https://github.com/christianhelle/puny/pull/61)) ([@christianhelle](https://github.com/christianhelle/))
 - Add integration tests for OpenCode Zen and LM Studio ([#60](https://github.com/christianhelle/puny/pull/60)) ([@christianhelle](https://github.com/christianhelle/))
