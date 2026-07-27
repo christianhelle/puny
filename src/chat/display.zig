@@ -120,6 +120,13 @@ fn renderKnown(
         return true;
     }
 
+    if (std.mem.eql(u8, name, "load_skill")) {
+        const skill_name = getString(args, "skill_name") orelse return false;
+        try output.appendSlice(allocator, "Loading skill ");
+        try appendJsonString(output, allocator, skill_name);
+        return true;
+    }
+
     return false;
 }
 
