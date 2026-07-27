@@ -18,7 +18,7 @@ pub fn pickModel(
     for (model_pick_list) |m| {
         try items.append(arena, .{
             .value = try arena.dupe(u8, m.id),
-            .label = try std.fmt.allocPrint(arena, "{s} — {s}", .{ m.id, m.display_name }),
+            .label = try std.fmt.allocPrint(arena, "{s}", .{m.display_name}),
         });
     }
 
