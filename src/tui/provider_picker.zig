@@ -26,7 +26,9 @@ pub fn buildProviderItems(arena: std.mem.Allocator, providers: []const ProviderO
 pub fn selectProviderInteractive(
     arena: std.mem.Allocator,
     io: std.Io,
+    init: std.process.Init,
 ) !?ModelProvider {
+    _ = init;
     const default_providers = comptime getDefaultProviders();
     var items = try buildProviderItems(arena, &default_providers);
     defer items.deinit(arena);
