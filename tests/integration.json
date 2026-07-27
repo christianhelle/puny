@@ -1,7 +1,4 @@
 {
-  "default_args": [
-    "--oneshot"
-  ],
   "tests": [
     {
       "name": "opencode_go: Basic chat response",
@@ -10,6 +7,7 @@
         "opencode_go",
         "--model",
         "deepseek-v4-flash",
+        "--oneshot",
         "--prompt",
         "Respond with just the word hello"
       ],
@@ -30,6 +28,7 @@
         "opencode_go",
         "--model",
         "deepseek-v4-flash",
+        "--oneshot",
         "--prompt",
         "Read the file src/main.zig"
       ],
@@ -50,6 +49,7 @@
         "opencode_go",
         "--model",
         "deepseek-v4-flash",
+        "--oneshot",
         "--prompt",
         "Search for 'pub fn' in the source code of src/main.zig"
       ],
@@ -70,6 +70,7 @@
         "opencode_go",
         "--model",
         "deepseek-v4-flash",
+        "--oneshot",
         "--prompt",
         "Run 'echo hello world' in the shell"
       ],
@@ -91,6 +92,7 @@
         "opencode_go",
         "--model",
         "deepseek-v4-flash",
+        "--oneshot",
         "--prompt",
         "/plan testing save_prd tool. create an empty plan with no details"
       ],
@@ -115,6 +117,7 @@
         "opencode_zen",
         "--model",
         "deepseek-v4-flash-free",
+        "--oneshot",
         "--prompt",
         "Respond with just the word hello"
       ],
@@ -135,6 +138,7 @@
         "opencode_zen",
         "--model",
         "deepseek-v4-flash-free",
+        "--oneshot",
         "--prompt",
         "Read the file src/main.zig"
       ],
@@ -155,6 +159,7 @@
         "opencode_zen",
         "--model",
         "deepseek-v4-flash-free",
+        "--oneshot",
         "--prompt",
         "Search for 'pub fn' in the source code of src/main.zig"
       ],
@@ -175,6 +180,7 @@
         "opencode_zen",
         "--model",
         "deepseek-v4-flash-free",
+        "--oneshot",
         "--prompt",
         "Run 'echo hello world' in the shell"
       ],
@@ -196,6 +202,7 @@
         "opencode_zen",
         "--model",
         "deepseek-v4-flash-free",
+        "--oneshot",
         "--prompt",
         "/plan testing save_prd tool. create an empty plan with no details"
       ],
@@ -220,6 +227,7 @@
         "lmstudio",
         "--model",
         "google/gemma-4-e2b",
+        "--oneshot",
         "--prompt",
         "Respond with just the word hello"
       ],
@@ -240,6 +248,7 @@
         "lmstudio",
         "--model",
         "google/gemma-4-e2b",
+        "--oneshot",
         "--prompt",
         "Read the file src/main.zig"
       ],
@@ -260,6 +269,7 @@
         "lmstudio",
         "--model",
         "google/gemma-4-e2b",
+        "--oneshot",
         "--prompt",
         "Search for 'pub fn' in the source code of src/main.zig"
       ],
@@ -280,6 +290,7 @@
         "lmstudio",
         "--model",
         "google/gemma-4-e2b",
+        "--oneshot",
         "--prompt",
         "Run 'echo hello world' in the shell"
       ],
@@ -301,6 +312,7 @@
         "lmstudio",
         "--model",
         "google/gemma-4-e2b",
+        "--oneshot",
         "--prompt",
         "/plan testing save_prd tool. create an empty plan with no details"
       ],
