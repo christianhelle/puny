@@ -570,16 +570,16 @@ test "Markdown renders simple table with box-drawing" {
     var md = Markdown.init();
     const result = try md.render(std.testing.allocator, "| A | B |\n|---|---|\n| 1 | 2 |");
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┌') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┐') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '└') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┘') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '│') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '├') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┤') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┼') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┬') != null);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┴') != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┌") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┐") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "└") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┘") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "│") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "├") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┤") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┼") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┬") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┴") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, ansi.bright) != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "A") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "B") != null);
@@ -591,14 +591,14 @@ test "Markdown handles column alignment markers" {
     var md = Markdown.init();
     const result = try md.render(std.testing.allocator, "| L | C | R |\n|:---|:---:|---:|\n| a | b | c |");
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┌') != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┌") != null);
 }
 
 test "Markdown handles table with empty cells" {
     var md = Markdown.init();
     const result = try md.render(std.testing.allocator, "| A | B | C |\n|---|---|---|\n| 1 | | 3 |");
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '│') != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "│") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "1") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "3") != null);
 }
@@ -614,7 +614,7 @@ test "Markdown treats single table line as plain text" {
     var md = Markdown.init();
     const result = try md.render(std.testing.allocator, "| not enough lines |");
     defer std.testing.allocator.free(result);
-    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┌') == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┌") == null);
     try std.testing.expect(std.mem.indexOf(u8, result, "| not enough lines |") != null);
 }
 
