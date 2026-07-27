@@ -211,9 +211,10 @@ fn parseAlignment(cell: []const u8) Alignment {
 fn splitTableLine(allocator: std.mem.Allocator, line: []const u8) ![][]const u8 {
     const inner = stripOuterPipes(line);
     var cells = std.ArrayList([]const u8).empty;
+    errdefer cells.deinit(allocator);
     var it = std.mem.splitScalar(u8, inner, '|');
     while (it.next()) |cell| {
-        try cells.append(allocator, trimRight(cell, " \t"));
+        try cells.append(allocator, trimLeft(trimRight(cell, " \t"), " \t"));
     }
     return cells.toOwnedSlice(allocator);
 }
