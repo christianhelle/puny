@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Disable mock provider from interactive picker ([#59](https://github.com/christianhelle/puny/pull/59)) ([@christianhelle](https://github.com/christianhelle/))
 - Show navigation instructions in list picker ([#58](https://github.com/christianhelle/puny/pull/58)) ([@christianhelle](https://github.com/christianhelle/))
 - Custom model and provider list pickers ([#57](https://github.com/christianhelle/puny/pull/57)) ([@christianhelle](https://github.com/christianhelle/))
 - Add integration tests against OpenCode Go ([#56](https://github.com/christianhelle/puny/pull/56)) ([@christianhelle](https://github.com/christianhelle/))
