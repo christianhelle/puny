@@ -618,9 +618,18 @@ test "Markdown handles table with empty cells" {
 
 test "Markdown treats non-table pipes as plain text" {
     var md = Markdown.init();
-    const result = try md.render(std.testing.allocator, "just | a pipe");
+    const result = try md.render(std.testing.allocator, "a | b | c");
     defer std.testing.allocator.free(result);
-    try std.testing.expectEqualStrings("just | a pipe\n", result);
+    try std.testing.expectEqualStrings("a | b | c\n", result);
+}
+
+test "Markdown handles lone table line before non-table text" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| a |\ntext");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┌") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "| a |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "text") != null);
 }
 
 test "Markdown treats single table line as plain text" {
