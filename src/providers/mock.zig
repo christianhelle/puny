@@ -42,6 +42,8 @@ pub const MockKeyword = enum {
     search,
     /// Trigger a tool call for shell execution.
     shell,
+    /// Generate a markdown table with realistic data.
+    table,
 };
 
 pub const MockClient = struct {
@@ -205,6 +207,11 @@ pub const MockClient = struct {
             return respondWithUsage(callback, last_content, speed, self.io);
         }
 
+        // Check for table mode
+        if (isKeyword(last_content, .table)) {
+            return respondWithTable(callback, speed, self.io);
+        }
+
         // Check for long mode
         if (isKeyword(last_content, .long)) {
             return respondWithLong(callback, speed, self.io);
@@ -269,6 +276,7 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .read => "read",
         .search => "search",
         .shell => "shell",
+        .table => "table",
     };
 }
 
@@ -389,6 +397,33 @@ fn respondWithUsage(callback: openai.StreamCallback, user_message: []const u8, s
         .tokens_per_second = 100.0,
         .time_to_first_token_seconds = 0.0,
     } });
+}
+
+fn respondWithTable(callback: openai.StreamCallback, speed: MockSpeed, io: std.Io) !void {
+    const header = "| ID | Name | Department | Position | Salary | Start Date |\n";
+    const separator = "| --- | --- | --- | --- | --- | --- |\n";
+    const rows = [_][]const u8{
+        "| 101 | Alice Johnson | Engineering | Senior Developer | $120,000 | 2020-03-15 |\n",
+        "| 102 | Bob Smith | Marketing | Marketing Manager | $95,000 | 2019-07-22 |\n",
+        "| 103 | Carol Davis | Sales | Sales Representative | $82,000 | 2021-01-10 |\n",
+        "| 104 | David Wilson | Engineering | DevOps Engineer | $110,000 | 2022-05-03 |\n",
+        "| 105 | Emma Brown | HR | HR Coordinator | $65,000 | 2020-11-18 |\n",
+        "| 106 | Frank Miller | Finance | Financial Analyst | $88,000 | 2018-09-01 |\n",
+        "| 107 | Grace Taylor | Engineering | Frontend Developer | $105,000 | 2023-02-14 |\n",
+        "| 108 | Henry Anderson | Marketing | Content Strategist | $72,000 | 2021-06-30 |\n",
+    };
+
+    try callback.emit(.{ .content = "Here is a markdown table with employee data:\n\n" });
+    try emitDelay(speed, io);
+    try callback.emit(.{ .content = header });
+    try emitDelay(speed, io);
+    try callback.emit(.{ .content = separator });
+    try emitDelay(speed, io);
+    for (rows) |row| {
+        try callback.emit(.{ .content = row });
+        try emitDelay(speed, io);
+    }
+    try callback.emit(.{ .finish = "stop" });
 }
 
 fn respondWithCompletion(callback: openai.StreamCallback) !void {
