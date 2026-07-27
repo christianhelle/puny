@@ -112,12 +112,6 @@ fn addPunyExecutable(
     });
     exe.root_module.addOptions("build_options", build_options);
 
-    const zigzag = b.dependency("zigzag", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("zigzag", zigzag.module("zigzag"));
-
     if (target.result.os.tag == .windows) {
         exe.root_module.linkSystemLibrary("psapi", .{});
     }
