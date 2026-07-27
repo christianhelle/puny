@@ -197,7 +197,8 @@ fn stripOuterPipes(line: []const u8) []const u8 {
 fn isWideCodePoint(cp: u21) bool {
     return switch (cp) {
         0x1100...0x115F, // Hangul Jamo
-        0x2329, 0x232A, // Angle brackets
+        0x2329,
+        0x232A, // Angle brackets
         0x2E80...0x303E, // CJK Radicals, Kangxi, CJK Symbols
         0x3040...0x33FF, // Hiragana, Katakana, Bopomofo, CJK Compatibility
         0x3400...0x4DBF, // CJK Extension A
@@ -331,7 +332,7 @@ fn displayWidth(text: []const u8) usize {
     var i: usize = 0;
     while (i < text.len) {
         const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const cp = std.unicode.utf8Decode(text[i..]) catch {
+        const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch {
             i += seq_len;
             width += 1;
             continue;
