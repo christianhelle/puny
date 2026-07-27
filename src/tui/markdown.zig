@@ -89,10 +89,12 @@ pub const Markdown = struct {
             // Blockquotes
             if (std.mem.startsWith(u8, trimmed, ">")) {
                 const content = trimLeft(trimmed[1..], " ");
+                const rendered = try renderInline(allocator, content);
                 try result.appendSlice(allocator, ansi.dim);
                 try result.appendSlice(allocator, "\u{2502} ");
                 try result.appendSlice(allocator, ansi.reset);
-                try result.appendSlice(allocator, try renderInline(allocator, content));
+                try result.appendSlice(allocator, rendered);
+                allocator.free(rendered);
                 try result.appendSlice(allocator, "\n");
                 continue;
             }
@@ -101,10 +103,12 @@ pub const Markdown = struct {
             if (std.mem.startsWith(u8, trimmed, "- ") or std.mem.startsWith(u8, trimmed, "* ")) {
                 const content = trimLeft(trimmed[2..], " ");
                 try result.appendSlice(allocator, "  ");
+                const rendered = try renderInline(allocator, content);
                 try result.appendSlice(allocator, ansi.dim);
                 try result.appendSlice(allocator, "\u{2022} ");
                 try result.appendSlice(allocator, ansi.reset);
-                try result.appendSlice(allocator, try renderInline(allocator, content));
+                try result.appendSlice(allocator, rendered);
+                allocator.free(rendered);
                 try result.appendSlice(allocator, "\n");
                 continue;
             }
@@ -121,7 +125,9 @@ pub const Markdown = struct {
                     allocator.free(rendered);
                 } else |_| {
                     for (table_lines) |tl| {
-                        try result.appendSlice(allocator, try renderInline(allocator, tl));
+                        const rendered = try renderInline(allocator, tl);
+                        try result.appendSlice(allocator, rendered);
+                        allocator.free(rendered);
                         try result.appendSlice(allocator, "\n");
                     }
                 }
@@ -131,6 +137,7 @@ pub const Markdown = struct {
             // Regular paragraph with inline formatting
             const rendered = try renderInline(allocator, line);
             try result.appendSlice(allocator, rendered);
+            allocator.free(rendered);
             try result.appendSlice(allocator, "\n");
         }
 
@@ -460,7 +467,7 @@ fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
         i += 1;
     }
 
-    return result.items;
+    return result.toOwnedSlice(allocator);
 }
 
 fn findMatchingBacktick(text: []const u8, start: usize) ?usize {
