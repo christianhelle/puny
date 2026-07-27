@@ -14,6 +14,7 @@ pub fn buildProviderItems(arena: std.mem.Allocator, providers: []const ProviderO
     errdefer items.deinit(arena);
 
     for (providers) |p| {
+        if (p.id == .mock) continue;
         try items.append(arena, .{
             .value = try arena.dupe(u8, @tagName(p.id)),
             .label = try arena.dupe(u8, p.display_name),
