@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const Spec = struct {
-    default_args: []const []const u8,
+    default_args: []const []const u8 = &.{},
     tests: []const TestCase,
 };
 
