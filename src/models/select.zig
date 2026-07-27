@@ -5,9 +5,6 @@ const client = @import("../providers/client.zig");
 const model_picker = @import("../tui/model_picker.zig");
 const provider = @import("../providers/provider.zig");
 const retry = @import("../core/retry.zig");
-const zz = @import("zigzag");
-
-const ModelPicker = model_picker.Widget;
 
 pub fn select(
     prov: *provider.Provider,
@@ -37,6 +34,7 @@ pub fn select(
     }
     var models = try listModelsWithRetry(prov, io, random, 1);
     defer models.deinit();
+    model_picker.setModels(models.value().models);
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
 
     if (cfg) |c| {
@@ -61,28 +59,9 @@ fn selectModelInteractive(
     io: std.Io,
     init: std.process.Init,
 ) !?[]const u8 {
+    _ = init;
     model_picker.setModels(models);
-    var program = zz.Program(ModelPicker).init(init.gpa, io, init.environ_map);
-
-    program.run() catch |err| {
-        program.deinit();
-
-        var stderr_buffer: [1024]u8 = undefined;
-        var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-        const stderr_writer = &stderr_file_writer.interface;
-        stderr_writer.print("\nCould not open the interactive model picker ({s}). Falling back to text selection.\n", .{@errorName(err)}) catch {};
-        stderr_writer.flush() catch {};
-
-        return try selectModelText(models, arena, io);
-    };
-
-    const picked = program.model.selected orelse {
-        program.deinit();
-        return null;
-    };
-    const key = try arena.dupe(u8, picked);
-    program.deinit();
-    return key;
+    return model_picker.pickModel(arena, io);
 }
 
 fn selectModelText(
