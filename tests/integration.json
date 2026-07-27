@@ -111,6 +111,28 @@
       }
     },
     {
+      "name": "opencode_go: Markdown table renderer",
+      "args": [
+        "--provider",
+        "opencode_go",
+        "--model",
+        "deepseek-v4-flash",
+        "--oneshot",
+        "--prompt",
+        "im testing the markdown table renderer. generate a markdown table with a realistic data set"
+      ],
+      "min_output_length": 1,
+      "expect": [
+        "|",
+        "---"
+      ],
+      "not_expect": [
+        "Error:",
+        "Chat failed",
+        "Failed"
+      ]
+    },
+    {
       "name": "opencode_zen: Basic chat response",
       "args": [
         "--provider",
@@ -221,6 +243,28 @@
       }
     },
     {
+      "name": "opencode_zen: Markdown table renderer",
+      "args": [
+        "--provider",
+        "opencode_zen",
+        "--model",
+        "deepseek-v4-flash-free",
+        "--oneshot",
+        "--prompt",
+        "im testing the markdown table renderer. generate a markdown table with a realistic data set"
+      ],
+      "min_output_length": 1,
+      "expect": [
+        "|",
+        "---"
+      ],
+      "not_expect": [
+        "Error:",
+        "Chat failed",
+        "Failed"
+      ]
+    },
+    {
       "name": "lmstudio: Basic chat response",
       "args": [
         "--provider",
@@ -329,6 +373,28 @@
       "evidence": {
         "extract_paths_from_output": true
       }
+    },
+    {
+      "name": "lmstudio: Markdown table renderer",
+      "args": [
+        "--provider",
+        "lmstudio",
+        "--model",
+        "google/gemma-4-e4b",
+        "--oneshot",
+        "--prompt",
+        "im testing the markdown table renderer. generate a markdown table with a realistic data set"
+      ],
+      "min_output_length": 1,
+      "expect": [
+        "|",
+        "---"
+      ],
+      "not_expect": [
+        "Error:",
+        "Chat failed",
+        "Failed"
+      ]
     }
   ]
 }
