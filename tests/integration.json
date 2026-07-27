@@ -226,7 +226,7 @@
         "--provider",
         "lmstudio",
         "--model",
-        "google/gemma-4-e2b",
+        "google/gemma-4-e4b",
         "--oneshot",
         "--prompt",
         "Respond with just the word hello"
@@ -247,7 +247,7 @@
         "--provider",
         "lmstudio",
         "--model",
-        "google/gemma-4-e2b",
+        "google/gemma-4-e4b",
         "--oneshot",
         "--prompt",
         "Read the file src/main.zig"
@@ -268,7 +268,7 @@
         "--provider",
         "lmstudio",
         "--model",
-        "google/gemma-4-e2b",
+        "google/gemma-4-e4b",
         "--oneshot",
         "--prompt",
         "Search for 'pub fn' in the source code of src/main.zig"
@@ -289,7 +289,7 @@
         "--provider",
         "lmstudio",
         "--model",
-        "google/gemma-4-e2b",
+        "google/gemma-4-e4b",
         "--oneshot",
         "--prompt",
         "Run 'echo hello world' in the shell"
@@ -311,7 +311,7 @@
         "--provider",
         "lmstudio",
         "--model",
-        "google/gemma-4-e2b",
+        "google/gemma-4-e4b",
         "--oneshot",
         "--prompt",
         "/plan testing save_prd tool. create an empty plan with no details"
