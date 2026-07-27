@@ -38,7 +38,7 @@ pub fn select(
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
 
     if (cfg) |c| {
-        if (client.isValidUtf8(key)) {
+        if (client.isValidUtf8(key) and current_provider != .mock) {
             c.providerEntry(current_provider).model = key;
             config.save(arena, io, c.*, environ_map) catch |err| {
                 var stderr_buffer: [1024]u8 = undefined;
