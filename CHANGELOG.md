@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Remove ZigZag dependency ([#57](https://github.com/christianhelle/puny/pull/57)) ([@christianhelle](https://github.com/christianhelle/))
 - Add integration tests against OpenCode Go ([#56](https://github.com/christianhelle/puny/pull/56)) ([@christianhelle](https://github.com/christianhelle/))
 
 
