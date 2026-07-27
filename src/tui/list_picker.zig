@@ -194,6 +194,8 @@ fn readKeyPosix(io: std.Io) !Key {
     switch (buf[0]) {
         '\r', '\n' => return .enter,
         'q', 'Q' => return .quit,
+        'j', 'J' => return .down,
+        'k', 'K' => return .up,
         else => return .unknown,
     }
 }
@@ -222,6 +224,8 @@ fn readKeyWindows(io: std.Io) !Key {
             else => {
                 const ch = record.Event.KeyEvent.uChar.UnicodeChar;
                 if (ch == 'q' or ch == 'Q') return .quit;
+                if (ch == 'j' or ch == 'J') return .down;
+                if (ch == 'k' or ch == 'K') return .up;
                 return .unknown;
             },
         }
