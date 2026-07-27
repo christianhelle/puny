@@ -64,12 +64,12 @@ pub fn selectFromList(
                 }
             },
             .enter => {
-                try stdout_writer.print("\x1b[{}A\x1b[J", .{items.len + 1});
+                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
                 try stdout_writer.flush();
                 return try arena.dupe(u8, items[selected].value);
             },
             .quit, .escape => {
-                try stdout_writer.print("\x1b[{}A\x1b[J", .{items.len + 1});
+                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
                 try stdout_writer.flush();
                 return null;
             },
@@ -79,9 +79,9 @@ pub fn selectFromList(
 }
 
 fn redrawList(stdout_writer: *std.Io.Writer, items: []const Item, selected: usize) !void {
-    try stdout_writer.print("\x1b[{}A", .{items.len});
+    try stdout_writer.print(terminal.cursor_up, .{items.len});
     for (items, 0..) |item, i| {
-        try stdout_writer.print("\x1b[2K\r", .{});
+        try stdout_writer.print(terminal.clear_line ++ "\r", .{});
         if (i == selected) {
             try stdout_writer.print("{s}> {s}{s}\n", .{ ansi.bright, item.label, ansi.reset });
         } else {

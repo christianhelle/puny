@@ -51,13 +51,21 @@ pub const backspace_echo = "\x08 \x08";
 pub const move_to_line_start = "\x1b[G";
 
 /// Move the cursor up `n` lines without changing column (CSI A).
+/// Use with `print(cursor_up, .{n})`.
 pub const cursor_up = "\x1b[{d}A";
 
 /// Move the cursor down `n` lines without changing column (CSI B).
+/// Use with `print(cursor_down, .{n})`.
 pub const cursor_down = "\x1b[{d}B";
 
 /// Clear from the cursor to the end of the current line (CSI K).
 pub const clear_to_end_of_line = "\x1b[K";
+
+/// Clear the entire current line (CSI 2K).
+pub const clear_line = "\x1b[2K";
+
+/// Erase from cursor to end of display (CSI J).
+pub const erase_display = "\x1b[J";
 
 /// Returns true for C0 control characters that the prompt input loop ignores.
 pub fn isIgnoredControlByte(byte: u8) bool {
