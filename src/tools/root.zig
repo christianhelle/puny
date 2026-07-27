@@ -45,6 +45,7 @@ const search = @import("search.zig");
 const git = @import("git.zig");
 const web = @import("web.zig");
 const core_session = @import("../core/session.zig");
+const skill_loader = @import("skill_loader.zig");
 
 pub const registry = blk: {
     @setEvalBranchQuota(10000);
@@ -57,6 +58,7 @@ pub const registry = blk: {
         git.git_status,
         git.git_diff,
         web.web_fetch,
+        skill_loader.load_skill,
     };
 };
 
@@ -83,5 +85,6 @@ test "dispatch returns known tools" {
     try std.testing.expect(dispatch("git_diff") != null);
     try std.testing.expect(dispatch("web_fetch") != null);
     try std.testing.expect(dispatch("save_prd") != null);
+    try std.testing.expect(dispatch("load_skill") != null);
     try std.testing.expect(dispatch("unknown_tool") == null);
 }
