@@ -388,14 +388,26 @@ fn capWidths(widths: []usize, terminal_width: usize) void {
     var total: usize = 0;
     for (widths) |w| total += w;
     if (total <= max_content) return;
-    var remaining = total - max_content;
+    const excess = total - max_content;
+    var shrinkable_total: usize = 0;
+    for (widths) |w| {
+        if (w > 3) shrinkable_total += w - 3;
+    }
+    if (shrinkable_total == 0) return;
+    var remaining = excess;
+    for (widths) |*w| {
+        if (w.* > 3) {
+            const share = (w.* - 3) * excess / shrinkable_total;
+            const shrink = @min(share, w.* - 3);
+            w.* -= shrink;
+            remaining -|= shrink;
+        }
+    }
     for (widths) |*w| {
         if (remaining == 0) break;
-        const min_w: usize = 3;
-        if (w.* > min_w) {
-            const shrink = @min(remaining, w.* - min_w);
-            w.* -= shrink;
-            remaining -= shrink;
+        if (w.* > 3) {
+            w.* -= 1;
+            remaining -= 1;
         }
     }
 }
