@@ -561,3 +561,88 @@ test "trimLeft strips leading characters" {
     try std.testing.expectEqualStrings("hello", trimLeft("\t\rhello", " \t\r"));
     try std.testing.expectEqualStrings("", trimLeft("   ", " "));
 }
+
+test "Markdown renders simple table with box-drawing" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| A | B |\n|---|---|\n| 1 | 2 |");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┌') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┐') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '└') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┘') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '│') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '├') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┤') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┼') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┬') != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┴') != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, ansi.bright) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "A") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "B") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "2") != null);
+}
+
+test "Markdown handles column alignment markers" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| L | C | R |\n|:---|:---:|---:|\n| a | b | c |");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┌') != null);
+}
+
+test "Markdown handles table with empty cells" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| A | B | C |\n|---|---|---|\n| 1 | | 3 |");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '│') != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "3") != null);
+}
+
+test "Markdown treats non-table pipes as plain text" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "just | a pipe");
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("just | a pipe\n", result);
+}
+
+test "Markdown treats single table line as plain text" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| not enough lines |");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOfScalar(u8, result, '┌') == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "| not enough lines |") != null);
+}
+
+test "Markdown renders table header in bright style" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| Name | Value |\n|------|-------|\n| x | 42 |");
+    defer std.testing.allocator.free(result);
+    const bright_pos = std.mem.indexOf(u8, result, ansi.bright) orelse return error.TestFailed;
+    const name_pos = std.mem.indexOf(u8, result, "Name") orelse return error.TestFailed;
+    try std.testing.expect(bright_pos < name_pos);
+}
+
+test "displayWidth counts code points not bytes" {
+    try std.testing.expectEqual(@as(usize, 3), displayWidth("abc"));
+    try std.testing.expectEqual(@as(usize, 0), displayWidth(""));
+}
+
+test "isTableLine detects pipe-delimited lines" {
+    try std.testing.expect(isTableLine("| a | b |"));
+    try std.testing.expect(isTableLine("  | a | b |  "));
+    try std.testing.expect(!isTableLine("just text"));
+    try std.testing.expect(!isTableLine("a | b"));
+}
+
+test "stripOuterPipes removes leading and trailing pipes" {
+    try std.testing.expectEqualStrings(" a ", stripOuterPipes("| a |"));
+    try std.testing.expectEqualStrings("a | b", stripOuterPipes("| a | b |"));
+}
+
+test "parseAlignment detects alignment from separator cells" {
+    try std.testing.expectEqual(Alignment.left, parseAlignment(":---"));
+    try std.testing.expectEqual(Alignment.center, parseAlignment(":---:"));
+    try std.testing.expectEqual(Alignment.right, parseAlignment("---:"));
+    try std.testing.expectEqual(Alignment.left, parseAlignment("----"));
+}
