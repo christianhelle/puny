@@ -164,6 +164,16 @@ pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
     }
 }
 
+var global_registry: ?*Registry = null;
+
+pub fn setGlobalRegistry(reg: *Registry) void {
+    global_registry = reg;
+}
+
+pub fn getGlobalRegistry() ?*Registry {
+    return global_registry;
+}
+
 fn trimCr(maybe_cr: []const u8) []const u8 {
     if (maybe_cr.len > 0 and maybe_cr[maybe_cr.len - 1] == '\r') return maybe_cr[0 .. maybe_cr.len - 1];
     return maybe_cr;
