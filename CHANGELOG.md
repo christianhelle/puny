@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Improve markdown table renderer ([#61](https://github.com/christianhelle/puny/pull/61)) ([@christianhelle](https://github.com/christianhelle/))
 - Add integration tests for OpenCode Zen and LM Studio ([#60](https://github.com/christianhelle/puny/pull/60)) ([@christianhelle](https://github.com/christianhelle/))
 - Disable mock provider from interactive picker ([#59](https://github.com/christianhelle/puny/pull/59)) ([@christianhelle](https://github.com/christianhelle/))
 - Show navigation instructions in list picker ([#58](https://github.com/christianhelle/puny/pull/58)) ([@christianhelle](https://github.com/christianhelle/))
