@@ -81,7 +81,7 @@ pub fn selectFromList(
 fn redrawList(stdout_writer: *std.Io.Writer, items: []const Item, selected: usize) !void {
     try stdout_writer.print("\x1b[{}A", .{items.len});
     for (items, 0..) |item, i| {
-        try stdout_writer.print("\x1b[2K\r");
+        try stdout_writer.print("\x1b[2K\r", .{});
         if (i == selected) {
             try stdout_writer.print("{s}> {s}{s}\n", .{ ansi.bright, item.label, ansi.reset });
         } else {
@@ -208,10 +208,10 @@ fn readKeyWindows(io: std.Io) !Key {
     while (true) {
         var record: win.INPUT_RECORD = undefined;
         var events_read: win.DWORD = 0;
-        if (win.ReadConsoleInputW(hStdin, &record, 1, &events_read) == 0) return error.ReadFailed;
+        if (win.ReadConsoleInputW(hStdin, &record, 1, &events_read) == .FALSE) return error.ReadFailed;
         if (events_read == 0) continue;
         if (record.EventType != win.KEY_EVENT) continue;
-        if (record.Event.KeyEvent.bKeyDown == 0) continue;
+        if (record.Event.KeyEvent.bKeyDown == .FALSE) continue;
 
         const vk = record.Event.KeyEvent.wVirtualKeyCode;
         switch (vk) {

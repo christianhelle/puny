@@ -11,44 +11,44 @@ pub const Markdown = struct {
     }
 
     pub fn render(_: *const Markdown, allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
-        var result = std.ArrayList(u8).init(allocator);
-        errdefer result.deinit();
+        var result = std.ArrayList(u8).empty;
+        errdefer result.deinit(allocator);
 
         var lines = std.mem.splitScalar(u8, text, '\n');
         var in_code_block = false;
 
         while (lines.next()) |raw_line| {
-            const line = std.mem.trimRight(u8, raw_line, " \t\r");
+            const line = trimRight(raw_line, " \t\r");
             if (in_code_block) {
                 if (std.mem.startsWith(u8, line, "```")) {
-                    try result.appendSlice(ansi.reset);
-                    try result.appendSlice("\n");
+                    try result.appendSlice(allocator, ansi.reset);
+                    try result.appendSlice(allocator, "\n");
                     in_code_block = false;
                 } else {
-                    try result.appendSlice(cyan);
-                    try result.appendSlice(line);
-                    try result.appendSlice(ansi.reset);
-                    try result.appendSlice("\n");
+                    try result.appendSlice(allocator, cyan);
+                    try result.appendSlice(allocator, line);
+                    try result.appendSlice(allocator, ansi.reset);
+                    try result.appendSlice(allocator, "\n");
                 }
                 continue;
             }
 
             if (std.mem.startsWith(u8, line, "```")) {
                 in_code_block = true;
-                const lang = std.mem.trim(u8, line[3..], " \t");
-                try result.appendSlice(ansi.dim);
+                const lang = trimLeft(line[3..], " \t");
+                try result.appendSlice(allocator, ansi.dim);
                 if (lang.len > 0) {
-                    try result.appendSlice(lang);
-                    try result.appendSlice(" code block:");
+                    try result.appendSlice(allocator, lang);
+                    try result.appendSlice(allocator, " code block:");
                 } else {
-                    try result.appendSlice("code block:");
+                    try result.appendSlice(allocator, "code block:");
                 }
-                try result.appendSlice(ansi.reset);
-                try result.appendSlice("\n");
+                try result.appendSlice(allocator, ansi.reset);
+                try result.appendSlice(allocator, "\n");
                 continue;
             }
 
-            const trimmed = std.mem.trimLeft(u8, line, " \t");
+            const trimmed = trimLeft(line, " \t");
 
             // Headings
             if (std.mem.startsWith(u8, trimmed, "#")) {
@@ -57,51 +57,83 @@ pub const Markdown = struct {
                     if (c == '#') hash_count += 1 else break;
                 }
                 if (hash_count <= 6 and hash_count >= 1 and trimmed.len > hash_count and trimmed[hash_count] == ' ') {
-                    const content = std.mem.trimLeft(u8, trimmed[hash_count..], " ");
-                    try result.appendSlice(ansi.bright);
-                    try result.appendSlice(content);
-                    try result.appendSlice(ansi.reset);
-                    try result.appendSlice("\n");
+                    const content = trimLeft(trimmed[hash_count..], " ");
+                    try result.appendSlice(allocator, ansi.bright);
+                    try result.appendSlice(allocator, content);
+                    try result.appendSlice(allocator, ansi.reset);
+                    try result.appendSlice(allocator, "\n");
                     continue;
                 }
             }
 
             // Blockquotes
             if (std.mem.startsWith(u8, trimmed, ">")) {
-                const content = std.mem.trimLeft(u8, trimmed[1..], " ");
-                try result.appendSlice(ansi.dim);
-                try result.appendSlice("\u{2502} ");
-                try result.appendSlice(ansi.reset);
-                try result.appendSlice(try renderInline(allocator, content));
-                try result.appendSlice("\n");
+                const content = trimLeft(trimmed[1..], " ");
+                try result.appendSlice(allocator, ansi.dim);
+                try result.appendSlice(allocator, "\u{2502} ");
+                try result.appendSlice(allocator, ansi.reset);
+                try result.appendSlice(allocator, try renderInline(allocator, content));
+                try result.appendSlice(allocator, "\n");
                 continue;
             }
 
             // Unordered lists
             if (std.mem.startsWith(u8, trimmed, "- ") or std.mem.startsWith(u8, trimmed, "* ")) {
-                const content = std.mem.trimLeft(u8, trimmed[2..], " ");
-                try result.appendSlice("  ");
-                try result.appendSlice(ansi.dim);
-                try result.appendSlice("\u{2022} ");
-                try result.appendSlice(ansi.reset);
-                try result.appendSlice(try renderInline(allocator, content));
-                try result.appendSlice("\n");
+                const content = trimLeft(trimmed[2..], " ");
+                try result.appendSlice(allocator, "  ");
+                try result.appendSlice(allocator, ansi.dim);
+                try result.appendSlice(allocator, "\u{2022} ");
+                try result.appendSlice(allocator, ansi.reset);
+                try result.appendSlice(allocator, try renderInline(allocator, content));
+                try result.appendSlice(allocator, "\n");
                 continue;
             }
 
             // Regular paragraph with inline formatting
             const rendered = try renderInline(allocator, line);
-            try result.appendSlice(rendered);
-            try result.appendSlice("\n");
+            try result.appendSlice(allocator, rendered);
+            try result.appendSlice(allocator, "\n");
         }
 
         return result.items;
     }
 };
 
+fn trimRight(s: []const u8, chars: []const u8) []const u8 {
+    var end = s.len;
+    while (end > 0) {
+        var found = false;
+        for (chars) |c| {
+            if (s[end - 1] == c) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) break;
+        end -= 1;
+    }
+    return s[0..end];
+}
+
+fn trimLeft(s: []const u8, chars: []const u8) []const u8 {
+    var start: usize = 0;
+    while (start < s.len) {
+        var found = false;
+        for (chars) |c| {
+            if (s[start] == c) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) break;
+        start += 1;
+    }
+    return s[start..];
+}
+
 fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result = std.ArrayList(u8).empty;
+    errdefer result.deinit(allocator);
 
     var i: usize = 0;
     while (i < text.len) {
@@ -109,9 +141,9 @@ fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
         if (text[i] == '`') {
             const end = findMatchingBacktick(text, i + 1);
             if (end) |e| {
-                try result.appendSlice(cyan);
-                try result.appendSlice(text[i + 1 .. e]);
-                try result.appendSlice(ansi.reset);
+                try result.appendSlice(allocator, cyan);
+                try result.appendSlice(allocator, text[i + 1 .. e]);
+                try result.appendSlice(allocator, ansi.reset);
                 i = e + 1;
                 continue;
             }
@@ -121,15 +153,15 @@ fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
         if (i + 1 < text.len and text[i] == '*' and text[i + 1] == '*') {
             const end = findBoldEnd(text, i + 2);
             if (end) |e| {
-                try result.appendSlice(bold_start);
-                try result.appendSlice(text[i + 2 .. e]);
-                try result.appendSlice(bold_end);
+                try result.appendSlice(allocator, bold_start);
+                try result.appendSlice(allocator, text[i + 2 .. e]);
+                try result.appendSlice(allocator, bold_end);
                 i = e + 2;
                 continue;
             }
         }
 
-        try result.append(text[i]);
+        try result.append(allocator, text[i]);
         i += 1;
     }
 
@@ -218,4 +250,16 @@ test "renderInline handles backtick matching" {
 test "renderInline handles bold matching" {
     try std.testing.expectEqual(@as(?usize, 5), findBoldEnd("**bold** rest", 2));
     try std.testing.expect(findBoldEnd("**bold rest", 2) == null);
+}
+
+test "trimRight strips trailing characters" {
+    try std.testing.expectEqualStrings("hello", trimRight("hello   ", " "));
+    try std.testing.expectEqualStrings("hello", trimRight("hello\t\r", " \t\r"));
+    try std.testing.expectEqualStrings("", trimRight("   ", " "));
+}
+
+test "trimLeft strips leading characters" {
+    try std.testing.expectEqualStrings("hello", trimLeft("   hello", " "));
+    try std.testing.expectEqualStrings("hello", trimLeft("\t\rhello", " \t\r"));
+    try std.testing.expectEqualStrings("", trimLeft("   ", " "));
 }
