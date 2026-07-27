@@ -38,7 +38,7 @@ pub fn selectFromList(
 
     var selected: usize = 0;
 
-    try stdout_writer.print("\n", .{});
+    try stdout_writer.print("\n\nUse arrow keys to navigate, Enter to select, 'q' to quit:\n", .{});
     for (items, 0..) |item, i| {
         if (i == selected) {
             try stdout_writer.print("{s}> {s}{s}\n", .{ ansi.bright, item.label, ansi.reset });
