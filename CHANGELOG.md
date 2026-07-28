@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Allow models to load skills via tool call ([#64](https://github.com/christianhelle/puny/pull/64)) ([@christianhelle](https://github.com/christianhelle/))
 - Add markdown table rendering integration and regression tests ([#62](https://github.com/christianhelle/puny/pull/62)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix app crashes when using --provider CLI argument ([#63](https://github.com/christianhelle/puny/pull/63)) ([@christianhelle](https://github.com/christianhelle/))
 - Improve markdown table renderer ([#61](https://github.com/christianhelle/puny/pull/61)) ([@christianhelle](https://github.com/christianhelle/))
