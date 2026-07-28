@@ -301,6 +301,7 @@ test "renders current tool calls as actions" {
     try expectRendered("git_status", "{\"path\":\"src\"}", "Checking git status for \"src\"");
     try expectRendered("git_diff", "{\"staged\":true,\"path\":\"src\"}", "Showing staged git diff for \"src\"");
     try expectRendered("web_fetch", "{\"url\":\"https://example.com\"}", "Fetching \"https://example.com\"");
+    try expectRendered("load_skill", "{\"skill_name\":\"my-skill\"}", "Loading skill \"my-skill\"");
 }
 
 test "summarizes unknown and invalid tool calls" {
