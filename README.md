@@ -372,8 +372,9 @@ The config file stores per-provider settings (URL, API key, and last-selected mo
 ## Skills
 
 Puny can load reusable prompt-engineering skills from markdown files. Skills are
-keyword-triggered instructions that get injected into the system prompt so the model
-knows how to behave for a specific task.
+instructions that get injected into the system prompt so the model knows how to
+behave for a specific task. They can be loaded by slash command, by mentioning
+a trigger phrase in your message, or by the model itself via tool call.
 
 ### Skill locations
 
@@ -387,8 +388,8 @@ directory name.
 
 ### Skill structure
 
-A skill directory must contain a `SKILL.md` file. The file can optionally start with
-YAML frontmatter for a description:
+A skill directory must contain a `SKILL.md` file. The file starts with YAML frontmatter
+that can include the following fields:
 
 ```markdown
 ---
@@ -396,6 +397,8 @@ name: my-skill
 description: >
   Expert knowledge of MyTool for integration testing.
   Covers setup, configuration, and common patterns.
+triggers: mytool, integration test, configure
+disable-model-invocation: false
 ---
 
 # MyTool Instructions
@@ -403,20 +406,38 @@ description: >
 When asked about MyTool, follow these guidelines...
 ```
 
-The body after the frontmatter (or the entire file if no frontmatter exists) is the
-skill content that gets injected into the system prompt when the skill is loaded.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Canonical identifier (must match the directory name) |
+| `description` | Yes | Short summary shown in `/skills` output and the `<available_skills>` block |
+| `triggers` | No | Comma-separated phrases that auto-load the skill when mentioned in a user message |
+| `disable-model-invocation` | No | Set to `true` to prevent the model from loading this skill via tool call (default `false`) |
+
+The body after the frontmatter is the skill content that gets injected into the
+conversation when the skill is loaded.
 
 ### Loading a skill
 
-Skills are loaded on demand by typing `/<skill-name>` in the chat prompt. For example,
-given a skill directory named `nano-commits`:
+Skills can be loaded in three ways:
 
-```text
-Prompt: /nano-commits
-```
+1. **Slash command** — type `/<skill-name>` in the prompt:
+   ```text
+   Prompt: /nano-commits
+   ```
 
-Puny loads the `SKILL.md` content and injects it into the conversation. The skill name
-is matched as a standalone word (e.g. `/nano-commits` loads the `nano-commits` skill).
+2. **Keyword trigger** — mention a trigger phrase from the skill's `triggers` field in your
+   message. For example, a `caveman` skill with `triggers: talk like caveman, be brief`
+   loads automatically when you say:
+   ```text
+   Prompt: talk like caveman from now on
+   ```
+   Skills are also triggered by their directory name as a whole word — saying
+   `grill me on this design` loads the `grill-me` skill.
+
+3. **Model invocation** — the model can load a skill it considers relevant by calling the
+   `load_skill` tool. This happens automatically when the model sees a matching skill in
+   the `<available_skills>` block. Skills with `disable-model-invocation: true` won't
+   appear for model invocation and must be loaded by slash command only.
 
 ### Listing available skills
 
@@ -450,9 +471,10 @@ skills and their descriptions (if scanned) are injected into the system prompt a
 </available_skills>
 ```
 
-When you load a skill with `/<name>`, Puny reads the `SKILL.md` body, strips the
-frontmatter, and adds the content as a system message. The model can then follow
-the skill's instructions for the remainder of the conversation.
+When a skill is loaded (via slash command, keyword trigger, or model invocation),
+Puny reads the `SKILL.md` body, strips the frontmatter, and adds the content as a
+system message. The model can then follow the skill's instructions for the remainder
+of the conversation.
 
 Skills stay loaded for the session. To clear all loaded skills, use `/reset`.
 
@@ -529,6 +551,10 @@ While in a chat session:
 
 Any unrecognized slash command (e.g. `/nano-commits`, `/grill-me`) is treated as a
 skill name and loads the matching skill if found.
+
+Skills also load automatically when your message contains the skill's directory name
+or a trigger phrase listed in its frontmatter `triggers` field. The model can also
+load skills on its own via the `load_skill` tool.
 
 ### Sessions
 
