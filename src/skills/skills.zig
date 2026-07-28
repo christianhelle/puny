@@ -174,23 +174,27 @@ pub fn getGlobalRegistry() ?*Registry {
     return global_registry;
 }
 
-var pending_skill_name: ?[]const u8 = null;
-var pending_skill_content: ?[]const u8 = null;
+const PendingSkill = struct { name: []const u8, content: []const u8 };
 
-pub fn takePendingSkill(allocator: std.mem.Allocator) ?struct { name: []const u8, content: []const u8 } {
-    const name = pending_skill_name orelse return null;
-    const content = pending_skill_content orelse return null;
-    pending_skill_name = null;
-    pending_skill_content = null;
+var pending_queue: std.ArrayList(PendingSkill) = .empty;
+
+pub fn takePendingSkill(allocator: std.mem.Allocator) ?PendingSkill {
+    if (pending_queue.items.len == 0) return null;
+    const item = pending_queue.orderedRemove(0);
     return .{
-        .name = allocator.dupe(u8, name) catch return null,
-        .content = allocator.dupe(u8, content) catch return null,
+        .name = allocator.dupe(u8, item.name) catch return null,
+        .content = allocator.dupe(u8, item.content) catch return null,
     };
 }
 
 pub fn setPendingSkill(name: []const u8, content: []const u8, allocator: std.mem.Allocator) void {
-    pending_skill_name = allocator.dupe(u8, name) catch return;
-    pending_skill_content = allocator.dupe(u8, content) catch return;
+    const dup_name = allocator.dupe(u8, name) catch return;
+    const dup_content = allocator.dupe(u8, content) catch return;
+    pending_queue.append(allocator, .{ .name = dup_name, .content = dup_content }) catch {
+        allocator.free(dup_name);
+        allocator.free(dup_content);
+        return;
+    };
 }
 
 fn trimCr(maybe_cr: []const u8) []const u8 {
