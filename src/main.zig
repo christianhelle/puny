@@ -129,6 +129,7 @@ pub fn main(init: std.process.Init) !void {
         const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
         try skill_registry.lightScan(io, repo_path);
     }
+    skill_registry.fullScan(io) catch {};
     skills.setGlobalRegistry(&skill_registry);
 
     var session_restored = false;
