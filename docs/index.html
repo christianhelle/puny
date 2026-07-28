@@ -142,7 +142,7 @@
         <div class="feature-card">
           <span class="feature-icon">📦</span>
           <h3>Skills System</h3>
-          <p>Load reusable prompt-engineering skills from markdown files</p>
+          <p>Load reusable prompt-engineering skills via slash command, keyword triggers, or automatic model invocation</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon">💬</span>
@@ -241,6 +241,18 @@
         <div class="install-card">
           <h3>Sessions</h3>
           <p>Each session is identified by a UUID. A new session is created on every start and <code>/reset</code>. Use <code>/sessions</code> to list saved sessions and <code>/prune</code> to clean up old ones. In <code>/plan</code> mode, once you confirm the plan is ready, the model saves the final PRD as both <code>plan.md</code> and <code>plan.html</code> to the session folder via the <code>save_prd</code> tool.</p>
+        </div>
+        <div class="install-card">
+          <h3>Skills</h3>
+          <p>Puny supports reusable prompt-engineering skills stored as markdown files. Skills are scanned from <code>~/.agents/skills/</code> (global) and <code>&lt;repo&gt;/.agents/skills/</code> (per-project).</p>
+          <p>Each skill directory contains a <code>SKILL.md</code> file with YAML frontmatter:</p>
+          <table style="width:100%;border-collapse:collapse;margin:0.5rem 0;font-size:0.9rem">
+            <tr><td style="padding:0.25rem 0.5rem;border:1px solid #333"><code>name</code></td><td style="padding:0.25rem 0.5rem;border:1px solid #333">Canonical identifier</td></tr>
+            <tr><td style="padding:0.25rem 0.5rem;border:1px solid #333"><code>description</code></td><td style="padding:0.25rem 0.5rem;border:1px solid #333">Short summary shown in <code>/skills</code></td></tr>
+            <tr><td style="padding:0.25rem 0.5rem;border:1px solid #333"><code>triggers</code></td><td style="padding:0.25rem 0.5rem;border:1px solid #333">Comma-separated phrases that auto-load the skill</td></tr>
+            <tr><td style="padding:0.25rem 0.5rem;border:1px solid #333"><code>disable-model-invocation</code></td><td style="padding:0.25rem 0.5rem;border:1px solid #333">Set to true to restrict to manual loading</td></tr>
+          </table>
+          <p>Skills load three ways: <code>/&lt;name&gt;</code> slash command, mentioning a trigger phrase in your message, or the model calling <code>load_skill</code> automatically when it finds a relevant skill.</p>
         </div>
         <div class="install-card">
           <h3>Quick Start with LM Studio</h3>
