@@ -12,7 +12,7 @@ Startup time under 10ms means Puny is always ready when you are — no spinner, 
 waiting. The ~1 MB binary and minimal memory footprint mean it runs comfortably on
 a Raspberry Pi, a remote server over SSH, or a decade-old laptop. Every millisecond
 and megabyte is deliberate: there is no hidden runtime, no garbage collector, no
-Node.js dependency, no Electron shell.
+Node.js dependency, no javascript.
 
 ## Why the feature set is intentionally limited
 
