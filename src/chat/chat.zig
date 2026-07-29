@@ -446,7 +446,7 @@ pub fn runTurn(
         .messages = messages.items,
         .tools = tool_definitions,
         .stream = true,
-        .reasoning = show_thinking,
+        .reasoning = show_thinking or chat_log != null,
     };
 
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
