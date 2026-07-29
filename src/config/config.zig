@@ -152,6 +152,7 @@ pub const Config = struct {
 pub const LoadResult = struct {
     config: Config,
     had_error: bool = false,
+    file_existed: bool = false,
     arena: ?std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *LoadResult) void {
@@ -181,7 +182,7 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
         const stderr_writer = &stderr_file_writer.interface;
         stderr_writer.print("Warning: failed to parse config at {s}: {s}\nUsing defaults.\n", .{ path, @errorName(err) }) catch {};
         stderr_writer.flush() catch {};
-        return .{ .config = Config.default(), .had_error = true };
+        return .{ .config = Config.default(), .had_error = true, .file_existed = true };
     };
 
     // Steal the parser's arena: strings live in the arena, not in a clone
@@ -192,7 +193,7 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
     }
     const arena = parsed.arena.*;
     allocator.destroy(parsed.arena);
-    return .{ .config = cfg, .arena = arena };
+    return .{ .config = cfg, .arena = arena, .file_existed = true };
 }
 
 pub fn save(
@@ -306,6 +307,19 @@ test "can deserialize valid config JSON" {
         .{ .ignore_unknown_fields = true, .allocate = .alloc_if_needed },
     );
     defer parsed.deinit();
+}
+
+
+
+test "LoadResult.file_existed defaults to false" {
+    const result: LoadResult = .{ .config = .{} };
+    try std.testing.expect(!result.file_existed);
+}
+
+test "LoadResult.file_existed is true when loaded from parse error" {
+    const result: LoadResult = .{ .config = .{}, .had_error = true, .file_existed = true };
+    try std.testing.expect(result.file_existed);
+    try std.testing.expect(result.had_error);
 }
 
 test "can serialize config to JSON" {
