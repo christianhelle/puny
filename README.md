@@ -27,6 +27,10 @@ fetch web pages. If you want parallel work, run another instance.
 Each feature earns its place. Nothing ships because it looks good on a comparison table.
 This is not a platform — it is a tool.
 
+Puny does not show the model's reasoning or thinking output by default. I do not care
+about the model's internal monologue. I see it as a wall of text, a huge TL;DR you have
+to scroll past to get to the actual answer. If you want it, pass `--show-thinking`.
+
 The four supported providers are the ones I use personally:
 
 - [LM Studio](https://lmstudio.ai/) — local inference on my own hardware
@@ -39,8 +43,8 @@ read, edit, search, and inspect your codebase.
 
 ## Screenshots
 
-| Welcome screen | Provider picker | Model picker |
-|---|---|---|
+| Welcome screen               | Provider picker                      | Model picker                      |
+| ---------------------------- | ------------------------------------ | --------------------------------- |
 | ![](docs/images/welcome.png) | ![](docs/images/change-provider.png) | ![](docs/images/change-model.png) |
 
 ## Features
@@ -154,10 +158,10 @@ Sign in to [OpenCode Zen](https://opencode.ai/zen), copy your API key, then:
 puny --provider opencode --api-key YOUR_API_KEY
 ```
 
-Puny connects to `https://opencode.ai/zen` and shows the model picker. 
-Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions` 
-transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models), 
-plus Qwen and Claude models served over Anthropic's `/v1/messages` transport, 
+Puny connects to `https://opencode.ai/zen` and shows the model picker.
+Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions`
+transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models),
+plus Qwen and Claude models served over Anthropic's `/v1/messages` transport,
 and Gemini models served over Google's `/v1/models/<model>:streamGenerateContent` transport.
 
 ### OpenCode Go
@@ -168,7 +172,7 @@ Sign in to [OpenCode Zen](https://opencode.ai/zen), subscribe to Go, copy your A
 puny --provider opencode-go --api-key YOUR_API_KEY
 ```
 
-Puny connects to `https://opencode.ai/zen/go` and shows the model picker. 
+Puny connects to `https://opencode.ai/zen/go` and shows the model picker.
 Go models are served over OpenAI-compatible `/v1/chat/completions` (DeepSeek, Grok, GLM, Kimi, MiMo)
 and Anthropic `/v1/messages` (MiniMax, Qwen) transports.
 
@@ -434,12 +438,12 @@ disable-model-invocation: false
 When asked about MyTool, follow these guidelines...
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Canonical identifier (must match the directory name) |
-| `description` | Yes | Short summary shown in `/skills` output and the `<available_skills>` block |
-| `triggers` | No | Comma-separated phrases that auto-load the skill when mentioned in a user message |
-| `disable-model-invocation` | No | Set to `true` to prevent the model from loading this skill via tool call (default `false`) |
+| Field                      | Required | Description                                                                                |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `name`                     | Yes      | Canonical identifier (must match the directory name)                                       |
+| `description`              | Yes      | Short summary shown in `/skills` output and the `<available_skills>` block                 |
+| `triggers`                 | No       | Comma-separated phrases that auto-load the skill when mentioned in a user message          |
+| `disable-model-invocation` | No       | Set to `true` to prevent the model from loading this skill via tool call (default `false`) |
 
 The body after the frontmatter is the skill content that gets injected into the
 conversation when the skill is loaded.
@@ -449,6 +453,7 @@ conversation when the skill is loaded.
 Skills can be loaded in three ways:
 
 1. **Slash command** — type `/<skill-name>` in the prompt:
+
    ```text
    Prompt: /nano-commits
    ```
@@ -456,9 +461,11 @@ Skills can be loaded in three ways:
 2. **Keyword trigger** — mention a trigger phrase from the skill's `triggers` field in your
    message. For example, a `caveman` skill with `triggers: talk like caveman, be brief`
    loads automatically when you say:
+
    ```text
    Prompt: talk like caveman from now on
    ```
+
    Skills are also triggered by their directory name as a whole word — saying
    `grill me on this design` loads the `grill-me` skill.
 
@@ -478,7 +485,6 @@ Available skills:
 
   nano-commits
   grill-me
-  ocpp-2.0.1  — Expert knowledge of OCPP 2.0.1 protocol
 ```
 
 Skills with a `description` field in their frontmatter show a description next to
@@ -528,37 +534,37 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 ### CLI options
 
-| Flag                       | Description                                                |
-| -------------------------- | ---------------------------------------------------------- |
-| `--provider <name>`        | Provider: `lmstudio`, `opencode`, `opencode-go`, or `copilot` (env/config/CLI precedence) |
-| `-u`, `--url <url>`        | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)  |
-| `-k`, `--api-key <key>`    | Provider API token (session only)                          |
-| `--api-key-file <path>`    | Read provider API token from file (session only)           |
-| `-m`, `--model <id>`       | Model identifier (skips picker if found in running models) |
-| `-p`, `--prompt <text>`    | Pre-fill prompt as first user message                      |
-| `-1`, `--oneshot`          | Exit after processing the prompt (requires `--prompt`)     |
-| `-M`, `--mock`             | Use mock provider (no backend required)                    |
-| `--reconfigure`            | Re-run first-run setup and update config                   |
-| `--show-thinking`          | Show reasoning/thinking output from the model              |
-| `--session <id>`           | Resume a previous session by UUID or unique prefix         |
-| `--resume`                 | Resume the most recent session with a saved conversation   |
-| `--prune`                  | Delete old sessions (use with `--session` to keep one)     |
-| `--debug`                  | Log HTTP requests and responses to `puny_debug.log`        |
-| `-U`, `--upgrade`          | Upgrade to the latest release via install script            |
-| `-h`, `--help`             | Show help text                                             |
-| `-V`, `--version`          | Print version                                              |
+| Flag                    | Description                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `--provider <name>`     | Provider: `lmstudio`, `opencode`, `opencode-go`, or `copilot` (env/config/CLI precedence) |
+| `-u`, `--url <url>`     | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)                                 |
+| `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
+| `--api-key-file <path>` | Read provider API token from file (session only)                                          |
+| `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
+| `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
+| `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt`)                                    |
+| `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
+| `--reconfigure`         | Re-run first-run setup and update config                                                  |
+| `--show-thinking`       | Show reasoning/thinking output from the model                                             |
+| `--session <id>`        | Resume a previous session by UUID or unique prefix                                        |
+| `--resume`              | Resume the most recent session with a saved conversation                                  |
+| `--prune`               | Delete old sessions (use with `--session` to keep one)                                    |
+| `--debug`               | Log HTTP requests and responses to `puny_debug.log`                                       |
+| `-U`, `--upgrade`       | Upgrade to the latest release via install script                                          |
+| `-h`, `--help`          | Show help text                                                                            |
+| `-V`, `--version`       | Print version                                                                             |
 
 ### Environment variables
 
-| Variable                 | Description                                        |
-| ------------------------ | -------------------------------------------------- |
-| `PUNY_PROVIDER`          | Default provider name (overrides config)           |
-| `PUNY_PROVIDER_URL`      | LM Studio endpoint URL (overrides config/CLI)      |
-| `PUNY_API_KEY`           | Provider API token (overrides config, session only)|
-| `PUNY_MODEL`             | Default model identifier (overrides config)        |
-| `PUNY_MOCK`              | Set to `1` or `true` to enable mock provider       |
-| `PUNY_SHOW_THINKING`     | Set to `1` or `true` to show reasoning output      |
-| `GITHUB_COPILOT_OAUTH_TOKEN` | GitHub OAuth token for Copilot provider        |
+| Variable                     | Description                                         |
+| ---------------------------- | --------------------------------------------------- |
+| `PUNY_PROVIDER`              | Default provider name (overrides config)            |
+| `PUNY_PROVIDER_URL`          | LM Studio endpoint URL (overrides config/CLI)       |
+| `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
+| `PUNY_MODEL`                 | Default model identifier (overrides config)         |
+| `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider        |
+| `PUNY_SHOW_THINKING`         | Set to `1` or `true` to show reasoning output       |
+| `GITHUB_COPILOT_OAUTH_TOKEN` | GitHub OAuth token for Copilot provider             |
 
 ### Interactive commands
 
@@ -597,12 +603,12 @@ Sessions are stored at `~/.config/puny/sessions/<uuid>/` (Linux/macOS) or
 use `$XDG_CONFIG_HOME/puny` when set on Linux/macOS, and on Windows fall back to
 `%USERPROFILE%\puny` when `%APPDATA%` is unavailable. Each session folder can contain:
 
-| File | Description |
-|------|-------------|
-| `plan.md` | PRD markdown produced by the model during `/plan` mode |
-| `plan.html` | HTML version of the PRD |
+| File            | Description                                                     |
+| --------------- | --------------------------------------------------------------- |
+| `plan.md`       | PRD markdown produced by the model during `/plan` mode          |
+| `plan.html`     | HTML version of the PRD                                         |
 | `messages.json` | Full conversation history, saved automatically after every turn |
-| `session.json` | Session metadata (planning mode, first user prompt) |
+| `session.json`  | Session metadata (planning mode, first user prompt)             |
 
 #### Conversation persistence
 
