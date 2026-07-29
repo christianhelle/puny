@@ -521,6 +521,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
         try thinking_indicator.show(ctx.stdout_writer);
 
+        const chat_log_writer = if (ctx.chat_log) |log| log.writer else null;
         const result = chat.runTurn(
             ctx.prov,
             ctx.messages_arena.allocator(),
@@ -533,6 +534,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
             ctx.messages,
             active_tool_definitions,
             &thinking_indicator,
+            chat_log_writer,
         ) catch |err| {
             try thinking_indicator.finish(ctx.io, ctx.stdout_writer, 0, false, false, .error_, null);
             return err;
