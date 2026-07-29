@@ -133,7 +133,7 @@ pub fn main(init: std.process.Init) !void {
     const now = std.Io.Clock.Timestamp.now(io, .awake);
     const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
     var startup_buf: [64]u8 = undefined;
-    try stdout_writer.print("{s}time-to-first-render: {s}{s}", .{
+    try stdout_writer.print("{s}Startup time: {s}{s}", .{
         ansi.dim, formatStartupTime(&startup_buf, elapsed_ns), ansi.reset,
     });
     try stdout_writer.flush();
