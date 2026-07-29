@@ -21,8 +21,8 @@ never try to be everything to everyone.
 
 Other coding agents ship MCP, subagents, plugins, extensions, animations, and dozens
 of other features I never asked for. Puny does not. The feature set is limited to what
-I need to get results: read files, write files, run commands, search code, check git
-status, fetch web pages. If you want parallel work, run another instance.
+I need to get results: read files, write files, run commands, search code, load skills,
+fetch web pages. If you want parallel work, run another instance.
 
 Each feature earns its place. Nothing ships because it looks good on a comparison table.
 This is not a platform — it is a tool.
