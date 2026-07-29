@@ -71,7 +71,19 @@ pub fn main(init: std.process.Init) !u8 {
     return if (failed == 0) 0 else 1;
 }
 
+fn removeEvidenceFiles(io: std.Io, test_case: TestCase) void {
+    if (test_case.evidence) |evidence| {
+        for (evidence.file_exists) |path| {
+            std.Io.Dir.cwd().deleteFile(io, path) catch {};
+        }
+        if (evidence.file_contains) |fc| {
+            std.Io.Dir.cwd().deleteFile(io, fc.path) catch {};
+        }
+    }
+}
+
 fn runTest(allocator: std.mem.Allocator, io: std.Io, binary_path: []const u8, test_case: TestCase) !bool {
+    removeEvidenceFiles(io, test_case);
     const child_argv = try allocator.alloc([]const u8, test_case.args.len + 1);
     defer allocator.free(child_argv);
     child_argv[0] = binary_path;
