@@ -164,18 +164,22 @@
         "--model",
         "deepseek-v4-flash-free",
         "--oneshot",
+        "--chat-log",
         "--prompt",
         "Read the file src/main.zig"
       ],
       "min_output_length": 1,
-      "expect": [
-        "const std = @import"
-      ],
       "not_expect": [
         "Error:",
         "Chat failed",
         "Failed"
-      ]
+      ],
+      "evidence": {
+        "file_contains": {
+          "path": "puny_chat.log",
+          "patterns": ["[TOOL_RESULT]", "const std = @import"]
+        }
+      }
     },
     {
       "name": "opencode_zen: Tool call grep_search",
