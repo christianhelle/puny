@@ -26,7 +26,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
     const args_slice = try init.minimal.args.toSlice(arena);
-    const parsed = cli.parseArgs(io, init.environ_map, args_slice);
+    var parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
     if (parsed.upgrade) {
         try runUpgrade(io);
@@ -85,6 +85,10 @@ pub fn main(init: std.process.Init) !void {
     defer cfg_result.deinit();
     const cfg = &cfg_result.config;
 
+    if (!cfg_result.file_existed and !parsed.reconfigure) {
+        parsed.reconfigure = true;
+    }
+
     var history = try loadHistory(arena, io, init.environ_map);
     defer history.deinit();
 
@@ -93,7 +97,7 @@ pub fn main(init: std.process.Init) !void {
     const stdout_writer = &stdout_file_writer.interface;
 
     if (parsed.reconfigure) {
-        try runStartupReconfigure(arena, io, init, cfg, stdout_writer);
+        try runStartupReconfigure(arena, io, init, cfg, stdout_writer, !cfg_result.file_existed);
     }
 
     var random_source: std.Random.IoSource = .{ .io = io };
@@ -349,8 +353,13 @@ fn runStartupReconfigure(
     init: std.process.Init,
     cfg: *config.Config,
     stdout_writer: *std.Io.Writer,
+    first_launch: bool,
 ) !void {
-    try stdout_writer.print("\nReconfiguring Puny.\n", .{});
+    if (first_launch) {
+        try stdout_writer.print("\nWelcome to Puny! Let's get you set up.\n", .{});
+    } else {
+        try stdout_writer.print("\nReconfiguring Puny.\n", .{});
+    }
     const result = try session.promptReconfigure(arena, io, init, stdout_writer, cfg);
     if (result.cancelled) return;
     if (result.changed) {
