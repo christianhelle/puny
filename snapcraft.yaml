@@ -20,7 +20,7 @@ donation:
   - https://buymeacoffee.com/christianhelle
   - https://github.com/sponsors/christianhelle
 description: |
-  A minimal AI coding agent for the terminal that currently supports the following model providers:
+  A minimal natively compiled single-binary coding agent with a ~1 MB footprint, for professionals on limited hardware. Currently supports the following model providers:
 
   - [LM Studio](https://lmstudio.ai/)
   - [OpenCode Zen](https://opencode.ai/zen)
