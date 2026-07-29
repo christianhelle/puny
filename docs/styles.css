@@ -191,6 +191,19 @@ body {
 
 .install-code code { color: #d4d4d4; white-space: pre-line; overflow-wrap: anywhere; display: block; line-height: 1.6; }
 
+.intro-card {
+  max-width: 720px; margin: 0 auto; padding: 2.5rem 3rem;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); line-height: 1.8;
+}
+.intro-card p { color: var(--text); font-size: 1.05rem; margin-bottom: 1.25rem; }
+.intro-card p:last-child { margin-bottom: 0; }
+.intro-card code { background: var(--bg-secondary); padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.9rem; }
+.intro-card ul { list-style: none; padding: 0; margin: 1rem 0 0; }
+.intro-card ul li { padding: 0.35rem 0; color: var(--text); font-size: 1.05rem; }
+.intro-card ul li a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.intro-card ul li a:hover { text-decoration: underline; }
+.intro-lede { text-align: center; color: var(--text-muted); margin-top: -2rem; margin-bottom: 2.5rem; font-size: 1rem; }
 .install-card p { color: var(--text-muted); font-size: 0.875rem; }
 .install-card p a { color: var(--primary); text-decoration: none; }
 .install-card p a:hover { text-decoration: underline; }
