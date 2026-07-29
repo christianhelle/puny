@@ -195,6 +195,10 @@ body {
 .install-card p a { color: var(--primary); text-decoration: none; }
 .install-card p a:hover { text-decoration: underline; }
 .install-card code { background: var(--bg-secondary); padding: 0.125rem 0.25rem; border-radius: 0.25rem; font-size: 0.75rem; }
+.install-card ul { list-style: none; padding: 0; margin: 1rem 0; }
+.install-card ul li { padding: 0.25rem 0; color: var(--text-muted); font-size: 0.875rem; }
+.install-card ul li a { color: var(--primary); text-decoration: none; }
+.install-card ul li a:hover { text-decoration: underline; }
 
 .install-platforms {
   display: grid;

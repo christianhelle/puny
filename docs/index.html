@@ -125,6 +125,39 @@
     </div>
   </section>
 
+  <section class="installation">
+    <div class="container">
+      <h2 class="section-title">Why fast and small matters</h2>
+      <div class="features-grid" style="grid-template-columns: 1fr;">
+        <div class="install-card">
+          <p>Startup time under 10ms means Puny is always ready when you are — no spinner, no waiting. The ~1 MB binary and minimal memory footprint mean it runs comfortably on a Raspberry Pi, a remote server over SSH, or a decade-old laptop. Every millisecond and megabyte is deliberate: there is no hidden runtime, no garbage collector, no Node.js dependency, no Electron shell.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="container">
+      <h2 class="section-title">Why the feature set is intentionally limited</h2>
+      <p style="text-align:center;color:var(--text-muted);margin-top:-2rem;margin-bottom:2rem;font-size:0.9rem;">Puny is designed around the way I work. It is highly opinionated.</p>
+      <div class="features-grid" style="grid-template-columns: 1fr;">
+        <div class="install-card">
+          <p>Puny is designed around the way I work. It is highly opinionated. That means it will never try to be everything to everyone.</p>
+          <p>Other coding agents include MCP, subagents, plugins, extensions, animations, and dozens of other features I never asked for. Puny does not. The feature set is limited to what I need to get results: read files, write files, run commands, search code, load skills, fetch web pages. If you want parallel work, run another instance.</p>
+          <p>Each feature earns its place. Nothing ships because it looks good on a comparison table. This is not a platform — it is a tool.</p>
+          <p>Puny does not show the model's reasoning or thinking output by default. I do not care about the model's internal monologue. I see it as a wall of text, a huge TL;DR you have to scroll past to get to the actual answer. If you want it, pass <code>--show-thinking</code>. If you think you want it later, pass <code>--chat-log</code> which saves the entire conversation, noise included, to <code>puny_chat.log</code>.</p>
+          <p>The four supported providers are the ones I use personally:</p>
+          <ul>
+            <li><a href="https://lmstudio.ai/">LM Studio</a> — local inference on my own hardware</li>
+            <li><a href="https://opencode.ai/zen">OpenCode Zen</a> — wide selection of reliable optimized models</li>
+            <li><a href="https://opencode.ai/go">OpenCode Go</a> — cheaper hosted models when I need them</li>
+            <li><a href="https://github.com/features/copilot">GitHub Copilot</a> — comes with my GitHub subscription</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="features" class="features">
     <div class="container">
       <h2 class="section-title">Features</h2>
