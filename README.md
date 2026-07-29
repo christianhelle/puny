@@ -30,7 +30,7 @@ This is not a platform — it is a tool.
 The four supported providers are the ones I use personally:
 
 - [LM Studio](https://lmstudio.ai/) — local inference on my own hardware
-- [OpenCode Zen](https://opencode.ai/zen) — hosted models I actually pay for
+- [OpenCode Zen](https://opencode.ai/zen) — wide selection of reliable optimized models
 - [OpenCode Go](https://opencode.ai/go) — cheaper hosted models when I need them
 - [GitHub Copilot](https://github.com/features/copilot) — comes with my GitHub subscription
 
