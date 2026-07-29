@@ -453,9 +453,64 @@ fn buildToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefi
     return definitions;
 }
 
+fn formatStartupTime(buf: []u8, elapsed_ns: u64) []const u8 {
+    if (elapsed_ns < 1000)
+        return std.fmt.bufPrint(buf, "{d} ns", .{elapsed_ns}) catch "0 ns";
+    const us = elapsed_ns / 1000;
+    if (us < 1000)
+        return std.fmt.bufPrint(buf, "{d} µs", .{us}) catch "0 µs";
+    const ms = us / 1000;
+    if (ms < 1000)
+        return std.fmt.bufPrint(buf, "{d} ms", .{ms}) catch "0 ms";
+    const s = @as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s;
+    return std.fmt.bufPrint(buf, "{d:.1} s", .{s}) catch "0 s";
+}
+
 fn requiresApiKey(selected_provider: ModelProvider) bool {
     return selected_provider == .opencode_zen or
         selected_provider == .opencode_go;
+}
+
+test "formatStartupTime formats sub-millisecond as µs" {
+    var buf: [64]u8 = undefined;
+    const result = formatStartupTime(&buf, 5000);
+    try std.testing.expectEqualStrings("5 µs", result);
+}
+
+test "formatStartupTime formats milliseconds" {
+    var buf: [64]u8 = undefined;
+    const result = formatStartupTime(&buf, 42_000_000);
+    try std.testing.expectEqualStrings("42 ms", result);
+}
+
+test "formatStartupTime formats seconds" {
+    var buf: [64]u8 = undefined;
+    const result = formatStartupTime(&buf, 2_500_000_000);
+    try std.testing.expectEqualStrings("2.5 s", result);
+}
+
+test "formatStartupTime handles zero" {
+    var buf: [64]u8 = undefined;
+    const result = formatStartupTime(&buf, 0);
+    try std.testing.expectEqualStrings("0 ns", result);
+}
+
+test "formatStartupTime boundary between ns and µs" {
+    var buf: [64]u8 = undefined;
+    const result = formatStartupTime(&buf, 999);
+    try std.testing.expectEqualStrings("999 ns", result);
+}
+
+test "formatStartupTime boundary between µs and ms" {
+    var buf: [64]u8 = undefined;
+    const result = formatStartupTime(&buf, 999_999);
+    try std.testing.expectEqualStrings("999 µs", result);
+}
+
+test "formatStartupTime boundary between ms and s" {
+    var buf: [64]u8 = undefined;
+    const result = formatStartupTime(&buf, 999_000_000);
+    try std.testing.expectEqualStrings("999 ms", result);
 }
 
 test "requiresApiKey only for opencode and opencode-go" {
