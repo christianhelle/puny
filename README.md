@@ -61,7 +61,7 @@ read, edit, search, and inspect your codebase.
   - Read, write, and list files in your project
   - Run shell commands
   - Search your codebase
-  - Check git status and diff
+  - Load skills
   - Fetch web pages
 
 ## Installation
@@ -542,6 +542,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `-u`, `--url <url>`     | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)                                 |
 | `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
 | `--api-key-file <path>` | Read provider API token from file (session only)                                          |
+| `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
 | `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
 | `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
 | `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt`)                                    |
@@ -560,6 +561,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 | Variable                     | Description                                         |
 | ---------------------------- | --------------------------------------------------- |
+| `PUNY_CHAT_LOG`              | Set to `1` or `true` to save full conversation to `puny_chat.log` |
 | `PUNY_PROVIDER`              | Default provider name (overrides config)            |
 | `PUNY_PROVIDER_URL`          | LM Studio endpoint URL (overrides config/CLI)       |
 | `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
