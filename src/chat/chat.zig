@@ -527,11 +527,13 @@ pub fn runTurn(
 
     if (indicator_opt) |i| try i.finish(io, stdout_writer, content_cursor_offset, content_ends_with_newline, has_streamed_content_after, .done, provider_ttft);
 
+    if (chat_log) |log| {
+        if (accumulator.reasoning.items.len > 0) {
+            log.print("[REASONING]\n{s}\n\n", .{accumulator.reasoning.items}) catch {};
+        }
+    }
     if (has_content) {
         if (chat_log) |log| {
-            if (accumulator.reasoning.items.len > 0) {
-                log.print("[REASONING]\n{s}\n\n", .{accumulator.reasoning.items}) catch {};
-            }
             log.print("[ASSISTANT]\n{s}\n\n", .{accumulator.content.items}) catch {};
         }
         const content = try tools.dupeString(arena, accumulator.content.items);
