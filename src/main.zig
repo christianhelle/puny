@@ -14,6 +14,7 @@ const sigint = @import("core/sigint.zig");
 const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
 const welcome = @import("tui/welcome.zig");
+const ansi = @import("tui/ansi.zig");
 const ModelProvider = provider.ModelProvider;
 const DebugLog = session.DebugLog;
 const ChatLog = session.ChatLog;
@@ -23,6 +24,7 @@ pub fn main(init: std.process.Init) !void {
     var messages_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const messages_arena = messages_arena_state.allocator();
     const io = init.io;
+    var startup_time = std.Io.Clock.Timestamp.now(io, .awake);
 
     const args_slice = try init.minimal.args.toSlice(arena);
     const parsed = cli.parseArgs(io, init.environ_map, args_slice);
@@ -93,6 +95,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (parsed.reconfigure) {
         try runStartupReconfigure(arena, io, init, cfg, stdout_writer);
+        startup_time = std.Io.Clock.Timestamp.now(io, .awake);
     }
 
     var random_source: std.Random.IoSource = .{ .io = io };
@@ -246,6 +249,14 @@ pub fn main(init: std.process.Init) !void {
         .chat_log = if (chat_log) |*log| log else null,
         .skill_registry = &skill_registry,
     };
+
+    const now = std.Io.Clock.Timestamp.now(io, .awake);
+    const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
+    var startup_buf: [64]u8 = undefined;
+    try stdout_writer.print("{s}Started in {s}{s}\n\n", .{
+        ansi.dim, formatStartupTime(&startup_buf, elapsed_ns), ansi.reset,
+    });
+    try stdout_writer.flush();
 
     var chat_session = session.ChatSession.init(ctx);
     try chat_session.run();
