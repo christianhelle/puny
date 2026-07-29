@@ -66,6 +66,9 @@ pub fn main(init: std.process.Init) !void {
     var chat_file_writer: std.Io.File.Writer = undefined;
     var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
         const file = try std.Io.Dir.cwd().createFile(io, "puny_chat.log", .{});
+        if (comptime @import("builtin").os.tag != .windows) {
+            std.Io.Dir.cwd().setFilePermissions(io, "puny_chat.log", @enumFromInt(0o600), .{}) catch {};
+        }
         chat_file_writer = .init(file, io, &chat_buffer);
         break :blk ChatLog{
             .file = file,
