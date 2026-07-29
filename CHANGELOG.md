@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Show startup time metrics on Welcome Screen ([#67](https://github.com/christianhelle/puny/pull/67)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --chat-log CLI flag for conversation logging ([#65](https://github.com/christianhelle/puny/pull/65)) ([@christianhelle](https://github.com/christianhelle/))
 - Allow models to load skills via tool call ([#64](https://github.com/christianhelle/puny/pull/64)) ([@christianhelle](https://github.com/christianhelle/))
 - Add markdown table rendering integration and regression tests ([#62](https://github.com/christianhelle/puny/pull/62)) ([@christianhelle](https://github.com/christianhelle/))
