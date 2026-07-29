@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add --chat-log CLI flag for conversation logging ([#65](https://github.com/christianhelle/puny/pull/65)) ([@christianhelle](https://github.com/christianhelle/))
 - Allow models to load skills via tool call ([#64](https://github.com/christianhelle/puny/pull/64)) ([@christianhelle](https://github.com/christianhelle/))
 - Add markdown table rendering integration and regression tests ([#62](https://github.com/christianhelle/puny/pull/62)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix app crashes when using --provider CLI argument ([#63](https://github.com/christianhelle/puny/pull/63)) ([@christianhelle](https://github.com/christianhelle/))
