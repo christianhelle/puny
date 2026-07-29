@@ -309,8 +309,6 @@ test "can deserialize valid config JSON" {
     defer parsed.deinit();
 }
 
-
-
 test "LoadResult.file_existed defaults to false" {
     const result: LoadResult = .{ .config = .{} };
     try std.testing.expect(!result.file_existed);
