@@ -16,6 +16,7 @@ const tools = @import("tools/root.zig");
 const welcome = @import("tui/welcome.zig");
 const ModelProvider = provider.ModelProvider;
 const DebugLog = session.DebugLog;
+const ChatLog = session.ChatLog;
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
@@ -57,6 +58,21 @@ pub fn main(init: std.process.Init) !void {
         };
     } else null;
     defer if (debug_log) |*log| {
+        log.writer.flush() catch {};
+        log.file.close(io);
+    };
+
+    var chat_buffer: [4096]u8 = undefined;
+    var chat_file_writer: std.Io.File.Writer = undefined;
+    var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
+        const file = try std.Io.Dir.cwd().createFile(io, "puny_chat.log", .{});
+        chat_file_writer = .init(file, io, &chat_buffer);
+        break :blk ChatLog{
+            .file = file,
+            .writer = &chat_file_writer.interface,
+        };
+    } else null;
+    defer if (chat_log) |*log| {
         log.writer.flush() catch {};
         log.file.close(io);
     };
@@ -224,6 +240,7 @@ pub fn main(init: std.process.Init) !void {
         .session = &current_session,
         .session_stats = &session_stats,
         .debug_log = if (debug_log) |*log| log else null,
+        .chat_log = if (chat_log) |*log| log else null,
         .skill_registry = &skill_registry,
     };
 
