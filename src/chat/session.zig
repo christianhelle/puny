@@ -117,6 +117,10 @@ pub const ChatSession = struct {
             };
             if (user_message.len == 0) continue;
 
+            if (ctx.chat_log) |log| {
+                log.print("[USER]\n{s}\n\n", .{user_message});
+            }
+
             const command = commands.parse(user_message);
             const action = try commands.dispatch(command, .{
                 .arena = ctx.arena,
