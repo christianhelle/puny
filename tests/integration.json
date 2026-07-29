@@ -395,6 +395,93 @@
         "Chat failed",
         "Failed"
       ]
+    },
+    {
+      "name": "opencode_go: Chat log captures conversation",
+      "args": [
+        "--provider",
+        "opencode_go",
+        "--model",
+        "deepseek-v4-flash",
+        "--oneshot",
+        "--prompt",
+        "Respond with just the word hello",
+        "--chat-log"
+      ],
+      "min_output_length": 1,
+      "expect": [
+        "hello"
+      ],
+      "not_expect": [
+        "Error:",
+        "Chat failed",
+        "Failed"
+      ],
+      "evidence": {
+        "file_exists": ["puny_chat.log"],
+        "file_contains": {
+          "path": "puny_chat.log",
+          "patterns": ["[USER]", "[ASSISTANT]"]
+        }
+      }
+    },
+    {
+      "name": "opencode_zen: Chat log captures conversation",
+      "args": [
+        "--provider",
+        "opencode_zen",
+        "--model",
+        "deepseek-v4-flash-free",
+        "--oneshot",
+        "--prompt",
+        "Respond with just the word hello",
+        "--chat-log"
+      ],
+      "min_output_length": 1,
+      "expect": [
+        "hello"
+      ],
+      "not_expect": [
+        "Error:",
+        "Chat failed",
+        "Failed"
+      ],
+      "evidence": {
+        "file_exists": ["puny_chat.log"],
+        "file_contains": {
+          "path": "puny_chat.log",
+          "patterns": ["[USER]", "[ASSISTANT]"]
+        }
+      }
+    },
+    {
+      "name": "lmstudio: Chat log captures conversation",
+      "args": [
+        "--provider",
+        "lmstudio",
+        "--model",
+        "google/gemma-4-e4b",
+        "--oneshot",
+        "--prompt",
+        "Respond with just the word hello",
+        "--chat-log"
+      ],
+      "min_output_length": 1,
+      "expect": [
+        "hello"
+      ],
+      "not_expect": [
+        "Error:",
+        "Chat failed",
+        "Failed"
+      ],
+      "evidence": {
+        "file_exists": ["puny_chat.log"],
+        "file_contains": {
+          "path": "puny_chat.log",
+          "patterns": ["[USER]", "[ASSISTANT]"]
+        }
+      }
     }
   ]
 }
