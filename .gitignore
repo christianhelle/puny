@@ -7,4 +7,5 @@ zig-cache/
 zig-pkg
 artifacts
 puny_debug.log
+puny_chat.log
 trace.log
