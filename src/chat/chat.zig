@@ -230,7 +230,7 @@ pub const OpenAiAccumulator = struct {
             .has_header = false,
             .lines_printed = 0,
             .content = .empty,
-            .reasoning = .{},
+            .reasoning = .empty,
             .partial_calls = .{},
             .tool_calls = .empty,
             .usage = null,
@@ -439,6 +439,7 @@ pub fn runTurn(
     messages: *std.ArrayList(openai.Message),
     tool_definitions: []const openai.ToolDefinition,
     indicator_opt: ?*indicator.ThinkingIndicator,
+    chat_log: ?*std.Io.Writer,
 ) !TurnResult {
     const request = openai.ChatRequest{
         .model = model_key,
@@ -497,6 +498,15 @@ pub fn runTurn(
         const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
         try messages.append(arena, .{ .assistant = assistant_content });
 
+        if (chat_log) |log| {
+            if (accumulator.reasoning.items.len > 0) {
+                log.print("[REASONING]\n{s}\n\n", .{accumulator.reasoning.items}) catch {};
+            }
+            if (assistant_content.content) |c| {
+                log.print("[ASSISTANT]\n{s}\n\n", .{c}) catch {};
+            }
+        }
+
         var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
             try printToolCall(arena, stdout_writer, tc);
@@ -504,6 +514,10 @@ pub fn runTurn(
             tool_output_lines += 1;
             const result = try executeTool(arena, io, tc);
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
+            if (chat_log) |log| {
+                log.print("[TOOL_CALL]\n{s}\n{s}\n\n", .{ tc.function.name, tc.function.arguments }) catch {};
+                log.print("[TOOL_RESULT]\n{s}\n\n", .{result}) catch {};
+            }
         }
 
         const cursor_offset = content_cursor_offset + tool_output_lines;
@@ -514,6 +528,12 @@ pub fn runTurn(
     if (indicator_opt) |i| try i.finish(io, stdout_writer, content_cursor_offset, content_ends_with_newline, has_streamed_content_after, .done, provider_ttft);
 
     if (has_content) {
+        if (chat_log) |log| {
+            if (accumulator.reasoning.items.len > 0) {
+                log.print("[REASONING]\n{s}\n\n", .{accumulator.reasoning.items}) catch {};
+            }
+            log.print("[ASSISTANT]\n{s}\n\n", .{accumulator.content.items}) catch {};
+        }
         const content = try tools.dupeString(arena, accumulator.content.items);
         try messages.append(arena, .{ .assistant = .{ .content = content } });
     }
