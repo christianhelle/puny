@@ -210,6 +210,7 @@ pub const OpenAiAccumulator = struct {
     has_header: bool,
     lines_printed: usize,
     content: std.ArrayList(u8),
+    reasoning: std.ArrayList(u8),
     partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
     tool_calls: std.ArrayList(openai.ToolCall),
     usage: ?openai.TurnUsage,
@@ -229,6 +230,7 @@ pub const OpenAiAccumulator = struct {
             .has_header = false,
             .lines_printed = 0,
             .content = .empty,
+            .reasoning = .{},
             .partial_calls = .{},
             .tool_calls = .empty,
             .usage = null,
@@ -243,6 +245,7 @@ pub const OpenAiAccumulator = struct {
 
     pub fn deinit(self: *@This()) void {
         self.content.deinit(self.allocator);
+        self.reasoning.deinit(self.allocator);
         var it = self.partial_calls.iterator();
         while (it.next()) |entry| {
             entry.value_ptr.args.deinit(self.allocator);
@@ -329,6 +332,7 @@ pub const OpenAiAccumulator = struct {
                 try self.content.appendSlice(self.allocator, text);
             },
             .reasoning => |text| {
+                try self.reasoning.appendSlice(self.allocator, text);
                 if (self.show_thinking) {
                     self.has_streamed_output = true;
                     self.reasoning_shown = true;
@@ -574,6 +578,21 @@ test "OpenAiAccumulator assembles content" {
 
     try std.testing.expectEqualStrings("Hello world", acc.content.items);
     try std.testing.expect(!acc.hasToolCalls());
+}
+
+test "OpenAiAccumulator captures reasoning unconditionally" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .reasoning = "thinking step 1" });
+    try acc.onEvent(.{ .reasoning = "thinking step 2" });
+    try acc.onEvent(.{ .finish = null });
+
+    try std.testing.expectEqualStrings("thinking step 1thinking step 2", acc.reasoning.items);
+    try std.testing.expectEqual(@as(usize, 0), acc.content.items.len);
 }
 
 test "OpenAiAccumulator updates SessionStats while streaming" {
