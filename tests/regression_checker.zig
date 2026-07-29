@@ -1,10 +1,21 @@
 const std = @import("std");
 
+const FileContains = struct {
+    path: []const u8,
+    patterns: []const []const u8,
+};
+
+const Evidence = struct {
+    file_exists: []const []const u8 = &.{},
+    file_contains: ?FileContains = null,
+};
+
 const TestCase = struct {
     name: []const u8,
     args: []const []const u8,
     expect: []const []const u8,
     not_expect: []const []const u8,
+    evidence: ?Evidence = null,
 };
 
 pub fn main(init: std.process.Init) !u8 {
@@ -106,6 +117,29 @@ fn runTest(allocator: std.mem.Allocator, io: std.Io, binary_path: []const u8, te
         if (std.mem.indexOf(u8, result.stdout, not_expected) != null) {
             std.debug.print("FAILED\n    unexpected: '{s}'\n", .{not_expected});
             return false;
+        }
+    }
+
+    if (test_case.evidence) |evidence| {
+        for (evidence.file_exists) |path| {
+            const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch {
+                std.debug.print("FAILED\n    evidence file not found: '{s}'\n", .{path});
+                return false;
+            };
+            file.close(io);
+        }
+        if (evidence.file_contains) |fc| {
+            const content = std.Io.Dir.cwd().readFileAlloc(io, fc.path, allocator, .limited(1024 * 1024)) catch {
+                std.debug.print("FAILED\n    could not read evidence file: '{s}'\n", .{fc.path});
+                return false;
+            };
+            defer allocator.free(content);
+            for (fc.patterns) |pattern| {
+                if (std.mem.indexOf(u8, content, pattern) == null) {
+                    std.debug.print("FAILED\n    missing pattern in '{s}': '{s}'\n", .{ fc.path, pattern });
+                    return false;
+                }
+            }
         }
     }
 

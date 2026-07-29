@@ -5,8 +5,14 @@ const Spec = struct {
     tests: []const TestCase,
 };
 
+const FileContainsEvidence = struct {
+    path: []const u8,
+    patterns: []const []const u8,
+};
+
 const Evidence = struct {
     file_exists: []const []const u8 = &.{},
+    file_contains: ?FileContainsEvidence = null,
     extract_paths_from_output: bool = false,
 };
 
@@ -154,6 +160,21 @@ fn runTest(
                 std.debug.print("FAILED\n    evidence file not found: '{s}'\n", .{path});
                 printStderr(result.stderr);
                 return false;
+            }
+        }
+        if (evidence.file_contains) |fc| {
+            const content = std.Io.Dir.cwd().readFileAlloc(io, fc.path, allocator, .limited(1024 * 1024)) catch {
+                std.debug.print("FAILED\n    could not read evidence file: '{s}'\n", .{fc.path});
+                printStderr(result.stderr);
+                return false;
+            };
+            defer allocator.free(content);
+            for (fc.patterns) |pattern| {
+                if (std.mem.indexOf(u8, content, pattern) == null) {
+                    std.debug.print("FAILED\n    missing pattern in '{s}': '{s}'\n", .{ fc.path, pattern });
+                    printStderr(result.stderr);
+                    return false;
+                }
             }
         }
         if (evidence.extract_paths_from_output) {
