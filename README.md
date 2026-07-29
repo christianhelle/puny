@@ -31,7 +31,7 @@ The four supported providers are the ones I use personally:
 
 - [LM Studio](https://lmstudio.ai/) — local inference on my own hardware
 - [OpenCode Zen](https://opencode.ai/zen) — hosted models I actually pay for
-- [OpenCode Go](https://opencode.ai/go) — faster hosted models when I need them
+- [OpenCode Go](https://opencode.ai/go) — cheaper hosted models when I need them
 - [GitHub Copilot](https://github.com/features/copilot) — comes with my GitHub subscription
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can
