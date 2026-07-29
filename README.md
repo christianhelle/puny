@@ -16,22 +16,23 @@ Node.js dependency, no Electron shell.
 
 ## Why the feature set is intentionally limited
 
+Puny is designed around the way I work. It is highly opinionated. That means it will
+never try to be everything to everyone.
+
 Other coding agents ship MCP, subagents, plugins, extensions, animations, and dozens
-of other features you did not ask for. Puny does not. The feature set is intentionally
-limited to what a single professional needs to get results: read files, write files,
-run commands, search code, check git status, fetch web pages. If you need parallel
-work, run another instance of Puny.
+of other features I never asked for. Puny does not. The feature set is limited to what
+I need to get results: read files, write files, run commands, search code, check git
+status, fetch web pages. If you want parallel work, run another instance.
 
-Each feature earns its place. Nothing ships because it looks good on a comparison
-table. This is not a platform — it is a tool.
+Each feature earns its place. Nothing ships because it looks good on a comparison table.
+This is not a platform — it is a tool.
 
-Puny currently supports the following model providers, with OpenAI, Anthropic, and
-Google (Gemini) API compatible models:
+The four supported providers are the ones I use personally:
 
-- [LM Studio](https://lmstudio.ai/) 
-- [OpenCode Zen](https://opencode.ai/zen)
-- [OpenCode Go](https://opencode.ai/go)
-- [GitHub Copilot](https://github.com/features/copilot)
+- [LM Studio](https://lmstudio.ai/) — local inference on my own hardware
+- [OpenCode Zen](https://opencode.ai/zen) — hosted models I actually pay for
+- [OpenCode Go](https://opencode.ai/go) — faster hosted models when I need them
+- [GitHub Copilot](https://github.com/features/copilot) — comes with my GitHub subscription
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can
 read, edit, search, and inspect your codebase.
