@@ -232,6 +232,8 @@ body {
 .footer-section ul li a { color: #475569; text-decoration: none; font-size: 0.875rem; transition: color 0.2s; }
 .footer-section ul li a:hover { color: var(--bg); }
 
+.footer-disclaimer { padding: 1rem 0; text-align: center; border-top: 1px solid #d1d5db; }
+.footer-disclaimer p { color: #6b7280; font-size: 0.75rem; font-style: italic; }
 .footer-bottom { border-top: 1px solid #475569; padding-top: 1rem; text-align: center; }
 .footer-bottom p { color: #475569; font-size: 0.875rem; }
 
