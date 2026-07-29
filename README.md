@@ -1,7 +1,7 @@
 # Puny
 
 Puny is for professionals on limited hardware or remote machines who hate JavaScript,
-TypeScript, Electron, npm, and Node. You want a coding agent that starts in under 10
+TypeScript, Electron, NPM, Node.js, etc. You want a coding agent that starts in under 10
 milliseconds, uses around 1 MB of disk space, and stays out of your way.
 
 Puny is a minimal natively compiled single-binary coding agent with a ~1 MB footprint.
@@ -19,7 +19,7 @@ Node.js dependency, no javascript.
 Puny is designed around the way I work. It is highly opinionated. That means it will
 never try to be everything to everyone.
 
-Other coding agents ship MCP, subagents, plugins, extensions, animations, and dozens
+Other coding agents include MCP, subagents, plugins, extensions, animations, and dozens
 of other features I never asked for. Puny does not. The feature set is limited to what
 I need to get results: read files, write files, run commands, search code, load skills,
 fetch web pages. If you want parallel work, run another instance.
