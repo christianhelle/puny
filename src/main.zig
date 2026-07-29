@@ -130,6 +130,15 @@ pub fn main(init: std.process.Init) !void {
         .oneshot = parsed.oneshot,
         .prefilled = parsed.prompt != null,
     });
+
+    const now = std.Io.Clock.Timestamp.now(io, .awake);
+    const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
+    var startup_buf: [64]u8 = undefined;
+    try stdout_writer.print("{s}Started in {s}{s}", .{
+        ansi.dim, formatStartupTime(&startup_buf, elapsed_ns), ansi.reset,
+    });
+    try stdout_writer.flush();
+
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
     defer prov.deinit();
 
@@ -249,14 +258,6 @@ pub fn main(init: std.process.Init) !void {
         .chat_log = if (chat_log) |*log| log else null,
         .skill_registry = &skill_registry,
     };
-
-    const now = std.Io.Clock.Timestamp.now(io, .awake);
-    const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
-    var startup_buf: [64]u8 = undefined;
-    try stdout_writer.print("{s}Started in {s}{s}\n\n", .{
-        ansi.dim, formatStartupTime(&startup_buf, elapsed_ns), ansi.reset,
-    });
-    try stdout_writer.flush();
 
     var chat_session = session.ChatSession.init(ctx);
     try chat_session.run();

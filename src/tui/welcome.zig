@@ -52,15 +52,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     }
 
     if (info.session_id.len > 0) {
-        try writer.print("{s}Session:{s} {s}\n\n", .{ ansi.dim, ansi.reset, info.session_id });
-    }
-
-    if (info.oneshot) {
-        // no prompt hint in oneshot mode
-    } else if (info.prefilled) {
-        try writer.print("{s}Prefilled prompt will be sent automatically. Type /quit to exit.{s}\n", .{ ansi.dim, ansi.reset });
-    } else {
-        try writer.print("{s}Type a prompt and press Enter to start chatting.{s}\n", .{ ansi.dim, ansi.reset });
+        try writer.print("{s}Session:{s} {s}\n", .{ ansi.dim, ansi.reset, info.session_id });
     }
 
     try writer.flush();
