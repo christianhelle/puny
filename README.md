@@ -30,7 +30,7 @@ This is not a platform — it is a tool.
 Puny does not show the model's reasoning or thinking output by default. I do not care
 about the model's internal monologue. I see it as a wall of text, a huge TL;DR you have
 to scroll past to get to the actual answer. If you want it, pass `--show-thinking`.
-If you thnk you want it later, pass `--chat-log` which saves the entire conversation,
+If you think you want it later, pass `--chat-log` which saves the entire conversation,
 noise included, to puny_chat.log
 
 The four supported providers are the ones I use personally:
