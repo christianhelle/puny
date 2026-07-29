@@ -38,6 +38,15 @@ pub const DebugLog = struct {
     }
 };
 
+pub const ChatLog = struct {
+    file: std.Io.File,
+    writer: *std.Io.Writer,
+
+    fn print(self: *ChatLog, comptime fmt: []const u8, args: anytype) void {
+        self.writer.print(fmt, args) catch {};
+    }
+};
+
 const UserInput = union(enum) {
     message: []const u8,
     continue_loop,
@@ -70,6 +79,7 @@ pub const ChatLoopContext = struct {
     session: *core_session.Session,
     session_stats: *chat.SessionStats,
     debug_log: ?*DebugLog,
+    chat_log: ?*ChatLog,
     skill_registry: *skills.Registry,
 };
 
