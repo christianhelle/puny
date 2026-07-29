@@ -1,14 +1,14 @@
 # Puny
 
 Puny is for professionals on limited hardware or remote machines who hate JavaScript,
-TypeScript, Electron, NPM, Node.js, etc. You want a coding agent that starts in under 10
-milliseconds, uses around 1 MB of disk space, and stays out of your way.
+TypeScript, Electron, NPM, Node.js, etc. You want a coding agent that starts in ~1
+millisecond, uses around 1 MB of disk space, and stays out of your way.
 
 Puny is a minimal natively compiled single-binary coding agent with a ~1 MB footprint.
 
 ## Why fast and small matters
 
-Startup time under 10ms means Puny is always ready when you are — no spinner, no
+Startup time ~1ms means Puny is always ready when you are — no spinner, no
 waiting. The ~1 MB binary and minimal memory footprint mean it runs comfortably on
 a Raspberry Pi, a remote server over SSH, or a decade-old laptop. Every millisecond
 and megabyte is deliberate: there is no hidden runtime, no garbage collector, no
