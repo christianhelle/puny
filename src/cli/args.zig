@@ -13,6 +13,7 @@ pub const Options = struct {
     mock: bool = false,
     reconfigure: bool = false,
     debug: bool = false,
+    chat_log: bool = false,
     show_thinking: bool = false,
     prune: bool = false,
     upgrade: bool = false,
@@ -79,6 +80,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.show_thinking = true;
         } else if (std.mem.eql(u8, arg, "--debug")) {
             opts.debug = true;
+        } else if (std.mem.eql(u8, arg, "--chat-log")) {
+            opts.chat_log = true;
         } else if (std.mem.eql(u8, arg, "--session")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -124,6 +127,12 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         }
     }
 
+    if (!opts.chat_log) {
+        if (environ_map.get("PUNY_CHAT_LOG")) |value| {
+            opts.chat_log = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
+        }
+    }
+
     return opts;
 }
 
@@ -149,6 +158,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --session <id>          Resume a previous session by ID or prefix
         \\      --resume                Pick a session to resume interactively
         \\      --prune                 Delete old sessions (use --session to keep one)
+        \\      --chat-log              Log conversation to puny_chat.log
         \\      --debug                 Log HTTP requests and responses to puny_debug.log
         \\  -U, --upgrade               Upgrade to the latest release via install script
         \\  -h, --help                  Show this help text
@@ -256,6 +266,43 @@ test "parseArgs sets debug from flag" {
     const args = &[_][:0]const u8{ "puny", "--debug" };
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expect(opts.debug);
+}
+
+test "parseArgs sets chat_log from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--chat-log" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.chat_log);
+}
+
+test "parseArgs falls back to PUNY_CHAT_LOG env" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_CHAT_LOG", "true");
+
+    const args = &[_][:0]const u8{"puny"};
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.chat_log);
+}
+
+test "parseArgs flag overrides PUNY_CHAT_LOG env" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_CHAT_LOG", "false");
+
+    const args = &[_][:0]const u8{ "puny", "--chat-log" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.chat_log);
 }
 
 test "parseArgs sets session from flag" {
