@@ -82,5 +82,31 @@
     "args": ["--mock", "--model", "mock-model", "--prompt", "im testing the markdown table renderer. generate a markdown table with a realistic data set", "--oneshot"],
     "expect": ["| ID | Name | Department | Position | Salary | Start Date |", "Alice Johnson", "Engineering"],
     "not_expect": []
+  },
+  {
+    "name": "Chat log creates file with user and assistant labels",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "echo hello world", "--oneshot", "--chat-log"],
+    "expect": ["Echo:", "hello world"],
+    "not_expect": [],
+    "evidence": {
+      "file_exists": ["puny_chat.log"],
+      "file_contains": {
+        "path": "puny_chat.log",
+        "patterns": ["[USER]", "[ASSISTANT]"]
+      }
+    }
+  },
+  {
+    "name": "Chat log captures tool calls and results",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "read the code", "--oneshot", "--chat-log"],
+    "expect": ["Reading", "Tool executed"],
+    "not_expect": [],
+    "evidence": {
+      "file_exists": ["puny_chat.log"],
+      "file_contains": {
+        "path": "puny_chat.log",
+        "patterns": ["[TOOL_CALL]", "[TOOL_RESULT]"]
+      }
+    }
   }
 ]
