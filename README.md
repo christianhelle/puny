@@ -1,13 +1,40 @@
 # Puny
 
-A minimal AI coding agent for the terminal that currently supports the following model providers, with OpenAI, Anthropic, and Google (Gemini) API compatible models:
+Puny is for professionals on limited hardware or remote machines who hate JavaScript,
+TypeScript, Electron, npm, and Node. You want a coding agent that starts in under 10
+milliseconds, uses around 1 MB of disk space, and stays out of your way.
+
+Puny is a minimal natively compiled single-binary coding agent with a ~1 MB footprint.
+
+## Why fast and small matters
+
+Startup time under 10ms means Puny is always ready when you are — no spinner, no
+waiting. The ~1 MB binary and minimal memory footprint mean it runs comfortably on
+a Raspberry Pi, a remote server over SSH, or a decade-old laptop. Every millisecond
+and megabyte is deliberate: there is no hidden runtime, no garbage collector, no
+Node.js dependency, no Electron shell.
+
+## Why the feature set is intentionally limited
+
+Other coding agents ship MCP, subagents, plugins, extensions, animations, and dozens
+of other features you did not ask for. Puny does not. The feature set is intentionally
+limited to what a single professional needs to get results: read files, write files,
+run commands, search code, check git status, fetch web pages. If you need parallel
+work, run another instance of Puny.
+
+Each feature earns its place. Nothing ships because it looks good on a comparison
+table. This is not a platform — it is a tool.
+
+Puny currently supports the following model providers, with OpenAI, Anthropic, and
+Google (Gemini) API compatible models:
 
 - [LM Studio](https://lmstudio.ai/) 
 - [OpenCode Zen](https://opencode.ai/zen)
 - [OpenCode Go](https://opencode.ai/go)
 - [GitHub Copilot](https://github.com/features/copilot)
 
-Puny lets you chat with an LLM and gives it a curated set of coding tools so it can read, edit, search, and inspect your codebase.
+Puny lets you chat with an LLM and gives it a curated set of coding tools so it can
+read, edit, search, and inspect your codebase.
 
 ## Screenshots
 
