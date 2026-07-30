@@ -9,6 +9,7 @@ const tool_display = @import("display.zig");
 const usage_estimator = @import("usage.zig");
 const cancel = @import("../core/cancel.zig");
 const memory = @import("../core/memory.zig");
+const markdown = @import("../tui/markdown.zig");
 
 fn countNewlines(text: []const u8) usize {
     var count: usize = 0;
@@ -323,7 +324,7 @@ pub const OpenAiAccumulator = struct {
                 if (self.reasoning_shown) {
                     self.reasoning_shown = false;
                     if (self.stdout) |stdout| {
-                        try stdout.print("\n", .{});
+                        try stdout.print("\r\n", .{});
                         try stdout.flush();
                     }
                     self.lines_printed += 1;
@@ -396,6 +397,26 @@ pub const OpenAiAccumulator = struct {
             });
         }
         self.partial_calls.clearRetainingCapacity();
+    }
+
+    /// Replace the raw streamed content with markdown-rendered content.
+    /// Uses the \r\n-corrected line count to move the cursor up and erase,
+    /// then re-prints the content with ANSI formatting applied.
+    pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !usize {
+        if (self.lines_printed == 0 or self.content.items.len == 0) return 0;
+
+        try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
+        try stdout.flush();
+
+        var md = markdown.Markdown.init();
+        const rendered = try md.render(self.allocator, self.content.items);
+        defer self.allocator.free(rendered);
+
+        try printWithCRLF(stdout, rendered);
+        try stdout.flush();
+
+        self.lines_printed = 0;
+        return countNewlines(rendered) + 1;
     }
 
     pub fn streamCallback(self: *@This()) openai.StreamCallback {
@@ -477,9 +498,16 @@ pub fn runTurn(
 
     var content_cursor_offset: usize = 0;
     var content_ends_with_newline = false;
+    var final_lines_printed: usize = 0;
     if (has_content) {
-        content_ends_with_newline = accumulator.content.items[accumulator.content.items.len - 1] == '\n';
-        content_cursor_offset = 1 + accumulator.lines_printed;
+        if (accumulator.lines_printed > 0) {
+            final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
+            content_cursor_offset = final_lines_printed;
+            content_ends_with_newline = true;
+        } else {
+            content_cursor_offset = 1;
+            content_ends_with_newline = false;
+        }
     }
 
     if (accumulator.hasToolCalls()) {
