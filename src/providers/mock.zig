@@ -44,6 +44,8 @@ pub const MockKeyword = enum {
     shell,
     /// Generate a markdown table with realistic data.
     table,
+    /// Generate complex markdown with headings, code blocks, lists, blockquotes, etc.
+    markdown,
 };
 
 pub const MockClient = struct {
@@ -277,6 +279,7 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .search => "search",
         .shell => "shell",
         .table => "table",
+        .markdown => "markdown",
     };
 }
 

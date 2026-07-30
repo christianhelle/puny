@@ -416,9 +416,9 @@ pub const OpenAiAccumulator = struct {
 
         const content_lines = self.lines_printed - self.content_start_line;
         if (content_lines > 0) {
-            try stdout.print("\x1b[{}A\x1b[J", .{content_lines});
+            try stdout.print("\r\x1b[{}A\x1b[J", .{content_lines});
         } else {
-            try stdout.print("\x1b[G\x1b[J", .{});
+            try stdout.print("\r\x1b[J", .{});
         }
         try stdout.flush();
 
@@ -514,14 +514,9 @@ pub fn runTurn(
     var content_ends_with_newline = false;
     var final_lines_printed: usize = 0;
     if (has_content) {
-        if (accumulator.lines_printed > 0) {
-            final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
-            content_cursor_offset = final_lines_printed;
-            content_ends_with_newline = true;
-        } else {
-            content_cursor_offset = 1;
-            content_ends_with_newline = false;
-        }
+        final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
+        content_cursor_offset = final_lines_printed;
+        content_ends_with_newline = true;
     }
 
     if (accumulator.hasToolCalls()) {
