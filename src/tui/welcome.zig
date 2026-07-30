@@ -37,7 +37,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("  {s}Model:{s}    {s}", .{ ansi.bright, ansi.reset, info.model_key });
     if (info.reasoning_effort) |effort| {
         if (effort != .default) {
-            try writer.print(" ({s})", .{@tagName(effort)});
+            try writer.print(" - {s}{s}{s}", .{ ansi.bold_start, @tagName(effort), ansi.bold_end });
         }
     }
     try writer.print("\n", .{});
@@ -72,7 +72,7 @@ pub fn printSummary(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("  {s}Model:{s}    {s}", .{ ansi.bright, ansi.reset, info.model_key });
     if (info.reasoning_effort) |effort| {
         if (effort != .default) {
-            try writer.print(" ({s})", .{@tagName(effort)});
+            try writer.print(" - {s}{s}{s}", .{ ansi.bold_start, @tagName(effort), ansi.bold_end });
         }
     }
     try writer.print("\n", .{});
