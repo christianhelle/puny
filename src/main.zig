@@ -2,6 +2,7 @@ const std = @import("std");
 const chat = @import("chat/chat.zig");
 const cli = @import("cli/args.zig");
 const config = @import("config/config.zig");
+const helpers = @import("tools/helpers.zig");
 const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
@@ -13,6 +14,7 @@ const session = @import("chat/session.zig");
 const sigint = @import("core/sigint.zig");
 const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
+const version = @import("version.zig");
 const welcome = @import("tui/welcome.zig");
 const ansi = @import("tui/ansi.zig");
 const ModelProvider = provider.ModelProvider;
@@ -31,7 +33,7 @@ pub fn main(init: std.process.Init) !void {
     var parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
     if (parsed.upgrade) {
-        try runUpgrade(io);
+        try runUpgrade(arena, io);
         return;
     }
 
@@ -280,22 +282,130 @@ fn cleanupOldBackup(allocator: std.mem.Allocator, io: std.Io) !void {
 }
 
 fn archiveNameForTarget() []const u8 {
-    comptime {
-        const target = @import("builtin").target;
-        const arch_suffix = if (target.cpu.arch == .aarch64) "aarch64" else "x86_64";
-        const os_part = switch (target.os.tag) {
-            .windows => "windows",
-            .linux => "linux",
-            .macos => "macos",
-            else => @compileError("unsupported OS for upgrade"),
-        };
-        const ext = if (target.os.tag == .windows) "zip" else "tar.gz";
-        return std.fmt.comptimePrint("puny-{s}-{s}.{s}", .{ os_part, arch_suffix, ext });
-    }
+    const target = @import("builtin").target;
+    const aarch = target.cpu.arch == .aarch64;
+    return switch (target.os.tag) {
+        .windows => if (aarch) "puny-windows-aarch64.zip" else "puny-windows-x86_64.zip",
+        .linux => if (aarch) "puny-linux-aarch64.tar.gz" else "puny-linux-x86_64.tar.gz",
+        .macos => if (aarch) "puny-macos-aarch64.tar.gz" else "puny-macos-x86_64.tar.gz",
+        else => @compileError("unsupported OS for upgrade"),
+    };
 }
 
-fn runUpgrade(io: std.Io) !void {
-    _ = io;
+fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+    const stderr_writer = &stderr_file_writer.interface;
+
+    try stderr_writer.print("\nChecking for updates...\n", .{});
+    try stderr_writer.flush();
+
+    const release_url = "https://api.github.com/repos/christianhelle/puny/releases/latest";
+    const json_bytes = try helpers.httpGet(arena, io, release_url);
+    defer arena.free(json_bytes);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, arena, json_bytes, .{});
+    defer parsed.deinit();
+
+    const tag_name = parsed.value.object.get("tag_name") orelse return error.MissingReleaseTag;
+    const latest_tag = tag_name.string;
+    const latest_ver_str = if (std.mem.startsWith(u8, latest_tag, "v")) latest_tag[1..] else latest_tag;
+
+    const current_ver = try std.SemanticVersion.parse(version.version);
+    const latest_ver = try std.SemanticVersion.parse(latest_ver_str);
+
+    if (current_ver.order(latest_ver) != .lt) {
+        try stderr_writer.print("Already up to date (v{s}).\n", .{version.version});
+        try stderr_writer.flush();
+        return;
+    }
+
+    var random_source: std.Random.IoSource = .{ .io = io };
+    const random = random_source.interface();
+    const unique = random.int(u64);
+    var unique_buf: [32]u8 = undefined;
+    const unique_str = try std.fmt.bufPrint(&unique_buf, "{x}", .{unique});
+    const tmp_dir_name = try std.fmt.allocPrint(arena, "puny-upgrade-{s}", .{unique_str});
+    defer arena.free(tmp_dir_name);
+
+    try std.Io.Dir.cwd().createDir(io, tmp_dir_name, @enumFromInt(0o755));
+    var tmp_dir = try std.Io.Dir.cwd().openDir(io, tmp_dir_name, .{ .iterate = true });
+    errdefer {
+        tmp_dir.close(io);
+        std.Io.Dir.cwd().deleteTree(io, tmp_dir_name) catch {};
+    }
+
+    const archive_name = archiveNameForTarget();
+    const download_url = try std.fmt.allocPrint(arena, "https://github.com/christianhelle/puny/releases/download/{s}/{s}", .{ latest_tag, archive_name });
+    defer arena.free(download_url);
+
+    try stderr_writer.print("Downloading {s}...\n", .{archive_name});
+    try stderr_writer.flush();
+    try helpers.httpDownloadFile(arena, io, download_url, tmp_dir, archive_name);
+
+    try stderr_writer.print("Extracting...\n", .{});
+    try stderr_writer.flush();
+
+    const binary_name = if (@import("builtin").os.tag == .windows) "puny.exe" else "puny";
+
+    if (@import("builtin").os.tag == .windows) {
+        var archive_buf: [4096]u8 = undefined;
+        var archive_file = try tmp_dir.openFile(io, archive_name, .{});
+        defer archive_file.close(io);
+        var archive_reader = archive_file.reader(io, &archive_buf);
+        try std.zip.extract(tmp_dir, &archive_reader, .{});
+    } else {
+        var archive_buf: [4096]u8 = undefined;
+        var tar_buf: [std.compress.flate.max_window_len]u8 = undefined;
+        var archive_file = try tmp_dir.openFile(io, archive_name, .{});
+        defer archive_file.close(io);
+        var archive_reader = archive_file.reader(io, &archive_buf);
+        var decompress = std.compress.flate.Decompress.init(&archive_reader, .gzip, &tar_buf);
+        try std.tar.extract(io, tmp_dir, &decompress.reader, .{});
+    }
+
+    const extracted_path = (try findInDir(arena, io, tmp_dir, binary_name)) orelse return error.BinaryNotFoundInArchive;
+    defer arena.free(extracted_path);
+
+    try stderr_writer.print("Installing...\n", .{});
+    try stderr_writer.flush();
+
+    const exe_path = try std.process.executablePathAlloc(io, arena);
+    defer arena.free(exe_path);
+    const exe_dir_path = std.fs.path.dirname(exe_path) orelse ".";
+    const exe_name = std.fs.path.basename(exe_path);
+
+    var exe_dir = try std.Io.Dir.cwd().openDir(io, exe_dir_path, .{});
+    defer exe_dir.close(io);
+
+    const old_name = try std.fmt.allocPrint(arena, "{s}.old", .{exe_name});
+    defer arena.free(old_name);
+
+    try std.Io.Dir.rename(exe_dir, exe_name, exe_dir, old_name, io);
+    errdefer std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
+
+    try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, exe_name, io, .{});
+
+    if (@import("builtin").os.tag != .windows) {
+        std.Io.Dir.setFilePermissions(exe_dir, io, exe_name, @enumFromInt(0o755), .{}) catch {};
+    }
+
+    tmp_dir.close(io);
+    std.Io.Dir.cwd().deleteTree(io, tmp_dir_name) catch {};
+
+    try stderr_writer.print("Upgraded to v{s}. Restart to use the new version.\n", .{latest_ver_str});
+    try stderr_writer.flush();
+}
+
+fn findInDir(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, name: []const u8) !?[]const u8 {
+    var walk = try dir.walk(allocator);
+    defer walk.deinit();
+    while (try walk.next(io)) |entry| {
+        if (entry.kind == .file and std.mem.eql(u8, entry.basename, name)) {
+            return try allocator.dupe(u8, entry.path);
+        }
+    }
+    return null;
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
