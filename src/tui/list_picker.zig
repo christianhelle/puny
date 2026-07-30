@@ -19,6 +19,9 @@ const Key = enum {
     unknown,
 };
 
+var pending_buf: [8]u8 = undefined;
+var pending_len: usize = 0;
+
 pub fn selectFromList(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -31,6 +34,8 @@ pub fn selectFromList(
         return try selectText(arena, io, title, items);
     };
     defer cancel.setRawMode(false) catch {};
+
+    pending_len = 0;
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -151,22 +156,34 @@ fn readKeyPosix(io: std.Io) !Key {
     _ = io;
     const posix = std.posix;
     var buf: [8]u8 = undefined;
+    var buf_len: usize = 0;
 
-    var pfd = [1]posix.pollfd{
-        .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
-    };
-    const rc = posix.poll(&pfd, 1000) catch return error.ReadFailed;
-    if (rc == 0) return .unknown;
-    if (pfd[0].revents & posix.POLL.IN == 0) return .unknown;
+    if (pending_len > 0) {
+        const copy_len = @min(pending_len, buf.len);
+        @memcpy(buf[0..copy_len], pending_buf[0..copy_len]);
+        buf_len = copy_len;
+        if (copy_len < pending_len) {
+            @memcpy(pending_buf[0 .. pending_len - copy_len], pending_buf[copy_len..pending_len]);
+        }
+        pending_len -= copy_len;
+    } else {
+        var pfd = [1]posix.pollfd{
+            .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
+        };
+        const rc = posix.poll(&pfd, 1000) catch return error.ReadFailed;
+        if (rc == 0) return .unknown;
+        if (pfd[0].revents & posix.POLL.IN == 0) return .unknown;
 
-    const n = posix.read(0, buf[0..]) catch return error.ReadFailed;
-    if (n == 0) return .unknown;
+        const n = posix.read(0, buf[0..]) catch return error.ReadFailed;
+        if (n == 0) return .unknown;
+        buf_len = n;
+    }
 
     if (buf[0] == 0x1b) {
         var seq: [8]u8 = undefined;
         var seq_len: usize = 0;
 
-        const copy_len = @min(@as(usize, n), seq.len);
+        const copy_len = @min(buf_len, seq.len);
         @memcpy(seq[0..copy_len], buf[0..copy_len]);
         seq_len = copy_len;
 
@@ -181,17 +198,35 @@ fn readKeyPosix(io: std.Io) !Key {
             seq_len += 1;
         }
 
-        if (seq_len == 1) return .escape;
-        if (seq_len >= 2 and seq[1] == '[') {
+        var consumed: usize = 1;
+        var result: Key = .unknown;
+
+        if (seq_len == 1) {
+            result = .escape;
+        } else if (seq_len >= 2 and seq[1] == '[') {
+            consumed = 2;
             if (seq_len >= 3) {
+                consumed = 3;
                 switch (seq[2]) {
-                    'A' => return .up,
-                    'B' => return .down,
-                    else => return .unknown,
+                    'A' => result = .up,
+                    'B' => result = .down,
+                    else => result = .unknown,
                 }
             }
         }
-        return .unknown;
+
+        if (seq_len > consumed) {
+            const remaining = seq_len - consumed;
+            @memcpy(pending_buf[0..remaining], seq[consumed..seq_len]);
+            pending_len = remaining;
+        }
+
+        return result;
+    }
+
+    if (buf_len > 1) {
+        @memcpy(pending_buf[0 .. buf_len - 1], buf[1..buf_len]);
+        pending_len = buf_len - 1;
     }
 
     switch (buf[0]) {
@@ -199,7 +234,10 @@ fn readKeyPosix(io: std.Io) !Key {
         'q', 'Q' => return .quit,
         'j', 'J' => return .down,
         'k', 'K' => return .up,
-        else => return .unknown,
+        else => {
+            pending_len = 0;
+            return .unknown;
+        },
     }
 }
 
