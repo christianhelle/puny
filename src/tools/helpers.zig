@@ -104,11 +104,25 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
 }
 
 pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u8, dest_dir: std.Io.Dir, dest_name: []const u8) !void {
-    const data = try httpGet(allocator, io, url);
-    defer allocator.free(data);
+    const uri = try std.Uri.parse(url);
+    var client = std.http.Client{ .allocator = allocator, .io = io };
+    defer client.deinit();
+
     var file = try dest_dir.createFile(io, dest_name, .{});
-    defer file.close(io);
-    try file.writeStreamingAll(io, data);
+    errdefer dest_dir.deleteFile(io, dest_name) catch {};
+
+    var buf: [8192]u8 = undefined;
+    var file_writer = file.writer(io, &buf);
+
+    const result = try client.fetch(.{
+        .location = .{ .uri = uri },
+        .method = .GET,
+        .response_writer = &file_writer.interface,
+    });
+
+    if (result.status != .ok) {
+        return error.HttpNotOk;
+    }
 }
 
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
