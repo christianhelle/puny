@@ -179,8 +179,9 @@ pub const ChatSession = struct {
 
                     if (try skills.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
                         defer ctx.arena.free(repo_root);
-                        if (try instructions.load(ctx.messages_arena.allocator(), ctx.io, repo_root)) |result| {
+                        if (try instructions.load(ctx.arena, ctx.io, repo_root)) |result| {
                             defer ctx.arena.free(result.filename);
+                            defer ctx.arena.free(result.content);
                             const labeled = try std.fmt.allocPrint(ctx.messages_arena.allocator(), "Instructions from {s}:\n{s}", .{ result.filename, result.content });
                             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = labeled });
                         }

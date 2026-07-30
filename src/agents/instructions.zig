@@ -36,22 +36,44 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, repo_root: []const u8) !?L
     return null;
 }
 
-test "load returns null when no instruction files exist" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+fn testLoad(allocator: std.mem.Allocator, io: std.Io, repo_root: []const u8, file_pairs: []const struct { []const u8, []const u8 }) !?LoadResult {
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteTree(io, repo_root) catch {};
 
-    const result = try load(std.testing.allocator, std.testing.io, &tmp.sub_path);
+    var tmp_dir = try cwd.createDirPathOpen(io, repo_root, .{});
+    defer tmp_dir.close(io);
+
+    for (file_pairs) |pair| {
+        const sub_dir_path = pair[0];
+        const data = pair[1];
+
+        // Check if the path contains a directory component
+        if (std.fs.path.dirname(sub_dir_path)) |dir_part| {
+            if (dir_part.len > 0) {
+                tmp_dir.createDir(io, dir_part, .default_dir) catch {};
+            }
+        }
+
+        try tmp_dir.writeFile(io, .{ .sub_path = sub_dir_path, .data = data });
+    }
+
+    return load(allocator, io, repo_root);
+}
+
+test "load returns null when no instruction files exist" {
+    const cwd = std.Io.Dir.cwd();
+    const tmp_name = "zig-test-no-files";
+    defer cwd.deleteTree(std.testing.io, tmp_name) catch {};
+
+    const result = try load(std.testing.allocator, std.testing.io, tmp_name);
     try std.testing.expect(result == null);
 }
 
 test "load finds AGENTS.md with highest priority" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "AGENTS.md", .data = "agents content" });
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "CLAUDE.md", .data = "claude content" });
-
-    const result = (try load(std.testing.allocator, std.testing.io, &tmp.sub_path)).?;
+    const result = (try testLoad(std.testing.allocator, std.testing.io, "zig-test-agents-priority", &.{
+        .{ "AGENTS.md", "agents content" },
+        .{ "CLAUDE.md", "claude content" },
+    })).?;
     defer std.testing.allocator.free(result.filename);
     defer std.testing.allocator.free(result.content);
 
@@ -60,13 +82,10 @@ test "load finds AGENTS.md with highest priority" {
 }
 
 test "load falls back to CLAUDE.md when AGENTS.md missing" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "CLAUDE.md", .data = "claude content" });
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".cursorrules", .data = "cursor content" });
-
-    const result = (try load(std.testing.allocator, std.testing.io, &tmp.sub_path)).?;
+    const result = (try testLoad(std.testing.allocator, std.testing.io, "zig-test-claude-fallback", &.{
+        .{ "CLAUDE.md", "claude content" },
+        .{ ".cursorrules", "cursor content" },
+    })).?;
     defer std.testing.allocator.free(result.filename);
     defer std.testing.allocator.free(result.content);
 
@@ -74,16 +93,21 @@ test "load falls back to CLAUDE.md when AGENTS.md missing" {
     try std.testing.expectEqualStrings("claude content", result.content);
 }
 
-test "load skips directories" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+test "load skips directories at candidate paths" {
+    const cwd = std.Io.Dir.cwd();
+    const tmp_name = "zig-test-skip-dir";
+    defer cwd.deleteTree(std.testing.io, tmp_name) catch {};
 
-    try tmp.dir.createDir(std.testing.io, ".github", .default_dir);
+    var tmp_dir = try cwd.createDirPathOpen(std.testing.io, tmp_name, .{});
+    defer tmp_dir.close(std.testing.io);
 
-    // Only CLAUDE.md exists (AGENTS.md is a dir)
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "CLAUDE.md", .data = "claude content" });
+    // AGENTS.md is a directory, not a file — load must skip it via error.IsDir
+    try tmp_dir.createDir(std.testing.io, "AGENTS.md", .default_dir);
 
-    const result = (try load(std.testing.allocator, std.testing.io, &tmp.sub_path)).?;
+    // CLAUDE.md is a regular file and should be found
+    try tmp_dir.writeFile(std.testing.io, .{ .sub_path = "CLAUDE.md", .data = "claude content" });
+
+    const result = (try load(std.testing.allocator, std.testing.io, tmp_name)).?;
     defer std.testing.allocator.free(result.filename);
     defer std.testing.allocator.free(result.content);
 
@@ -92,13 +116,9 @@ test "load skips directories" {
 }
 
 test "load finds copilot-instructions.md inside .github" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.createDir(std.testing.io, ".github", .default_dir);
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".github/copilot-instructions.md", .data = "copilot instructions" });
-
-    const result = (try load(std.testing.allocator, std.testing.io, &tmp.sub_path)).?;
+    const result = (try testLoad(std.testing.allocator, std.testing.io, "zig-test-copilot-github", &.{
+        .{ ".github/copilot-instructions.md", "copilot instructions" },
+    })).?;
     defer std.testing.allocator.free(result.filename);
     defer std.testing.allocator.free(result.content);
 
@@ -107,16 +127,14 @@ test "load finds copilot-instructions.md inside .github" {
 }
 
 test "load reads multi-line content correctly" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
     const multiline = "Line 1\nLine 2\nLine 3\n";
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "AGENTS.md", .data = multiline });
-
-    const result = (try load(std.testing.allocator, std.testing.io, &tmp.sub_path)).?;
+    const result = (try testLoad(std.testing.allocator, std.testing.io, "zig-test-multiline", &.{
+        .{ "AGENTS.md", multiline },
+    })).?;
     defer std.testing.allocator.free(result.filename);
     defer std.testing.allocator.free(result.content);
 
     try std.testing.expectEqualStrings("AGENTS.md", result.filename);
     try std.testing.expectEqualStrings(multiline, result.content);
 }
+
