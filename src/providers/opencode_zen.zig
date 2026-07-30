@@ -588,8 +588,12 @@ pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.Cha
 
     if (request.reasoning_effort) |effort| {
         if (effort != .default) {
+            const effort_str = switch (effort) {
+                .xhigh => "max",
+                else => @tagName(effort),
+            };
             try w.writeAll(",\"thinking\":{\"type\":\"enabled\"},\"output_config\":{\"effort\":\"");
-            try w.writeAll(@tagName(effort));
+            try w.writeAll(effort_str);
             try w.writeAll("\"}");
         }
     }
@@ -1317,6 +1321,26 @@ test "anthropicRequestPayload omits thinking when reasoning_effort default" {
 
     try std.testing.expect(parsed.value.object.get("thinking") == null);
     try std.testing.expect(parsed.value.object.get("output_config") == null);
+}
+
+test "anthropicRequestPayload maps xhigh to max effort" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{},
+        .tools = &.{},
+        .reasoning_effort = .xhigh,
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("max", root.get("output_config").?.object.get("effort").?.string);
 }
 
 test "googleToolNameForId prefers the nearest prior assistant tool call" {
