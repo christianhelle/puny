@@ -134,8 +134,9 @@ pub const Markdown = struct {
                 continue;
             }
 
-            // Regular paragraph with inline formatting
-            const rendered = try renderInline(allocator, line);
+            // Regular paragraph with inline formatting — strip leading whitespace
+            const trimmed_line = trimLeft(line, " \t");
+            const rendered = try renderInline(allocator, trimmed_line);
             try result.appendSlice(allocator, rendered);
             allocator.free(rendered);
             try result.appendSlice(allocator, "\n");
@@ -711,6 +712,27 @@ test "Markdown handles plain text" {
     const result = try md.render(std.testing.allocator, "Just plain text");
     defer std.testing.allocator.free(result);
     try std.testing.expectEqualStrings("Just plain text\n", result);
+}
+
+test "Markdown strips leading whitespace from plain text" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "   indented text");
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("indented text\n", result);
+}
+
+test "Markdown strips leading whitespace from plain text with multiple lines" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "   first line\n   second line");
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("first line\nsecond line\n", result);
+}
+
+test "Markdown preserves leading whitespace in code blocks" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "```\n   indented code\n```");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "   indented code") != null);
 }
 
 test "renderInline handles backtick matching" {
