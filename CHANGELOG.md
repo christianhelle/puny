@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Fix list picker layout and arrow key navigation on Unix ([#74](https://github.com/christianhelle/puny/pull/74)) ([@christianhelle](https://github.com/christianhelle/))
 - Change reasoning efforts to default, none, minimal, low, medium, high, and xhigh ([#73](https://github.com/christianhelle/puny/pull/73)) ([@christianhelle](https://github.com/christianhelle/))
 - Add reasoning effort selection to /model command ([#72](https://github.com/christianhelle/puny/pull/72)) ([@christianhelle](https://github.com/christianhelle/))
 - Add coding agent instruction file support ([#71](https://github.com/christianhelle/puny/pull/71)) ([@christianhelle](https://github.com/christianhelle/))
