@@ -173,8 +173,12 @@ pub const ToolDefinition = struct {
 
 pub const ReasoningEffort = enum {
     default,
+    none,
+    minimal,
+    low,
+    medium,
     high,
-    max,
+    xhigh,
 };
 
 pub const ChatRequest = struct {
@@ -530,23 +534,26 @@ test "message JSON conversion" {
     }
 }
 
-test "requestPayload includes reasoning_effort and thinking" {
-    const request = ChatRequest{
-        .model = "test-model",
-        .messages = &.{},
-        .tools = &.{},
-        .reasoning_effort = .high,
-    };
+test "requestPayload includes reasoning_effort and thinking for each level" {
+    const levels = [_]ReasoningEffort{ .none, .minimal, .low, .medium, .high, .xhigh };
+    for (levels) |effort| {
+        const request = ChatRequest{
+            .model = "test-model",
+            .messages = &.{},
+            .tools = &.{},
+            .reasoning_effort = effort,
+        };
 
-    const payload = try requestPayload(std.testing.allocator, request);
-    defer std.testing.allocator.free(payload);
+        const payload = try requestPayload(std.testing.allocator, request);
+        defer std.testing.allocator.free(payload);
 
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
 
-    const root = parsed.value.object;
-    try std.testing.expectEqualStrings("high", root.get("reasoning_effort").?.string);
-    try std.testing.expectEqualStrings("enabled", root.get("thinking").?.object.get("type").?.string);
+        const root = parsed.value.object;
+        try std.testing.expectEqualStrings(@tagName(effort), root.get("reasoning_effort").?.string);
+        try std.testing.expectEqualStrings("enabled", root.get("thinking").?.object.get("type").?.string);
+    }
 }
 
 test "requestPayload omits reasoning_effort when default" {
@@ -585,7 +592,7 @@ test "requestPayload omits reasoning_effort when null" {
 }
 
 test "ReasoningEffort JSON serialization" {
-    const efforts = [_]ReasoningEffort{ .default, .high, .max };
+    const efforts = [_]ReasoningEffort{ .default, .none, .minimal, .low, .medium, .high, .xhigh };
 
     for (efforts) |effort| {
         var buf: std.Io.Writer.Allocating = .init(std.testing.allocator);
