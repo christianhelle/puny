@@ -129,6 +129,7 @@ pub fn main(init: std.process.Init) !void {
         &selected_provider,
         &provider_url,
         &model_key,
+        &reasoning_effort,
     );
     var startup_time = std.Io.Clock.Timestamp.now(io, .awake);
     try welcome.print(stdout_writer, .{
@@ -590,6 +591,7 @@ fn initializeProviderAndModel(
     selected_provider: *ModelProvider,
     provider_url: *[]const u8,
     model_key: *[]const u8,
+    reasoning_effort: *?openai.ReasoningEffort,
 ) !void {
     selected_provider.* = session.effectiveProvider(parsed, cfg.*);
     provider_url.* = if (parsed.mock) "-" else session.baseUrlFor(selected_provider.*, parsed, cfg.*);
@@ -625,7 +627,7 @@ fn initializeProviderAndModel(
         provider_url.*,
         config.default_lm_studio_url,
     );
-    model_key.* = (try model_selection.select(
+    const init_result = (try model_selection.select(
         prov,
         configured_model,
         arena,
@@ -659,6 +661,12 @@ fn initializeProviderAndModel(
             return;
         };
     };
+    model_key.* = init_result.model_key;
+    if (init_result.reasoning_effort) |effort| {
+        reasoning_effort.* = effort;
+    } else if (cfg.providerEntry(selected_provider.*).reasoning_effort) |effort_str| {
+        reasoning_effort.* = std.meta.stringToEnum(openai.ReasoningEffort, effort_str);
+    }
 }
 
 fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefinition) {

@@ -628,8 +628,11 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
             ctx.random,
         );
 
-        if (model_selection_result) |new_key| {
-            ctx.model_key.* = new_key;
+        if (model_selection_result) |sel| {
+            ctx.model_key.* = sel.model_key;
+            if (sel.reasoning_effort) |effort| {
+                ctx.reasoning_effort.* = effort;
+            }
         }
     } else {
         ctx.prov.setConfig(.{ .base_url = new_provider_url, .api_key = new_api_key });
@@ -665,8 +668,11 @@ fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void 
         ctx.model_provider.*,
         ctx.init.environ_map,
         ctx.random,
-    )) |new_key| {
-        ctx.model_key.* = new_key;
+    )) |result| {
+        ctx.model_key.* = result.model_key;
+        if (result.reasoning_effort) |effort| {
+            ctx.reasoning_effort.* = effort;
+        }
     }
 }
 
@@ -719,8 +725,11 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
         ctx.random,
     );
 
-    if (model_selection_result) |new_key| {
-        ctx.model_key.* = new_key;
+    if (model_selection_result) |sel| {
+        ctx.model_key.* = sel.model_key;
+        if (sel.reasoning_effort) |effort| {
+            ctx.reasoning_effort.* = effort;
+        }
     }
 
     try welcome.printSummary(
