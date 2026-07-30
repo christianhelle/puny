@@ -62,6 +62,7 @@ pub const Provider = struct {
     apiKey: ?[]const u8,
     url: []const u8,
     model: []const u8,
+    reasoning_effort: ?[]const u8 = null,
 
     pub fn clone(self: Provider, allocator: std.mem.Allocator) std.mem.Allocator.Error!Provider {
         return .{
@@ -69,6 +70,7 @@ pub const Provider = struct {
             .apiKey = if (self.apiKey) |value| try allocator.dupe(u8, value) else null,
             .url = try allocator.dupe(u8, self.url),
             .model = try allocator.dupe(u8, self.model),
+            .reasoning_effort = if (self.reasoning_effort) |v| try allocator.dupe(u8, v) else null,
         };
     }
 
@@ -76,6 +78,7 @@ pub const Provider = struct {
         if (self.apiKey) |key| allocator.free(key);
         allocator.free(self.url);
         allocator.free(self.model);
+        if (self.reasoning_effort) |v| allocator.free(v);
     }
 };
 
@@ -330,4 +333,32 @@ test "can serialize config to JSON" {
 
     const buffer = try std.json.Stringify.valueAlloc(allocator, cfg, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
+}
+
+test "reasoning_effort round-trip via JSON" {
+    const allocator = std.testing.allocator;
+    var cfg = Config{
+        .provider = .opencode_go,
+    };
+    const entry = cfg.providerEntry(.opencode_go);
+    entry.model = "deepseek-v4-pro";
+    entry.reasoning_effort = "high";
+
+    const buffer = try std.json.Stringify.valueAlloc(allocator, cfg, .{ .whitespace = .indent_2 });
+    defer allocator.free(buffer);
+
+    const parsed = try std.json.parseFromSlice(
+        Config,
+        allocator,
+        buffer,
+        .{ .ignore_unknown_fields = true, .allocate = .alloc_if_needed },
+    );
+    defer parsed.deinit();
+
+    var cloned = try parsed.value.clone(allocator);
+    defer cloned.deinit(allocator);
+
+    try std.testing.expectEqual(.opencode_go, cloned.provider);
+    try std.testing.expectEqualStrings("deepseek-v4-pro", cloned.providerEntryConst(.opencode_go).model);
+    try std.testing.expectEqualStrings("high", cloned.providerEntryConst(.opencode_go).reasoning_effort.?);
 }
