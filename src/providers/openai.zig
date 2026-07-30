@@ -171,13 +171,19 @@ pub const ToolDefinition = struct {
     function: std.json.Value,
 };
 
+pub const ReasoningEffort = enum {
+    default,
+    high,
+    max,
+};
+
 pub const ChatRequest = struct {
     model: []const u8,
     messages: []const Message,
     tools: []const ToolDefinition,
     stream: bool = true,
     temperature: ?f64 = null,
-    reasoning: bool = false,
+    reasoning_effort: ?ReasoningEffort = null,
 };
 
 pub const StreamEvent = union(enum) {
@@ -513,5 +519,19 @@ test "message JSON conversion" {
         defer parsed.deinit();
         try std.testing.expectEqualStrings("tool", parsed.value.object.get("role").?.string);
         try std.testing.expectEqualStrings("call_1", parsed.value.object.get("tool_call_id").?.string);
+    }
+}
+
+test "ReasoningEffort JSON serialization" {
+    const efforts = [_]ReasoningEffort{ .default, .high, .max };
+
+    for (efforts) |effort| {
+        var buf: std.Io.Writer.Allocating = .init(std.testing.allocator);
+        defer buf.deinit();
+        try std.json.Stringify.value(effort, .{}, &buf.writer);
+
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, buf.written(), .{});
+        defer parsed.deinit();
+        try std.testing.expectEqualStrings(@tagName(effort), parsed.value.string);
     }
 }
