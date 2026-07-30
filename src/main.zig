@@ -360,7 +360,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
         var archive_file = try tmp_dir.openFile(io, archive_name, .{});
         defer archive_file.close(io);
         var archive_reader = archive_file.reader(io, &archive_buf);
-        var decompress = std.compress.flate.Decompress.init(&archive_reader, .gzip, &tar_buf);
+        var decompress = std.compress.flate.Decompress.init(&archive_reader.interface, .gzip, &tar_buf);
         try std.tar.extract(io, tmp_dir, &decompress.reader, .{});
     }
 
