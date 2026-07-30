@@ -164,8 +164,11 @@ fn readKeyPosix(io: std.Io) !Key {
 
     if (buf[0] == 0x1b) {
         var seq: [8]u8 = undefined;
-        seq[0] = 0x1b;
-        var seq_len: usize = 1;
+        var seq_len: usize = 0;
+
+        const copy_len = @min(@as(usize, n), seq.len);
+        @memcpy(seq[0..copy_len], buf[0..copy_len]);
+        seq_len = copy_len;
 
         while (seq_len < 8) {
             var pfd2 = [1]posix.pollfd{
