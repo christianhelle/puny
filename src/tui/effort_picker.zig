@@ -9,13 +9,17 @@ pub fn pickEffort(
     var items: std.ArrayList(list_picker.Item) = .empty;
     defer items.deinit(arena);
 
-    inline for ([_]openai.ReasoningEffort{ .default, .high, .max }) |effort| {
+    inline for ([_]openai.ReasoningEffort{ .default, .none, .minimal, .low, .medium, .high, .xhigh }) |effort| {
         try items.append(arena, .{
             .value = @tagName(effort),
             .label = switch (effort) {
                 .default => "Default (let provider decide)",
+                .none => "None",
+                .minimal => "Minimal",
+                .low => "Low",
+                .medium => "Medium",
                 .high => "High",
-                .max => "Max",
+                .xhigh => "Extra High",
             },
         });
     }
@@ -27,6 +31,10 @@ pub fn pickEffort(
 
 test "pickEffort returns correct enum for each label" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .default), std.meta.stringToEnum(openai.ReasoningEffort, "default"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .none), std.meta.stringToEnum(openai.ReasoningEffort, "none"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .minimal), std.meta.stringToEnum(openai.ReasoningEffort, "minimal"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .low), std.meta.stringToEnum(openai.ReasoningEffort, "low"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .medium), std.meta.stringToEnum(openai.ReasoningEffort, "medium"));
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), std.meta.stringToEnum(openai.ReasoningEffort, "high"));
-    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .max), std.meta.stringToEnum(openai.ReasoningEffort, "max"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), std.meta.stringToEnum(openai.ReasoningEffort, "xhigh"));
 }
