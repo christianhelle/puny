@@ -554,4 +554,3 @@ test "requiresApiKey only for opencode and opencode-go" {
 test "include core session tests" {
     _ = @import("core/session.zig");
 }
-
