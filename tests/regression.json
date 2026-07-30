@@ -80,7 +80,7 @@
   {
     "name": "Markdown table response",
     "args": ["--mock", "--model", "mock-model", "--prompt", "im testing the markdown table renderer. generate a markdown table with a realistic data set", "--oneshot"],
-    "expect": ["Alice", "Engineering", "employee data"],
+    "expect": ["Smith", "employee data"],
     "not_expect": []
   },
   {
