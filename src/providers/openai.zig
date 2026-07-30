@@ -459,6 +459,14 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 
         try std.json.Stringify.value(temp, .{}, w);
     }
 
+    if (request.reasoning_effort) |effort| {
+        if (effort != .default) {
+            try w.writeAll(",\"reasoning_effort\":\"");
+            try w.writeAll(@tagName(effort));
+            try w.writeAll("\",\"thinking\":{\"type\":\"enabled\"}");
+        }
+    }
+
     try w.writeByte('}');
 
     return buf.toOwnedSlice();
@@ -520,6 +528,60 @@ test "message JSON conversion" {
         try std.testing.expectEqualStrings("tool", parsed.value.object.get("role").?.string);
         try std.testing.expectEqualStrings("call_1", parsed.value.object.get("tool_call_id").?.string);
     }
+}
+
+test "requestPayload includes reasoning_effort and thinking" {
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{},
+        .tools = &.{},
+        .reasoning_effort = .high,
+    };
+
+    const payload = try requestPayload(std.testing.allocator, request);
+    defer std.testing.allocator.free(payload);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("high", root.get("reasoning_effort").?.string);
+    try std.testing.expectEqualStrings("enabled", root.get("thinking").?.object.get("type").?.string);
+}
+
+test "requestPayload omits reasoning_effort when default" {
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{},
+        .tools = &.{},
+        .reasoning_effort = .default,
+    };
+
+    const payload = try requestPayload(std.testing.allocator, request);
+    defer std.testing.allocator.free(payload);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.object.get("reasoning_effort") == null);
+    try std.testing.expect(parsed.value.object.get("thinking") == null);
+}
+
+test "requestPayload omits reasoning_effort when null" {
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{},
+        .tools = &.{},
+    };
+
+    const payload = try requestPayload(std.testing.allocator, request);
+    defer std.testing.allocator.free(payload);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.object.get("reasoning_effort") == null);
+    try std.testing.expect(parsed.value.object.get("thinking") == null);
 }
 
 test "ReasoningEffort JSON serialization" {

@@ -586,6 +586,14 @@ pub fn anthropicRequestPayload(allocator: std.mem.Allocator, request: openai.Cha
         try std.json.Stringify.value(temp, .{}, w);
     }
 
+    if (request.reasoning_effort) |effort| {
+        if (effort != .default) {
+            try w.writeAll(",\"thinking\":{\"type\":\"enabled\"},\"output_config\":{\"effort\":\"");
+            try w.writeAll(@tagName(effort));
+            try w.writeAll("\"}");
+        }
+    }
+
     try w.writeByte('}');
 
     return buf.toOwnedSlice();
@@ -733,8 +741,10 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
         try w.writeAll(",\"temperature\":");
         try std.json.Stringify.value(temp, .{}, w);
     }
-    if (request.reasoning) {
-        try w.writeAll(",\"thinkingConfig\":{\"includeThoughts\":true}");
+    if (request.reasoning_effort) |effort| {
+        if (effort != .default) {
+            try w.writeAll(",\"thinkingConfig\":{\"includeThoughts\":true}");
+        }
     }
     try w.writeByte('}');
 
@@ -1237,7 +1247,7 @@ test "googleRequestPayload includes thinkingConfig when reasoning is enabled" {
         .model = "gemini-3.5-flash",
         .messages = &.{},
         .tools = &.{},
-        .reasoning = true,
+        .reasoning_effort = .high,
     };
 
     const payload = try googleRequestPayload(allocator, request);
@@ -1247,6 +1257,66 @@ test "googleRequestPayload includes thinkingConfig when reasoning is enabled" {
     const generation_config = parsed.value.object.get("generationConfig").?.object;
     const thinking_config = generation_config.get("thinkingConfig").?.object;
     try std.testing.expectEqual(true, thinking_config.get("includeThoughts").?.bool);
+}
+
+test "googleRequestPayload omits thinkingConfig when reasoning_effort default" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{},
+        .tools = &.{},
+        .reasoning_effort = .default,
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.object.get("generationConfig").?.object.get("thinkingConfig") == null);
+}
+
+test "anthropicRequestPayload includes thinking and output_config when reasoning_effort high" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{},
+        .tools = &.{},
+        .reasoning_effort = .high,
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("enabled", root.get("thinking").?.object.get("type").?.string);
+    try std.testing.expectEqualStrings("high", root.get("output_config").?.object.get("effort").?.string);
+}
+
+test "anthropicRequestPayload omits thinking when reasoning_effort default" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{},
+        .tools = &.{},
+        .reasoning_effort = .default,
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.object.get("thinking") == null);
+    try std.testing.expect(parsed.value.object.get("output_config") == null);
 }
 
 test "googleToolNameForId prefers the nearest prior assistant tool call" {

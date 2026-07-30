@@ -115,6 +115,7 @@ pub fn main(init: std.process.Init) !void {
     var selected_provider: ModelProvider = undefined;
     var provider_url: []const u8 = undefined;
     var model_key: []const u8 = undefined;
+    var reasoning_effort: ?openai.ReasoningEffort = null;
     try initializeProviderAndModel(
         arena,
         messages_arena,
@@ -265,6 +266,7 @@ pub fn main(init: std.process.Init) !void {
         .model_provider = &selected_provider,
         .provider_url = &provider_url,
         .model_key = &model_key,
+        .reasoning_effort = &reasoning_effort,
         .full_tool_definitions = &full_tool_definitions,
         .planning_tool_definitions = &planning_tool_definitions,
         .messages = &messages,

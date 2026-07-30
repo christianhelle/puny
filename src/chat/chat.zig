@@ -436,6 +436,7 @@ pub fn runTurn(
     show_thinking: bool,
     random: std.Random,
     model_key: []const u8,
+    reasoning_effort: ?openai.ReasoningEffort,
     messages: *std.ArrayList(openai.Message),
     tool_definitions: []const openai.ToolDefinition,
     indicator_opt: ?*indicator.ThinkingIndicator,
@@ -446,7 +447,7 @@ pub fn runTurn(
         .messages = messages.items,
         .tools = tool_definitions,
         .stream = true,
-        .reasoning = show_thinking or chat_log != null,
+        .reasoning_effort = reasoning_effort,
     };
 
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
