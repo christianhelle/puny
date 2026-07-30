@@ -660,6 +660,7 @@ fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void 
         ctx.prov,
         model_id,
         ctx.model_key.*,
+        ctx.reasoning_effort.*,
         ctx.arena,
         ctx.io,
         ctx.init,
