@@ -279,6 +279,21 @@ fn cleanupOldBackup(allocator: std.mem.Allocator, io: std.Io) !void {
     };
 }
 
+fn archiveNameForTarget() []const u8 {
+    comptime {
+        const target = @import("builtin").target;
+        const arch_suffix = if (target.cpu.arch == .aarch64) "aarch64" else "x86_64";
+        const os_part = switch (target.os.tag) {
+            .windows => "windows",
+            .linux => "linux",
+            .macos => "macos",
+            else => @compileError("unsupported OS for upgrade"),
+        };
+        const ext = if (target.os.tag == .windows) "zip" else "tar.gz";
+        return std.fmt.comptimePrint("puny-{s}-{s}.{s}", .{ os_part, arch_suffix, ext });
+    }
+}
+
 fn runUpgrade(io: std.Io) !void {
     _ = io;
 }
