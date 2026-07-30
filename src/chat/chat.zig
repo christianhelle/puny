@@ -9,7 +9,6 @@ const tool_display = @import("display.zig");
 const usage_estimator = @import("usage.zig");
 const cancel = @import("../core/cancel.zig");
 const memory = @import("../core/memory.zig");
-const markdown = @import("../tui/markdown.zig");
 
 fn countNewlines(text: []const u8) usize {
     var count: usize = 0;
