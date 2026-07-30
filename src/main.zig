@@ -33,7 +33,7 @@ pub fn main(init: std.process.Init) !void {
     var parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
     if (parsed.upgrade) {
-        try runUpgrade(arena, io, parsed.force_upgrade);
+        try runUpgrade(arena, io, init.environ_map, parsed.force_upgrade);
         return;
     }
 
@@ -308,7 +308,15 @@ fn archiveNameForTarget() []const u8 {
     @compileError("unsupported CPU architecture for upgrade");
 }
 
-fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
+fn upgradeTempParent(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+    if (environ_map.get("TMPDIR")) |t| return try arena.dupe(u8, t);
+    if (environ_map.get("TEMP")) |t| return try arena.dupe(u8, t);
+    if (environ_map.get("TMP")) |t| return try arena.dupe(u8, t);
+    if (comptime @import("builtin").os.tag == .windows) return try arena.dupe(u8, "C:\\Windows\\Temp");
+    return try arena.dupe(u8, "/tmp");
+}
+
+fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map, force: bool) !void {
     var stderr_buffer: [1024]u8 = undefined;
     var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
     const stderr_writer = &stderr_file_writer.interface;
@@ -341,14 +349,18 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
     const unique = random.int(u64);
     var unique_buf: [32]u8 = undefined;
     const unique_str = try std.fmt.bufPrint(&unique_buf, "{x}", .{unique});
-    const tmp_dir_name = try std.fmt.allocPrint(arena, "puny-upgrade-{s}", .{unique_str});
-    defer arena.free(tmp_dir_name);
+    const tmp_parent = try upgradeTempParent(arena, environ_map);
+    defer arena.free(tmp_parent);
+    const tmp_rel_name = try std.fmt.allocPrint(arena, "puny-upgrade-{s}", .{unique_str});
+    defer arena.free(tmp_rel_name);
+    const tmp_dir_path = try std.fs.path.join(arena, &.{ tmp_parent, tmp_rel_name });
+    defer arena.free(tmp_dir_path);
 
-    try std.Io.Dir.cwd().createDir(io, tmp_dir_name, @enumFromInt(0o755));
-    var tmp_dir = try std.Io.Dir.cwd().openDir(io, tmp_dir_name, .{ .iterate = true });
+    try std.Io.Dir.createDirAbsolute(io, tmp_dir_path, @enumFromInt(0o755));
+    var tmp_dir = try std.Io.Dir.cwd().openDir(io, tmp_dir_path, .{ .iterate = true });
     errdefer {
         tmp_dir.close(io);
-        std.Io.Dir.cwd().deleteTree(io, tmp_dir_name) catch {};
+        std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
     }
 
     const archive_name = archiveNameForTarget();
@@ -399,10 +411,6 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
         defer arena.free(update_name);
         try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, update_name, io, .{});
 
-        const cwd = try std.process.currentPathAlloc(io, arena);
-        defer arena.free(cwd);
-        const tmp_dir_abs = try std.fs.path.join(arena, &.{ cwd, tmp_dir_name });
-        defer arena.free(tmp_dir_abs);
         const full_update_path = try std.fs.path.join(arena, &.{ exe_dir_path, update_name });
         defer arena.free(full_update_path);
 
@@ -421,7 +429,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
             "copy /Y \"{s}\" \"{s}\" > nul\r\n" ++
             "del \"{s}\" > nul\r\n" ++
             "rmdir /S /Q \"{s}\" > nul 2>&1\r\n" ++
-            "del /Q \"{s}\" > nul 2>&1\r\n", .{ exe_path, exe_path, full_update_path, exe_path, full_update_path, tmp_dir_abs, batch_path });
+            "del /Q \"{s}\" > nul 2>&1\r\n", .{ exe_path, exe_path, full_update_path, exe_path, full_update_path, tmp_dir_path, batch_path });
         defer arena.free(batch_body);
 
         var batch_file = try exe_dir.createFile(io, batch_name, .{});
@@ -457,7 +465,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
 
     tmp_dir.close(io);
     if (@import("builtin").os.tag != .windows) {
-        std.Io.Dir.cwd().deleteTree(io, tmp_dir_name) catch {};
+        std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
     }
 
     try stderr_writer.print("Upgraded to v{s}. Restart to use the new version.\n", .{latest_ver_str});
