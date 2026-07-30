@@ -17,6 +17,10 @@ pub const ModelProvider = enum {
 
 pub const ClientConfig = client.ClientConfig;
 
+fn isLmStudioAnthropicModel(model_id: []const u8) bool {
+    return std.mem.indexOf(u8, model_id, "qwen") != null;
+}
+
 pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
     return switch (selected_provider) {
         .lmstudio => "LM Studio",
@@ -67,7 +71,10 @@ pub const Provider = union(enum) {
 
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
-            .lmstudio => |*c| openai.chatStreaming(c, request, callback),
+            .lmstudio => |*c| if (isLmStudioAnthropicModel(request.model))
+                opencode_zen.chatStreamingAnthropic(c, request, callback)
+            else
+                openai.chatStreaming(c, request, callback),
             .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
                 opencode_zen.chatStreamingAnthropic(c, request, callback)
             else if (opencode_zen.isGoogleModel(request.model))
