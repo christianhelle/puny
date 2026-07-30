@@ -12,6 +12,7 @@ const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
 const session = @import("chat/session.zig");
 const sigint = @import("core/sigint.zig");
+const instructions = @import("agents/instructions.zig");
 const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
 const version = @import("version.zig");
@@ -233,6 +234,14 @@ pub fn main(init: std.process.Init) !void {
         if (skill_registry.count() > 0) {
             const skills_block = try skill_registry.buildListing(messages_arena);
             try messages.append(messages_arena, .{ .system = skills_block });
+        }
+        if (try skills.findGitRepoRoot(arena, io)) |repo_root| {
+            defer arena.free(repo_root);
+            if (try instructions.load(messages_arena, io, repo_root)) |result| {
+                defer arena.free(result.filename);
+                const labeled = try std.fmt.allocPrint(messages_arena, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
+                try messages.append(messages_arena, .{ .system = labeled });
+            }
         }
     }
 
