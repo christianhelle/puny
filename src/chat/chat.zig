@@ -25,8 +25,13 @@ fn countNewlines(text: []const u8) usize {
 fn printWithCRLF(writer: *std.Io.Writer, text: []const u8) !void {
     var rest = text;
     while (std.mem.indexOfScalar(u8, rest, '\n')) |nl_idx| {
-        try writer.print("{s}\r\n", .{rest[0..nl_idx]});
-        rest = rest[nl_idx + 1 ..];
+        if (nl_idx > 0 and rest[nl_idx - 1] == '\r') {
+            try writer.print("{s}", .{rest[0 .. nl_idx + 1]});
+            rest = rest[nl_idx + 1 ..];
+        } else {
+            try writer.print("{s}\r\n", .{rest[0..nl_idx]});
+            rest = rest[nl_idx + 1 ..];
+        }
     }
     if (rest.len > 0) try writer.print("{s}", .{rest});
 }
@@ -221,6 +226,7 @@ pub const OpenAiAccumulator = struct {
     session_stats: *SessionStats,
     has_header: bool,
     lines_printed: usize,
+    content_start_line: usize,
     content: std.ArrayList(u8),
     reasoning: std.ArrayList(u8),
     partial_calls: std.array_hash_map.Auto(usize, PartialToolCall),
@@ -240,6 +246,7 @@ pub const OpenAiAccumulator = struct {
             .session_stats = session_stats,
             .has_header = false,
             .lines_printed = 0,
+            .content_start_line = 0,
             .content = .empty,
             .reasoning = .empty,
             .partial_calls = .{},
@@ -328,6 +335,7 @@ pub const OpenAiAccumulator = struct {
                         try stdout.flush();
                     }
                     self.lines_printed += 1;
+                    self.content_start_line = self.lines_printed;
                 }
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(text.len, 4)), null);
                 if (self.stdout) |stdout| {
@@ -356,6 +364,7 @@ pub const OpenAiAccumulator = struct {
                         try stdout.print("{s}", .{ansi.reset});
                         try stdout.flush();
                     }
+                    self.lines_printed += countNewlines(text);
                 }
             },
             .tool_call_start => |tc| {
@@ -403,9 +412,14 @@ pub const OpenAiAccumulator = struct {
     /// Uses the \r\n-corrected line count to move the cursor up and erase,
     /// then re-prints the content with ANSI formatting applied.
     pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !usize {
-        if (self.lines_printed == 0 or self.content.items.len == 0) return 0;
+        if (self.content.items.len == 0) return 0;
 
-        try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
+        const content_lines = self.lines_printed - self.content_start_line;
+        if (content_lines > 0) {
+            try stdout.print("\x1b[{}A\x1b[J", .{content_lines});
+        } else {
+            try stdout.print("\x1b[G\x1b[J", .{});
+        }
         try stdout.flush();
 
         var md = markdown.Markdown.init();
@@ -415,7 +429,7 @@ pub const OpenAiAccumulator = struct {
         try printWithCRLF(stdout, rendered);
         try stdout.flush();
 
-        self.lines_printed = 0;
+        self.lines_printed = self.content_start_line;
         return countNewlines(rendered) + 1;
     }
 
@@ -743,6 +757,7 @@ test "SessionStats finalizes turn and reconciles usage" {
     try std.testing.expectEqual(@as(i64, 8), model_stats.output_tokens);
     try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
     try std.testing.expectEqual(@as(usize, 1), model_stats.tps_count);
+    try std.testing.expectEqual(@as(i64, 1), model_stats.reasoning_output_tokens);
 }
 
 test "SessionStats keeps partial tokens on cancelled turn" {
@@ -863,4 +878,12 @@ test "printWithCRLF handles multiple newlines" {
 
     try printWithCRLF(&output.writer, "a\nb\nc\n");
     try std.testing.expectEqualStrings("a\r\nb\r\nc\r\n", output.written());
+}
+
+test "printWithCRLF preserves existing CRLF" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printWithCRLF(&output.writer, "a\r\nb");
+    try std.testing.expectEqualStrings("a\r\nb", output.written());
 }
