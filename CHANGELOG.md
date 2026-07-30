@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Native self-upgrade for --upgrade (fixes Windows Defender false positive) ([#70](https://github.com/christianhelle/puny/pull/70)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.2.2](https://github.com/christianhelle/puny/releases/tag/v0.2.2) (2026-07-29)
 
 ### Features
