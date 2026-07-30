@@ -237,8 +237,9 @@ pub fn main(init: std.process.Init) !void {
         }
         if (try skills.findGitRepoRoot(arena, io)) |repo_root| {
             defer arena.free(repo_root);
-            if (try instructions.load(messages_arena, io, repo_root)) |result| {
+            if (try instructions.load(arena, io, repo_root)) |result| {
                 defer arena.free(result.filename);
+                defer arena.free(result.content);
                 const labeled = try std.fmt.allocPrint(messages_arena, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
                 try messages.append(messages_arena, .{ .system = labeled });
             }
@@ -749,3 +750,4 @@ test "requiresApiKey only for opencode and opencode-go" {
 test "include core session tests" {
     _ = @import("core/session.zig");
 }
+
