@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const input = @import("../tui/input.zig");
@@ -128,12 +129,21 @@ pub fn switchModel(
         }
         return null;
     };
+    const effort_suffix = if (result.reasoning_effort) |effort| if (effort != .default) @tagName(effort) else null else null;
     if (std.mem.eql(u8, result.model_key, current_key)) {
-        try stdout_writer.print("\nAlready using model {s}.\n", .{result.model_key});
+        try stdout_writer.print("\nAlready using model {s}", .{result.model_key});
+        if (effort_suffix) |suffix| {
+            try stdout_writer.print(" - {s}{s}{s}", .{ ansi.bold_start, suffix, ansi.bold_end });
+        }
+        try stdout_writer.print(".\n", .{});
         try stdout_writer.flush();
         return null;
     }
-    try stdout_writer.print("\nSwitched to model {s}.\n", .{result.model_key});
+    try stdout_writer.print("\nSwitched to model {s}", .{result.model_key});
+    if (effort_suffix) |suffix| {
+        try stdout_writer.print(" - {s}{s}{s}", .{ ansi.bold_start, suffix, ansi.bold_end });
+    }
+    try stdout_writer.print(".\n", .{});
     try stdout_writer.flush();
     return result;
 }
