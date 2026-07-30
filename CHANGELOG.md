@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add coding agent instruction file support ([#71](https://github.com/christianhelle/puny/pull/71)) ([@christianhelle](https://github.com/christianhelle/))
 - Native self-upgrade for --upgrade (fixes Windows Defender false positive) ([#70](https://github.com/christianhelle/puny/pull/70)) ([@christianhelle](https://github.com/christianhelle/))
 
 
