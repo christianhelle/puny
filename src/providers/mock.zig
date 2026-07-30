@@ -209,6 +209,11 @@ pub const MockClient = struct {
             return respondWithUsage(callback, last_content, speed, self.io);
         }
 
+        // Check for markdown mode (complex markdown with all features)
+        if (isKeyword(last_content, .markdown)) {
+            return respondWithMarkdown(callback, speed, self.io);
+        }
+
         // Check for table mode
         if (isKeyword(last_content, .table)) {
             return respondWithTable(callback, speed, self.io);
