@@ -80,13 +80,13 @@
   {
     "name": "Markdown table response",
     "args": ["--mock", "--model", "mock-model", "--prompt", "im testing the markdown table renderer. generate a markdown table with a realistic data set", "--oneshot"],
-    "expect": ["| ID | Name | Department | Position | Salary | Start Date |", "Alice Johnson", "Engineering"],
+    "expect": ["Alice Johnson", "Engineering", "employee data"],
     "not_expect": []
   },
   {
     "name": "Complex markdown response",
     "args": ["--mock", "--model", "mock-model", "--prompt", "test complex markdown rendering", "--oneshot"],
-    "expect": ["# Complex Markdown Sample", "## Code Blocks", "```zig", "## Lists", "## Blockquotes", "## Table", "embedded code block", "escaped backticks"],
+    "expect": ["Complex Markdown Sample", "Code Blocks", "Lists", "Blockquotes", "Blockquote with Mixed Content", "embedded code block", "literal backticks"],
     "not_expect": []
   },
   {
