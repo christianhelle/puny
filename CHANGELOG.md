@@ -1,8 +1,9 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.2.2](https://github.com/christianhelle/puny/releases/tag/v0.2.2) (2026-07-29)
 
 ### Features
+- Auto-trigger reconfigure on first launch when config file missing ([#68](https://github.com/christianhelle/puny/pull/68)) ([@christianhelle](https://github.com/christianhelle/))
 - Show startup time metrics on Welcome Screen ([#67](https://github.com/christianhelle/puny/pull/67)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --chat-log CLI flag for conversation logging ([#65](https://github.com/christianhelle/puny/pull/65)) ([@christianhelle](https://github.com/christianhelle/))
 - Allow models to load skills via tool call ([#64](https://github.com/christianhelle/puny/pull/64)) ([@christianhelle](https://github.com/christianhelle/))
