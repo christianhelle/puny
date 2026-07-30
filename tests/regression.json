@@ -84,6 +84,12 @@
     "not_expect": []
   },
   {
+    "name": "Complex markdown response",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "test complex markdown rendering", "--oneshot"],
+    "expect": ["## Complex Markdown Sample", "### Code Blocks", "```zig", "### Lists", "### Blockquotes", "### Table", "### Escaped Characters"],
+    "not_expect": []
+  },
+  {
     "name": "Chat log creates file with user and assistant labels",
     "args": ["--mock", "--model", "mock-model", "--prompt", "echo hello world", "--oneshot", "--chat-log"],
     "expect": ["Echo:", "hello world"],
