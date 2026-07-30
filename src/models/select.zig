@@ -1,10 +1,17 @@
 const std = @import("std");
 const config = @import("../config/config.zig");
+const effort_picker = @import("../tui/effort_picker.zig");
 const input = @import("../tui/input.zig");
 const client = @import("../providers/client.zig");
 const model_picker = @import("../tui/model_picker.zig");
+const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const retry = @import("../core/retry.zig");
+
+pub const SelectionResult = struct {
+    model_key: []const u8,
+    reasoning_effort: ?openai.ReasoningEffort,
+};
 
 pub fn select(
     prov: *provider.Provider,
@@ -17,10 +24,10 @@ pub fn select(
     current_provider: provider.ModelProvider,
     environ_map: *const std.process.Environ.Map,
     random: std.Random,
-) !?[]const u8 {
+) !?SelectionResult {
     if (model_id) |id| {
         if (skip_validation) {
-            return try arena.dupe(u8, id);
+            return .{ .model_key = try arena.dupe(u8, id), .reasoning_effort = null };
         }
         var models = try listModelsWithRetry(prov, io, random, 0);
         defer models.deinit();
@@ -28,7 +35,7 @@ pub fn select(
             if (std.mem.eql(u8, m.id, id)) break true;
         } else false;
         if (found) {
-            return try arena.dupe(u8, id);
+            return .{ .model_key = try arena.dupe(u8, id), .reasoning_effort = null };
         }
         return null;
     }
@@ -36,10 +43,13 @@ pub fn select(
     defer models.deinit();
     model_picker.setModels(models.value().models);
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
+    const effort = (try effort_picker.pickEffort(arena, io)) orelse return null;
 
     if (cfg) |c| {
         if (client.isValidUtf8(key) and current_provider != .mock) {
             c.providerEntry(current_provider).model = key;
+            const effort_str = if (effort != .default) @tagName(effort) else null;
+            c.providerEntry(current_provider).reasoning_effort = if (effort_str) |e| try arena.dupe(u8, e) else null;
             config.save(arena, io, c.*, environ_map) catch |err| {
                 var stderr_buffer: [1024]u8 = undefined;
                 var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
@@ -50,7 +60,7 @@ pub fn select(
         }
     }
 
-    return key;
+    return .{ .model_key = key, .reasoning_effort = effort };
 }
 
 fn selectModelInteractive(
@@ -110,22 +120,22 @@ pub fn switchModel(
     current_provider: provider.ModelProvider,
     environ_map: *const std.process.Environ.Map,
     random: std.Random,
-) !?[]const u8 {
-    const new_key = (try select(prov, model_id, arena, io, init, skip_validation, cfg, current_provider, environ_map, random)) orelse {
+) !?SelectionResult {
+    const result = (try select(prov, model_id, arena, io, init, skip_validation, cfg, current_provider, environ_map, random)) orelse {
         if (model_id != null) {
             try stdout_writer.print("\nModel not found.\n", .{});
             try stdout_writer.flush();
         }
         return null;
     };
-    if (std.mem.eql(u8, new_key, current_key)) {
-        try stdout_writer.print("\nAlready using model {s}.\n", .{new_key});
+    if (std.mem.eql(u8, result.model_key, current_key)) {
+        try stdout_writer.print("\nAlready using model {s}.\n", .{result.model_key});
         try stdout_writer.flush();
         return null;
     }
-    try stdout_writer.print("\nSwitched to model {s}.\n", .{new_key});
+    try stdout_writer.print("\nSwitched to model {s}.\n", .{result.model_key});
     try stdout_writer.flush();
-    return new_key;
+    return result;
 }
 
 pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, comptime retries: usize) !client.Owned(client.ModelsList) {
