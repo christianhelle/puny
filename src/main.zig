@@ -27,7 +27,7 @@ pub fn main(init: std.process.Init) !void {
     const messages_arena = messages_arena_state.allocator();
     const io = init.io;
 
-    try cleanupOldBackup(arena, io);
+    cleanupOldBackup(arena, io);
 
     const args_slice = try init.minimal.args.toSlice(arena);
     var parsed = cli.parseArgs(io, init.environ_map, args_slice);
@@ -270,26 +270,42 @@ pub fn main(init: std.process.Init) !void {
     try chat_session.run();
 }
 
-fn cleanupOldBackup(allocator: std.mem.Allocator, io: std.Io) !void {
-    const exe_path = try std.process.executablePathAlloc(io, allocator);
+fn cleanupOldBackup(allocator: std.mem.Allocator, io: std.Io) void {
+    const exe_path = std.process.executablePathAlloc(io, allocator) catch return;
     defer allocator.free(exe_path);
-    const old_path = try std.fmt.allocPrint(allocator, "{s}.old", .{exe_path});
+    const old_path = std.fmt.allocPrint(allocator, "{s}.old", .{exe_path}) catch return;
     defer allocator.free(old_path);
     std.Io.Dir.deleteFileAbsolute(io, old_path) catch |err| switch (err) {
         error.FileNotFound => {},
-        else => |e| return e,
+        else => {
+            var buf: [512]u8 = undefined;
+            var w: std.Io.File.Writer = .init(.stderr(), io, &buf);
+            w.interface.print("warning: failed to remove old backup: {s}\n", .{@errorName(err)}) catch {};
+            w.interface.flush() catch {};
+        },
     };
 }
 
 fn archiveNameForTarget() []const u8 {
     const target = @import("builtin").target;
-    const aarch = target.cpu.arch == .aarch64;
-    return switch (target.os.tag) {
-        .windows => if (aarch) "puny-windows-aarch64.zip" else "puny-windows-x86_64.zip",
-        .linux => if (aarch) "puny-linux-aarch64.tar.gz" else "puny-linux-x86_64.tar.gz",
-        .macos => if (aarch) "puny-macos-aarch64.tar.gz" else "puny-macos-x86_64.tar.gz",
-        else => @compileError("unsupported OS for upgrade"),
-    };
+    const aarch = target.cpu.arch;
+    const os = target.os.tag;
+    if (aarch == .aarch64) {
+        return switch (os) {
+            .windows => "puny-windows-aarch64.zip",
+            .linux => "puny-linux-aarch64.tar.gz",
+            .macos => "puny-macos-aarch64.tar.gz",
+            else => @compileError("unsupported OS for upgrade"),
+        };
+    } else if (aarch == .x86_64) {
+        return switch (os) {
+            .windows => "puny-windows-x86_64.zip",
+            .linux => "puny-linux-x86_64.tar.gz",
+            .macos => "puny-macos-x86_64.tar.gz",
+            else => @compileError("unsupported OS for upgrade"),
+        };
+    }
+    @compileError("unsupported CPU architecture for upgrade");
 }
 
 fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
@@ -419,12 +435,24 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
             .stderr = .ignore,
         });
     } else {
+        const new_name = try std.fmt.allocPrint(arena, "{s}.new", .{exe_name});
+        defer arena.free(new_name);
         const old_name = try std.fmt.allocPrint(arena, "{s}.old", .{exe_name});
         defer arena.free(old_name);
+
+        try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, new_name, io, .{});
+        std.Io.Dir.setFilePermissions(exe_dir, io, new_name, @enumFromInt(0o755), .{}) catch {};
+
         try std.Io.Dir.rename(exe_dir, exe_name, exe_dir, old_name, io);
         errdefer std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
-        try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, exe_name, io, .{});
-        std.Io.Dir.setFilePermissions(exe_dir, io, exe_name, @enumFromInt(0o755), .{}) catch {};
+
+        std.Io.Dir.rename(exe_dir, new_name, exe_dir, exe_name, io) catch |err| {
+            std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
+            std.Io.Dir.deleteFile(exe_dir, io, new_name) catch {};
+            return err;
+        };
+
+        std.Io.Dir.deleteFile(exe_dir, io, old_name) catch {};
     }
 
     tmp_dir.close(io);
