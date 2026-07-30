@@ -338,14 +338,6 @@ pub const OpenAiAccumulator = struct {
                     self.content_start_line = self.lines_printed;
                 }
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(text.len, 4)), null);
-                if (self.stdout) |stdout| {
-                    if (!self.has_header) {
-                        self.has_header = true;
-                        try stdout.print("\r\n", .{});
-                    }
-                    try printWithCRLF(stdout, text);
-                    try stdout.flush();
-                }
                 self.lines_printed += countNewlines(text);
                 try self.content.appendSlice(self.allocator, text);
             },
@@ -408,18 +400,11 @@ pub const OpenAiAccumulator = struct {
         self.partial_calls.clearRetainingCapacity();
     }
 
-    /// Replace the raw streamed content with markdown-rendered content.
-    /// Uses the \r\n-corrected line count to move the cursor up and erase,
-    /// then re-prints the content with ANSI formatting applied.
+    /// Render the accumulated content as ANSI-formatted markdown and print it.
     pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !usize {
         if (self.content.items.len == 0) return 0;
 
-        const content_lines = self.lines_printed - self.content_start_line;
-        if (content_lines > 0) {
-            try stdout.print("\r\x1b[{}A\x1b[J", .{content_lines});
-        } else {
-            try stdout.print("\r\x1b[J", .{});
-        }
+        try stdout.print("\r\n", .{});
         try stdout.flush();
 
         var md = markdown.Markdown.init();
