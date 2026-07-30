@@ -112,6 +112,7 @@ pub fn switchModel(
     prov: *provider.Provider,
     model_id: ?[]const u8,
     current_key: []const u8,
+    current_effort: ?openai.ReasoningEffort,
     arena: std.mem.Allocator,
     io: std.Io,
     init: std.process.Init,
@@ -130,7 +131,8 @@ pub fn switchModel(
         return null;
     };
     const effort_suffix = if (result.reasoning_effort) |effort| if (effort != .default) @tagName(effort) else null else null;
-    if (std.mem.eql(u8, result.model_key, current_key)) {
+    const same_effort = if (result.reasoning_effort) |new_effort| if (current_effort) |cur| new_effort == cur else false else current_effort == null;
+    if (std.mem.eql(u8, result.model_key, current_key) and same_effort) {
         try stdout_writer.print("\nAlready using model {s}", .{result.model_key});
         if (effort_suffix) |suffix| {
             try stdout_writer.print(" - {s}{s}{s}", .{ ansi.bold_start, suffix, ansi.bold_end });
