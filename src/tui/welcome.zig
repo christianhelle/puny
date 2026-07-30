@@ -165,9 +165,9 @@ test "print shows reasoning effort when non-default" {
             .provider_name = "Test",
             .provider_url = "http://localhost",
             .model_key = "deepseek-v4-pro",
-            .reasoning_effort = .max,
+            .reasoning_effort = .xhigh,
         });
-        try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, " - \x1b[1mmax\x1b[22m"));
+        try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, " - \x1b[1mxhigh\x1b[22m"));
     }
 }
 
