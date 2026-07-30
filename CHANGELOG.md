@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Change reasoning efforts to default, none, minimal, low, medium, high, and xhigh ([#73](https://github.com/christianhelle/puny/pull/73)) ([@christianhelle](https://github.com/christianhelle/))
 - Add reasoning effort selection to /model command ([#72](https://github.com/christianhelle/puny/pull/72)) ([@christianhelle](https://github.com/christianhelle/))
 - Add coding agent instruction file support ([#71](https://github.com/christianhelle/puny/pull/71)) ([@christianhelle](https://github.com/christianhelle/))
 - Native self-upgrade for --upgrade (fixes Windows Defender false positive) ([#70](https://github.com/christianhelle/puny/pull/70)) ([@christianhelle](https://github.com/christianhelle/))
