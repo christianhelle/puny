@@ -86,7 +86,7 @@
   {
     "name": "Complex markdown response",
     "args": ["--mock", "--model", "mock-model", "--prompt", "test complex markdown rendering", "--oneshot"],
-    "expect": ["## Markdown Sample", "```rust", "[link]", "nested with `code`", "escaped asterisks"],
+    "expect": ["# Complex Markdown Sample", "## Code Blocks", "```zig", "## Lists", "## Blockquotes", "## Table", "embedded code block", "escaped backticks"],
     "not_expect": []
   },
   {
