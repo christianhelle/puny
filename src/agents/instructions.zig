@@ -7,10 +7,8 @@ pub const LoadResult = struct {
 
 const candidate_files = [_][]const u8{
     "AGENTS.md",
-    "CLAUDE.md",
-    ".cursorrules",
-    ".windsurfrules",
     ".github/copilot-instructions.md",
+    "CLAUDE.md",
 };
 
 /// Scans the given directory for coding agent instruction files in priority order.
@@ -137,4 +135,3 @@ test "load reads multi-line content correctly" {
     try std.testing.expectEqualStrings("AGENTS.md", result.filename);
     try std.testing.expectEqualStrings(multiline, result.content);
 }
-
