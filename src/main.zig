@@ -136,6 +136,7 @@ pub fn main(init: std.process.Init) !void {
         .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
         .provider_url = provider_url,
         .model_key = model_key,
+        .reasoning_effort = reasoning_effort,
         .session_id = current_session.id,
         .oneshot = parsed.oneshot,
         .prefilled = parsed.prompt != null,
