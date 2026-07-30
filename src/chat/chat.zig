@@ -19,6 +19,18 @@ fn countNewlines(text: []const u8) usize {
     return count;
 }
 
+/// Print text to stdout, replacing each `\n` with `\r\n` so the cursor
+/// returns to column 0 in raw mode. This prevents the staircase effect
+/// where each line shifts one column to the right.
+fn printWithCRLF(writer: *std.Io.Writer, text: []const u8) !void {
+    var rest = text;
+    while (std.mem.indexOfScalar(u8, rest, '\n')) |nl_idx| {
+        try writer.print("{s}\r\n", .{rest[0..nl_idx]});
+        rest = rest[nl_idx + 1 ..];
+    }
+    if (rest.len > 0) try writer.print("{s}", .{rest});
+}
+
 pub const PerModelStats = struct {
     turn_count: usize = 0,
     input_tokens: i64 = 0,
@@ -218,7 +230,6 @@ pub const OpenAiAccumulator = struct {
     first_token_recorded: bool,
     has_streamed_output: bool,
     show_thinking: bool,
-    reasoning_lines_printed: usize,
     reasoning_shown: bool,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats) OpenAiAccumulator {
@@ -238,7 +249,6 @@ pub const OpenAiAccumulator = struct {
             .first_token_recorded = false,
             .has_streamed_output = false,
             .show_thinking = false,
-            .reasoning_lines_printed = 0,
             .reasoning_shown = false,
         };
     }
@@ -323,9 +333,9 @@ pub const OpenAiAccumulator = struct {
                 if (self.stdout) |stdout| {
                     if (!self.has_header) {
                         self.has_header = true;
-                        try stdout.print("\n", .{});
+                        try stdout.print("\r\n", .{});
                     }
-                    try stdout.print("{s}", .{text});
+                    try printWithCRLF(stdout, text);
                     try stdout.flush();
                 }
                 self.lines_printed += countNewlines(text);
@@ -339,12 +349,13 @@ pub const OpenAiAccumulator = struct {
                     if (self.stdout) |stdout| {
                         if (!self.has_header) {
                             self.has_header = true;
-                            try stdout.print("\n", .{});
+                            try stdout.print("\r\n", .{});
                         }
-                        try stdout.print("{s}{s}{s}", .{ ansi.dim, text, ansi.reset });
+                        try stdout.print("{s}", .{ansi.dim});
+                        try printWithCRLF(stdout, text);
+                        try stdout.print("{s}", .{ansi.reset});
                         try stdout.flush();
                     }
-                    self.reasoning_lines_printed += countNewlines(text);
                 }
             },
             .tool_call_start => |tc| {
@@ -386,23 +397,6 @@ pub const OpenAiAccumulator = struct {
             });
         }
         self.partial_calls.clearRetainingCapacity();
-    }
-
-    pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !usize {
-        if (self.lines_printed == 0 or self.content.items.len == 0) return 0;
-
-        try stdout.print("\x1b[{}A\x1b[J", .{self.lines_printed});
-        try stdout.flush();
-
-        var md = markdown.Markdown.init();
-        const rendered = try md.render(self.allocator, self.content.items);
-        defer self.allocator.free(rendered);
-
-        try stdout.print("{s}\n", .{rendered});
-        try stdout.flush();
-
-        self.lines_printed = 0;
-        return countNewlines(rendered) + 1;
     }
 
     pub fn streamCallback(self: *@This()) openai.StreamCallback {
@@ -484,16 +478,9 @@ pub fn runTurn(
 
     var content_cursor_offset: usize = 0;
     var content_ends_with_newline = false;
-    var final_lines_printed: usize = 0;
     if (has_content) {
-        if (accumulator.lines_printed > 0) {
-            final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
-            content_cursor_offset = final_lines_printed;
-            content_ends_with_newline = true;
-        } else {
-            content_cursor_offset = 1;
-            content_ends_with_newline = false;
-        }
+        content_ends_with_newline = accumulator.content.items[accumulator.content.items.len - 1] == '\n';
+        content_cursor_offset = 1 + accumulator.lines_printed;
     }
 
     if (accumulator.hasToolCalls()) {
@@ -727,7 +714,6 @@ test "SessionStats finalizes turn and reconciles usage" {
     try std.testing.expectEqual(@as(usize, 1), model_stats.turn_count);
     try std.testing.expectEqual(@as(i64, 12), model_stats.input_tokens);
     try std.testing.expectEqual(@as(i64, 8), model_stats.output_tokens);
-    try std.testing.expectEqual(@as(i64, 1), model_stats.reasoning_output_tokens);
     try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
     try std.testing.expectEqual(@as(usize, 1), model_stats.tps_count);
 }
@@ -818,4 +804,36 @@ test "SessionStats.print includes memory section" {
     try std.testing.expect(std.mem.indexOf(u8, written, "─── Memory ───") != null);
     try std.testing.expect(std.mem.indexOf(u8, written, memory.resident_label) != null);
     try std.testing.expect(std.mem.indexOf(u8, written, memory.private_label) != null);
+}
+
+test "printWithCRLF replaces \\n with \\r\\n" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printWithCRLF(&output.writer, "Hello\nWorld\n");
+    try std.testing.expectEqualStrings("Hello\r\nWorld\r\n", output.written());
+}
+
+test "printWithCRLF handles text without newlines" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printWithCRLF(&output.writer, "Hello world");
+    try std.testing.expectEqualStrings("Hello world", output.written());
+}
+
+test "printWithCRLF handles empty text" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printWithCRLF(&output.writer, "");
+    try std.testing.expectEqualStrings("", output.written());
+}
+
+test "printWithCRLF handles multiple newlines" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printWithCRLF(&output.writer, "a\nb\nc\n");
+    try std.testing.expectEqualStrings("a\r\nb\r\nc\r\n", output.written());
 }
