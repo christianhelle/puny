@@ -61,10 +61,8 @@ pub fn selectFromList(
                 try redrawList(stdout_writer, items, selected);
             },
             .down => {
-                if (selected < items.len - 1) {
-                    selected += 1;
-                    try redrawList(stdout_writer, items, selected);
-                }
+                selected = if (selected < items.len - 1) selected + 1 else 0;
+                try redrawList(stdout_writer, items, selected);
             },
             .enter => {
                 try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
