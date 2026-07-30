@@ -57,10 +57,8 @@ pub fn selectFromList(
         const key = readKey(io) catch .unknown;
         switch (key) {
             .up => {
-                if (selected > 0) {
-                    selected -= 1;
-                    try redrawList(stdout_writer, items, selected);
-                }
+                selected = if (selected == 0) items.len - 1 else selected - 1;
+                try redrawList(stdout_writer, items, selected);
             },
             .down => {
                 if (selected < items.len - 1) {
