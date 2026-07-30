@@ -17,6 +17,7 @@ pub const Options = struct {
     show_thinking: bool = false,
     prune: bool = false,
     upgrade: bool = false,
+    force_upgrade: bool = false,
     session: ?[]const u8 = null,
     do_resume: bool = false,
 };
@@ -92,6 +93,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.prune = true;
         } else if (std.mem.eql(u8, arg, "--upgrade") or std.mem.eql(u8, arg, "-U")) {
             opts.upgrade = true;
+        } else if (std.mem.eql(u8, arg, "--force")) {
+            opts.force_upgrade = true;
         } else {
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
@@ -160,7 +163,8 @@ pub fn printHelp(io: std.Io) void {
         \\      --prune                 Delete old sessions (use --session to keep one)
         \\      --chat-log              Log conversation to puny_chat.log
         \\      --debug                 Log HTTP requests and responses to puny_debug.log
-        \\  -U, --upgrade               Upgrade to the latest release via install script
+        \\  -U, --upgrade               Upgrade to the latest release
+        \\      --force                 Force upgrade even if same version (use with --upgrade)
         \\  -h, --help                  Show this help text
         \\  -V, --version               Print version
         \\

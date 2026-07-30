@@ -33,7 +33,7 @@ pub fn main(init: std.process.Init) !void {
     var parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
     if (parsed.upgrade) {
-        try runUpgrade(arena, io);
+        try runUpgrade(arena, io, parsed.force_upgrade);
         return;
     }
 
@@ -292,7 +292,7 @@ fn archiveNameForTarget() []const u8 {
     };
 }
 
-fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
+fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
     var stderr_buffer: [1024]u8 = undefined;
     var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
     const stderr_writer = &stderr_file_writer.interface;
@@ -314,8 +314,8 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io) !void {
     const current_ver = try std.SemanticVersion.parse(version.version);
     const latest_ver = try std.SemanticVersion.parse(latest_ver_str);
 
-    if (current_ver.order(latest_ver) != .lt) {
-        try stderr_writer.print("Already up to date (v{s}).\n", .{version.version});
+    if (!force and current_ver.order(latest_ver) != .lt) {
+        try stderr_writer.print("Already up to date (v{s}). Use --force to upgrade anyway.\n", .{version.version});
         try stderr_writer.flush();
         return;
     }
