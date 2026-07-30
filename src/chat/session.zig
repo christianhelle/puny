@@ -18,6 +18,7 @@ const copilot = @import("../providers/copilot.zig");
 const prompt_history = @import("../prompts/history.zig");
 const prompts = @import("../prompts/prompts.zig");
 const provider = @import("../providers/provider.zig");
+const instructions = @import("../agents/instructions.zig");
 const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
 const tools = @import("../tools/root.zig");
@@ -175,6 +176,15 @@ pub const ChatSession = struct {
                     core_session.setWriteBlocked(false);
                     const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
+
+                    if (try skills.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
+                        defer ctx.arena.free(repo_root);
+                        if (try instructions.load(ctx.messages_arena.allocator(), ctx.io, repo_root)) |result| {
+                            defer ctx.arena.free(result.filename);
+                            const labeled = try std.fmt.allocPrint(ctx.messages_arena.allocator(), "Instructions from {s}:\n{s}", .{ result.filename, result.content });
+                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = labeled });
+                        }
+                    }
 
                     ctx.session.* = try core_session.Session.init(ctx.arena, ctx.session.base, ctx.random, ctx.io);
 
