@@ -378,20 +378,59 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, force: bool) !void {
     var exe_dir = try std.Io.Dir.cwd().openDir(io, exe_dir_path, .{});
     defer exe_dir.close(io);
 
-    const old_name = try std.fmt.allocPrint(arena, "{s}.old", .{exe_name});
-    defer arena.free(old_name);
+    if (@import("builtin").os.tag == .windows) {
+        const update_name = try std.fmt.allocPrint(arena, "{s}.update", .{exe_name});
+        defer arena.free(update_name);
+        try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, update_name, io, .{});
 
-    try std.Io.Dir.rename(exe_dir, exe_name, exe_dir, old_name, io);
-    errdefer std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
+        const cwd = try std.process.currentPathAlloc(io, arena);
+        defer arena.free(cwd);
+        const tmp_dir_abs = try std.fs.path.join(arena, &.{ cwd, tmp_dir_name });
+        defer arena.free(tmp_dir_abs);
+        const full_update_path = try std.fs.path.join(arena, &.{ exe_dir_path, update_name });
+        defer arena.free(full_update_path);
 
-    try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, exe_name, io, .{});
+        const batch_name = try std.fmt.allocPrint(arena, "puny-upgrade-{s}.bat", .{unique_str});
+        defer arena.free(batch_name);
+        const batch_path = try std.fs.path.join(arena, &.{ exe_dir_path, batch_name });
+        defer arena.free(batch_path);
 
-    if (@import("builtin").os.tag != .windows) {
+        const batch_body = try std.fmt.allocPrint(arena, "@echo off\r\n" ++
+            ":retry\r\n" ++
+            "del \"{s}\" > nul 2>&1\r\n" ++
+            "if exist \"{s}\" (\r\n" ++
+            "  ping 127.0.0.1 -n 3 > nul\r\n" ++
+            "  goto retry\r\n" ++
+            ")\r\n" ++
+            "copy /Y \"{s}\" \"{s}\" > nul\r\n" ++
+            "del \"{s}\" > nul\r\n" ++
+            "rmdir /S /Q \"{s}\" > nul 2>&1\r\n" ++
+            "del /Q \"{s}\" > nul 2>&1\r\n", .{ exe_path, exe_path, full_update_path, exe_path, full_update_path, tmp_dir_abs, batch_path });
+        defer arena.free(batch_body);
+
+        var batch_file = try exe_dir.createFile(io, batch_name, .{});
+        defer batch_file.close(io);
+        try batch_file.writeStreamingAll(io, batch_body);
+
+        _ = try std.process.spawn(io, .{
+            .argv = &[_][]const u8{ "cmd", "/c", batch_path },
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        });
+    } else {
+        const old_name = try std.fmt.allocPrint(arena, "{s}.old", .{exe_name});
+        defer arena.free(old_name);
+        try std.Io.Dir.rename(exe_dir, exe_name, exe_dir, old_name, io);
+        errdefer std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
+        try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, exe_name, io, .{});
         std.Io.Dir.setFilePermissions(exe_dir, io, exe_name, @enumFromInt(0o755), .{}) catch {};
     }
 
     tmp_dir.close(io);
-    std.Io.Dir.cwd().deleteTree(io, tmp_dir_name) catch {};
+    if (@import("builtin").os.tag != .windows) {
+        std.Io.Dir.cwd().deleteTree(io, tmp_dir_name) catch {};
+    }
 
     try stderr_writer.print("Upgraded to v{s}. Restart to use the new version.\n", .{latest_ver_str});
     try stderr_writer.flush();
