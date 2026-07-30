@@ -142,3 +142,62 @@ test "prefilled prompt mode shows automatic submission hint" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Prefilled prompt will be sent automatically"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
+
+test "print shows reasoning effort when non-default" {
+    const allocator = std.testing.allocator;
+
+    {
+        var out = std.Io.Writer.Allocating.init(allocator);
+        defer out.deinit();
+        try print(&out.writer, .{
+            .provider_name = "Test",
+            .provider_url = "http://localhost",
+            .model_key = "deepseek-v4-pro",
+            .reasoning_effort = .high,
+        });
+        try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, " - \x1b[1mhigh\x1b[22m"));
+    }
+
+    {
+        var out = std.Io.Writer.Allocating.init(allocator);
+        defer out.deinit();
+        try print(&out.writer, .{
+            .provider_name = "Test",
+            .provider_url = "http://localhost",
+            .model_key = "deepseek-v4-pro",
+            .reasoning_effort = .max,
+        });
+        try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, " - \x1b[1mmax\x1b[22m"));
+    }
+}
+
+test "print omits reasoning effort when default" {
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try print(&out.writer, .{
+        .provider_name = "Test",
+        .provider_url = "http://localhost",
+        .model_key = "deepseek-v4-pro",
+        .reasoning_effort = .default,
+    });
+
+    const text = out.written();
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, " - \x1b[1m"));
+}
+
+test "printSummary shows reasoning effort when non-default" {
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try printSummary(&out.writer, .{
+        .provider_name = "Test",
+        .provider_url = "http://localhost",
+        .model_key = "deepseek-v4-pro",
+        .reasoning_effort = .high,
+    });
+
+    try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, " - \x1b[1mhigh\x1b[22m"));
+}
