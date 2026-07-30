@@ -442,12 +442,13 @@ pub fn runTurn(
     indicator_opt: ?*indicator.ThinkingIndicator,
     chat_log: ?*std.Io.Writer,
 ) !TurnResult {
+    const effective_effort = if (reasoning_effort) |e| e else if (show_thinking or chat_log != null) openai.ReasoningEffort.high else null;
     const request = openai.ChatRequest{
         .model = model_key,
         .messages = messages.items,
         .tools = tool_definitions,
         .stream = true,
-        .reasoning_effort = reasoning_effort,
+        .reasoning_effort = effective_effort,
     };
 
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
