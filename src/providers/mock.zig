@@ -429,6 +429,77 @@ fn respondWithTable(callback: openai.StreamCallback, speed: MockSpeed, io: std.I
     try callback.emit(.{ .finish = "stop" });
 }
 
+fn respondWithMarkdown(callback: openai.StreamCallback, speed: MockSpeed, io: std.Io) !void {
+    const chunks = [_][]const u8{
+        "## Complex Markdown Sample\n\n",
+        "A paragraph with **bold**, *italic*, and ***bold-italic*** text. Also `inline code`.\n\n",
+        "### Headings\n\n",
+        "# H1 Heading\n",
+        "## H2 Heading\n",
+        "### H3 Heading\n",
+        "#### H4 Heading\n",
+        "##### H5 Heading\n",
+        "###### H6 Heading\n\n",
+        "### Code Blocks\n\n",
+        "```zig\nconst std = @import(\"std\");\n\npub fn main() !void {\n    std.debug.print(\"Hello, World!\\n\", .{});\n}\n```\n\n",
+        "```python\ndef fibonacci(n):\n    if n <= 1:\n        return n\n    return fibonacci(n - 1) + fibonacci(n - 2)\n```\n\n",
+        "```bash\n$ curl -s https://api.example.com/v1/status | jq '.healthy'\n```\n\n",
+        "### Lists\n\n",
+        "Unordered:\n\n",
+        "- Item **one**\n",
+        "- Item *two*\n",
+        "  - Nested `code`\n",
+        "  - Nested ***bold-italic***\n",
+        "- Item three\n\n",
+        "Ordered:\n\n",
+        "1. First step\n",
+        "2. Second step\n",
+        "   1. Sub-step A\n",
+        "   2. Sub-step B\n",
+        "3. Third step\n\n",
+        "Task list:\n\n",
+        "- [x] Completed task\n",
+        "- [ ] Pending task\n",
+        "- [x] ~Strikethrough~ done\n\n",
+        "### Blockquotes\n\n",
+        "> This is a blockquote with **bold** text.\n",
+        ">\n",
+        "> > Nested blockquote with `code`.\n",
+        ">\n",
+        "> Back to outer level.\n\n",
+        "### Horizontal Rule\n\n",
+        "---\n\n",
+        "### Links & Images\n\n",
+        "[Puny on GitHub](https://github.com/christianhelle/puny)\n\n",
+        "![Puny Logo](https://via.placeholder.com/150x50?text=Puny)\n\n",
+        "### Table\n\n",
+        "| Language | Typing | Compiled |\n",
+        "| --- | --- | --- |\n",
+        "| **Zig** | Static | Yes |\n",
+        "| *Python* | Dynamic | No |\n",
+        "| `Rust` | Static | Yes |\n\n",
+        "### Escaped Characters\n\n",
+        "\\*literal asterisks\\*\n\n",
+        "\\`literal backticks\\`\n\n",
+        "### Mixed Content\n\n",
+        "> **Note:** This blockquote contains:\n",
+        ">\n",
+        "> 1. An ordered list\n",
+        "> 2. With `inline code`\n",
+        ">    - And a nested unordered item\n",
+        ">\n",
+        "> ```zig\n",
+        "> const x: i32 = 42;\n",
+        "> ```\n",
+    };
+
+    for (chunks) |chunk| {
+        try callback.emit(.{ .content = chunk });
+        try emitDelay(speed, io);
+    }
+    try callback.emit(.{ .finish = "stop" });
+}
+
 fn respondWithCompletion(callback: openai.StreamCallback) !void {
     try callback.emit(.{ .content = "Tool executed successfully. Here's the result:\n\n" });
     try callback.emit(.{ .content = "The operation completed. I'm running in mock mode, so the result is simulated.\n" });
