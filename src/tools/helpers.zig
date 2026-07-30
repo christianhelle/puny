@@ -103,6 +103,14 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
     return ownedSliceOrEmpty(&result, allocator);
 }
 
+pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u8, dest_dir: std.Io.Dir, dest_name: []const u8) !void {
+    const data = try httpGet(allocator, io, url);
+    defer allocator.free(data);
+    var file = try dest_dir.createFile(io, dest_name, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, data);
+}
+
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
     const uri = try std.Uri.parse(url);
     var client = std.http.Client{ .allocator = allocator, .io = io };
