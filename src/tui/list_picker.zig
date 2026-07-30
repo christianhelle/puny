@@ -38,12 +38,12 @@ pub fn selectFromList(
 
     var selected: usize = 0;
 
-    try stdout_writer.print("\n\n{s}\n", .{title});
+    try stdout_writer.print("\r\n\r\n{s}\r\n", .{title});
     for (items, 0..) |item, i| {
         if (i == selected) {
-            try stdout_writer.print("{s}> {s}{s}\n", .{ ansi.bright, item.label, ansi.reset });
+            try stdout_writer.print("{s}> {s}{s}\r\n", .{ ansi.bright, item.label, ansi.reset });
         } else {
-            try stdout_writer.print("  {s}\n", .{item.label});
+            try stdout_writer.print("  {s}\r\n", .{item.label});
         }
     }
     try stdout_writer.flush();
