@@ -1,11 +1,13 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
+const openai = @import("../providers/openai.zig");
 const version = @import("../version.zig");
 
 pub const Info = struct {
     provider_name: []const u8,
     provider_url: []const u8,
     model_key: []const u8,
+    reasoning_effort: ?openai.ReasoningEffort = null,
     session_id: []const u8 = "",
     oneshot: bool = false,
     prefilled: bool = false,
@@ -32,7 +34,13 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("\n", .{});
 
     try writer.print("  {s}Provider:{s} {s} ({s})\n", .{ ansi.bright, ansi.reset, info.provider_name, info.provider_url });
-    try writer.print("  {s}Model:{s}    {s}\n", .{ ansi.bright, ansi.reset, info.model_key });
+    try writer.print("  {s}Model:{s}    {s}", .{ ansi.bright, ansi.reset, info.model_key });
+    if (info.reasoning_effort) |effort| {
+        if (effort != .default) {
+            try writer.print(" ({s})", .{@tagName(effort)});
+        }
+    }
+    try writer.print("\n", .{});
     try writer.print("\n", .{});
 
     if (!info.oneshot) {
@@ -61,7 +69,13 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
 pub fn printSummary(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("\n", .{});
     try writer.print("  {s}Provider:{s} {s} ({s})\n", .{ ansi.bright, ansi.reset, info.provider_name, info.provider_url });
-    try writer.print("  {s}Model:{s}    {s}\n", .{ ansi.bright, ansi.reset, info.model_key });
+    try writer.print("  {s}Model:{s}    {s}", .{ ansi.bright, ansi.reset, info.model_key });
+    if (info.reasoning_effort) |effort| {
+        if (effort != .default) {
+            try writer.print(" ({s})", .{@tagName(effort)});
+        }
+    }
+    try writer.print("\n", .{});
     try writer.print("\n", .{});
     try writer.flush();
 }

@@ -646,6 +646,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
             .provider_name = if (ctx.parsed.mock) "Mock" else provider.getProviderDisplayName(ctx.model_provider.*),
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
+            .reasoning_effort = ctx.reasoning_effort.*,
         },
     );
 
@@ -738,6 +739,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
             .provider_name = if (ctx.parsed.mock) "Mock" else provider.getProviderDisplayName(ctx.model_provider.*),
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
+            .reasoning_effort = ctx.reasoning_effort.*,
         },
     );
 
