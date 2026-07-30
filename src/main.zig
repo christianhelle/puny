@@ -25,6 +25,8 @@ pub fn main(init: std.process.Init) !void {
     const messages_arena = messages_arena_state.allocator();
     const io = init.io;
 
+    try cleanupOldBackup(arena, io);
+
     const args_slice = try init.minimal.args.toSlice(arena);
     var parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
@@ -266,25 +268,19 @@ pub fn main(init: std.process.Init) !void {
     try chat_session.run();
 }
 
+fn cleanupOldBackup(allocator: std.mem.Allocator, io: std.Io) !void {
+    const exe_path = try std.process.executablePathAlloc(io, allocator);
+    defer allocator.free(exe_path);
+    const old_path = try std.fmt.allocPrint(allocator, "{s}.old", .{exe_path});
+    defer allocator.free(old_path);
+    std.Io.Dir.deleteFileAbsolute(io, old_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => |e| return e,
+    };
+}
+
 fn runUpgrade(io: std.Io) !void {
-    var stderr_buffer: [1024]u8 = undefined;
-    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-    const stderr_writer = &stderr_file_writer.interface;
-
-    try stderr_writer.print("\nUpgrading Puny...\n", .{});
-    try stderr_writer.flush();
-
-    const argv: []const []const u8 = if (comptime @import("builtin").os.tag == .windows)
-        &[_][]const u8{ "powershell", "-Command", "irm https://christianhelle.com/puny/install.ps1 | iex" }
-    else
-        &[_][]const u8{ "bash", "-c", "curl -fsSL https://christianhelle.com/puny/install | bash" };
-
-    _ = try std.process.spawn(io, .{
-        .argv = argv,
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-    });
+    _ = io;
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
