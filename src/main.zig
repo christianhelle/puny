@@ -497,6 +497,7 @@ fn retryExtract(
         if (attempt > 0) {
             try progress_writer.print("Retrying download...\n", .{});
             try progress_writer.flush();
+            try clearDirContents(io, tmp_dir);
             try download_fn(allocator, io, download_url, tmp_dir, archive_name);
         }
 
@@ -514,6 +515,16 @@ fn retryExtract(
             continue;
         };
         return result;
+    }
+}
+
+fn clearDirContents(io: std.Io, dir: std.Io.Dir) !void {
+    var iterable = dir.iterate();
+    while (try iterable.next(io)) |entry| {
+        switch (entry.kind) {
+            .directory => dir.deleteTree(io, entry.name) catch {},
+            else => dir.deleteFile(io, entry.name) catch {},
+        }
     }
 }
 
