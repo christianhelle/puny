@@ -211,7 +211,9 @@ pub fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.
     const parsed = try std.json.parseFromSlice(std.json.Value, arena, json_bytes, .{});
     defer parsed.deinit();
 
+    if (parsed.value != .object) return error.InvalidReleaseResponse;
     const tag_name = parsed.value.object.get("tag_name") orelse return error.MissingReleaseTag;
+    if (tag_name != .string) return error.InvalidReleaseTag;
     const latest_tag = tag_name.string;
     const latest_ver_str = if (std.mem.startsWith(u8, latest_tag, "v")) latest_tag[1..] else latest_tag;
 
