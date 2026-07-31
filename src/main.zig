@@ -3,7 +3,6 @@ const chat = @import("chat/chat.zig");
 const upgrade = @import("upgrade.zig");
 const cli = @import("cli/args.zig");
 const config = @import("config/config.zig");
-const helpers = @import("tools/helpers.zig");
 const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
@@ -16,10 +15,8 @@ const sigint = @import("core/sigint.zig");
 const instructions = @import("agents/instructions.zig");
 const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
-const version = @import("version.zig");
 const welcome = @import("tui/welcome.zig");
 const ansi = @import("tui/ansi.zig");
-const retry = @import("core/retry.zig");
 const ModelProvider = provider.ModelProvider;
 const DebugLog = session.DebugLog;
 const ChatLog = session.ChatLog;
@@ -36,7 +33,7 @@ pub fn main(init: std.process.Init) !void {
     var parsed = cli.parseArgs(io, init.environ_map, args_slice);
 
     if (parsed.upgrade) {
-        try runUpgrade(arena, io, init.environ_map, parsed.force_upgrade);
+        try upgrade.runUpgrade(arena, io, init.environ_map, parsed.force_upgrade);
         return;
     }
 
@@ -284,153 +281,6 @@ pub fn main(init: std.process.Init) !void {
 
     var chat_session = session.ChatSession.init(ctx);
     try chat_session.run();
-}
-
-fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map, force: bool) !void {
-    var stderr_buffer: [1024]u8 = undefined;
-    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-    const stderr_writer = &stderr_file_writer.interface;
-
-    try stderr_writer.print("\nChecking for updates...\n", .{});
-    try stderr_writer.flush();
-
-    const release_url = "https://api.github.com/repos/christianhelle/puny/releases/latest";
-    const json_bytes = try helpers.httpGet(arena, io, release_url);
-    defer arena.free(json_bytes);
-
-    const parsed = try std.json.parseFromSlice(std.json.Value, arena, json_bytes, .{});
-    defer parsed.deinit();
-
-    const tag_name = parsed.value.object.get("tag_name") orelse return error.MissingReleaseTag;
-    const latest_tag = tag_name.string;
-    const latest_ver_str = if (std.mem.startsWith(u8, latest_tag, "v")) latest_tag[1..] else latest_tag;
-
-    const current_ver = try std.SemanticVersion.parse(version.version);
-    const latest_ver = try std.SemanticVersion.parse(latest_ver_str);
-
-    if (!force and current_ver.order(latest_ver) != .lt) {
-        try stderr_writer.print("Already up to date (v{s}). Use --force to upgrade anyway.\n", .{version.version});
-        try stderr_writer.flush();
-        return;
-    }
-
-    var random_source: std.Random.IoSource = .{ .io = io };
-    const random = random_source.interface();
-    const unique = random.int(u64);
-    var unique_buf: [32]u8 = undefined;
-    const unique_str = try std.fmt.bufPrint(&unique_buf, "{x}", .{unique});
-    const tmp_parent = try upgrade.upgradeTempParent(arena, environ_map);
-    defer arena.free(tmp_parent);
-    const tmp_rel_name = try std.fmt.allocPrint(arena, "puny-upgrade-{s}", .{unique_str});
-    defer arena.free(tmp_rel_name);
-    const tmp_dir_path = try std.fs.path.join(arena, &.{ tmp_parent, tmp_rel_name });
-    defer arena.free(tmp_dir_path);
-
-    try std.Io.Dir.createDirAbsolute(io, tmp_dir_path, @enumFromInt(0o755));
-    var tmp_dir = try std.Io.Dir.cwd().openDir(io, tmp_dir_path, .{ .iterate = true });
-    errdefer {
-        tmp_dir.close(io);
-        std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
-    }
-
-    const archive_name = upgrade.archiveNameForTarget();
-    const download_url = try std.fmt.allocPrint(arena, "https://github.com/christianhelle/puny/releases/download/{s}/{s}", .{ latest_tag, archive_name });
-    defer arena.free(download_url);
-
-    const expected_size: ?u64 = blk: {
-        const assets = parsed.value.object.get("assets") orelse break :blk null;
-        if (assets != .array) break :blk null;
-        for (assets.array.items) |asset| {
-            if (asset != .object) continue;
-            const name = asset.object.get("name") orelse continue;
-            if (name != .string or !std.mem.eql(u8, name.string, archive_name)) continue;
-            const size = asset.object.get("size") orelse continue;
-            if (size != .integer) continue;
-            break :blk @intCast(size.integer);
-        }
-        break :blk null;
-    };
-
-    const binary_name = if (@import("builtin").os.tag == .windows) "puny.exe" else "puny";
-
-    const extracted_path = try upgrade.extractAndFindBinary(arena, io, tmp_dir, archive_name, binary_name, download_url, expected_size, random);
-    defer arena.free(extracted_path);
-
-    try stderr_writer.print("Installing...\n", .{});
-    try stderr_writer.flush();
-
-    const exe_path = try std.process.executablePathAlloc(io, arena);
-    defer arena.free(exe_path);
-    const exe_dir_path = std.fs.path.dirname(exe_path) orelse ".";
-    const exe_name = std.fs.path.basename(exe_path);
-
-    var exe_dir = try std.Io.Dir.cwd().openDir(io, exe_dir_path, .{});
-    defer exe_dir.close(io);
-
-    if (@import("builtin").os.tag == .windows) {
-        const update_name = try std.fmt.allocPrint(arena, "{s}.update", .{exe_name});
-        defer arena.free(update_name);
-        try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, update_name, io, .{});
-
-        const full_update_path = try std.fs.path.join(arena, &.{ exe_dir_path, update_name });
-        defer arena.free(full_update_path);
-
-        const batch_name = try std.fmt.allocPrint(arena, "puny-upgrade-{s}.bat", .{unique_str});
-        defer arena.free(batch_name);
-        const batch_path = try std.fs.path.join(arena, &.{ exe_dir_path, batch_name });
-        defer arena.free(batch_path);
-
-        const batch_body = try std.fmt.allocPrint(arena, "@echo off\r\n" ++
-            ":retry\r\n" ++
-            "del \"{s}\" > nul 2>&1\r\n" ++
-            "if exist \"{s}\" (\r\n" ++
-            "  ping 127.0.0.1 -n 3 > nul\r\n" ++
-            "  goto retry\r\n" ++
-            ")\r\n" ++
-            "copy /Y \"{s}\" \"{s}\" > nul\r\n" ++
-            "del \"{s}\" > nul\r\n" ++
-            "rmdir /S /Q \"{s}\" > nul 2>&1\r\n" ++
-            "del /Q \"{s}\" > nul 2>&1\r\n", .{ exe_path, exe_path, full_update_path, exe_path, full_update_path, tmp_dir_path, batch_path });
-        defer arena.free(batch_body);
-
-        var batch_file = try exe_dir.createFile(io, batch_name, .{});
-        defer batch_file.close(io);
-        try batch_file.writeStreamingAll(io, batch_body);
-
-        _ = try std.process.spawn(io, .{
-            .argv = &[_][]const u8{ "cmd", "/c", batch_path },
-            .stdin = .ignore,
-            .stdout = .ignore,
-            .stderr = .ignore,
-        });
-    } else {
-        const new_name = try std.fmt.allocPrint(arena, "{s}.new", .{exe_name});
-        defer arena.free(new_name);
-        const old_name = try std.fmt.allocPrint(arena, "{s}.old", .{exe_name});
-        defer arena.free(old_name);
-
-        try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, new_name, io, .{});
-        std.Io.Dir.setFilePermissions(exe_dir, io, new_name, @enumFromInt(0o755), .{}) catch {};
-
-        try std.Io.Dir.rename(exe_dir, exe_name, exe_dir, old_name, io);
-        errdefer std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
-
-        std.Io.Dir.rename(exe_dir, new_name, exe_dir, exe_name, io) catch |err| {
-            std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
-            std.Io.Dir.deleteFile(exe_dir, io, new_name) catch {};
-            return err;
-        };
-
-        std.Io.Dir.deleteFile(exe_dir, io, old_name) catch {};
-    }
-
-    tmp_dir.close(io);
-    if (@import("builtin").os.tag != .windows) {
-        std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
-    }
-
-    try stderr_writer.print("Upgraded to v{s}. Restart to use the new version.\n", .{latest_ver_str});
-    try stderr_writer.flush();
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
