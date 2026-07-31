@@ -388,7 +388,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
 
     const binary_name = if (@import("builtin").os.tag == .windows) "puny.exe" else "puny";
 
-    const extracted_path = try extractAndFindBinary(arena, io, tmp_dir, archive_name, binary_name, download_url, random);
+    const extracted_path = try extractAndFindBinary(arena, io, tmp_dir, archive_name, binary_name, download_url, null, random);
     defer arena.free(extracted_path);
 
     try stderr_writer.print("Installing...\n", .{});
@@ -486,11 +486,13 @@ fn retryExtract(
     archive_name: []const u8,
     binary_name: []const u8,
     download_url: []const u8,
+    expected_size: ?u64,
     random: std.Random,
     progress_writer: *std.Io.Writer,
     comptime download_fn: fn (std.mem.Allocator, std.Io, []const u8, std.Io.Dir, []const u8) anyerror!void,
     comptime extract_fn: fn (std.mem.Allocator, std.Io, std.Io.Dir, []const u8, []const u8) anyerror![]const u8,
 ) ![]const u8 {
+    _ = expected_size;
     const cfg = retry.default_config;
     var attempt: usize = 0;
     while (true) : (attempt += 1) {
@@ -535,6 +537,7 @@ fn extractAndFindBinary(
     archive_name: []const u8,
     binary_name: []const u8,
     download_url: []const u8,
+    expected_size: ?u64,
     random: std.Random,
 ) ![]const u8 {
     var stderr_buffer: [256]u8 = undefined;
@@ -548,6 +551,7 @@ fn extractAndFindBinary(
         archive_name,
         binary_name,
         download_url,
+        expected_size,
         random,
         stderr_writer,
         helpers.httpDownloadFile,
@@ -918,6 +922,7 @@ test "retryExtract clears the temp dir so stale files do not block a retry" {
         "archive.zip",
         "puny",
         "http://example.com/archive.zip",
+        null,
         random,
         &progress_writer,
         testRetryExtractDownload,
@@ -927,4 +932,71 @@ test "retryExtract clears the temp dir so stale files do not block a retry" {
 
     try std.testing.expectEqualStrings("puny", result);
     try std.testing.expectEqual(@as(usize, 2), test_retry_extract_attempts);
+}
+
+var test_size_download_attempts: usize = 0;
+
+fn testSizeRetryExtractDownload(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    dest_dir: std.Io.Dir,
+    dest_name: []const u8,
+) anyerror!void {
+    _ = allocator;
+    _ = url;
+    test_size_download_attempts += 1;
+    var file = try dest_dir.createFile(io, dest_name, .{});
+    defer file.close(io);
+    const content = if (test_size_download_attempts == 1) "abc" else "abcd";
+    try file.writeStreamingAll(io, content);
+}
+
+fn testSimpleRetryExtractUnpack(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    archive_name: []const u8,
+    binary_name: []const u8,
+) anyerror![]const u8 {
+    _ = archive_name;
+    var bin = try dir.createFile(io, binary_name, .{});
+    defer bin.close(io);
+    try bin.writeStreamingAll(io, "new binary");
+    return try allocator.dupe(u8, binary_name);
+}
+
+test "retryExtract re-downloads when archive size does not match expected" {
+    test_size_download_attempts = 0;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const sub_path = try std.fs.path.join(std.testing.allocator, &.{ tmp.sub_path[0..], "upgrade" });
+    defer std.testing.allocator.free(sub_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, sub_path);
+    var tmp_dir = try std.Io.Dir.cwd().openDir(std.testing.io, sub_path, .{ .iterate = true });
+    defer tmp_dir.close(std.testing.io);
+
+    var progress_buf: [128]u8 = undefined;
+    var progress_writer = std.Io.Writer.fixed(&progress_buf);
+
+    const result = try retryExtract(
+        std.testing.allocator,
+        std.testing.io,
+        tmp_dir,
+        "archive.zip",
+        "puny",
+        "http://example.com/archive.zip",
+        4,
+        random,
+        &progress_writer,
+        testSizeRetryExtractDownload,
+        testSimpleRetryExtractUnpack,
+    );
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualStrings("puny", result);
+    try std.testing.expectEqual(@as(usize, 2), test_size_download_attempts);
 }
