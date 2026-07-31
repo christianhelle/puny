@@ -125,7 +125,6 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
     }) catch |err| return err;
 
     try file_writer.interface.flush();
-    file.close(io);
 
     if (result.status != .ok) {
         return error.HttpNotOk;
@@ -133,6 +132,8 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
 
     const stat = try dest_dir.statFile(io, dest_name, .{});
     if (stat.size == 0) return error.TruncatedDownload;
+
+    file.close(io);
 }
 
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
