@@ -536,6 +536,12 @@ test "formatDuration boundary between ms and s" {
     try std.testing.expectEqualStrings("999 ms", result);
 }
 
+test "formatRestoreHeader includes load time" {
+    var buf: [256]u8 = undefined;
+    const result = formatRestoreHeader(&buf, "abc123", 5, 42_000_000);
+    try std.testing.expectEqualStrings("Restored session abc123 — 5 messages (42 ms)", result);
+}
+
 test "requiresApiKey only for opencode and opencode-go" {
     try std.testing.expect(!requiresApiKey(.lmstudio));
     try std.testing.expect(requiresApiKey(.opencode_zen));
