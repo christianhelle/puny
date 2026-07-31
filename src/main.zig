@@ -479,6 +479,44 @@ fn findInDir(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, name: []
     return null;
 }
 
+fn retryExtract(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    tmp_dir: std.Io.Dir,
+    archive_name: []const u8,
+    binary_name: []const u8,
+    download_url: []const u8,
+    random: std.Random,
+    progress_writer: *std.Io.Writer,
+    comptime download_fn: fn (std.mem.Allocator, std.Io, []const u8, std.Io.Dir, []const u8) anyerror!void,
+    comptime extract_fn: fn (std.mem.Allocator, std.Io, std.Io.Dir, []const u8, []const u8) anyerror![]const u8,
+) ![]const u8 {
+    const cfg = retry.default_config;
+    var attempt: usize = 0;
+    while (true) : (attempt += 1) {
+        if (attempt > 0) {
+            try progress_writer.print("Retrying download...\n", .{});
+            try progress_writer.flush();
+            try download_fn(allocator, io, download_url, tmp_dir, archive_name);
+        }
+
+        try progress_writer.print("Extracting...\n", .{});
+        try progress_writer.flush();
+
+        const result = extract_fn(allocator, io, tmp_dir, archive_name, binary_name) catch |err| {
+            if (!retry.isTransientError(err)) return err;
+            if (attempt >= cfg.max_retries) return err;
+            var delay_ms: u64 = cfg.base_delay_ms;
+            var i: usize = 1;
+            while (i < attempt) : (i += 1) delay_ms *= 2;
+            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
+            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+            continue;
+        };
+        return result;
+    }
+}
+
 fn extractAndFindBinary(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -802,4 +840,79 @@ test "requiresApiKey only for opencode and opencode-go" {
 
 test "include core session tests" {
     _ = @import("core/session.zig");
+}
+
+var test_retry_extract_attempts: usize = 0;
+
+fn testRetryExtractDownload(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    dest_dir: std.Io.Dir,
+    dest_name: []const u8,
+) anyerror!void {
+    _ = allocator;
+    _ = url;
+    var file = try dest_dir.createFile(io, dest_name, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, "test-archive");
+}
+
+fn testRetryExtractUnpack(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    archive_name: []const u8,
+    binary_name: []const u8,
+) anyerror![]const u8 {
+    _ = archive_name;
+    test_retry_extract_attempts += 1;
+    if (test_retry_extract_attempts == 1) {
+        var stale = try dir.createFile(io, "stale.bin", .{});
+        defer stale.close(io);
+        try stale.writeStreamingAll(io, "leftover from partial extraction");
+        return error.CorruptInput;
+    }
+    if (dir.openFile(io, "stale.bin", .{})) |f| {
+        f.close(io);
+        return error.StaleFileNotCleaned;
+    } else |_| {}
+    var bin = try dir.createFile(io, binary_name, .{});
+    defer bin.close(io);
+    try bin.writeStreamingAll(io, "new binary");
+    return try allocator.dupe(u8, binary_name);
+}
+
+test "retryExtract clears the temp dir so stale files do not block a retry" {
+    test_retry_extract_attempts = 0;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const sub_path = try std.fs.path.join(std.testing.allocator, &.{ tmp.sub_path[0..], "upgrade" });
+    defer std.testing.allocator.free(sub_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, sub_path);
+    var tmp_dir = try std.Io.Dir.cwd().openDir(std.testing.io, sub_path, .{ .iterate = true });
+    defer tmp_dir.close(std.testing.io);
+
+    var progress_buf: [128]u8 = undefined;
+    var progress_writer = std.Io.Writer.fixed(&progress_buf);
+
+    const result = try retryExtract(
+        std.testing.allocator,
+        std.testing.io,
+        tmp_dir,
+        "archive.zip",
+        "puny",
+        "http://example.com/archive.zip",
+        random,
+        &progress_writer,
+        testRetryExtractDownload,
+        testRetryExtractUnpack,
+    );
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualStrings("puny", result);
+    try std.testing.expectEqual(@as(usize, 2), test_retry_extract_attempts);
 }
