@@ -17,6 +17,13 @@ pub fn isTransientError(err: anyerror) bool {
         error.TlsConnectionClosure,
         error.SslUpgradeFailed,
         error.HttpHeadersInvalid,
+        => true,
+        else => false,
+    };
+}
+
+pub fn isDownloadTransientError(err: anyerror) bool {
+    return isTransientError(err) or switch (err) {
         error.Unexpected,
         error.SystemResources,
         error.TruncatedDownload,
@@ -42,30 +49,48 @@ pub const default_config: Config = .{
     .jitter_max_ms = 250,
 };
 
-test "isTransientError recognizes download-related errors" {
-    const download_errors = [_]anyerror{
+test "isTransientError recognizes network and transport errors" {
+    const network_errors = [_]anyerror{
+        error.ConnectionRefused,
+        error.ConnectionTimedOut,
         error.ConnectionResetByPeer,
+        error.ReadTimedOut,
+        error.ReadFailed,
+        error.WriteFailed,
         error.BrokenPipe,
-        error.HttpHeadersInvalid,
-        error.Unexpected,
-        error.SystemResources,
+        error.EndOfStream,
+        error.DnsFailed,
+        error.NameResolveFailed,
+        error.TlsFailure,
         error.TlsAlert,
         error.TlsConnectionClosure,
-        error.TruncatedDownload,
-        error.ZipNoEndRecord,
-        error.ZipTruncated,
-        error.WrongGzipChecksum,
-        error.WrongGzipSize,
-        error.CorruptInput,
+        error.SslUpgradeFailed,
+        error.HttpHeadersInvalid,
     };
-    for (download_errors) |err| {
+    for (network_errors) |err| {
         try std.testing.expect(isTransientError(err));
     }
 }
 
-test "isTransientError rejects non-transient errors" {
-    try std.testing.expect(!isTransientError(error.OutOfMemory));
-    try std.testing.expect(!isTransientError(error.AccessDenied));
-    try std.testing.expect(!isTransientError(error.FileNotFound));
-    try std.testing.expect(!isTransientError(error.InvalidArgument));
+test "isTransientError rejects generic and archive errors" {
+    try std.testing.expect(!isTransientError(error.Unexpected));
+    try std.testing.expect(!isTransientError(error.SystemResources));
+    try std.testing.expect(!isTransientError(error.TruncatedDownload));
+    try std.testing.expect(!isTransientError(error.ZipNoEndRecord));
+    try std.testing.expect(!isTransientError(error.ZipTruncated));
+}
+
+test "isDownloadTransientError includes all transient plus download-specific errors" {
+    try std.testing.expect(isDownloadTransientError(error.ConnectionRefused));
+    try std.testing.expect(isDownloadTransientError(error.Unexpected));
+    try std.testing.expect(isDownloadTransientError(error.SystemResources));
+    try std.testing.expect(isDownloadTransientError(error.TruncatedDownload));
+    try std.testing.expect(isDownloadTransientError(error.ZipNoEndRecord));
+    try std.testing.expect(isDownloadTransientError(error.ZipTruncated));
+    try std.testing.expect(isDownloadTransientError(error.WrongGzipChecksum));
+    try std.testing.expect(isDownloadTransientError(error.WrongGzipSize));
+    try std.testing.expect(isDownloadTransientError(error.CorruptInput));
+    try std.testing.expect(!isDownloadTransientError(error.OutOfMemory));
+    try std.testing.expect(!isDownloadTransientError(error.AccessDenied));
+    try std.testing.expect(!isDownloadTransientError(error.InvalidArgument));
 }

@@ -498,7 +498,7 @@ fn extractAndFindBinary(
         if (attempt > 0) {
             try stderr_writer.print("Retrying download...\n", .{});
             try stderr_writer.flush();
-            try helpers.httpDownloadFile(arena, io, download_url, tmp_dir, archive_name);
+            try helpers.httpDownloadFileWithRetry(arena, io, download_url, tmp_dir, archive_name, random);
         }
 
         try stderr_writer.print("Extracting...\n", .{});
@@ -526,7 +526,7 @@ fn extractAndFindBinary(
             const found = try findInDir(arena, io, tmp_dir, binary_name);
             return found orelse error.BinaryNotFoundInArchive;
         } else |err| {
-            if (!retry.isTransientError(err)) return err;
+            if (!retry.isDownloadTransientError(err)) return err;
             if (attempt >= cfg.max_retries) return err;
             tmp_dir.deleteFile(io, archive_name) catch {};
             var delay_ms: u64 = cfg.base_delay_ms;
