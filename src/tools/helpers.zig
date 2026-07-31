@@ -230,29 +230,3 @@ test "retryDownload fails immediately on non-transient error" {
     try std.testing.expectEqual(@as(usize, 1), test_download_attempts);
     _ = result;
 }
-
-fn validateDownloadSize(io: std.Io, dest_dir: std.Io.Dir, dest_name: []const u8, expected: u64) !void {
-    const stat = try dest_dir.statFile(io, dest_name, .{});    if (stat.size != expected) return error.TruncatedDownload;
-}
-
-test "validateDownloadSize accepts matching size" {
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-    var file = try tmp_dir.dir.createFile(std.testing.io, "test.bin", .{});
-    defer file.close(std.testing.io);
-    var buf: [8]u8 = .{1} ** 8;
-    try file.writeStreamingAll(std.testing.io, &buf);
-    file.close(std.testing.io);
-    try validateDownloadSize(std.testing.io, tmp_dir.dir, "test.bin", 8);
-}
-
-test "validateDownloadSize rejects mismatched size" {
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-    var file = try tmp_dir.dir.createFile(std.testing.io, "test.bin", .{});
-    defer file.close(std.testing.io);
-    var buf: [4]u8 = .{1} ** 4;
-    try file.writeStreamingAll(std.testing.io, &buf);
-    file.close(std.testing.io);
-    try std.testing.expectError(error.TruncatedDownload, validateDownloadSize(std.testing.io, tmp_dir.dir, "test.bin", 8));
-}
