@@ -384,10 +384,13 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
 
     const expected_size: ?u64 = blk: {
         const assets = parsed.value.object.get("assets") orelse break :blk null;
+        if (assets != .array) break :blk null;
         for (assets.array.items) |asset| {
+            if (asset != .object) continue;
             const name = asset.object.get("name") orelse continue;
-            if (!std.mem.eql(u8, name.string, archive_name)) continue;
+            if (name != .string or !std.mem.eql(u8, name.string, archive_name)) continue;
             const size = asset.object.get("size") orelse continue;
+            if (size != .integer) continue;
             break :blk @intCast(size.integer);
         }
         break :blk null;
