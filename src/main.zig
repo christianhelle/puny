@@ -383,7 +383,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
 
     try stderr_writer.print("Downloading {s}...\n", .{archive_name});
     try stderr_writer.flush();
-    try helpers.httpDownloadFile(arena, io, download_url, tmp_dir, archive_name);
+    try helpers.httpDownloadFileWithRetry(arena, io, download_url, tmp_dir, archive_name, random);
 
     try stderr_writer.print("Extracting...\n", .{});
     try stderr_writer.flush();
