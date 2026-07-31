@@ -557,8 +557,8 @@ fn clearDirContents(io: std.Io, dir: std.Io.Dir) !void {
     var iterable = dir.iterate();
     while (try iterable.next(io)) |entry| {
         switch (entry.kind) {
-            .directory => dir.deleteTree(io, entry.name) catch {},
-            else => dir.deleteFile(io, entry.name) catch {},
+            .directory => try dir.deleteTree(io, entry.name),
+            else => try dir.deleteFile(io, entry.name),
         }
     }
 }
