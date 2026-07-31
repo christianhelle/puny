@@ -512,7 +512,7 @@ fn retryExtract(
         }
 
         download_fn(allocator, io, download_url, tmp_dir, archive_name) catch |err| {
-            if (!retry.isTransientError(err)) return err;
+            if (!retry.isDownloadTransientError(err)) return err;
             if (attempt >= cfg.max_retries) return err;
             retryDelay(io, random, cfg, attempt);
             continue;
@@ -520,7 +520,7 @@ fn retryExtract(
 
         if (expected_size) |expected| {
             verifyDownloadSize(io, tmp_dir, archive_name, expected) catch |err| {
-                if (!retry.isTransientError(err)) return err;
+                if (!retry.isDownloadTransientError(err)) return err;
                 if (attempt >= cfg.max_retries) return err;
                 retryDelay(io, random, cfg, attempt);
                 continue;
@@ -531,7 +531,7 @@ fn retryExtract(
         try progress_writer.flush();
 
         const result = extract_fn(allocator, io, tmp_dir, archive_name, binary_name) catch |err| {
-            if (!retry.isTransientError(err)) return err;
+            if (!retry.isDownloadTransientError(err)) return err;
             if (attempt >= cfg.max_retries) return err;
             retryDelay(io, random, cfg, attempt);
             continue;
@@ -622,7 +622,6 @@ fn extractArchiveAndFindBinary(
         return found orelse error.BinaryNotFoundInArchive;
     } else |err| {
         return err;
-    }
     }
 }
 
