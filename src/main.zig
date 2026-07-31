@@ -145,7 +145,7 @@ pub fn main(init: std.process.Init) !void {
     const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
     var startup_buf: [64]u8 = undefined;
     try stdout_writer.print("{s}Startup time: {s}{s}", .{
-        ansi.dim, formatStartupTime(&startup_buf, elapsed_ns), ansi.reset,
+        ansi.dim, formatDuration(&startup_buf, elapsed_ns), ansi.reset,
     });
     try stdout_writer.flush();
 
@@ -476,7 +476,7 @@ fn buildToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefi
     return definitions;
 }
 
-fn formatStartupTime(buf: []u8, elapsed_ns: u64) []const u8 {
+fn formatDuration(buf: []u8, elapsed_ns: u64) []const u8 {
     if (elapsed_ns < 1000)
         return std.fmt.bufPrint(buf, "{d} ns", .{elapsed_ns}) catch "0 ns";
     const us = elapsed_ns / 1000;
@@ -494,45 +494,45 @@ fn requiresApiKey(selected_provider: ModelProvider) bool {
         selected_provider == .opencode_go;
 }
 
-test "formatStartupTime formats sub-millisecond as µs" {
+test "formatDuration formats sub-millisecond as µs" {
     var buf: [64]u8 = undefined;
-    const result = formatStartupTime(&buf, 5000);
+    const result = formatDuration(&buf, 5000);
     try std.testing.expectEqualStrings("5 µs", result);
 }
 
-test "formatStartupTime formats milliseconds" {
+test "formatDuration formats milliseconds" {
     var buf: [64]u8 = undefined;
-    const result = formatStartupTime(&buf, 42_000_000);
+    const result = formatDuration(&buf, 42_000_000);
     try std.testing.expectEqualStrings("42 ms", result);
 }
 
-test "formatStartupTime formats seconds" {
+test "formatDuration formats seconds" {
     var buf: [64]u8 = undefined;
-    const result = formatStartupTime(&buf, 2_500_000_000);
+    const result = formatDuration(&buf, 2_500_000_000);
     try std.testing.expectEqualStrings("2.5 s", result);
 }
 
-test "formatStartupTime handles zero" {
+test "formatDuration handles zero" {
     var buf: [64]u8 = undefined;
-    const result = formatStartupTime(&buf, 0);
+    const result = formatDuration(&buf, 0);
     try std.testing.expectEqualStrings("0 ns", result);
 }
 
-test "formatStartupTime boundary between ns and µs" {
+test "formatDuration boundary between ns and µs" {
     var buf: [64]u8 = undefined;
-    const result = formatStartupTime(&buf, 999);
+    const result = formatDuration(&buf, 999);
     try std.testing.expectEqualStrings("999 ns", result);
 }
 
-test "formatStartupTime boundary between µs and ms" {
+test "formatDuration boundary between µs and ms" {
     var buf: [64]u8 = undefined;
-    const result = formatStartupTime(&buf, 999_999);
+    const result = formatDuration(&buf, 999_999);
     try std.testing.expectEqualStrings("999 µs", result);
 }
 
-test "formatStartupTime boundary between ms and s" {
+test "formatDuration boundary between ms and s" {
     var buf: [64]u8 = undefined;
-    const result = formatStartupTime(&buf, 999_000_000);
+    const result = formatDuration(&buf, 999_000_000);
     try std.testing.expectEqualStrings("999 ms", result);
 }
 
