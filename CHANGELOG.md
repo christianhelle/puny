@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Generate HTML plan with system theme awareness (dark and light mode) ([#81](https://github.com/christianhelle/puny/pull/81)) ([@christianhelle](https://github.com/christianhelle/))
 - Improve MacOS/Linux upgrade experience ([#80](https://github.com/christianhelle/puny/pull/80)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix release binary version and install.sh cleanup trap ([#79](https://github.com/christianhelle/puny/pull/79)) ([@christianhelle](https://github.com/christianhelle/))
 - Add retry logic and validation to Windows self-upgrade pipeline ([#78](https://github.com/christianhelle/puny/pull/78)) ([@christianhelle](https://github.com/christianhelle/))
