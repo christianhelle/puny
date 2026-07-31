@@ -382,10 +382,6 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
     const download_url = try std.fmt.allocPrint(arena, "https://github.com/christianhelle/puny/releases/download/{s}/{s}", .{ latest_tag, archive_name });
     defer arena.free(download_url);
 
-    try stderr_writer.print("Downloading {s}...\n", .{archive_name});
-    try stderr_writer.flush();
-    try helpers.httpDownloadFileWithRetry(arena, io, download_url, tmp_dir, archive_name, random);
-
     const binary_name = if (@import("builtin").os.tag == .windows) "puny.exe" else "puny";
 
     const extracted_path = try extractAndFindBinary(arena, io, tmp_dir, archive_name, binary_name, download_url, null, random);
@@ -492,7 +488,6 @@ fn retryExtract(
     comptime download_fn: fn (std.mem.Allocator, std.Io, []const u8, std.Io.Dir, []const u8) anyerror!void,
     comptime extract_fn: fn (std.mem.Allocator, std.Io, std.Io.Dir, []const u8, []const u8) anyerror![]const u8,
 ) ![]const u8 {
-    _ = expected_size;
     const cfg = retry.default_config;
     var attempt: usize = 0;
     while (true) : (attempt += 1) {
@@ -500,7 +495,25 @@ fn retryExtract(
             try progress_writer.print("Retrying download...\n", .{});
             try progress_writer.flush();
             try clearDirContents(io, tmp_dir);
-            try download_fn(allocator, io, download_url, tmp_dir, archive_name);
+        } else {
+            try progress_writer.print("Downloading {s}...\n", .{archive_name});
+            try progress_writer.flush();
+        }
+
+        download_fn(allocator, io, download_url, tmp_dir, archive_name) catch |err| {
+            if (!retry.isTransientError(err)) return err;
+            if (attempt >= cfg.max_retries) return err;
+            retryDelay(io, random, cfg, attempt);
+            continue;
+        };
+
+        if (expected_size) |expected| {
+            verifyDownloadSize(io, tmp_dir, archive_name, expected) catch |err| {
+                if (!retry.isTransientError(err)) return err;
+                if (attempt >= cfg.max_retries) return err;
+                retryDelay(io, random, cfg, attempt);
+                continue;
+            };
         }
 
         try progress_writer.print("Extracting...\n", .{});
@@ -509,15 +522,24 @@ fn retryExtract(
         const result = extract_fn(allocator, io, tmp_dir, archive_name, binary_name) catch |err| {
             if (!retry.isTransientError(err)) return err;
             if (attempt >= cfg.max_retries) return err;
-            var delay_ms: u64 = cfg.base_delay_ms;
-            var i: usize = 1;
-            while (i < attempt) : (i += 1) delay_ms *= 2;
-            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
-            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+            retryDelay(io, random, cfg, attempt);
             continue;
         };
         return result;
     }
+}
+
+fn retryDelay(io: std.Io, random: std.Random, cfg: retry.Config, attempt: usize) void {
+    var delay_ms: u64 = cfg.base_delay_ms;
+    var i: usize = 1;
+    while (i < attempt) : (i += 1) delay_ms *= 2;
+    delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
+    io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+}
+
+fn verifyDownloadSize(io: std.Io, dir: std.Io.Dir, name: []const u8, expected: u64) !void {
+    const stat = try dir.statFile(io, name, .{});
+    if (stat.size != expected) return error.TruncatedDownload;
 }
 
 fn clearDirContents(io: std.Io, dir: std.Io.Dir) !void {
