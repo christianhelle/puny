@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.2.3](https://github.com/christianhelle/puny/releases/tag/v0.2.3) (2026-07-31)
 
 ### Features
 - Reduce excessive whitespace and staircase effect in terminal output ([#76](https://github.com/christianhelle/puny/pull/76)) ([@christianhelle](https://github.com/christianhelle/))
