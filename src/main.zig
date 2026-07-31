@@ -342,7 +342,7 @@ fn restoreSessionAtStartup(
     const now = std.Io.Clock.Timestamp.now(io, .awake);
     const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
     var header_buf: [256]u8 = undefined;
-    try stdout_writer.print("\n\n{s}\n", .{ formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns) });
+    try stdout_writer.print("\n\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
     try session.printConversation(stdout_writer, messages.items);
     try stdout_writer.flush();
     return true;
