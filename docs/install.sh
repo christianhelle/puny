@@ -128,7 +128,7 @@ download_and_install() {
   local version="$2"
   local archive_name="puny-${platform}.tar.gz"
   local download_url="https://github.com/$GITHUB_REPO/releases/download/$version/$archive_name"
-  local temp_dir
+  temp_dir=""
   local source_binary
   local archive_path
   local archive_entry
