@@ -541,50 +541,51 @@ fn extractAndFindBinary(
     var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
     const stderr_writer = &stderr_file_writer.interface;
 
-    const cfg = retry.default_config;
-    var attempt: usize = 0;
-    while (true) : (attempt += 1) {
-        if (attempt > 0) {
-            try stderr_writer.print("Retrying download...\n", .{});
-            try stderr_writer.flush();
-            try helpers.httpDownloadFileWithRetry(arena, io, download_url, tmp_dir, archive_name, random);
-        }
+    return retryExtract(
+        arena,
+        io,
+        tmp_dir,
+        archive_name,
+        binary_name,
+        download_url,
+        random,
+        stderr_writer,
+        helpers.httpDownloadFile,
+        extractArchiveAndFindBinary,
+    );
+}
 
-        try stderr_writer.print("Extracting...\n", .{});
-        try stderr_writer.flush();
+fn extractArchiveAndFindBinary(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    tmp_dir: std.Io.Dir,
+    archive_name: []const u8,
+    binary_name: []const u8,
+) ![]const u8 {
+    const extract_result = if (@import("builtin").os.tag == .windows) extract_zip: {
+        var archive_buf: [4096]u8 = undefined;
+        var archive_file = tmp_dir.openFile(io, archive_name, .{}) catch |err| break :extract_zip err;
+        defer archive_file.close(io);
+        var archive_reader = archive_file.reader(io, &archive_buf);
+        std.zip.extract(tmp_dir, &archive_reader, .{}) catch |err| break :extract_zip err;
+        break :extract_zip {};
+    } else extract_tar: {
+        var archive_buf: [4096]u8 = undefined;
+        var tar_buf: [std.compress.flate.max_window_len]u8 = undefined;
+        var archive_file = tmp_dir.openFile(io, archive_name, .{}) catch |err| break :extract_tar err;
+        defer archive_file.close(io);
+        var archive_reader = archive_file.reader(io, &archive_buf);
+        var decompress = std.compress.flate.Decompress.init(&archive_reader.interface, .gzip, &tar_buf);
+        std.tar.extract(io, tmp_dir, &decompress.reader, .{}) catch |err| break :extract_tar err;
+        break :extract_tar {};
+    };
 
-        const extract_result = if (@import("builtin").os.tag == .windows) extract_zip: {
-            var archive_buf: [4096]u8 = undefined;
-            var archive_file = tmp_dir.openFile(io, archive_name, .{}) catch |err| break :extract_zip err;
-            defer archive_file.close(io);
-            var archive_reader = archive_file.reader(io, &archive_buf);
-            std.zip.extract(tmp_dir, &archive_reader, .{}) catch |err| break :extract_zip err;
-            break :extract_zip {};
-        } else extract_tar: {
-            var archive_buf: [4096]u8 = undefined;
-            var tar_buf: [std.compress.flate.max_window_len]u8 = undefined;
-            var archive_file = tmp_dir.openFile(io, archive_name, .{}) catch |err| break :extract_tar err;
-            defer archive_file.close(io);
-            var archive_reader = archive_file.reader(io, &archive_buf);
-            var decompress = std.compress.flate.Decompress.init(&archive_reader.interface, .gzip, &tar_buf);
-            std.tar.extract(io, tmp_dir, &decompress.reader, .{}) catch |err| break :extract_tar err;
-            break :extract_tar {};
-        };
-
-        if (extract_result) |_| {
-            const found = try findInDir(arena, io, tmp_dir, binary_name);
-            return found orelse error.BinaryNotFoundInArchive;
-        } else |err| {
-            if (!retry.isDownloadTransientError(err)) return err;
-            if (attempt >= cfg.max_retries) return err;
-            tmp_dir.deleteFile(io, archive_name) catch {};
-            var delay_ms: u64 = cfg.base_delay_ms;
-            var i: usize = 1;
-            while (i < attempt) : (i += 1) delay_ms *= 2;
-            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
-            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
-            continue;
-        }
+    if (extract_result) |_| {
+        const found = try findInDir(arena, io, tmp_dir, binary_name);
+        return found orelse error.BinaryNotFoundInArchive;
+    } else |err| {
+        return err;
+    }
     }
 }
 
