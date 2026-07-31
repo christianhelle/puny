@@ -49,8 +49,9 @@ pub const default_config: Config = .{
     .jitter_max_ms = 250,
 };
 
-/// Exponential backoff delay in milliseconds, including jitter, for the given
-/// zero-based attempt count.
+/// Exponential backoff delay in milliseconds, including jitter, for a retry
+/// attempt: `base_delay_ms` for attempts 0 and 1, doubling each subsequent
+/// attempt.
 pub fn computeDelay(cfg: Config, attempt: usize, random: std.Random) u64 {
     var delay_ms: u64 = cfg.base_delay_ms;
     var i: usize = 1;
