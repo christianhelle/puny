@@ -25,24 +25,24 @@ pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     var messages_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const messages_arena = messages_arena_state.allocator();
-    const io = init.io;
+    const startup_time = std.Io.Clock.Timestamp.now(init.io, .awake);
 
-    upgrade.cleanupOldBackup(arena, io);
+    upgrade.cleanupOldBackup(arena, init.io);
 
     const args_slice = try init.minimal.args.toSlice(arena);
-    var parsed = cli.parseArgs(io, init.environ_map, args_slice);
+    var parsed = cli.parseArgs(init.io, init.environ_map, args_slice);
 
     if (parsed.upgrade) {
-        try upgrade.runUpgrade(arena, io, init.environ_map, parsed.force_upgrade);
+        try upgrade.runUpgrade(arena, init.io, init.environ_map, parsed.force_upgrade);
         return;
     }
 
     if (parsed.prune) {
         var buf: [1024]u8 = undefined;
-        var out: std.Io.File.Writer = .init(.stdout(), io, &buf);
+        var out: std.Io.File.Writer = .init(.stdout(), init.io, &buf);
         const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
         const keep_id = parsed.session orelse "";
-        try core_sess.pruneSessions(arena, io, base_dir, keep_id);
+        try core_sess.pruneSessions(arena, init.io, base_dir, keep_id);
         if (keep_id.len > 0) {
             try out.interface.print("Pruned all sessions except '{s}'.\n", .{keep_id});
         } else {
@@ -55,8 +55,8 @@ pub fn main(init: std.process.Init) !void {
     var debug_buffer: [4096]u8 = undefined;
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
-        const file = try std.Io.Dir.cwd().createFile(io, "puny_debug.log", .{});
-        debug_file_writer = .init(file, io, &debug_buffer);
+        const file = try std.Io.Dir.cwd().createFile(init.io, "puny_debug.log", .{});
+        debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
             .file = file,
             .writer = &debug_file_writer.interface,
@@ -64,17 +64,17 @@ pub fn main(init: std.process.Init) !void {
     } else null;
     defer if (debug_log) |*log| {
         log.writer.flush() catch {};
-        log.file.close(io);
+        log.file.close(init.io);
     };
 
     var chat_buffer: [4096]u8 = undefined;
     var chat_file_writer: std.Io.File.Writer = undefined;
     var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
-        const file = try std.Io.Dir.cwd().createFile(io, "puny_chat.log", .{});
+        const file = try std.Io.Dir.cwd().createFile(init.io, "puny_chat.log", .{});
         if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(io, "puny_chat.log", @enumFromInt(0o600), .{}) catch {};
+            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_chat.log", @enumFromInt(0o600), .{}) catch {};
         }
-        chat_file_writer = .init(file, io, &chat_buffer);
+        chat_file_writer = .init(file, init.io, &chat_buffer);
         break :blk ChatLog{
             .file = file,
             .writer = &chat_file_writer.interface,
@@ -82,10 +82,10 @@ pub fn main(init: std.process.Init) !void {
     } else null;
     defer if (chat_log) |*log| {
         log.writer.flush() catch {};
-        log.file.close(io);
+        log.file.close(init.io);
     };
 
-    var cfg_result = try config.load(arena, io, init.environ_map);
+    var cfg_result = try config.load(arena, init.io, init.environ_map);
     defer cfg_result.deinit();
     const cfg = &cfg_result.config;
 
@@ -93,22 +93,22 @@ pub fn main(init: std.process.Init) !void {
         parsed.reconfigure = true;
     }
 
-    var history = try loadHistory(arena, io, init.environ_map);
+    var history = try loadHistory(arena, init.io, init.environ_map);
     defer history.deinit();
 
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), init.io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
     if (parsed.reconfigure) {
-        try runStartupReconfigure(arena, io, init, cfg, stdout_writer, !cfg_result.file_existed);
+        try runStartupReconfigure(arena, init.io, init, cfg, stdout_writer, !cfg_result.file_existed);
     }
 
-    var random_source: std.Random.IoSource = .{ .io = io };
+    var random_source: std.Random.IoSource = .{ .io = init.io };
     const random = random_source.interface();
 
     const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
-    var current_session = try core_sess.Session.init(arena, base_dir, random, io);
+    var current_session = try core_sess.Session.init(arena, base_dir, random, init.io);
 
     var prov: provider.Provider = undefined;
     var selected_provider: ModelProvider = undefined;
@@ -118,7 +118,7 @@ pub fn main(init: std.process.Init) !void {
     try initializeProviderAndModel(
         arena,
         messages_arena,
-        io,
+        init.io,
         init,
         parsed,
         cfg,
@@ -130,7 +130,7 @@ pub fn main(init: std.process.Init) !void {
         &model_key,
         &reasoning_effort,
     );
-    var startup_time = std.Io.Clock.Timestamp.now(io, .awake);
+
     try welcome.print(stdout_writer, .{
         .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
         .provider_url = provider_url,
@@ -141,13 +141,7 @@ pub fn main(init: std.process.Init) !void {
         .prefilled = parsed.prompt != null,
     });
 
-    const now = std.Io.Clock.Timestamp.now(io, .awake);
-    const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
-    var startup_buf: [64]u8 = undefined;
-    try stdout_writer.print("{s}Startup time: {s}{s}", .{
-        ansi.dim, formatDuration(&startup_buf, elapsed_ns), ansi.reset,
-    });
-    try stdout_writer.flush();
+    try printStartupTime(init.io, stdout_writer, startup_time);
 
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
     defer prov.deinit();
@@ -164,13 +158,13 @@ pub fn main(init: std.process.Init) !void {
     defer skill_registry.deinit();
     if (try skills.homeDir(arena, init.environ_map)) |home| {
         const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
-        try skill_registry.lightScan(io, global_path);
+        try skill_registry.lightScan(init.io, global_path);
     }
-    if (try skills.findGitRepoRoot(arena, io)) |repo_root| {
+    if (try skills.findGitRepoRoot(arena, init.io)) |repo_root| {
         const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
-        try skill_registry.lightScan(io, repo_path);
+        try skill_registry.lightScan(init.io, repo_path);
     }
-    skill_registry.fullScan(io) catch {};
+    skill_registry.fullScan(init.io) catch {};
     skills.setGlobalRegistry(&skill_registry);
 
     var session_restored = false;
@@ -178,12 +172,12 @@ pub fn main(init: std.process.Init) !void {
     defer messages.deinit(messages_arena);
 
     if (parsed.session) |sid| {
-        if (core_sess.findSessionByPrefix(arena, io, base_dir, sid)) |maybe_s| {
+        if (core_sess.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
             if (maybe_s) |s| {
                 session_restored = try restoreSessionAtStartup(
                     arena,
                     messages_arena,
-                    io,
+                    init.io,
                     base_dir,
                     s,
                     &current_session,
@@ -197,7 +191,7 @@ pub fn main(init: std.process.Init) !void {
             }
         } else |_| {}
     } else if (parsed.do_resume) {
-        if (core_sess.listSessions(arena, io, base_dir)) |sessions| {
+        if (core_sess.listSessions(arena, init.io, base_dir)) |sessions| {
             var conv_count: usize = 0;
             var found: ?core_sess.SessionInfo = null;
             for (sessions) |s| {
@@ -211,7 +205,7 @@ pub fn main(init: std.process.Init) !void {
                     session_restored = try restoreSessionAtStartup(
                         arena,
                         messages_arena,
-                        io,
+                        init.io,
                         base_dir,
                         s,
                         &current_session,
@@ -237,9 +231,9 @@ pub fn main(init: std.process.Init) !void {
             const skills_block = try skill_registry.buildListing(messages_arena);
             try messages.append(messages_arena, .{ .system = skills_block });
         }
-        if (try skills.findGitRepoRoot(arena, io)) |repo_root| {
+        if (try skills.findGitRepoRoot(arena, init.io)) |repo_root| {
             defer arena.free(repo_root);
-            if (try instructions.load(arena, io, repo_root)) |result| {
+            if (try instructions.load(arena, init.io, repo_root)) |result| {
                 defer arena.free(result.filename);
                 defer arena.free(result.content);
                 const labeled = try std.fmt.allocPrint(messages_arena, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
@@ -248,7 +242,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    var session_stats = chat.SessionStats.init(arena, io);
+    var session_stats = chat.SessionStats.init(arena, init.io);
     session_stats.session_id = current_session.id;
     defer session_stats.deinit();
     sigint.register() catch {};
@@ -256,7 +250,7 @@ pub fn main(init: std.process.Init) !void {
     const ctx = session.ChatLoopContext{
         .arena = arena,
         .messages_arena = &messages_arena_state,
-        .io = io,
+        .io = init.io,
         .init = init,
         .parsed = parsed,
         .cfg = cfg,
@@ -281,6 +275,20 @@ pub fn main(init: std.process.Init) !void {
 
     var chat_session = session.ChatSession.init(ctx);
     try chat_session.run();
+}
+
+fn printStartupTime(
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    startup_time: std.Io.Clock.Timestamp,
+) !void {
+    const now = std.Io.Clock.Timestamp.now(io, .awake);
+    const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
+    var startup_buf: [64]u8 = undefined;
+    try stdout_writer.print("{s}Startup time: {s}{s}", .{
+        ansi.dim, formatDuration(&startup_buf, elapsed_ns), ansi.reset,
+    });
+    try stdout_writer.flush();
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
