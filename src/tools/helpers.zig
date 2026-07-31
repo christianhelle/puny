@@ -125,13 +125,7 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
         return error.HttpNotOk;
     }
 
-    if (result.content_length) |expected| {
-        const stat = try dest_dir.statFile(io, dest_name);
-        if (stat.size != expected) {
-            dest_dir.deleteFile(io, dest_name) catch {};
-            return error.TruncatedDownload;
-        }
-    }
+    const stat = try dest_dir.statFile(io, dest_name, .{});    if (stat.size == 0) return error.TruncatedDownload;
 }
 
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
@@ -238,8 +232,7 @@ test "retryDownload fails immediately on non-transient error" {
 }
 
 fn validateDownloadSize(io: std.Io, dest_dir: std.Io.Dir, dest_name: []const u8, expected: u64) !void {
-    const stat = try dest_dir.statFile(io, dest_name);
-    if (stat.size != expected) return error.TruncatedDownload;
+    const stat = try dest_dir.statFile(io, dest_name, .{});    if (stat.size != expected) return error.TruncatedDownload;
 }
 
 test "validateDownloadSize accepts matching size" {

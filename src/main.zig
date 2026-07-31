@@ -18,6 +18,7 @@ const tools = @import("tools/root.zig");
 const version = @import("version.zig");
 const welcome = @import("tui/welcome.zig");
 const ansi = @import("tui/ansi.zig");
+const retry = @import("core/retry.zig");
 const ModelProvider = provider.ModelProvider;
 const DebugLog = session.DebugLog;
 const ChatLog = session.ChatLog;
@@ -385,28 +386,9 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
     try stderr_writer.flush();
     try helpers.httpDownloadFileWithRetry(arena, io, download_url, tmp_dir, archive_name, random);
 
-    try stderr_writer.print("Extracting...\n", .{});
-    try stderr_writer.flush();
-
     const binary_name = if (@import("builtin").os.tag == .windows) "puny.exe" else "puny";
 
-    if (@import("builtin").os.tag == .windows) {
-        var archive_buf: [4096]u8 = undefined;
-        var archive_file = try tmp_dir.openFile(io, archive_name, .{});
-        defer archive_file.close(io);
-        var archive_reader = archive_file.reader(io, &archive_buf);
-        try std.zip.extract(tmp_dir, &archive_reader, .{});
-    } else {
-        var archive_buf: [4096]u8 = undefined;
-        var tar_buf: [std.compress.flate.max_window_len]u8 = undefined;
-        var archive_file = try tmp_dir.openFile(io, archive_name, .{});
-        defer archive_file.close(io);
-        var archive_reader = archive_file.reader(io, &archive_buf);
-        var decompress = std.compress.flate.Decompress.init(&archive_reader.interface, .gzip, &tar_buf);
-        try std.tar.extract(io, tmp_dir, &decompress.reader, .{});
-    }
-
-    const extracted_path = (try findInDir(arena, io, tmp_dir, binary_name)) orelse return error.BinaryNotFoundInArchive;
+    const extracted_path = try extractAndFindBinary(arena, io, tmp_dir, archive_name, binary_name, download_url, random);
     defer arena.free(extracted_path);
 
     try stderr_writer.print("Installing...\n", .{});
@@ -495,6 +477,66 @@ fn findInDir(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, name: []
         }
     }
     return null;
+}
+
+fn extractAndFindBinary(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    tmp_dir: std.Io.Dir,
+    archive_name: []const u8,
+    binary_name: []const u8,
+    download_url: []const u8,
+    random: std.Random,
+) ![]const u8 {
+    var stderr_buffer: [256]u8 = undefined;
+    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+    const stderr_writer = &stderr_file_writer.interface;
+
+    const cfg = retry.default_config;
+    var attempt: usize = 0;
+    while (true) : (attempt += 1) {
+        if (attempt > 0) {
+            try stderr_writer.print("Retrying download...\n", .{});
+            try stderr_writer.flush();
+            try helpers.httpDownloadFile(arena, io, download_url, tmp_dir, archive_name);
+        }
+
+        try stderr_writer.print("Extracting...\n", .{});
+        try stderr_writer.flush();
+
+        const extract_result = if (@import("builtin").os.tag == .windows) extract_zip: {
+            var archive_buf: [4096]u8 = undefined;
+            var archive_file = tmp_dir.openFile(io, archive_name, .{}) catch |err| break :extract_zip err;
+            defer archive_file.close(io);
+            var archive_reader = archive_file.reader(io, &archive_buf);
+            std.zip.extract(tmp_dir, &archive_reader, .{}) catch |err| break :extract_zip err;
+            break :extract_zip {};
+        } else extract_tar: {
+            var archive_buf: [4096]u8 = undefined;
+            var tar_buf: [std.compress.flate.max_window_len]u8 = undefined;
+            var archive_file = tmp_dir.openFile(io, archive_name, .{}) catch |err| break :extract_tar err;
+            defer archive_file.close(io);
+            var archive_reader = archive_file.reader(io, &archive_buf);
+            var decompress = std.compress.flate.Decompress.init(&archive_reader.interface, .gzip, &tar_buf);
+            std.tar.extract(io, tmp_dir, &decompress.reader, .{}) catch |err| break :extract_tar err;
+            break :extract_tar {};
+        };
+
+        if (extract_result) |_| {
+            const found = try findInDir(arena, io, tmp_dir, binary_name);
+            return found orelse error.BinaryNotFoundInArchive;
+        } else |err| {
+            if (!retry.isTransientError(err)) return err;
+            if (attempt >= cfg.max_retries) return err;
+            tmp_dir.deleteFile(io, archive_name) catch {};
+            var delay_ms: u64 = cfg.base_delay_ms;
+            var i: usize = 1;
+            while (i < attempt) : (i += 1) delay_ms *= 2;
+            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
+            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+            continue;
+        }
+    }
 }
 
 fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !prompt_history.History {
