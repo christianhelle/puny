@@ -1,5 +1,6 @@
 const std = @import("std");
 const chat = @import("chat/chat.zig");
+const upgrade = @import("upgrade.zig");
 const cli = @import("cli/args.zig");
 const config = @import("config/config.zig");
 const helpers = @import("tools/helpers.zig");
@@ -29,7 +30,7 @@ pub fn main(init: std.process.Init) !void {
     const messages_arena = messages_arena_state.allocator();
     const io = init.io;
 
-    cleanupOldBackup(arena, io);
+    upgrade.cleanupOldBackup(arena, io);
 
     const args_slice = try init.minimal.args.toSlice(arena);
     var parsed = cli.parseArgs(io, init.environ_map, args_slice);
@@ -285,52 +286,6 @@ pub fn main(init: std.process.Init) !void {
     try chat_session.run();
 }
 
-fn cleanupOldBackup(allocator: std.mem.Allocator, io: std.Io) void {
-    const exe_path = std.process.executablePathAlloc(io, allocator) catch return;
-    defer allocator.free(exe_path);
-    const old_path = std.fmt.allocPrint(allocator, "{s}.old", .{exe_path}) catch return;
-    defer allocator.free(old_path);
-    std.Io.Dir.deleteFileAbsolute(io, old_path) catch |err| switch (err) {
-        error.FileNotFound => {},
-        else => {
-            var buf: [512]u8 = undefined;
-            var w: std.Io.File.Writer = .init(.stderr(), io, &buf);
-            w.interface.print("warning: failed to remove old backup: {s}\n", .{@errorName(err)}) catch {};
-            w.interface.flush() catch {};
-        },
-    };
-}
-
-fn archiveNameForTarget() []const u8 {
-    const target = @import("builtin").target;
-    const aarch = target.cpu.arch;
-    const os = target.os.tag;
-    if (aarch == .aarch64) {
-        return switch (os) {
-            .windows => "puny-windows-aarch64.zip",
-            .linux => "puny-linux-aarch64.tar.gz",
-            .macos => "puny-macos-aarch64.tar.gz",
-            else => @compileError("unsupported OS for upgrade"),
-        };
-    } else if (aarch == .x86_64) {
-        return switch (os) {
-            .windows => "puny-windows-x86_64.zip",
-            .linux => "puny-linux-x86_64.tar.gz",
-            .macos => "puny-macos-x86_64.tar.gz",
-            else => @compileError("unsupported OS for upgrade"),
-        };
-    }
-    @compileError("unsupported CPU architecture for upgrade");
-}
-
-fn upgradeTempParent(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
-    if (environ_map.get("TMPDIR")) |t| return try arena.dupe(u8, t);
-    if (environ_map.get("TEMP")) |t| return try arena.dupe(u8, t);
-    if (environ_map.get("TMP")) |t| return try arena.dupe(u8, t);
-    if (comptime @import("builtin").os.tag == .windows) return try arena.dupe(u8, "C:\\Windows\\Temp");
-    return try arena.dupe(u8, "/tmp");
-}
-
 fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map, force: bool) !void {
     var stderr_buffer: [1024]u8 = undefined;
     var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
@@ -364,7 +319,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
     const unique = random.int(u64);
     var unique_buf: [32]u8 = undefined;
     const unique_str = try std.fmt.bufPrint(&unique_buf, "{x}", .{unique});
-    const tmp_parent = try upgradeTempParent(arena, environ_map);
+    const tmp_parent = try upgrade.upgradeTempParent(arena, environ_map);
     defer arena.free(tmp_parent);
     const tmp_rel_name = try std.fmt.allocPrint(arena, "puny-upgrade-{s}", .{unique_str});
     defer arena.free(tmp_rel_name);
@@ -378,7 +333,7 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
         std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
     }
 
-    const archive_name = archiveNameForTarget();
+    const archive_name = upgrade.archiveNameForTarget();
     const download_url = try std.fmt.allocPrint(arena, "https://github.com/christianhelle/puny/releases/download/{s}/{s}", .{ latest_tag, archive_name });
     defer arena.free(download_url);
 
