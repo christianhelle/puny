@@ -382,9 +382,20 @@ fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.proc
     const download_url = try std.fmt.allocPrint(arena, "https://github.com/christianhelle/puny/releases/download/{s}/{s}", .{ latest_tag, archive_name });
     defer arena.free(download_url);
 
+    const expected_size: ?u64 = blk: {
+        const assets = parsed.value.object.get("assets") orelse break :blk null;
+        for (assets.array.items) |asset| {
+            const name = asset.object.get("name") orelse continue;
+            if (!std.mem.eql(u8, name.string, archive_name)) continue;
+            const size = asset.object.get("size") orelse continue;
+            break :blk @intCast(size.integer);
+        }
+        break :blk null;
+    };
+
     const binary_name = if (@import("builtin").os.tag == .windows) "puny.exe" else "puny";
 
-    const extracted_path = try extractAndFindBinary(arena, io, tmp_dir, archive_name, binary_name, download_url, null, random);
+    const extracted_path = try extractAndFindBinary(arena, io, tmp_dir, archive_name, binary_name, download_url, expected_size, random);
     defer arena.free(extracted_path);
 
     try stderr_writer.print("Installing...\n", .{});
