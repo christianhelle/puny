@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Add retry logic and validation to Windows self-upgrade pipeline ([#78](https://github.com/christianhelle/puny/pull/78)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.2.3](https://github.com/christianhelle/puny/releases/tag/v0.2.3) (2026-07-31)
 
 ### Features
