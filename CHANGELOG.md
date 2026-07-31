@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Reduce excessive whitespace and staircase effect in terminal output ([#76](https://github.com/christianhelle/puny/pull/76)) ([@christianhelle](https://github.com/christianhelle/))
 - Use OpenAI Compatible endpoints for all LM Studio models ([#77](https://github.com/christianhelle/puny/pull/77)) ([@christianhelle](https://github.com/christianhelle/))
 - Add circular navigation to list picker ([#75](https://github.com/christianhelle/puny/pull/75)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix list picker layout and arrow key navigation on Unix ([#74](https://github.com/christianhelle/puny/pull/74)) ([@christianhelle](https://github.com/christianhelle/))
