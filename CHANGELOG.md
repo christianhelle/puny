@@ -1,8 +1,9 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.2.4](https://github.com/christianhelle/puny/releases/tag/v0.2.4) (2026-07-31)
 
 ### Features
+- Fix incorrect startup time measurement ([#84](https://github.com/christianhelle/puny/pull/84)) ([@christianhelle](https://github.com/christianhelle/))
 - Show session load time in restored session header ([#83](https://github.com/christianhelle/puny/pull/83)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract upgrade logic into a dedicated upgrade module ([#82](https://github.com/christianhelle/puny/pull/82)) ([@christianhelle](https://github.com/christianhelle/))
 - Generate HTML plan with system theme awareness (dark and light mode) ([#81](https://github.com/christianhelle/puny/pull/81)) ([@christianhelle](https://github.com/christianhelle/))
