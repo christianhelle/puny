@@ -188,17 +188,6 @@ fn retryDownload(
     }
 }
 
-pub fn httpDownloadFileWithRetry(
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    url: []const u8,
-    dest_dir: std.Io.Dir,
-    dest_name: []const u8,
-    random: std.Random,
-) !void {
-    return retryDownload(allocator, io, url, dest_dir, dest_name, random, httpDownloadFile);
-}
-
 test "retryDownload retries transient errors" {
     test_download_attempts = 0;
     test_download_fail_until = 2;
