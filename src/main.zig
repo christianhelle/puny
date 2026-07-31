@@ -309,6 +309,8 @@ fn restoreSessionAtStartup(
     const msg_path = try std.fs.path.join(msg_alloc, &.{ dir, "messages.json" });
     defer msg_alloc.free(msg_path);
 
+    const load_start = std.Io.Clock.Timestamp.now(io, .awake);
+
     var file = std.Io.Dir.cwd().openFile(io, msg_path, .{}) catch {
         try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{s.id});
         try stdout_writer.flush();
@@ -337,7 +339,10 @@ fn restoreSessionAtStartup(
         try std.fs.path.join(msg_alloc, &.{ dir, "plan.html" }),
     );
     planning_mode.* = s.planning_mode;
-    try stdout_writer.print("\n\nRestored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
+    const now = std.Io.Clock.Timestamp.now(io, .awake);
+    const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
+    var header_buf: [256]u8 = undefined;
+    try stdout_writer.print("\n\n{s}\n", .{ formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns) });
     try session.printConversation(stdout_writer, messages.items);
     try stdout_writer.flush();
     return true;
