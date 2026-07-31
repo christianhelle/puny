@@ -494,6 +494,14 @@ fn requiresApiKey(selected_provider: ModelProvider) bool {
         selected_provider == .opencode_go;
 }
 
+fn formatRestoreHeader(buf: []u8, id: []const u8, count: usize, elapsed_ns: u64) []const u8 {
+    var time_buf: [64]u8 = undefined;
+    const time_str = formatDuration(&time_buf, elapsed_ns);
+    return std.fmt.bufPrint(buf, "Restored session {s} — {d} messages ({s})", .{
+        id, count, time_str,
+    }) catch "Restored session";
+}
+
 test "formatDuration formats sub-millisecond as µs" {
     var buf: [64]u8 = undefined;
     const result = formatDuration(&buf, 5000);
