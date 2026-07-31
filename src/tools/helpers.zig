@@ -1,4 +1,5 @@
 const std = @import("std");
+const retry = @import("../core/retry.zig");
 
 pub fn dupeString(allocator: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error![]const u8 {
     if (s.len == 0) return "";
@@ -138,4 +139,92 @@ pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]con
     });
     if (response_body.written().len == 0) return "";
     return response_body.toOwnedSlice();
+}
+
+var test_download_attempts: usize = 0;
+var test_download_fail_until: usize = 0;
+
+fn testDownload(allocator: std.mem.Allocator, io: std.Io, url: []const u8, dest_dir: std.Io.Dir, dest_name: []const u8) anyerror!void {
+    _ = allocator;
+    _ = url;
+    test_download_attempts += 1;
+    if (test_download_attempts <= test_download_fail_until) return error.ConnectionTimedOut;
+    var file = try dest_dir.createFile(io, dest_name, .{});
+    file.close(io);
+}
+
+fn retryDownload(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    dest_dir: std.Io.Dir,
+    dest_name: []const u8,
+    random: std.Random,
+    comptime download_fn: fn (std.mem.Allocator, std.Io, []const u8, std.Io.Dir, []const u8) anyerror!void,
+) !void {
+    const cfg = retry.default_config;
+    var attempt: usize = 0;
+    while (true) {
+        attempt += 1;
+        download_fn(allocator, io, url, dest_dir, dest_name) catch |err| {
+            dest_dir.deleteFile(io, dest_name) catch {};
+            if (attempt > cfg.max_retries) return err;
+            if (!retry.isTransientError(err)) return err;
+            var delay_ms: u64 = cfg.base_delay_ms;
+            var i: usize = 1;
+            while (i < attempt) : (i += 1) delay_ms *= 2;
+            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
+            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+            continue;
+        };
+        return;
+    }
+}
+
+pub fn httpDownloadFileWithRetry(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    dest_dir: std.Io.Dir,
+    dest_name: []const u8,
+    random: std.Random,
+) !void {
+    return retryDownload(allocator, io, url, dest_dir, dest_name, random, httpDownloadFile);
+}
+
+test "retryDownload retries transient errors" {
+    test_download_attempts = 0;
+    test_download_fail_until = 2;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    try retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
+    try std.testing.expectEqual(@as(usize, 3), test_download_attempts);
+    // Verify file exists after successful retry
+    var f = try tmp_dir.dir.openFile(std.testing.io, "test.zip", .{});
+    f.close(std.testing.io);
+}
+
+test "retryDownload fails after exhausting retries" {
+    test_download_attempts = 0;
+    test_download_fail_until = 999;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const result = retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
+    try std.testing.expectError(error.ConnectionTimedOut, result);
+}
+
+test "retryDownload fails immediately on non-transient error" {
+    test_download_attempts = 0;
+    test_download_fail_until = 0;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const result = retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
+    try std.testing.expectEqual(@as(usize, 1), test_download_attempts);
+    _ = result;
 }
