@@ -4,14 +4,22 @@ pub fn isTransientError(err: anyerror) bool {
     return switch (err) {
         error.ConnectionRefused,
         error.ConnectionTimedOut,
+        error.ConnectionResetByPeer,
         error.ReadTimedOut,
         error.ReadFailed,
         error.WriteFailed,
+        error.BrokenPipe,
+        error.EndOfStream,
         error.DnsFailed,
         error.NameResolveFailed,
         error.TlsFailure,
+        error.TlsAlert,
+        error.TlsConnectionClosure,
         error.SslUpgradeFailed,
-        error.EndOfStream,
+        error.HttpHeadersInvalid,
+        error.Unexpected,
+        error.SystemResources,
+        error.TruncatedDownload,
         => true,
         else => false,
     };
@@ -28,3 +36,26 @@ pub const default_config: Config = .{
     .base_delay_ms = 500,
     .jitter_max_ms = 250,
 };
+
+test "isTransientError recognizes download-related errors" {
+    const download_errors = [_]anyerror{
+        error.ConnectionResetByPeer,
+        error.BrokenPipe,
+        error.HttpHeadersInvalid,
+        error.Unexpected,
+        error.SystemResources,
+        error.TlsAlert,
+        error.TlsConnectionClosure,
+        error.TruncatedDownload,
+    };
+    for (download_errors) |err| {
+        try std.testing.expect(isTransientError(err));
+    }
+}
+
+test "isTransientError rejects non-transient errors" {
+    try std.testing.expect(!isTransientError(error.OutOfMemory));
+    try std.testing.expect(!isTransientError(error.AccessDenied));
+    try std.testing.expect(!isTransientError(error.FileNotFound));
+    try std.testing.expect(!isTransientError(error.InvalidArgument));
+}
