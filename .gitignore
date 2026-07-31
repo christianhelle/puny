@@ -9,3 +9,5 @@ artifacts
 puny_debug.log
 puny_chat.log
 trace.log
+*/upgrade/*.zip
+*/upgrade/puny*
