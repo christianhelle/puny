@@ -19,7 +19,7 @@ pub fn cleanupOldBackup(allocator: std.mem.Allocator, io: std.Io) void {
     };
 }
 
-pub fn archiveNameForTarget() []const u8 {
+fn archiveNameForTarget() []const u8 {
     const target = @import("builtin").target;
     const aarch = target.cpu.arch;
     const os = target.os.tag;
@@ -41,7 +41,7 @@ pub fn archiveNameForTarget() []const u8 {
     @compileError("unsupported CPU architecture for upgrade");
 }
 
-pub fn upgradeTempParent(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+fn upgradeTempParent(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
     if (environ_map.get("TMPDIR")) |t| return try arena.dupe(u8, t);
     if (environ_map.get("TEMP")) |t| return try arena.dupe(u8, t);
     if (environ_map.get("TMP")) |t| return try arena.dupe(u8, t);
@@ -134,7 +134,7 @@ fn clearDirContents(io: std.Io, dir: std.Io.Dir) !void {
     }
 }
 
-pub fn extractAndFindBinary(
+fn extractAndFindBinary(
     arena: std.mem.Allocator,
     io: std.Io,
     tmp_dir: std.Io.Dir,
