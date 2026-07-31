@@ -337,7 +337,7 @@ fn restoreSessionAtStartup(
         try std.fs.path.join(msg_alloc, &.{ dir, "plan.html" }),
     );
     planning_mode.* = s.planning_mode;
-    try stdout_writer.print("Restored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
+    try stdout_writer.print("\n\nRestored session {s} — {d} messages:\n", .{ s.id, messages.items.len });
     try session.printConversation(stdout_writer, messages.items);
     try stdout_writer.flush();
     return true;
