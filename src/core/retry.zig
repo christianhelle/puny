@@ -22,6 +22,9 @@ pub fn isTransientError(err: anyerror) bool {
         error.TruncatedDownload,
         error.ZipNoEndRecord,
         error.ZipTruncated,
+        error.WrongGzipChecksum,
+        error.WrongGzipSize,
+        error.CorruptInput,
         => true,
         else => false,
     };
@@ -51,6 +54,9 @@ test "isTransientError recognizes download-related errors" {
         error.TruncatedDownload,
         error.ZipNoEndRecord,
         error.ZipTruncated,
+        error.WrongGzipChecksum,
+        error.WrongGzipSize,
+        error.CorruptInput,
     };
     for (download_errors) |err| {
         try std.testing.expect(isTransientError(err));

@@ -125,7 +125,8 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
         return error.HttpNotOk;
     }
 
-    const stat = try dest_dir.statFile(io, dest_name, .{});    if (stat.size == 0) return error.TruncatedDownload;
+    const stat = try dest_dir.statFile(io, dest_name, .{});
+    if (stat.size == 0) return error.TruncatedDownload;
 }
 
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
