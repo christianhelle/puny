@@ -1,23 +1,41 @@
 # Puny
 
-Puny is for professionals on limited hardware or remote machines who hate JavaScript,
-TypeScript, Electron, NPM, Node.js, etc. You want a coding agent that starts in ~1
-millisecond, uses around 1 MB of disk space, and stays out of your way.
-
 Puny is a minimal natively compiled single-binary coding agent with a ~1 MB footprint.
+
+It's designed for people who want a fast, lightweight coding agent that runs smoothly 
+on limited hardware or remote machines. This is a coding agent that starts in under 1
+millisecond, uses around 1 MB of disk space, uses minimal memory, uses <1% CPU,
+and stays out of your way.
+
+## Features
+
+- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
+- **Interactive model picker**: choose the model to load when Puny starts.
+- **Multi-turn chat**: keeps the conversation history across messages.
+- **Session management**: each run and `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
+- **Tool calling**: the LLM can use built-in tools to work with your project.
+- **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
+- **Built-in tools**:
+  - Read, write, and list files in your project
+  - Run shell commands
+  - Search your codebase
+  - Load skills
+  - Fetch web pages
 
 ## Why fast and small matters
 
-Startup time ~1ms means Puny is always ready when you are — no spinner, no
+Startup time ~1ms means Puny is always ready when you are — no spinner, no animations, no
 waiting. The ~1 MB binary and minimal memory footprint mean it runs comfortably on
-a Raspberry Pi, a remote server over SSH, or a decade-old laptop. Every millisecond
-and megabyte is deliberate: there is no hidden runtime, no garbage collector, no
-Node.js dependency, no javascript.
+a Raspberry Pi, a slow remote server over SSH, or a cheap decade-old laptop. 
+Every millisecond and megabyte is deliberate: there is no hidden runtime, no garbage collector, 
+no Node.js dependencies, no JavaScript.
 
 ## Why the feature set is intentionally limited
 
 Puny is designed around the way I work. It is highly opinionated. That means it will
-never try to be everything to everyone.
+never try to be everything to everyone. It's a tool and will take credit itself for your work
+by adding itself as a co-author to your commits. It will never try to be a platform, a framework, 
+or a plugin ecosystem. 
 
 Other coding agents include MCP, subagents, plugins, extensions, animations, and dozens
 of other features I never asked for. Puny does not. The feature set is limited to what
@@ -48,21 +66,6 @@ read, edit, search, and inspect your codebase.
 | Welcome screen               | Provider picker                      | Model picker                      |
 | ---------------------------- | ------------------------------------ | --------------------------------- |
 | ![](docs/images/welcome.png) | ![](docs/images/change-provider.png) | ![](docs/images/change-model.png) |
-
-## Features
-
-- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
-- **Interactive model picker**: choose the model to load when Puny starts.
-- **Multi-turn chat**: keeps the conversation history across messages.
-- **Session management**: each run and `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
-- **Tool calling**: the LLM can use built-in tools to work with your project.
-- **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
-- **Built-in tools**:
-  - Read, write, and list files in your project
-  - Run shell commands
-  - Search your codebase
-  - Load skills
-  - Fetch web pages
 
 ## Installation
 
