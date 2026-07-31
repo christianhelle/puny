@@ -110,16 +110,22 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
     defer client.deinit();
 
     var file = try dest_dir.createFile(io, dest_name, .{});
-    errdefer dest_dir.deleteFile(io, dest_name) catch {};
+    errdefer {
+        file.close(io);
+        dest_dir.deleteFile(io, dest_name) catch {};
+    }
 
     var buf: [8192]u8 = undefined;
     var file_writer = file.writer(io, &buf);
 
-    const result = try client.fetch(.{
+    const result = client.fetch(.{
         .location = .{ .uri = uri },
         .method = .GET,
         .response_writer = &file_writer.interface,
-    });
+    }) catch |err| return err;
+
+    try file_writer.interface.flush();
+    file.close(io);
 
     if (result.status != .ok) {
         return error.HttpNotOk;
@@ -146,12 +152,13 @@ pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]con
 
 var test_download_attempts: usize = 0;
 var test_download_fail_until: usize = 0;
+var test_download_error: anyerror = error.ConnectionTimedOut;
 
 fn testDownload(allocator: std.mem.Allocator, io: std.Io, url: []const u8, dest_dir: std.Io.Dir, dest_name: []const u8) anyerror!void {
     _ = allocator;
     _ = url;
     test_download_attempts += 1;
-    if (test_download_attempts <= test_download_fail_until) return error.ConnectionTimedOut;
+    if (test_download_attempts <= test_download_fail_until) return test_download_error;
     var file = try dest_dir.createFile(io, dest_name, .{});
     file.close(io);
 }
@@ -172,7 +179,7 @@ fn retryDownload(
         download_fn(allocator, io, url, dest_dir, dest_name) catch |err| {
             dest_dir.deleteFile(io, dest_name) catch {};
             if (attempt > cfg.max_retries) return err;
-            if (!retry.isTransientError(err)) return err;
+            if (!retry.isDownloadTransientError(err)) return err;
             var delay_ms: u64 = cfg.base_delay_ms;
             var i: usize = 1;
             while (i < attempt) : (i += 1) delay_ms *= 2;
@@ -222,12 +229,13 @@ test "retryDownload fails after exhausting retries" {
 
 test "retryDownload fails immediately on non-transient error" {
     test_download_attempts = 0;
-    test_download_fail_until = 0;
+    test_download_fail_until = 1;
+    test_download_error = error.InvalidArgument;
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
     const result = retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
     try std.testing.expectEqual(@as(usize, 1), test_download_attempts);
-    _ = result;
+    try std.testing.expectError(error.InvalidArgument, result);
 }
