@@ -20,6 +20,8 @@ pub fn isTransientError(err: anyerror) bool {
         error.Unexpected,
         error.SystemResources,
         error.TruncatedDownload,
+        error.ZipNoEndRecord,
+        error.ZipTruncated,
         => true,
         else => false,
     };
@@ -47,6 +49,8 @@ test "isTransientError recognizes download-related errors" {
         error.TlsAlert,
         error.TlsConnectionClosure,
         error.TruncatedDownload,
+        error.ZipNoEndRecord,
+        error.ZipTruncated,
     };
     for (download_errors) |err| {
         try std.testing.expect(isTransientError(err));
