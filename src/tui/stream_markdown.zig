@@ -23,6 +23,7 @@ pub const StreamRenderer = struct {
 
     rows_printed: usize,
     pending_rows: usize,
+    pending_trailing_newline: bool,
     finished: bool,
 
     pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer, terminal_width: usize) StreamRenderer {
@@ -37,6 +38,7 @@ pub const StreamRenderer = struct {
             .table = null,
             .rows_printed = 0,
             .pending_rows = 0,
+            .pending_trailing_newline = false,
             .finished = false,
         };
     }
@@ -223,6 +225,7 @@ pub const StreamRenderer = struct {
             try terminal.writeWithCRLF(self.writer, rendered);
         }
         self.pending_rows = countRows(rendered, self.terminal_width);
+        self.pending_trailing_newline = rendered.len > 0 and rendered[rendered.len - 1] == '\n';
     }
 
     /// The in-progress tail grew without completing a line: append the new bytes
@@ -238,6 +241,7 @@ pub const StreamRenderer = struct {
             try self.writer.writeAll(cleaned);
         }
         self.pending_rows = self.pendingRegionRows();
+        self.pending_trailing_newline = false;
     }
 
     fn pendingRegionRows(self: *StreamRenderer) usize {
@@ -279,12 +283,14 @@ pub const StreamRenderer = struct {
 
     fn erasePending(self: *StreamRenderer) !void {
         if (self.pending_rows == 0) return;
-        if (self.pending_rows > 1) {
-            try self.writer.print(terminal.cursor_up, .{self.pending_rows - 1});
+        const up = if (self.pending_trailing_newline) self.pending_rows else self.pending_rows - 1;
+        if (up > 0) {
+            try self.writer.print(terminal.cursor_up, .{up});
         }
         try self.writer.writeAll(terminal.move_to_line_start);
         try self.writer.writeAll(terminal.erase_display);
         self.pending_rows = 0;
+        self.pending_trailing_newline = false;
     }
 
     fn printCommitted(self: *StreamRenderer, rendered: []const u8) !void {
