@@ -614,6 +614,7 @@ pub fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, term
         try rows.append(allocator, cells);
     }
     if (max_cols < 2) return error.TooFewColumns;
+    const sep_len: usize = rows.items[1].len;
     for (rows.items) |*row| {
         if (row.len < max_cols) {
             const expanded = try allocator.alloc([]const u8, max_cols);
@@ -629,7 +630,7 @@ pub fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, term
     {
         const sep = rows.items[1];
         for (sep, 0..) |cell, i| {
-            if (i >= max_cols) break;
+            if (i >= sep_len or i >= max_cols) break;
             if (!isSeparatorCell(cell)) return error.InvalidTableSeparator;
             alignments[i] = parseAlignment(cell);
         }
