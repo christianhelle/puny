@@ -192,7 +192,7 @@ fn trimLeft(s: []const u8, chars: []const u8) []const u8 {
     return s[start..];
 }
 
-fn isTableLine(line: []const u8) bool {
+pub fn isTableLine(line: []const u8) bool {
     const trimmed = trimLeft(line, " \t");
     if (trimmed.len < 2) return false;
     if (trimmed[0] != '|') return false;
@@ -808,7 +808,7 @@ test "renderInline handles backtick matching" {
 }
 
 test "renderInline handles bold matching" {
-    try std.testing.expectEqual(@as(?usize, 5), findBoldEnd("**bold** rest", 2));
+    try std.testing.expectEqual(@as(usize, 6), findBoldEnd("**bold** rest", 2));
     try std.testing.expect(findBoldEnd("**bold rest", 2) == null);
 }
 
@@ -911,7 +911,7 @@ test "isTableLine detects pipe-delimited lines" {
 
 test "stripOuterPipes removes leading and trailing pipes" {
     try std.testing.expectEqualStrings(" a ", stripOuterPipes("| a |"));
-    try std.testing.expectEqualStrings("a | b", stripOuterPipes("| a | b |"));
+    try std.testing.expectEqualStrings(" a | b ", stripOuterPipes("| a | b |"));
 }
 
 test "parseAlignment detects alignment from separator cells" {
@@ -924,7 +924,7 @@ test "parseAlignment detects alignment from separator cells" {
 test "ansiVisibleWidth ignores ANSI escapes" {
     try std.testing.expectEqual(@as(usize, 5), ansiVisibleWidth("\x1b[1mhello\x1b[0m"));
     try std.testing.expectEqual(@as(usize, 3), ansiVisibleWidth("a\x1b[36mb\x1b[0mc"));
-    try std.testing.expectEqual(@as(usize, 4), ansiVisibleWidth("\x1b[2m中\x1b[0m"));
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("\x1b[2m中\x1b[0m"));
     try std.testing.expectEqual(@as(usize, 0), ansiVisibleWidth(""));
     try std.testing.expectEqual(@as(usize, 0), ansiVisibleWidth("\x1b[38;5;237m\x1b[0m"));
 }
@@ -941,15 +941,16 @@ test "isSeparatorRow detects pipe delimiter rows" {
     try std.testing.expect(!isSeparatorRow("| a | b |"));
     try std.testing.expect(!isSeparatorRow("| --- | not |"));
     try std.testing.expect(!isSeparatorRow("just text"));
-    try std.testing.expect(!isSeparatorRow("| --- |"));
+    try std.testing.expect(isSeparatorRow("| --- |"));
 }
 
 test "renderLine renders headings bright" {
     const rl = try renderLine(std.testing.allocator, "# Title", false);
     defer if (rl.output) |o| std.testing.allocator.free(o);
     try std.testing.expectEqual(RenderKind.text, rl.kind);
-    try std.testing.expect(std.mem.indexOf(u8, rl.output.?, ansi.bright) != null);
-    try std.testing.expectEqualStrings("Title", std.mem.trimRight(rl.output.?, "\n"));
+    const expected = try std.fmt.allocPrint(std.testing.allocator, "{s}Title{s}\n", .{ ansi.bright, ansi.reset });
+    defer std.testing.allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, rl.output.?);
 }
 
 test "renderLine opens code fences" {
@@ -970,7 +971,7 @@ test "renderLine closes code fences" {
     const rl = try renderLine(std.testing.allocator, "```", true);
     defer if (rl.output) |o| std.testing.allocator.free(o);
     try std.testing.expectEqual(RenderKind.code_fence_close, rl.kind);
-    try std.testing.expectEqualStrings("\n", std.mem.trimLeft(rl.output.?, ansi.reset));
+    try std.testing.expectEqualStrings("\n", trimLeft(rl.output.?, ansi.reset));
 }
 
 test "renderLine flags table candidates" {
