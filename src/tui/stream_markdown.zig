@@ -485,7 +485,7 @@ fn expectStreamedEqualsBatch(content: []const u8) !void {
     var written_so_far: usize = 0;
     var rest = content;
     while (rest.len > 0) {
-        const chunk_len = @min(rest.len, 3); 
+        const chunk_len = @min(rest.len, 3);
         try streamer.push(rest[0..chunk_len]);
         rest = rest[chunk_len..];
         const fresh = output.written()[written_so_far..];
@@ -545,7 +545,3 @@ test "stream renderer matches batch render for lone pipe line" {
 test "stream renderer matches batch render for empty content" {
     try expectStreamedEqualsBatch("");
 }
-
-
-
-

@@ -848,4 +848,3 @@ test "SessionStats.print includes memory section" {
     try std.testing.expect(std.mem.indexOf(u8, written, memory.resident_label) != null);
     try std.testing.expect(std.mem.indexOf(u8, written, memory.private_label) != null);
 }
-
