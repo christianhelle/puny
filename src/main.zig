@@ -578,3 +578,7 @@ test "include core session tests" {
 test "include upgrade module tests" {
     _ = @import("upgrade.zig");
 }
+
+test "include stream markdown tests" {
+    _ = @import("tui/stream_markdown.zig");
+}
