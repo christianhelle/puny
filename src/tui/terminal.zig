@@ -86,18 +86,21 @@ pub fn isIgnoredControlByte(byte: u8) bool {
 
 /// Print text to a writer, replacing bare `\n` with `\r\n` so the cursor
 /// returns to column 0 in raw mode. Existing CRLF pairs are preserved.
+/// Assumes `text` is a complete rendered blob: a trailing `\r` at the end of
+/// one call is never combined with a leading `\n` from the next call.
 pub fn writeWithCRLF(writer: *std.Io.Writer, text: []const u8) !void {
     var rest = text;
     while (std.mem.indexOfScalar(u8, rest, '\n')) |nl_idx| {
         if (nl_idx > 0 and rest[nl_idx - 1] == '\r') {
-            try writer.print("{s}", .{rest[0 .. nl_idx + 1]});
+            try writer.writeAll(rest[0 .. nl_idx + 1]);
             rest = rest[nl_idx + 1 ..];
         } else {
-            try writer.print("{s}\r\n", .{rest[0..nl_idx]});
+            try writer.writeAll(rest[0..nl_idx]);
+            try writer.writeAll("\r\n");
             rest = rest[nl_idx + 1 ..];
         }
     }
-    if (rest.len > 0) try writer.print("{s}", .{rest});
+    if (rest.len > 0) try writer.writeAll(rest);
 }
 
 test "writeWithCRLF replaces \\n with \\r\\n" {
