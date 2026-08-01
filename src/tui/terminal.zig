@@ -143,6 +143,9 @@ pub fn terminalWidth() ?usize {
     if (comptime builtin.os.tag == .windows) {
         return windowsTerminalWidth();
     }
+    if (comptime builtin.os.tag != .linux and builtin.os.tag != .macos) {
+        return null;
+    }
     var ws: std.posix.winsize = undefined;
     const rc = std.posix.system.ioctl(std.posix.STDOUT_FILENO, TIOCGWINSZ, @intFromPtr(&ws));
     if (comptime builtin.os.tag == .linux) {
@@ -164,7 +167,7 @@ fn windowsTerminalWidth() ?usize {
 /// Request code for TIOCGWINSZ, per-OS.
 const TIOCGWINSZ: c_int = switch (builtin.os.tag) {
     .linux => 0x5413,
-    .macos, .ios, .tvos, .watchos, .freebsd, .netbsd, .openbsd, .dragonfly => 0x40087468,
+    .macos => 0x40087468,
     else => 0,
 };
 
