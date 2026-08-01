@@ -10,7 +10,7 @@ const tool_display = @import("display.zig");
 const usage_estimator = @import("usage.zig");
 const cancel = @import("../core/cancel.zig");
 const memory = @import("../core/memory.zig");
-const markdown = @import("../tui/markdown.zig");
+const stream_markdown = @import("../tui/stream_markdown.zig");
 
 fn countNewlines(text: []const u8) usize {
     var count: usize = 0;
@@ -221,6 +221,8 @@ pub const OpenAiAccumulator = struct {
     has_streamed_output: bool,
     show_thinking: bool,
     reasoning_shown: bool,
+    content_started: bool,
+    stream: ?stream_markdown.StreamRenderer,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, stdout: ?*std.Io.Writer, session_stats: *SessionStats) OpenAiAccumulator {
         return .{
@@ -241,12 +243,15 @@ pub const OpenAiAccumulator = struct {
             .has_streamed_output = false,
             .show_thinking = false,
             .reasoning_shown = false,
+            .content_started = false,
+            .stream = null,
         };
     }
 
     pub fn deinit(self: *@This()) void {
         self.content.deinit(self.allocator);
         self.reasoning.deinit(self.allocator);
+        if (self.stream) |*s| s.deinit();
         var it = self.partial_calls.iterator();
         while (it.next()) |entry| {
             entry.value_ptr.args.deinit(self.allocator);
@@ -320,9 +325,25 @@ pub const OpenAiAccumulator = struct {
                     }
                     self.lines_printed += 1;
                     self.content_start_line = self.lines_printed;
+                    self.content_started = true;
                 }
                 self.session_stats.addStreamingOutput(@intCast(@divFloor(text.len, 4)), null);
-                self.lines_printed += countNewlines(text);
+                if (self.stdout) |stdout| {
+                    if (!self.content_started) {
+                        try stdout.print("\r\n", .{});
+                        try stdout.flush();
+                        self.lines_printed += 1;
+                        self.content_start_line = self.lines_printed;
+                        self.content_started = true;
+                    }
+                    if (self.stream == null) {
+                        const width = terminal.terminalWidth() orelse 80;
+                        self.stream = stream_markdown.StreamRenderer.init(self.allocator, stdout, width);
+                    }
+                    const streamer = &self.stream.?;
+                    try streamer.push(text);
+                    self.lines_printed = self.content_start_line + streamer.contentRows();
+                }
                 try self.content.appendSlice(self.allocator, text);
             },
             .reasoning => |text| {
@@ -384,22 +405,15 @@ pub const OpenAiAccumulator = struct {
         self.partial_calls.clearRetainingCapacity();
     }
 
-    /// Render the accumulated content as ANSI-formatted markdown and print it.
-    pub fn replaceWithRendered(self: *@This(), stdout: *std.Io.Writer) !usize {
-        if (self.content.items.len == 0) return 0;
-
-        try stdout.print("\r\n", .{});
-        try stdout.flush();
-
-        var md = markdown.Markdown.init();
-        const rendered = try md.render(self.allocator, self.content.items);
-        defer self.allocator.free(rendered);
-
-        try terminal.writeWithCRLF(stdout, rendered);
-        try stdout.flush();
-
-        self.lines_printed = self.content_start_line;
-        return countNewlines(rendered) + 1;
+    /// Commit the streamed content and return the number of screen rows the
+    /// content occupies (plus one for the leading newline before it).
+    pub fn finishStream(self: *@This(), _: *std.Io.Writer) !usize {
+        if (self.stream) |*s| {
+            try s.finish();
+            self.lines_printed = self.content_start_line + s.contentRows();
+            return s.contentRows() + 1;
+        }
+        return 0;
     }
 
     pub fn streamCallback(self: *@This()) openai.StreamCallback {
@@ -483,7 +497,7 @@ pub fn runTurn(
     var content_ends_with_newline = false;
     var final_lines_printed: usize = 0;
     if (has_content) {
-        final_lines_printed = try accumulator.replaceWithRendered(stdout_writer);
+        final_lines_printed = try accumulator.finishStream(stdout_writer);
         content_cursor_offset = final_lines_printed;
         content_ends_with_newline = true;
     }
@@ -594,6 +608,29 @@ test "OpenAiAccumulator assembles content" {
 
     try std.testing.expectEqualStrings("Hello world", acc.content.items);
     try std.testing.expect(!acc.hasToolCalls());
+}
+
+test "OpenAiAccumulator streams content through the markdown renderer" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 0);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, &output.writer, &stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "# Title\n" });
+    try acc.onEvent(.{ .content = "Body" });
+    try acc.onEvent(.{ .finish = null });
+
+    try std.testing.expectEqualStrings("# Title\nBody", acc.content.items);
+    const rows = try acc.finishStream(&output.writer);
+    try std.testing.expect(rows >= 2);
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "Title") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "Body") != null);
 }
 
 test "OpenAiAccumulator captures reasoning unconditionally" {
@@ -811,3 +848,4 @@ test "SessionStats.print includes memory section" {
     try std.testing.expect(std.mem.indexOf(u8, written, memory.resident_label) != null);
     try std.testing.expect(std.mem.indexOf(u8, written, memory.private_label) != null);
 }
+
