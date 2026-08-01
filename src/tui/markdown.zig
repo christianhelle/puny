@@ -207,15 +207,8 @@ pub fn isSeparatorRow(line: []const u8) bool {
     if (inner.len == 0) return false;
     var it = std.mem.splitScalar(u8, inner, '|');
     var count: usize = 0;
-    while (it.next()) |raw_cell| {
-        const cell = trimRight(trimLeft(raw_cell, " \t"), " \t");
-        if (cell.len == 0) return false;
-        for (cell) |c| {
-            switch (c) {
-                '-', ':' => {},
-                else => return false,
-            }
-        }
+    while (it.next()) |cell| {
+        if (!isSeparatorCell(cell)) return false;
         count += 1;
     }
     return count >= 1;
