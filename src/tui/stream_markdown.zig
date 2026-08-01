@@ -154,17 +154,17 @@ pub const StreamRenderer = struct {
         try lines.append(self.allocator, header);
         try lines.append(self.allocator, sep_dupe);
 
-    const rendered = markdown.renderTable(self.allocator, lines.items, self.terminal_width) catch {
-        self.allocator.free(sep_dupe);
-        lines.deinit(self.allocator);
-        return false;
-    };
-    defer self.allocator.free(rendered);
+        const rendered = markdown.renderTable(self.allocator, lines.items, self.terminal_width) catch {
+            self.allocator.free(sep_dupe);
+            lines.deinit(self.allocator);
+            return false;
+        };
+        defer self.allocator.free(rendered);
 
-    self.table = .{ .lines = lines, .start_row = self.rows_printed };
-    try self.applyTableRepaint(rendered);
-    return true;
-}
+        self.table = .{ .lines = lines, .start_row = self.rows_printed };
+        try self.applyTableRepaint(rendered);
+        return true;
+    }
 
     fn commitRunAsParagraphs(self: *StreamRenderer) !void {
         var out = std.ArrayList(u8).empty;
@@ -529,6 +529,10 @@ test "stream renderer matches batch render for code blocks split across chunks" 
 
 test "stream renderer matches batch render for tables" {
     try expectStreamedEqualsBatch("| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n");
+}
+
+test "stream renderer matches batch render for a data row wider than the separator" {
+    try expectStreamedEqualsBatch("| A | B |\n|---|---|\n| 1 | 2 | 3 |\n");
 }
 
 test "stream renderer matches batch render for trailing partial line" {
