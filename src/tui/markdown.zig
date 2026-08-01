@@ -356,6 +356,14 @@ fn isZeroWidthCodePoint(cp: u21) bool {
     };
 }
 
+/// Display width of a single code point: 0 for combining/format marks, 2 for
+/// wide (CJK/emoji) code points, otherwise 1.
+fn codePointWidth(cp: u21) usize {
+    if (isZeroWidthCodePoint(cp)) return 0;
+    if (isWideCodePoint(cp)) return 2;
+    return 1;
+}
+
 pub fn displayWidth(text: []const u8) usize {
     var width: usize = 0;
     var i: usize = 0;
@@ -366,20 +374,15 @@ pub fn displayWidth(text: []const u8) usize {
             width += 1;
             continue;
         };
-        if (isZeroWidthCodePoint(cp)) {
-            // width unchanged
-        } else if (isWideCodePoint(cp)) {
-            width += 2;
-        } else {
-            width += 1;
-        }
+        width += codePointWidth(cp);
         i += seq_len;
     }
     return width;
 }
 
 /// Visible display width of a rendered line, ignoring ANSI escape sequences.
-/// The markdown renderer only emits SGR sequences (`\x1b[<params>m`).
+/// CSI sequences are skipped to their final byte (0x40-0x7E), so escape
+/// sequences like cursor movement cannot consume the remaining text.
 pub fn ansiVisibleWidth(text: []const u8) usize {
     var width: usize = 0;
     var i: usize = 0;
@@ -388,7 +391,7 @@ pub fn ansiVisibleWidth(text: []const u8) usize {
             i += 1;
             if (i < text.len and text[i] == '[') {
                 i += 1;
-                while (i < text.len and text[i] != 'm') i += 1;
+                while (i < text.len and !(text[i] >= 0x40 and text[i] <= 0x7e)) i += 1;
                 if (i < text.len) i += 1;
             }
             continue;
@@ -399,13 +402,7 @@ pub fn ansiVisibleWidth(text: []const u8) usize {
             width += 1;
             continue;
         };
-        if (isZeroWidthCodePoint(cp)) {
-            // width unchanged
-        } else if (isWideCodePoint(cp)) {
-            width += 2;
-        } else {
-            width += 1;
-        }
+        width += codePointWidth(cp);
         i += seq_len;
     }
     return width;
