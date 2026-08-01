@@ -549,6 +549,31 @@ test "stream renderer matches batch render when content ends mid code block" {
     try expectStreamedEqualsBatch("```zig\nfn main() {}");
 }
 
+test "stream renderer clears a trailing table-candidate line on finish" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var streamer = StreamRenderer.init(std.testing.allocator, &output.writer, 200);
+    defer streamer.deinit();
+
+    var screen = FakeScreen{};
+    defer screen.deinit(arena);
+
+    try streamer.push("| a | b |\n");
+    try screen.feed(arena, output.written());
+    const written_so_far = output.written().len;
+    try streamer.finish();
+    try screen.feed(arena, output.written()[written_so_far..]);
+
+    const screen_text = try screen.toText(arena);
+    defer arena.free(screen_text);
+    try std.testing.expectEqualStrings("| a | b |", trimRight(screen_text, "\n"));
+}
+
 test "stream renderer matches batch render for lone pipe line" {
     try expectStreamedEqualsBatch("| not a table |\n\nmore text\n");
 }
