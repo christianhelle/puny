@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
+const terminal = @import("../tui/terminal.zig");
 const chat_retry = @import("retry.zig");
 const indicator = @import("../tui/indicator.zig");
 const openai = @import("../providers/openai.zig");
@@ -17,23 +18,6 @@ fn countNewlines(text: []const u8) usize {
         if (c == '\n') count += 1;
     }
     return count;
-}
-
-/// Print text to stdout, replacing each `\n` with `\r\n` so the cursor
-/// returns to column 0 in raw mode. This prevents the staircase effect
-/// where each line shifts one column to the right.
-fn printWithCRLF(writer: *std.Io.Writer, text: []const u8) !void {
-    var rest = text;
-    while (std.mem.indexOfScalar(u8, rest, '\n')) |nl_idx| {
-        if (nl_idx > 0 and rest[nl_idx - 1] == '\r') {
-            try writer.print("{s}", .{rest[0 .. nl_idx + 1]});
-            rest = rest[nl_idx + 1 ..];
-        } else {
-            try writer.print("{s}\r\n", .{rest[0..nl_idx]});
-            rest = rest[nl_idx + 1 ..];
-        }
-    }
-    if (rest.len > 0) try writer.print("{s}", .{rest});
 }
 
 pub const PerModelStats = struct {
@@ -352,7 +336,7 @@ pub const OpenAiAccumulator = struct {
                             try stdout.print("\r\n", .{});
                         }
                         try stdout.print("{s}", .{ansi.dim});
-                        try printWithCRLF(stdout, text);
+                        try terminal.writeWithCRLF(stdout, text);
                         try stdout.print("{s}", .{ansi.reset});
                         try stdout.flush();
                     }
@@ -411,7 +395,7 @@ pub const OpenAiAccumulator = struct {
         const rendered = try md.render(self.allocator, self.content.items);
         defer self.allocator.free(rendered);
 
-        try printWithCRLF(stdout, rendered);
+        try terminal.writeWithCRLF(stdout, rendered);
         try stdout.flush();
 
         self.lines_printed = self.content_start_line;
@@ -826,44 +810,4 @@ test "SessionStats.print includes memory section" {
     try std.testing.expect(std.mem.indexOf(u8, written, "─── Memory ───") != null);
     try std.testing.expect(std.mem.indexOf(u8, written, memory.resident_label) != null);
     try std.testing.expect(std.mem.indexOf(u8, written, memory.private_label) != null);
-}
-
-test "printWithCRLF replaces \\n with \\r\\n" {
-    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer output.deinit();
-
-    try printWithCRLF(&output.writer, "Hello\nWorld\n");
-    try std.testing.expectEqualStrings("Hello\r\nWorld\r\n", output.written());
-}
-
-test "printWithCRLF handles text without newlines" {
-    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer output.deinit();
-
-    try printWithCRLF(&output.writer, "Hello world");
-    try std.testing.expectEqualStrings("Hello world", output.written());
-}
-
-test "printWithCRLF handles empty text" {
-    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer output.deinit();
-
-    try printWithCRLF(&output.writer, "");
-    try std.testing.expectEqualStrings("", output.written());
-}
-
-test "printWithCRLF handles multiple newlines" {
-    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer output.deinit();
-
-    try printWithCRLF(&output.writer, "a\nb\nc\n");
-    try std.testing.expectEqualStrings("a\r\nb\r\nc\r\n", output.written());
-}
-
-test "printWithCRLF preserves existing CRLF" {
-    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer output.deinit();
-
-    try printWithCRLF(&output.writer, "a\r\nb");
-    try std.testing.expectEqualStrings("a\r\nb", output.written());
 }

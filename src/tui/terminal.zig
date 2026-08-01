@@ -2,6 +2,8 @@
 ///
 /// Names follow the standard ASCII abbreviations so the code reads like a
 /// terminal reference table instead of raw hex.
+const std = @import("std");
+
 pub const control = struct {
     pub const nul: u8 = 0x00;
     pub const soh: u8 = 0x01;
@@ -79,4 +81,55 @@ pub fn isIgnoredControlByte(byte: u8) bool {
         => true,
         else => false,
     };
+}
+
+/// Print text to a writer, replacing bare `\n` with `\r\n` so the cursor
+/// returns to column 0 in raw mode. Existing CRLF pairs are preserved.
+pub fn writeWithCRLF(writer: *std.Io.Writer, text: []const u8) !void {
+    var rest = text;
+    while (std.mem.indexOfScalar(u8, rest, '\n')) |nl_idx| {
+        if (nl_idx > 0 and rest[nl_idx - 1] == '\r') {
+            try writer.print("{s}", .{rest[0 .. nl_idx + 1]});
+            rest = rest[nl_idx + 1 ..];
+        } else {
+            try writer.print("{s}\r\n", .{rest[0..nl_idx]});
+            rest = rest[nl_idx + 1 ..];
+        }
+    }
+    if (rest.len > 0) try writer.print("{s}", .{rest});
+}
+
+test "writeWithCRLF replaces \\n with \\r\\n" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "Hello\nWorld\n");
+    try std.testing.expectEqualStrings("Hello\r\nWorld\r\n", output.written());
+}
+
+test "writeWithCRLF passes text without newlines" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "Hello world");
+    try std.testing.expectEqualStrings("Hello world", output.written());
+}
+
+test "writeWithCRLF handles empty text" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "");
+    try std.testing.expectEqualStrings("", output.written());
+}
+
+test "writeWithCRLF handles multiple newlines" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "a\nb\nc\n");
+    try std.testing.expectEqualStrings("a\r\nb\r\nc\r\n", output.written());
+}
+
+test "writeWithCRLF preserves existing CRLF" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "a\r\nb");
+    try std.testing.expectEqualStrings("a\r\nb", output.written());
 }
