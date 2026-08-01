@@ -885,6 +885,13 @@ test "Markdown renders table header in bright style" {
     try std.testing.expect(bright_pos < name_pos);
 }
 
+test "Markdown handles a data row wider than the separator" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| A | B |\n|---|---|\n| 1 | 2 | 3 |");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┌") != null);
+}
+
 test "displayWidth counts code points not bytes" {
     try std.testing.expectEqual(@as(usize, 3), displayWidth("abc"));
     try std.testing.expectEqual(@as(usize, 0), displayWidth(""));
