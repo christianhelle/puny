@@ -629,7 +629,7 @@ test "OpenAiAccumulator streams content through the markdown renderer" {
 
     try std.testing.expectEqualStrings("# Title\nBody", acc.content.items);
     const rows = try acc.finishStream();
-    try std.testing.expect(rows >= 2);
+    try std.testing.expectEqual(@as(usize, 3), rows);
     const written = output.written();
     try std.testing.expect(std.mem.indexOf(u8, written, "Title") != null);
     try std.testing.expect(std.mem.indexOf(u8, written, "Body") != null);
