@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Add real-time markdown rendering ([#85](https://github.com/christianhelle/puny/pull/85)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.2.4](https://github.com/christianhelle/puny/releases/tag/v0.2.4) (2026-07-31)
 
 ### Features
