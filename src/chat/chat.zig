@@ -479,10 +479,12 @@ pub fn runTurn(
     switch (outcome) {
         .success => {},
         .cancelled => {
+            _ = try accumulator.finishStream();
             if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, false, has_streamed_content, .cancelled, provider_ttft);
             return .{ .turn_complete = true, .usage = accumulator.usage, .was_cancelled = true };
         },
         .failed => {
+            _ = try accumulator.finishStream();
             if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, false, has_streamed_content, .error_, provider_ttft);
             return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
         },
