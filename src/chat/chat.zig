@@ -407,7 +407,7 @@ pub const OpenAiAccumulator = struct {
 
     /// Commit the streamed content and return the number of screen rows the
     /// content occupies (plus one for the leading newline before it).
-    pub fn finishStream(self: *@This(), _: *std.Io.Writer) !usize {
+    pub fn finishStream(self: *@This()) !usize {
         if (self.stream) |*s| {
             try s.finish();
             self.lines_printed = self.content_start_line + s.contentRows();
@@ -497,7 +497,7 @@ pub fn runTurn(
     var content_ends_with_newline = false;
     var final_lines_printed: usize = 0;
     if (has_content) {
-        final_lines_printed = try accumulator.finishStream(stdout_writer);
+        final_lines_printed = try accumulator.finishStream();
         content_cursor_offset = final_lines_printed;
         content_ends_with_newline = true;
     }
@@ -626,7 +626,7 @@ test "OpenAiAccumulator streams content through the markdown renderer" {
     try acc.onEvent(.{ .finish = null });
 
     try std.testing.expectEqualStrings("# Title\nBody", acc.content.items);
-    const rows = try acc.finishStream(&output.writer);
+    const rows = try acc.finishStream();
     try std.testing.expect(rows >= 2);
     const written = output.written();
     try std.testing.expect(std.mem.indexOf(u8, written, "Title") != null);
