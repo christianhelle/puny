@@ -186,6 +186,27 @@ fn isTableLine(line: []const u8) bool {
     return end.len > 0 and end[end.len - 1] == '|';
 }
 
+/// True when the line is a table delimiter row (only `-` and `:` cells).
+pub fn isSeparatorRow(line: []const u8) bool {
+    if (!isTableLine(line)) return false;
+    const inner = stripOuterPipes(line);
+    if (inner.len == 0) return false;
+    var it = std.mem.splitScalar(u8, inner, '|');
+    var count: usize = 0;
+    while (it.next()) |raw_cell| {
+        const cell = trimRight(trimLeft(raw_cell, " \t"), " \t");
+        if (cell.len == 0) return false;
+        for (cell) |c| {
+            switch (c) {
+                '-', ':' => {},
+                else => return false,
+            }
+        }
+        count += 1;
+    }
+    return count >= 1;
+}
+
 fn stripOuterPipes(line: []const u8) []const u8 {
     const trimmed = trimLeft(line, " \t");
     var s = trimmed;
@@ -328,7 +349,7 @@ fn isZeroWidthCodePoint(cp: u21) bool {
     };
 }
 
-fn displayWidth(text: []const u8) usize {
+pub fn displayWidth(text: []const u8) usize {
     var width: usize = 0;
     var i: usize = 0;
     while (i < text.len) {
@@ -575,7 +596,7 @@ fn renderDataRow(
     }
 }
 
-fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, terminal_width: usize) ![]const u8 {
+pub fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, terminal_width: usize) ![]const u8 {
     if (lines.len < 2) return error.TooFewTableLines;
     var rows = std.ArrayList([][]const u8).empty;
     defer {
@@ -636,10 +657,9 @@ fn renderTable(allocator: std.mem.Allocator, lines: []const []const u8, terminal
     return result.toOwnedSlice(allocator);
 }
 
-fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+pub fn renderInline(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
     var result = std.ArrayList(u8).empty;
     errdefer result.deinit(allocator);
-
     var i: usize = 0;
     while (i < text.len) {
         // Inline code: `...`
@@ -898,6 +918,16 @@ test "ansiVisibleWidth ignores ANSI escapes" {
 test "ansiVisibleWidth counts table borders and styling separately" {
     const styled = "┌───┐\x1b[0m";
     try std.testing.expectEqual(@as(usize, 5), ansiVisibleWidth(styled));
+}
+
+test "isSeparatorRow detects pipe delimiter rows" {
+    try std.testing.expect(isSeparatorRow("|---|---|"));
+    try std.testing.expect(isSeparatorRow("|:---|:---:|"));
+    try std.testing.expect(isSeparatorRow("  | --- | --- |  "));
+    try std.testing.expect(!isSeparatorRow("| a | b |"));
+    try std.testing.expect(!isSeparatorRow("| --- | not |"));
+    try std.testing.expect(!isSeparatorRow("just text"));
+    try std.testing.expect(!isSeparatorRow("| --- |"));
 }
 
 test "render handles mixed text and table content" {
