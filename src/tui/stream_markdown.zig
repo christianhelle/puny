@@ -54,13 +54,17 @@ pub const StreamRenderer = struct {
         try self.content.appendSlice(self.allocator, text);
 
         const has_lines = std.mem.indexOfScalar(u8, self.content.items[self.consumed..], '\n') != null;
-        if (has_lines) try self.erasePending();
-
-        while (try self.takeNextLine()) |line| {
-            try self.processLine(line);
+        if (has_lines) {
+            try self.erasePending();
+            while (try self.takeNextLine()) |line| {
+                try self.processLine(line);
+            }
+            try self.updatePending();
+        } else {
+            // No new complete line; the in-progress tail simply grew. Append it
+            // to the screen instead of erasing and rewriting the whole tail.
+            try self.appendTailGrowth(text);
         }
-
-        try self.updatePending();
         try self.writer.flush();
     }
 
@@ -214,6 +218,33 @@ pub const StreamRenderer = struct {
             try terminal.writeWithCRLF(self.writer, rendered);
         }
         self.pending_rows = countRows(rendered, self.terminal_width);
+    }
+
+    /// The in-progress tail grew without completing a line: append the new bytes
+    /// to the screen (styled as code when inside a fence) rather than erasing
+    /// and rewriting the whole tail. Keeps per-chunk output proportional to the
+    /// chunk, not to the accumulated tail.
+    fn appendTailGrowth(self: *StreamRenderer, text: []const u8) !void {
+        const cleaned = trimRight(text, "\r");
+        if (cleaned.len == 0) return;
+        if (self.in_code_block) {
+            try self.writer.print("{s}{s}{s}", .{ ansi.cyan, cleaned, ansi.reset });
+        } else {
+            try self.writer.writeAll(cleaned);
+        }
+        self.pending_rows = self.pendingRegionRows();
+    }
+
+    fn pendingRegionRows(self: *StreamRenderer) usize {
+        var rows: usize = 0;
+        for (self.pending_run.items) |line| {
+            const rendered = markdown.renderInline(self.allocator, line) catch continue;
+            defer self.allocator.free(rendered);
+            rows += countRows(rendered, self.terminal_width);
+        }
+        const tail = trimRight(self.content.items[self.consumed..], "\r");
+        rows += rowCountForLine(markdown.ansiVisibleWidth(tail), self.terminal_width);
+        return rows;
     }
 
     fn renderPendingRegion(self: *StreamRenderer) ![]const u8 {
@@ -491,6 +522,16 @@ test "stream renderer matches batch render for tables" {
 
 test "stream renderer matches batch render for trailing partial line" {
     try expectStreamedEqualsBatch("Some text without newline");
+}
+
+test "stream renderer matches batch render for long single line chunked" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var line = std.ArrayList(u8).empty;
+    for (0..200) |_| try line.appendSlice(arena, "word ");
+    const content = try std.fmt.allocPrint(arena, "{s}tail", .{line.items});
+    try expectStreamedEqualsBatch(content);
 }
 
 test "stream renderer matches batch render when content ends mid code block" {
