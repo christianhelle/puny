@@ -91,8 +91,12 @@ fn runTest(allocator: std.mem.Allocator, io: std.Io, binary_path: []const u8, te
 
     const result = try std.process.run(allocator, io, .{
         .argv = child_argv,
-        .stdout_limit = .limited(1024 * 1024),
-        .stderr_limit = .limited(1024 * 1024),
+        // Generous capture limits. Crossing the limit triggers the
+        // StreamTooLong error path in std.process.run, which deadlocks on
+        // Windows (the child blocks writing to a full pipe), so the limits
+        // must stay far above any realistic output.
+        .stdout_limit = .limited(64 * 1024 * 1024),
+        .stderr_limit = .limited(64 * 1024 * 1024),
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
