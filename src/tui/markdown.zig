@@ -39,112 +39,126 @@ pub const Markdown = struct {
         var i: usize = 0;
         while (i < all_lines.items.len) : (i += 1) {
             const line = all_lines.items[i];
-            if (in_code_block) {
-                if (std.mem.startsWith(u8, line, "```")) {
-                    try result.appendSlice(allocator, ansi.reset);
-                    try result.appendSlice(allocator, "\n");
-                    in_code_block = false;
-                } else {
-                    try result.appendSlice(allocator, ansi.cyan);
-                    try result.appendSlice(allocator, line);
-                    try result.appendSlice(allocator, ansi.reset);
-                    try result.appendSlice(allocator, "\n");
-                }
+            const rl = try renderLine(allocator, line, in_code_block);
+            defer if (rl.output) |o| allocator.free(o);
+            switch (rl.kind) {
+                .code_fence_open => in_code_block = true,
+                .code_fence_close => in_code_block = false,
+                else => {},
+            }
+
+            if (rl.output) |out| {
+                try result.appendSlice(allocator, out);
                 continue;
             }
 
-            if (std.mem.startsWith(u8, line, "```")) {
-                in_code_block = true;
-                const lang = trimLeft(line[3..], " \t");
-                try result.appendSlice(allocator, ansi.dim);
-                if (lang.len > 0) {
-                    try result.appendSlice(allocator, lang);
-                    try result.appendSlice(allocator, " code block:");
-                } else {
-                    try result.appendSlice(allocator, "code block:");
-                }
-                try result.appendSlice(allocator, ansi.reset);
-                try result.appendSlice(allocator, "\n");
-                continue;
+            // Table candidate: collect the run of consecutive table lines and
+            // render it as a bordered table, falling back to plain paragraphs
+            // when the run does not form a valid table.
+            const start = i;
+            while (i + 1 < all_lines.items.len and isTableLine(all_lines.items[i + 1])) {
+                i += 1;
             }
-
-            const trimmed = trimLeft(line, " \t");
-
-            // Headings
-            if (std.mem.startsWith(u8, trimmed, "#")) {
-                var hash_count: usize = 0;
-                for (trimmed) |c| {
-                    if (c == '#') hash_count += 1 else break;
-                }
-                if (hash_count <= 6 and hash_count >= 1 and trimmed.len > hash_count and trimmed[hash_count] == ' ') {
-                    const content = trimLeft(trimmed[hash_count..], " ");
-                    try result.appendSlice(allocator, ansi.bright);
-                    try result.appendSlice(allocator, content);
-                    try result.appendSlice(allocator, ansi.reset);
-                    try result.appendSlice(allocator, "\n");
-                    continue;
-                }
-            }
-
-            // Blockquotes
-            if (std.mem.startsWith(u8, trimmed, ">")) {
-                const content = trimLeft(trimmed[1..], " ");
-                const rendered = try renderInline(allocator, content);
-                try result.appendSlice(allocator, ansi.dim);
-                try result.appendSlice(allocator, "\u{2502} ");
-                try result.appendSlice(allocator, ansi.reset);
+            const table_lines = all_lines.items[start .. i + 1];
+            if (renderTable(allocator, table_lines, 80)) |rendered| {
                 try result.appendSlice(allocator, rendered);
                 allocator.free(rendered);
-                try result.appendSlice(allocator, "\n");
-                continue;
-            }
-
-            // Unordered lists
-            if (std.mem.startsWith(u8, trimmed, "- ") or std.mem.startsWith(u8, trimmed, "* ")) {
-                const content = trimLeft(trimmed[2..], " ");
-                try result.appendSlice(allocator, "  ");
-                const rendered = try renderInline(allocator, content);
-                try result.appendSlice(allocator, ansi.dim);
-                try result.appendSlice(allocator, "\u{2022} ");
-                try result.appendSlice(allocator, ansi.reset);
-                try result.appendSlice(allocator, rendered);
-                allocator.free(rendered);
-                try result.appendSlice(allocator, "\n");
-                continue;
-            }
-
-            // Tables
-            if (isTableLine(line)) {
-                const start = i;
-                while (i + 1 < all_lines.items.len and isTableLine(all_lines.items[i + 1])) {
-                    i += 1;
-                }
-                const table_lines = all_lines.items[start .. i + 1];
-                if (renderTable(allocator, table_lines, 80)) |rendered| {
+            } else |_| {
+                for (table_lines) |tl| {
+                    const rendered = try renderInline(allocator, tl);
                     try result.appendSlice(allocator, rendered);
                     allocator.free(rendered);
-                } else |_| {
-                    for (table_lines) |tl| {
-                        const rendered = try renderInline(allocator, tl);
-                        try result.appendSlice(allocator, rendered);
-                        allocator.free(rendered);
-                        try result.appendSlice(allocator, "\n");
-                    }
+                    try result.appendSlice(allocator, "\n");
                 }
-                continue;
             }
-
-            // Regular paragraph with inline formatting — strip leading whitespace
-            const trimmed_line = trimLeft(line, " \t");
-            const rendered = try renderInline(allocator, trimmed_line);
-            try result.appendSlice(allocator, rendered);
-            allocator.free(rendered);
-            try result.appendSlice(allocator, "\n");
         }
 
         return result.toOwnedSlice(allocator);
     }
 };
+
+/// How a single complete line should be handled by a markdown consumer.
+pub const RenderKind = enum {
+    /// A rendered line ready to display (owned `output`).
+    text,
+    /// The line opened a fenced code block (its `output` is the header line).
+    code_fence_open,
+    /// The line closed a fenced code block (its `output` is the reset line).
+    code_fence_close,
+    /// The line could be part of a table; the caller must decide with lookahead.
+    table_candidate,
+};
+
+pub const RenderLine = struct {
+    kind: RenderKind,
+    output: ?[]const u8 = null,
+};
+
+/// Render one complete line. `in_code_block` carries the fenced-code state.
+/// The returned `output` (when present) is owned by the caller and ends with
+/// a trailing newline.
+pub fn renderLine(allocator: std.mem.Allocator, line: []const u8, in_code_block: bool) !RenderLine {
+    if (in_code_block) {
+        if (std.mem.startsWith(u8, line, "```")) {
+            const output = try std.fmt.allocPrint(allocator, "{s}\n", .{ansi.reset});
+            return .{ .kind = .code_fence_close, .output = output };
+        }
+        const output = try std.fmt.allocPrint(allocator, "{s}{s}{s}\n", .{ ansi.cyan, line, ansi.reset });
+        return .{ .kind = .text, .output = output };
+    }
+
+    if (std.mem.startsWith(u8, line, "```")) {
+        const lang = trimLeft(line[3..], " \t");
+        const output = if (lang.len > 0)
+            try std.fmt.allocPrint(allocator, "{s}{s} code block:{s}\n", .{ ansi.dim, lang, ansi.reset })
+        else
+            try std.fmt.allocPrint(allocator, "{s}code block:{s}\n", .{ ansi.dim, ansi.reset });
+        return .{ .kind = .code_fence_open, .output = output };
+    }
+
+    if (isTableLine(line)) {
+        return .{ .kind = .table_candidate };
+    }
+
+    const trimmed = trimLeft(line, " \t");
+
+    // Headings
+    if (std.mem.startsWith(u8, trimmed, "#")) {
+        var hash_count: usize = 0;
+        for (trimmed) |c| {
+            if (c == '#') hash_count += 1 else break;
+        }
+        if (hash_count <= 6 and hash_count >= 1 and trimmed.len > hash_count and trimmed[hash_count] == ' ') {
+            const content = trimLeft(trimmed[hash_count..], " ");
+            const output = try std.fmt.allocPrint(allocator, "{s}{s}{s}\n", .{ ansi.bright, content, ansi.reset });
+            return .{ .kind = .text, .output = output };
+        }
+    }
+
+    // Blockquotes
+    if (std.mem.startsWith(u8, trimmed, ">")) {
+        const content = trimLeft(trimmed[1..], " ");
+        const rendered = try renderInline(allocator, content);
+        defer allocator.free(rendered);
+        const output = try std.fmt.allocPrint(allocator, "{s}\u{2502} {s}{s}\n", .{ ansi.dim, ansi.reset, rendered });
+        return .{ .kind = .text, .output = output };
+    }
+
+    // Unordered lists
+    if (std.mem.startsWith(u8, trimmed, "- ") or std.mem.startsWith(u8, trimmed, "* ")) {
+        const content = trimLeft(trimmed[2..], " ");
+        const rendered = try renderInline(allocator, content);
+        defer allocator.free(rendered);
+        const output = try std.fmt.allocPrint(allocator, "  {s}\u{2022} {s}{s}\n", .{ ansi.dim, ansi.reset, rendered });
+        return .{ .kind = .text, .output = output };
+    }
+
+    // Regular paragraph with inline formatting
+    const rendered = try renderInline(allocator, trimmed);
+    defer allocator.free(rendered);
+    const output = try std.fmt.allocPrint(allocator, "{s}\n", .{rendered});
+    return .{ .kind = .text, .output = output };
+}
 
 fn trimRight(s: []const u8, chars: []const u8) []const u8 {
     var end = s.len;
@@ -928,6 +942,48 @@ test "isSeparatorRow detects pipe delimiter rows" {
     try std.testing.expect(!isSeparatorRow("| --- | not |"));
     try std.testing.expect(!isSeparatorRow("just text"));
     try std.testing.expect(!isSeparatorRow("| --- |"));
+}
+
+test "renderLine renders headings bright" {
+    const rl = try renderLine(std.testing.allocator, "# Title", false);
+    defer if (rl.output) |o| std.testing.allocator.free(o);
+    try std.testing.expectEqual(RenderKind.text, rl.kind);
+    try std.testing.expect(std.mem.indexOf(u8, rl.output.?, ansi.bright) != null);
+    try std.testing.expectEqualStrings("Title", std.mem.trimRight(rl.output.?, "\n"));
+}
+
+test "renderLine opens code fences" {
+    const rl = try renderLine(std.testing.allocator, "```zig", false);
+    defer if (rl.output) |o| std.testing.allocator.free(o);
+    try std.testing.expectEqual(RenderKind.code_fence_open, rl.kind);
+    try std.testing.expect(std.mem.indexOf(u8, rl.output.?, "zig code block:") != null);
+}
+
+test "renderLine renders code lines inside code blocks" {
+    const rl = try renderLine(std.testing.allocator, "fn main() {}", true);
+    defer if (rl.output) |o| std.testing.allocator.free(o);
+    try std.testing.expectEqual(RenderKind.text, rl.kind);
+    try std.testing.expect(std.mem.indexOf(u8, rl.output.?, ansi.cyan) != null);
+}
+
+test "renderLine closes code fences" {
+    const rl = try renderLine(std.testing.allocator, "```", true);
+    defer if (rl.output) |o| std.testing.allocator.free(o);
+    try std.testing.expectEqual(RenderKind.code_fence_close, rl.kind);
+    try std.testing.expectEqualStrings("\n", std.mem.trimLeft(rl.output.?, ansi.reset));
+}
+
+test "renderLine flags table candidates" {
+    const rl = try renderLine(std.testing.allocator, "| a | b |", false);
+    try std.testing.expectEqual(RenderKind.table_candidate, rl.kind);
+    try std.testing.expect(rl.output == null);
+}
+
+test "renderLine renders plain paragraphs" {
+    const rl = try renderLine(std.testing.allocator, "plain text", false);
+    defer if (rl.output) |o| std.testing.allocator.free(o);
+    try std.testing.expectEqual(RenderKind.text, rl.kind);
+    try std.testing.expectEqualStrings("plain text\n", rl.output.?);
 }
 
 test "render handles mixed text and table content" {
