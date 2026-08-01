@@ -350,6 +350,39 @@ fn displayWidth(text: []const u8) usize {
     return width;
 }
 
+/// Visible display width of a rendered line, ignoring ANSI escape sequences.
+/// The markdown renderer only emits SGR sequences (`\x1b[<params>m`).
+pub fn ansiVisibleWidth(text: []const u8) usize {
+    var width: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == 0x1b) {
+            i += 1;
+            if (i < text.len and text[i] == '[') {
+                i += 1;
+                while (i < text.len and text[i] != 'm') i += 1;
+                if (i < text.len) i += 1;
+            }
+            continue;
+        }
+        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch {
+            i += seq_len;
+            width += 1;
+            continue;
+        };
+        if (isZeroWidthCodePoint(cp)) {
+            // width unchanged
+        } else if (isWideCodePoint(cp)) {
+            width += 2;
+        } else {
+            width += 1;
+        }
+        i += seq_len;
+    }
+    return width;
+}
+
 fn isSeparatorCell(cell: []const u8) bool {
     const trimmed = trimRight(trimLeft(cell, " \t"), " \t");
     if (trimmed.len == 0) return false;
@@ -852,6 +885,19 @@ test "parseAlignment detects alignment from separator cells" {
     try std.testing.expectEqual(Alignment.center, parseAlignment(":---:"));
     try std.testing.expectEqual(Alignment.right, parseAlignment("---:"));
     try std.testing.expectEqual(Alignment.left, parseAlignment("----"));
+}
+
+test "ansiVisibleWidth ignores ANSI escapes" {
+    try std.testing.expectEqual(@as(usize, 5), ansiVisibleWidth("\x1b[1mhello\x1b[0m"));
+    try std.testing.expectEqual(@as(usize, 3), ansiVisibleWidth("a\x1b[36mb\x1b[0mc"));
+    try std.testing.expectEqual(@as(usize, 4), ansiVisibleWidth("\x1b[2m中\x1b[0m"));
+    try std.testing.expectEqual(@as(usize, 0), ansiVisibleWidth(""));
+    try std.testing.expectEqual(@as(usize, 0), ansiVisibleWidth("\x1b[38;5;237m\x1b[0m"));
+}
+
+test "ansiVisibleWidth counts table borders and styling separately" {
+    const styled = "┌───┐\x1b[0m";
+    try std.testing.expectEqual(@as(usize, 5), ansiVisibleWidth(styled));
 }
 
 test "render handles mixed text and table content" {
