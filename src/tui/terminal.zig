@@ -160,7 +160,7 @@ fn windowsTerminalWidth() ?usize {
     const h = windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
     var info: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (windows.GetConsoleScreenBufferInfo(h, &info) == .FALSE) return null;
-    const w: i32 = info.dwSize.X;
+    const w: i32 = @as(i32, info.srWindow.Right) - @as(i32, info.srWindow.Left) + 1;
     return if (w > 0) @intCast(w) else null;
 }
 
