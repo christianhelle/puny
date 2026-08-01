@@ -153,7 +153,7 @@ pub fn terminalWidth() ?usize {
 fn windowsTerminalWidth() ?usize {
     const h = windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
     var info: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
-    if (windows.GetConsoleScreenBufferInfo(h, &info) == 0) return null;
+    if (windows.GetConsoleScreenBufferInfo(h, &info) == .FALSE) return null;
     const w: i32 = info.dwSize.X;
     return if (w > 0) @intCast(w) else null;
 }
