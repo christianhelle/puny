@@ -167,6 +167,9 @@ pub fn main(init: std.process.Init) !void {
     skill_registry.fullScan(init.io) catch {};
     skills.setGlobalRegistry(&skill_registry);
 
+    var tool_ctx = tools.ToolContext.init(arena, init.io, &skill_registry);
+    defer tool_ctx.deinit();
+
     var session_restored = false;
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
@@ -258,6 +261,7 @@ pub fn main(init: std.process.Init) !void {
         .random = random,
         .history = &history,
         .prov = &prov,
+        .tool_ctx = &tool_ctx,
         .model_provider = &selected_provider,
         .provider_url = &provider_url,
         .model_key = &model_key,

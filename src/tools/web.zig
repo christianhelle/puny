@@ -1,13 +1,14 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
+const ToolContext = tools.ToolContext;
 
 const WebFetchParams = struct {
     url: []const u8,
 };
 
-fn webFetch(allocator: std.mem.Allocator, io: std.Io, params: WebFetchParams) ![]const u8 {
-    return helpers.httpGet(allocator, io, params.url);
+fn webFetch(ctx: *ToolContext, params: WebFetchParams) ![]const u8 {
+    return helpers.httpGet(ctx.allocator, ctx.io, params.url);
 }
 
 pub const web_fetch = tools.defineTool(

@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const tool_schema = @import("../tools/schema.zig");
 const helpers = @import("../tools/helpers.zig");
+const context = @import("../tools/context.zig");
 
 const Tool = tool_schema.Tool;
 
@@ -46,19 +47,19 @@ pub const save_prd_tool = Tool{
     .description = "Save the Product Requirements Document. Call this when the user confirms they are ready for the final PRD. Provide the markdown content and HTML content separately.",
     .schema = savePrdSchema,
     .execute = struct {
-        pub fn exec(allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) ![]const u8 {
+        pub fn exec(ctx: *context.ToolContext, args: std.json.Value) ![]const u8 {
             const markdown = args.object.get("markdown") orelse return error.MissingMarkdown;
             const html = args.object.get("html") orelse return error.MissingHtml;
-            var md_file = try std.Io.Dir.cwd().createFile(io, prd_path_global, .{});
-            defer md_file.close(io);
-            try md_file.writeStreamingAll(io, markdown.string);
-            var html_file = try std.Io.Dir.cwd().createFile(io, html_path_global, .{});
-            defer html_file.close(io);
-            try html_file.writeStreamingAll(io, html.string);
-            const abs_md = try resolvePath(allocator, io, prd_path_global);
-            const abs_html = try resolvePath(allocator, io, html_path_global);
+            var md_file = try std.Io.Dir.cwd().createFile(ctx.io, prd_path_global, .{});
+            defer md_file.close(ctx.io);
+            try md_file.writeStreamingAll(ctx.io, markdown.string);
+            var html_file = try std.Io.Dir.cwd().createFile(ctx.io, html_path_global, .{});
+            defer html_file.close(ctx.io);
+            try html_file.writeStreamingAll(ctx.io, html.string);
+            const abs_md = try resolvePath(ctx.allocator, ctx.io, prd_path_global);
+            const abs_html = try resolvePath(ctx.allocator, ctx.io, html_path_global);
             return std.fmt.allocPrint(
-                allocator,
+                ctx.allocator,
                 " - {s}\n - {s}",
                 .{ abs_md, abs_html },
             );
