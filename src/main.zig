@@ -187,6 +187,7 @@ pub fn main(init: std.process.Init) !void {
                     &planning_mode,
                     &messages,
                     stdout_writer,
+                    &tool_ctx,
                 );
             } else {
                 try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
