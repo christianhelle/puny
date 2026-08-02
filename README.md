@@ -600,8 +600,9 @@ load skills on its own via the `load_skill` tool.
 ### Sessions
 
 Each Puny session is identified by a UUID. A new session is created every time you
-start Puny or run `/reset`. The session ID is shown in the welcome screen and in
-the `/stats` header.
+start Puny without resuming, or run `/reset`. Resuming a session with `--session`
+or `/resume` reuses the existing session and its ID — no new session is created.
+The session ID is shown in the welcome screen and in the `/stats` header.
 
 #### Storage
 
