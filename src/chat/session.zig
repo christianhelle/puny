@@ -78,6 +78,7 @@ pub const ChatLoopContext = struct {
     planning_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
+    restore_incomplete: bool = false,
     session: *core_session.Session,
     session_stats: *chat.SessionStats,
     debug_log: ?*DebugLog,
@@ -1184,6 +1185,40 @@ test "sessionHasContent returns true for user and assistant messages" {
     try std.testing.expect(sessionHasContent(&messages));
 }
 
+test "shouldRemoveSessionDir is false when restore was incomplete" {
+    const messages = [_]openai.Message{};
+    try std.testing.expect(!shouldRemoveSessionDir(true, &messages, std.testing.io, ".zig-cache/tmp"));
+}
+
+test "shouldRemoveSessionDir is false when session has content" {
+    const messages = [_]openai.Message{
+        .{ .user = "Hello!" },
+    };
+    try std.testing.expect(!shouldRemoveSessionDir(false, &messages, std.testing.io, ".zig-cache/tmp"));
+}
+
+test "shouldRemoveSessionDir is true for a fully restored empty session" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(dir);
+    const messages = [_]openai.Message{};
+    try std.testing.expect(shouldRemoveSessionDir(false, &messages, std.testing.io, dir));
+}
+
+test "shouldRemoveSessionDir is false when a plan exists" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(dir);
+    const plan_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "plan.md" });
+    defer std.testing.allocator.free(plan_path);
+    var file = try std.Io.Dir.cwd().createFile(std.testing.io, plan_path, .{});
+    file.close(std.testing.io);
+    const messages = [_]openai.Message{};
+    try std.testing.expect(!shouldRemoveSessionDir(false, &messages, std.testing.io, dir));
+}
+
 test "rollBackCancelledTurn keeps the user message on a cancelled turn" {
     var messages = std.ArrayList(openai.Message).empty;
     defer messages.deinit(std.testing.allocator);
@@ -1222,6 +1257,10 @@ fn sessionHasContent(messages: []const openai.Message) bool {
     return false;
 }
 
+fn shouldRemoveSessionDir(restore_incomplete: bool, messages: []const openai.Message, io: std.Io, dir: []const u8) bool {
+    return !restore_incomplete and !sessionHasContent(messages) and !core_session.sessionHasPlan(io, dir);
+}
+
 fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
     while (messages.items.len > 0) {
         switch (messages.items[messages.items.len - 1]) {
@@ -1234,9 +1273,7 @@ fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
 fn finalizeSession(ctx: *ChatLoopContext) void {
     saveMessages(ctx) catch {};
     saveSessionMeta(ctx) catch {};
-    const has_content = sessionHasContent(ctx.messages.items);
-    const has_plan = core_session.sessionHasPlan(ctx.io, ctx.session.dir);
-    if (!has_content and !has_plan) {
+    if (shouldRemoveSessionDir(ctx.restore_incomplete, ctx.messages.items, ctx.io, ctx.session.dir)) {
         core_session.removeSessionDir(ctx.io, ctx.session.dir);
     }
     printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
