@@ -1150,3 +1150,50 @@ test "providerHasFixedUrl for opencode, opencode-go, copilot and mock" {
 test "include chat retry tests" {
     _ = @import("retry.zig");
 }
+
+test "sessionHasContent returns false for empty message list" {
+    const messages = [_]openai.Message{};
+    try std.testing.expect(!sessionHasContent(&messages));
+}
+
+test "sessionHasContent returns false for system-only messages" {
+    const messages = [_]openai.Message{
+        .{ .system = "You are a helpful assistant." },
+        .{ .system = "Skills block" },
+    };
+    try std.testing.expect(!sessionHasContent(&messages));
+}
+
+test "sessionHasContent returns true for a user message" {
+    const messages = [_]openai.Message{
+        .{ .system = "You are a helpful assistant." },
+        .{ .user = "Hello!" },
+    };
+    try std.testing.expect(sessionHasContent(&messages));
+}
+
+test "sessionHasContent returns true for an assistant message" {
+    const messages = [_]openai.Message{
+        .{ .system = "You are a helpful assistant." },
+        .{ .assistant = .{ .content = "Hi there!" } },
+    };
+    try std.testing.expect(sessionHasContent(&messages));
+}
+
+test "sessionHasContent returns true for user and assistant messages" {
+    const messages = [_]openai.Message{
+        .{ .user = "Hello!" },
+        .{ .assistant = .{ .content = "Hi there!" } },
+    };
+    try std.testing.expect(sessionHasContent(&messages));
+}
+
+fn sessionHasContent(messages: []const openai.Message) bool {
+    for (messages) |msg| {
+        switch (msg) {
+            .user, .assistant => return true,
+            else => {},
+        }
+    }
+    return false;
+}
