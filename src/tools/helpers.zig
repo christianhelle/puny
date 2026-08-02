@@ -181,8 +181,7 @@ fn retryDownload(
             dest_dir.deleteFile(io, dest_name) catch {};
             if (attempt > cfg.max_retries) return err;
             if (!retry.isDownloadTransientError(err)) return err;
-            const delay_ms = retry.computeDelay(cfg, attempt, random);
-            io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+            retry.sleep(cfg, io, attempt, random);
             continue;
         };
         return;
