@@ -501,9 +501,9 @@ test "message JSON round-trip all variants" {
     defer parsed_val.deinit();
 
     const arr = parsed_val.value.array;
-    try std.testing.expectEqual(@as(usize, messages.len), arr.len);
+    try std.testing.expectEqual(@as(usize, messages.len), arr.items.len);
 
-    for (messages, arr, 0..) |expected, item, i| {
+    for (messages, arr.items, 0..) |expected, item, i| {
         const parsed = try Message.fromJsonValue(a, item);
         try std.testing.expectEqualDeep(expected, parsed);
         _ = i;

@@ -598,3 +598,11 @@ test "include tool context tests" {
 test "include tools tests" {
     _ = @import("tools/root.zig");
 }
+
+test "include chat retry tests" {
+    _ = @import("chat/retry.zig");
+}
+
+test "include model selection tests" {
+    _ = @import("models/select.zig");
+}
