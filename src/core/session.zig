@@ -512,3 +512,79 @@ test "sessionBaseDir extracts from environ map" {
         try std.testing.expectEqualStrings("/tmp/test-home/.config/puny", dir);
     }
 }
+
+test "sessionHasPlan returns false when no plan files exist" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "no-plan-1", false);
+
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "no-plan-1" });
+    defer std.testing.allocator.free(dir);
+
+    try std.testing.expect(!sessionHasPlan(std.testing.io, dir));
+}
+
+test "sessionHasPlan returns true when plan.md exists" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "md-plan-1", true);
+
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "md-plan-1" });
+    defer std.testing.allocator.free(dir);
+
+    try std.testing.expect(sessionHasPlan(std.testing.io, dir));
+}
+
+test "sessionHasPlan returns true when plan.html exists" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "html-plan-1", false);
+
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "html-plan-1" });
+    defer std.testing.allocator.free(dir);
+    const html_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "plan.html" });
+    defer std.testing.allocator.free(html_path);
+    var file = try std.Io.Dir.cwd().createFile(std.testing.io, html_path, .{});
+    file.close(std.testing.io);
+
+    try std.testing.expect(sessionHasPlan(std.testing.io, dir));
+}
+
+test "sessionHasPlan returns true when both plan files exist" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "both-plan-1", true);
+
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "both-plan-1" });
+    defer std.testing.allocator.free(dir);
+    const html_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "plan.html" });
+    defer std.testing.allocator.free(html_path);
+    var file = try std.Io.Dir.cwd().createFile(std.testing.io, html_path, .{});
+    file.close(std.testing.io);
+
+    try std.testing.expect(sessionHasPlan(std.testing.io, dir));
+}
+
+pub fn sessionHasPlan(io: std.Io, dir: []const u8) bool {
+    var tmp_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer tmp_arena.deinit();
+    const tmp = tmp_arena.allocator();
+
+    const md_path = std.fs.path.join(tmp, &.{ dir, "plan.md" }) catch return false;
+    if (hasFile(io, md_path)) return true;
+
+    const html_path = std.fs.path.join(tmp, &.{ dir, "plan.html" }) catch return false;
+    return hasFile(io, html_path);
+}
