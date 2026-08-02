@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const retry = @import("../core/retry.zig");
 
 pub fn dupeString(allocator: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error![]const u8 {
@@ -56,21 +57,13 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
     if (child.stdout) |file| {
         var buffer: [4096]u8 = undefined;
         var reader = file.reader(io, &buffer);
-        while (true) {
-            const n = try reader.interface.readSliceShort(&buffer);
-            if (n == 0) break;
-            try stdout.appendSlice(allocator, buffer[0..n]);
-        }
+        try reader.interface.appendRemainingUnlimited(allocator, &stdout);
     }
 
     if (child.stderr) |file| {
         var buffer: [4096]u8 = undefined;
         var reader = file.reader(io, &buffer);
-        while (true) {
-            const n = try reader.interface.readSliceShort(&buffer);
-            if (n == 0) break;
-            try stderr.appendSlice(allocator, buffer[0..n]);
-        }
+        try reader.interface.appendRemainingUnlimited(allocator, &stderr);
     }
 
     const term = try child.wait(io);
@@ -225,4 +218,24 @@ test "retryDownload fails immediately on non-transient error" {
     const result = retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
     try std.testing.expectEqual(@as(usize, 1), test_download_attempts);
     try std.testing.expectError(error.InvalidArgument, result);
+}
+
+test "runCommand reads stdout and stderr larger than its read buffer" {
+    // Regression: the reader's internal buffer must not alias the caller's
+    // buffer in runCommand. A single pipe read of more than 4096 bytes used to
+    // leave bytes buffered in the reader, and the next readSliceShort call
+    // memcpy'd a slice onto itself, aborting with "@memcpy arguments alias".
+    const argv: []const []const u8 = if (builtin.os.tag == .windows)
+        &[_][]const u8{ "cmd", "/c", "for /l %i in (1,1,20000) do @(echo 0123456789 & echo error_line 1>&2)" }
+    else
+        &[_][]const u8{ "sh", "-c", "awk 'BEGIN{printf \"%01000000d\",0}' ; awk 'BEGIN{printf \"%0500000d\",1}' 1>&2" };
+
+    const result = try runCommand(std.testing.allocator, std.testing.io, argv, null);
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "Exit code: 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "STDOUT:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "STDERR:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "0000000000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "1111111111") != null);
 }
