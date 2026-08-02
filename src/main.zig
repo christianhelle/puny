@@ -169,6 +169,7 @@ pub fn main(init: std.process.Init) !void {
 
     var tool_ctx = tools.ToolContext.init(arena, init.io, &skill_registry);
     defer tool_ctx.deinit();
+    tool_ctx.setSession(&current_session);
 
     var session_restored = false;
     var messages: std.ArrayList(openai.Message) = .empty;
@@ -215,6 +216,7 @@ pub fn main(init: std.process.Init) !void {
                         &planning_mode,
                         &messages,
                         stdout_writer,
+                        &tool_ctx,
                     );
                 }
             } else if (conv_count > 1) {
@@ -314,6 +316,7 @@ fn restoreSessionAtStartup(
     planning_mode: *bool,
     messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
+    tool_ctx: *tools.ToolContext,
 ) !bool {
     const dir = try std.fs.path.join(msg_alloc, &.{ base_dir, "sessions", s.id });
     defer msg_alloc.free(dir);
@@ -350,6 +353,7 @@ fn restoreSessionAtStartup(
         try std.fs.path.join(msg_alloc, &.{ dir, "plan.md" }),
         try std.fs.path.join(msg_alloc, &.{ dir, "plan.html" }),
     );
+    tool_ctx.setSession(current_session);
     planning_mode.* = s.planning_mode;
     const now = std.Io.Clock.Timestamp.now(io, .awake);
     const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);

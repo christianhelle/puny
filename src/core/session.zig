@@ -3,11 +3,9 @@ const builtin = @import("builtin");
 const tool_schema = @import("../tools/schema.zig");
 const helpers = @import("../tools/helpers.zig");
 const context = @import("../tools/context.zig");
+const skills = @import("../skills/skills.zig");
 
 const Tool = tool_schema.Tool;
-
-var prd_path_global: []const u8 = "";
-var html_path_global: []const u8 = "";
 
 var write_blocked_global: bool = false;
 
@@ -17,11 +15,6 @@ pub fn setWriteBlocked(blocked: bool) void {
 
 pub fn isWriteBlocked() bool {
     return write_blocked_global;
-}
-
-pub fn setSessionPaths(prd: []const u8, html: []const u8) void {
-    prd_path_global = prd;
-    html_path_global = html;
 }
 
 const SavePrdParams = struct {
@@ -50,14 +43,14 @@ pub const save_prd_tool = Tool{
         pub fn exec(ctx: *context.ToolContext, args: std.json.Value) ![]const u8 {
             const markdown = args.object.get("markdown") orelse return error.MissingMarkdown;
             const html = args.object.get("html") orelse return error.MissingHtml;
-            var md_file = try std.Io.Dir.cwd().createFile(ctx.io, prd_path_global, .{});
+            var md_file = try std.Io.Dir.cwd().createFile(ctx.io, ctx.prd_path, .{});
             defer md_file.close(ctx.io);
             try md_file.writeStreamingAll(ctx.io, markdown.string);
-            var html_file = try std.Io.Dir.cwd().createFile(ctx.io, html_path_global, .{});
+            var html_file = try std.Io.Dir.cwd().createFile(ctx.io, ctx.html_path, .{});
             defer html_file.close(ctx.io);
             try html_file.writeStreamingAll(ctx.io, html.string);
-            const abs_md = try resolvePath(ctx.allocator, ctx.io, prd_path_global);
-            const abs_html = try resolvePath(ctx.allocator, ctx.io, html_path_global);
+            const abs_md = try resolvePath(ctx.allocator, ctx.io, ctx.prd_path);
+            const abs_html = try resolvePath(ctx.allocator, ctx.io, ctx.html_path);
             return std.fmt.allocPrint(
                 ctx.allocator,
                 " - {s}\n - {s}",
@@ -93,7 +86,6 @@ pub const Session = struct {
         const prd_path = try std.fs.path.join(arena, &.{ dir, "plan.md" });
         const html_path = try std.fs.path.join(arena, &.{ dir, "plan.html" });
         try createSessionDir(io, dir);
-        setSessionPaths(prd_path, html_path);
         return .{
             .id = id,
             .base = try arena.dupe(u8, base_dir),
@@ -512,4 +504,35 @@ test "sessionBaseDir extracts from environ map" {
         defer allocator.free(dir);
         try std.testing.expectEqualStrings("/tmp/test-home/.config/puny", dir);
     }
+}
+
+test "save_prd writes markdown and html to context session paths" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var skill_registry = skills.Registry.init(arena);
+    defer skill_registry.deinit();
+
+    const session_dir = try std.fs.path.join(arena, &.{ ".zig-cache", "tmp", &tmp.sub_path, "sessions", "abc-123" });
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, session_dir);
+    const prd_path = try std.fs.path.join(arena, &.{ session_dir, "plan.md" });
+    const html_path = try std.fs.path.join(arena, &.{ session_dir, "plan.html" });
+
+    var ctx = context.ToolContext.init(arena, std.testing.io, &skill_registry);
+    defer ctx.deinit();
+    ctx.setSession(.{ .prd_path = prd_path, .html_path = html_path });
+
+    const args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"markdown\":\"# PRD\\n\",\"html\":\"<h1>PRD</h1>\\n\"}", .{});
+
+    const result = try save_prd_tool.execute(&ctx, args);
+    try std.testing.expect(std.mem.indexOf(u8, result, prd_path) != null);
+
+    const md = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, prd_path, arena, std.Io.Limit.limited(1024));
+    try std.testing.expectEqualStrings("# PRD\n", md);
+    const html = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, html_path, arena, std.Io.Limit.limited(1024));
+    try std.testing.expectEqualStrings("<h1>PRD</h1>\n", html);
 }
