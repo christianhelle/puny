@@ -7,16 +7,6 @@ const skills = @import("../skills/skills.zig");
 
 const Tool = tool_schema.Tool;
 
-var write_blocked_global: bool = false;
-
-pub fn setWriteBlocked(blocked: bool) void {
-    write_blocked_global = blocked;
-}
-
-pub fn isWriteBlocked() bool {
-    return write_blocked_global;
-}
-
 const SavePrdParams = struct {
     markdown: []const u8,
     html: []const u8,

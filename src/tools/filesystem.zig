@@ -1,7 +1,6 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
-const core_session = @import("../core/session.zig");
 const ToolContext = tools.ToolContext;
 
 const ReadFileParams = struct {
@@ -18,7 +17,7 @@ const WriteFileParams = struct {
 };
 
 fn writeFile(ctx: *ToolContext, params: WriteFileParams) ![]const u8 {
-    if (core_session.isWriteBlocked()) {
+    if (ctx.isWriteBlocked()) {
         return "Write blocked: app is in planning mode. Exit planning mode with /build or use save_prd to save the PRD.";
     }
     try helpers.writeFile(ctx.io, params.path, params.content);
@@ -53,3 +52,58 @@ pub const list_directory = tools.defineTool(
     ListDirectoryParams,
     listDirectory,
 );
+
+test "write_file is blocked when context write_blocked is set" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var skill_registry = @import("../skills/skills.zig").Registry.init(arena);
+    defer skill_registry.deinit();
+
+    var ctx = tools.ToolContext.init(arena, std.testing.io, &skill_registry);
+    defer ctx.deinit();
+    ctx.write_blocked = true;
+
+    const target = try std.fs.path.join(arena, &.{ ".zig-cache", "tmp", &tmp.sub_path, "blocked.txt" });
+    var args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"path\":\"PLACEHOLDER\",\"content\":\"nope\"}", .{});
+    args.object.put(arena, "path", .{ .string = target }) catch unreachable;
+
+    const result = try write_file.execute(&ctx, args);
+    try std.testing.expect(std.mem.indexOf(u8, result, "Write blocked") != null);
+
+    var file = std.Io.Dir.cwd().openFile(std.testing.io, target, .{}) catch |err| switch (err) {
+        error.FileNotFound => return, // blocked: file must not exist
+        else => return err,
+    };
+    file.close(std.testing.io);
+    return error.TestUnexpectedResult; // file was written despite block
+}
+
+test "write_file writes when context allows" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var skill_registry = @import("../skills/skills.zig").Registry.init(arena);
+    defer skill_registry.deinit();
+
+    var ctx = tools.ToolContext.init(arena, std.testing.io, &skill_registry);
+    defer ctx.deinit();
+
+    const target = try std.fs.path.join(arena, &.{ ".zig-cache", "tmp", &tmp.sub_path, "written.txt" });
+    var args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"path\":\"PLACEHOLDER\",\"content\":\"hello\"}", .{});
+    args.object.put(arena, "path", .{ .string = target }) catch unreachable;
+
+    const result = try write_file.execute(&ctx, args);
+    try std.testing.expectEqualStrings("File written successfully.", result);
+
+    const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, target, arena, std.Io.Limit.limited(1024));
+    try std.testing.expectEqualStrings("hello", content);
+}

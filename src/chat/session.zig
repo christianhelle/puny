@@ -136,7 +136,7 @@ pub const ChatSession = struct {
                 .cfg = ctx.cfg,
                 .session_prd_path = ctx.session.prd_path,
             });
-            core_session.setWriteBlocked(ctx.planning_mode.*);
+            ctx.tool_ctx.write_blocked = ctx.planning_mode.*;
 
             if (command == .prompt) {
                 for (ctx.skill_registry.records.items) |*r| {
@@ -175,7 +175,7 @@ pub const ChatSession = struct {
                     _ = ctx.messages_arena.reset(.free_all);
                     ctx.messages.* = .empty;
                     ctx.planning_mode.* = false;
-                    core_session.setWriteBlocked(false);
+                    ctx.tool_ctx.write_blocked = false;
                     const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
 
@@ -278,7 +278,7 @@ pub const ChatSession = struct {
                         try loadMessagesIntoContext(ctx, dir);
 
                         ctx.planning_mode.* = s.planning_mode;
-                        core_session.setWriteBlocked(ctx.planning_mode.*);
+                        ctx.tool_ctx.write_blocked = ctx.planning_mode.*;
 
                         ctx.session.* = try core_session.Session.fromDir(
                             ctx.arena,
