@@ -1,19 +1,20 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
+const ToolContext = tools.ToolContext;
 
 const GitStatusParams = struct {
     path: ?[]const u8 = null,
 };
 
-fn gitStatus(allocator: std.mem.Allocator, io: std.Io, params: GitStatusParams) ![]const u8 {
+fn gitStatus(ctx: *ToolContext, params: GitStatusParams) ![]const u8 {
     var argv: std.ArrayList([]const u8) = .empty;
-    defer argv.deinit(allocator);
-    try argv.appendSlice(allocator, &[_][]const u8{ "git", "status", "--short", "--branch" });
+    defer argv.deinit(ctx.allocator);
+    try argv.appendSlice(ctx.allocator, &[_][]const u8{ "git", "status", "--short", "--branch" });
     if (params.path) |path| {
-        try argv.append(allocator, path);
+        try argv.append(ctx.allocator, path);
     }
-    return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommand(ctx.allocator, ctx.io, argv.items, null);
 }
 
 const GitDiffParams = struct {
@@ -21,20 +22,20 @@ const GitDiffParams = struct {
     staged: ?bool = null,
 };
 
-fn gitDiff(allocator: std.mem.Allocator, io: std.Io, params: GitDiffParams) ![]const u8 {
+fn gitDiff(ctx: *ToolContext, params: GitDiffParams) ![]const u8 {
     var argv: std.ArrayList([]const u8) = .empty;
-    defer argv.deinit(allocator);
-    try argv.appendSlice(allocator, &[_][]const u8{ "git", "diff" });
+    defer argv.deinit(ctx.allocator);
+    try argv.appendSlice(ctx.allocator, &[_][]const u8{ "git", "diff" });
     if (params.staged) |staged| {
         if (staged) {
-            try argv.append(allocator, "--staged");
+            try argv.append(ctx.allocator, "--staged");
         }
     }
     if (params.path) |path| {
-        try argv.append(allocator, "--");
-        try argv.append(allocator, path);
+        try argv.append(ctx.allocator, "--");
+        try argv.append(ctx.allocator, path);
     }
-    return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommand(ctx.allocator, ctx.io, argv.items, null);
 }
 
 pub const git_status = tools.defineTool(

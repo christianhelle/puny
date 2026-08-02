@@ -2,13 +2,14 @@ const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
 const core_session = @import("../core/session.zig");
+const ToolContext = tools.ToolContext;
 
 const ReadFileParams = struct {
     path: []const u8,
 };
 
-fn readFile(allocator: std.mem.Allocator, io: std.Io, params: ReadFileParams) ![]const u8 {
-    return helpers.readFileAlloc(allocator, io, params.path, 1024 * 1024);
+fn readFile(ctx: *ToolContext, params: ReadFileParams) ![]const u8 {
+    return helpers.readFileAlloc(ctx.allocator, ctx.io, params.path, 1024 * 1024);
 }
 
 const WriteFileParams = struct {
@@ -16,12 +17,11 @@ const WriteFileParams = struct {
     content: []const u8,
 };
 
-fn writeFile(allocator: std.mem.Allocator, io: std.Io, params: WriteFileParams) ![]const u8 {
+fn writeFile(ctx: *ToolContext, params: WriteFileParams) ![]const u8 {
     if (core_session.isWriteBlocked()) {
         return "Write blocked: app is in planning mode. Exit planning mode with /build or use save_prd to save the PRD.";
     }
-    _ = allocator;
-    try helpers.writeFile(io, params.path, params.content);
+    try helpers.writeFile(ctx.io, params.path, params.content);
     return "File written successfully.";
 }
 
@@ -29,8 +29,8 @@ const ListDirectoryParams = struct {
     path: []const u8,
 };
 
-fn listDirectory(allocator: std.mem.Allocator, io: std.Io, params: ListDirectoryParams) ![]const u8 {
-    return helpers.listDirectory(allocator, io, params.path);
+fn listDirectory(ctx: *ToolContext, params: ListDirectoryParams) ![]const u8 {
+    return helpers.listDirectory(ctx.allocator, ctx.io, params.path);
 }
 
 pub const read_file = tools.defineTool(

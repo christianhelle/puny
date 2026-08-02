@@ -1,9 +1,11 @@
 const std = @import("std");
 
 pub const schema = @import("schema.zig");
+const context = @import("context.zig");
 const helpers = @import("helpers.zig");
 
 pub const Tool = schema.Tool;
+pub const ToolContext = context.ToolContext;
 pub const dupeString = helpers.dupeString;
 pub const ownedSliceOrEmpty = helpers.ownedSliceOrEmpty;
 
@@ -11,7 +13,7 @@ pub fn defineTool(
     comptime name: []const u8,
     comptime description: []const u8,
     comptime Params: type,
-    comptime handler: fn (allocator: std.mem.Allocator, io: std.Io, params: Params) anyerror![]const u8,
+    comptime handler: fn (ctx: *ToolContext, params: Params) anyerror![]const u8,
 ) Tool {
     const Schema = schema.ToolDefinition(name, description, Params);
 
@@ -20,10 +22,10 @@ pub fn defineTool(
         .description = description,
         .schema = Schema.schema,
         .execute = struct {
-            pub fn exec(allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) ![]const u8 {
-                const parsed = try std.json.parseFromValue(Params, allocator, args, .{});
+            pub fn exec(ctx: *ToolContext, args: std.json.Value) ![]const u8 {
+                const parsed = try std.json.parseFromValue(Params, ctx.allocator, args, .{});
                 defer parsed.deinit();
-                return handler(allocator, io, parsed.value);
+                return handler(ctx, parsed.value);
             }
         }.exec,
     };
@@ -88,4 +90,28 @@ test "dispatch returns known tools" {
     try std.testing.expect(dispatch("save_prd") != null);
     try std.testing.expect(dispatch("load_skill") != null);
     try std.testing.expect(dispatch("unknown_tool") == null);
+}
+
+test "read_file executes through ToolContext" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "hello.txt", .data = "hello world" });
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var skill_registry = @import("../skills/skills.zig").Registry.init(arena);
+    defer skill_registry.deinit();
+
+    var ctx = ToolContext.init(arena, std.testing.io, &skill_registry);
+    defer ctx.deinit();
+
+    const file_path = try std.fs.path.join(arena, &.{ ".zig-cache", "tmp", &tmp.sub_path, "hello.txt" });
+    var args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"path\":\"PLACEHOLDER\"}", .{});
+    args.object.put(arena, "path", .{ .string = file_path }) catch unreachable;
+
+    const tool = dispatch("read_file") orelse unreachable;
+    const result = try tool.execute(&ctx, args);
+    try std.testing.expectEqualStrings("hello world", result);
 }

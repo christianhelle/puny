@@ -70,6 +70,7 @@ pub const ChatLoopContext = struct {
     random: std.Random,
     history: *prompt_history.History,
     prov: *provider.Provider,
+    tool_ctx: *tools.ToolContext,
     model_provider: *ModelProvider,
     provider_url: *[]const u8,
     model_key: *[]const u8,
@@ -535,6 +536,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         const chat_log_writer = if (ctx.chat_log) |log| log.writer else null;
         const result = chat.runTurn(
             ctx.prov,
+            ctx.tool_ctx,
             ctx.messages_arena.allocator(),
             ctx.io,
             ctx.stdout_writer,

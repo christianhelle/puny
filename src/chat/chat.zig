@@ -440,6 +440,7 @@ pub const TurnResult = struct {
 
 pub fn runTurn(
     prov: *provider.Provider,
+    tool_ctx: *tools.ToolContext,
     arena: std.mem.Allocator,
     io: std.Io,
     stdout_writer: *std.Io.Writer,
@@ -522,7 +523,7 @@ pub fn runTurn(
             try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
             tool_output_lines += 1;
-            const result = try executeTool(arena, io, tc);
+            const result = try executeTool(tool_ctx, tc);
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
                 log.print("[TOOL_CALL]\n{s}\n{s}\n\n", .{ tc.function.name, tc.function.arguments }) catch {};
@@ -562,16 +563,16 @@ fn printToolCall(
     try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
 }
 
-fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
+fn executeTool(ctx: *tools.ToolContext, tool_call: openai.ToolCall) ![]const u8 {
     const tool = tools.dispatch(tool_call.function.name) orelse {
-        return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
+        return std.fmt.allocPrint(ctx.allocator, "Unknown tool: {s}", .{tool_call.function.name});
     };
 
-    var parsed = try std.json.parseFromSlice(std.json.Value, arena, tool_call.function.arguments, .{ .ignore_unknown_fields = true });
+    var parsed = try std.json.parseFromSlice(std.json.Value, ctx.allocator, tool_call.function.arguments, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
-    return tool.execute(arena, io, parsed.value) catch |err| {
-        return std.fmt.allocPrint(arena, "Tool {s} failed: {}", .{ tool_call.function.name, err });
+    return tool.execute(ctx, parsed.value) catch |err| {
+        return std.fmt.allocPrint(ctx.allocator, "Tool {s} failed: {}", .{ tool_call.function.name, err });
     };
 }
 

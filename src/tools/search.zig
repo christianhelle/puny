@@ -1,6 +1,7 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
+const ToolContext = tools.ToolContext;
 
 const GrepSearchParams = struct {
     query: []const u8,
@@ -8,29 +9,29 @@ const GrepSearchParams = struct {
     case_sensitive: ?bool = null,
 };
 
-fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams) ![]const u8 {
+fn grepSearch(ctx: *ToolContext, params: GrepSearchParams) ![]const u8 {
     var argv: std.ArrayList([]const u8) = .empty;
-    defer argv.deinit(allocator);
+    defer argv.deinit(ctx.allocator);
 
-    try argv.append(allocator, "rg");
-    try argv.append(allocator, "--line-number");
-    try argv.append(allocator, "--with-filename");
+    try argv.append(ctx.allocator, "rg");
+    try argv.append(ctx.allocator, "--line-number");
+    try argv.append(ctx.allocator, "--with-filename");
 
     if (params.case_sensitive) |case_sensitive| {
         if (!case_sensitive) {
-            try argv.append(allocator, "--ignore-case");
+            try argv.append(ctx.allocator, "--ignore-case");
         }
     }
 
-    try argv.append(allocator, params.query);
+    try argv.append(ctx.allocator, params.query);
 
     if (params.path) |path| {
-        try argv.append(allocator, path);
+        try argv.append(ctx.allocator, path);
     } else {
-        try argv.append(allocator, ".");
+        try argv.append(ctx.allocator, ".");
     }
 
-    return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommand(ctx.allocator, ctx.io, argv.items, null);
 }
 
 pub const grep_search = tools.defineTool(

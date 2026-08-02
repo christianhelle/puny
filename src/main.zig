@@ -225,6 +225,9 @@ pub fn main(init: std.process.Init) !void {
     skill_registry.fullScan(init.io) catch {};
     skills.setGlobalRegistry(&skill_registry);
 
+    var tool_ctx = tools.ToolContext.init(arena, init.io, &skill_registry);
+    defer tool_ctx.deinit();
+
     if (!session_restored) {
         const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
         try messages.append(messages_arena, .{ .system = system_prompt });
@@ -259,6 +262,7 @@ pub fn main(init: std.process.Init) !void {
         .random = random,
         .history = &history,
         .prov = &prov,
+        .tool_ctx = &tool_ctx,
         .model_provider = &selected_provider,
         .provider_url = &provider_url,
         .model_key = &model_key,
