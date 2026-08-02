@@ -20,7 +20,8 @@ pub fn getMemoryStats(allocator: std.mem.Allocator, io: std.Io) !memory.MemorySt
 fn readFileToBuffer(io: std.Io, path: []const u8, buf: []u8) ![]u8 {
     var file = try std.Io.Dir.cwd().openFile(io, path, .{});
     defer file.close(io);
-    var file_reader = file.reader(io, buf);
+    var internal: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &internal);
     const reader = &file_reader.interface;
     var written: usize = 0;
     while (written < buf.len) {
