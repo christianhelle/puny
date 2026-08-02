@@ -588,3 +588,37 @@ pub fn sessionHasPlan(io: std.Io, dir: []const u8) bool {
     const html_path = std.fs.path.join(tmp, &.{ dir, "plan.html" }) catch return false;
     return hasFile(io, html_path);
 }
+
+test "removeSessionDir deletes an existing session directory" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "rm-1", false);
+
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "rm-1" });
+    defer std.testing.allocator.free(dir);
+
+    removeSessionDir(std.testing.io, dir);
+
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, dir, .{}));
+}
+
+test "removeSessionDir is a no-op for a missing directory" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createSessionDir(std.testing.io, test_dir);
+
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "missing-1" });
+    defer std.testing.allocator.free(dir);
+
+    removeSessionDir(std.testing.io, dir);
+}
+
+pub fn removeSessionDir(io: std.Io, dir: []const u8) void {
+    std.Io.Dir.cwd().deleteTree(io, dir) catch {};
+}
