@@ -575,6 +575,10 @@ test "include core session tests" {
     _ = @import("core/session.zig");
 }
 
+test "include chat session tests" {
+    _ = @import("chat/session.zig");
+}
+
 test "include upgrade module tests" {
     _ = @import("upgrade.zig");
 }
