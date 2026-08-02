@@ -284,8 +284,6 @@ fn resolveStartupSession(
     stdout_writer: *std.Io.Writer,
     current_session: *core_sess.Session,
 ) !StartupSessionResult {
-    current_session.* = try core_sess.Session.init(arena, base_dir, random, io);
-
     var session_restored = false;
     var restore_incomplete = false;
 
@@ -344,6 +342,10 @@ fn resolveStartupSession(
                 try stdout_writer.flush();
             }
         } else |_| {}
+    }
+
+    if (!session_restored) {
+        current_session.* = try core_sess.Session.init(arena, base_dir, random, io);
     }
 
     return .{ .restored = session_restored, .restore_incomplete = restore_incomplete };
