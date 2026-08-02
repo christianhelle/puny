@@ -168,13 +168,14 @@ pub fn main(init: std.process.Init) !void {
     skills.setGlobalRegistry(&skill_registry);
 
     var session_restored = false;
+    var restore_incomplete = false;
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
     if (parsed.session) |sid| {
         if (core_sess.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
             if (maybe_s) |s| {
-                session_restored = try restoreSessionAtStartup(
+                const restore_result = try restoreSessionAtStartup(
                     arena,
                     messages_arena,
                     init.io,
@@ -185,6 +186,8 @@ pub fn main(init: std.process.Init) !void {
                     &messages,
                     stdout_writer,
                 );
+                session_restored = restore_result.restored;
+                restore_incomplete = restore_result.incomplete;
             } else {
                 try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
                 try stdout_writer.flush();
@@ -202,7 +205,7 @@ pub fn main(init: std.process.Init) !void {
             }
             if (conv_count == 1) {
                 if (found) |s| {
-                    session_restored = try restoreSessionAtStartup(
+                    const restore_result = try restoreSessionAtStartup(
                         arena,
                         messages_arena,
                         init.io,
@@ -213,6 +216,8 @@ pub fn main(init: std.process.Init) !void {
                         &messages,
                         stdout_writer,
                     );
+                    session_restored = restore_result.restored;
+                    restore_incomplete = restore_result.incomplete;
                 }
             } else if (conv_count > 1) {
                 try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_count});
@@ -266,6 +271,7 @@ pub fn main(init: std.process.Init) !void {
         .planning_tool_definitions = &planning_tool_definitions,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .restore_incomplete = restore_incomplete,
         .session = &current_session,
         .session_stats = &session_stats,
         .debug_log = if (debug_log) |*log| log else null,
@@ -300,6 +306,11 @@ fn loadHistory(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.pro
     return history;
 }
 
+const RestoreResult = struct {
+    restored: bool,
+    incomplete: bool,
+};
+
 fn restoreSessionAtStartup(
     arena: std.mem.Allocator,
     msg_alloc: std.mem.Allocator,
@@ -310,7 +321,7 @@ fn restoreSessionAtStartup(
     planning_mode: *bool,
     messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
-) !bool {
+) !RestoreResult {
     const dir = try std.fs.path.join(msg_alloc, &.{ base_dir, "sessions", s.id });
     defer msg_alloc.free(dir);
 
@@ -322,7 +333,7 @@ fn restoreSessionAtStartup(
     var file = std.Io.Dir.cwd().openFile(io, msg_path, .{}) catch {
         try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{s.id});
         try stdout_writer.flush();
-        return false;
+        return .{ .restored = false, .incomplete = false };
     };
     defer file.close(io);
 
@@ -332,10 +343,18 @@ fn restoreSessionAtStartup(
     const parsed_val = try std.json.parseFromSlice(std.json.Value, msg_alloc, data, .{});
     defer parsed_val.deinit();
 
+    var restore_incomplete = false;
     for (parsed_val.value.array.items) |item| {
         if (openai.Message.fromJsonValue(msg_alloc, item)) |msg| {
             try messages.append(msg_alloc, msg);
-        } else |_| {}
+        } else |_| {
+            restore_incomplete = true;
+        }
+    }
+
+    if (restore_incomplete) {
+        try stdout_writer.print("Warning: session '{s}' has messages that could not be restored.\n", .{s.id});
+        try stdout_writer.flush();
     }
 
     current_session.* = try core_sess.Session.fromDir(
@@ -353,7 +372,7 @@ fn restoreSessionAtStartup(
     try stdout_writer.print("\n\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
     try session.printConversation(stdout_writer, messages.items);
     try stdout_writer.flush();
-    return true;
+    return .{ .restored = true, .incomplete = restore_incomplete };
 }
 
 fn runStartupReconfigure(
