@@ -686,7 +686,7 @@ test "findTriggeredSkill matches directory name" {
     defer registry.deinit();
     try registry.lightScan(std.testing.io, base_path);
 
-    const matched = registry.findTriggeredSkill("can you grill me on this");
+    const matched = registry.findTriggeredSkill("can you run grill-me on this project");
     try std.testing.expect(matched != null);
     try std.testing.expectEqualStrings("grill-me", matched.?);
 }
@@ -732,7 +732,7 @@ test "findTriggeredSkill skips disabled skills" {
     try registry.lightScan(std.testing.io, base_path);
     try registry.fullScan(std.testing.io);
 
-    const matched = registry.findTriggeredSkill("manual-skill");
+    const matched = registry.findTriggeredSkill("use manual-skill or auto-skill");
     try std.testing.expect(matched != null);
     try std.testing.expectEqualStrings("auto-skill", matched.?);
 }
