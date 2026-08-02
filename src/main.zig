@@ -586,3 +586,7 @@ test "include stream markdown tests" {
 test "include tool context tests" {
     _ = @import("tools/context.zig");
 }
+
+test "include tools tests" {
+    _ = @import("tools/root.zig");
+}
