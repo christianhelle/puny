@@ -624,6 +624,10 @@ every completed chat turn. It is also saved automatically when you exit the
 session (`/quit`, `Ctrl+C`) or run `/reset`. Tool call results are included in
 the save so the restored session has the full context.
 
+Sessions that end with no real content — no user message, no assistant reply,
+and no `plan.md`/`plan.html` — are removed automatically on exit so empty
+session folders don't accumulate.
+
 #### Restoring a session
 
 You can resume a previous session in several ways:
