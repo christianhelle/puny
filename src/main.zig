@@ -628,6 +628,122 @@ test "requiresApiKey only for opencode and opencode-go" {
     try std.testing.expect(!requiresApiKey(.mock));
 }
 
+fn createTestSessionDirWithConversation(io: std.Io, base_dir: []const u8, id: []const u8) !void {
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ base_dir, "sessions", id });
+    defer std.testing.allocator.free(dir);
+    try std.Io.Dir.cwd().createDirPath(io, dir);
+
+    const msg_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "messages.json" });
+    defer std.testing.allocator.free(msg_path);
+    var msg_file = try std.Io.Dir.cwd().createFile(io, msg_path, .{});
+    defer msg_file.close(io);
+    try msg_file.writeStreamingAll(io, "[{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},{\"role\":\"user\",\"content\":\"Hello from old session\"}]");
+
+    const meta_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "session.json" });
+    defer std.testing.allocator.free(meta_path);
+    var meta_file = try std.Io.Dir.cwd().createFile(io, meta_path, .{});
+    defer meta_file.close(io);
+    try meta_file.writeStreamingAll(io, "{\"planning_mode\":false,\"first_prompt\":\"Hello from old session\"}");
+}
+
+test "resolveStartupSession resumes by id without creating a new session directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_dir);
+
+    try createTestSessionDirWithConversation(std.testing.io, base_dir, "abc-111-aaa");
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(arena);
+    var planning_mode = false;
+    var current_session: core_sess.Session = undefined;
+    var out = std.Io.Writer.Allocating.init(arena);
+    defer out.deinit();
+
+    const parsed = cli.Options{ .session = "abc-111" };
+    const result = try resolveStartupSession(arena, arena, std.testing.io, random, base_dir, parsed, &planning_mode, &messages, &out.writer, &current_session);
+
+    try std.testing.expect(result.restored);
+    try std.testing.expect(!result.restore_incomplete);
+    try std.testing.expectEqualStrings("abc-111-aaa", current_session.id);
+
+    const sessions = try core_sess.listSessions(arena, std.testing.io, base_dir);
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("abc-111-aaa", sessions[0].id);
+}
+
+test "resolveStartupSession resumes the only conversation with --resume without creating a new session directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_dir);
+
+    try createTestSessionDirWithConversation(std.testing.io, base_dir, "conv-1-aaa");
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(arena);
+    var planning_mode = false;
+    var current_session: core_sess.Session = undefined;
+    var out = std.Io.Writer.Allocating.init(arena);
+    defer out.deinit();
+
+    const parsed = cli.Options{ .do_resume = true };
+    const result = try resolveStartupSession(arena, arena, std.testing.io, random, base_dir, parsed, &planning_mode, &messages, &out.writer, &current_session);
+
+    try std.testing.expect(result.restored);
+    try std.testing.expectEqualStrings("conv-1-aaa", current_session.id);
+
+    const sessions = try core_sess.listSessions(arena, std.testing.io, base_dir);
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("conv-1-aaa", sessions[0].id);
+}
+
+test "resolveStartupSession creates a fresh session when nothing is resumed" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base_dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_dir);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(arena);
+    var planning_mode = false;
+    var current_session: core_sess.Session = undefined;
+    var out = std.Io.Writer.Allocating.init(arena);
+    defer out.deinit();
+
+    const parsed = cli.Options{};
+    const result = try resolveStartupSession(arena, arena, std.testing.io, random, base_dir, parsed, &planning_mode, &messages, &out.writer, &current_session);
+
+    try std.testing.expect(!result.restored);
+    try std.testing.expectEqual(@as(usize, 36), current_session.id.len);
+
+    const sessions = try core_sess.listSessions(arena, std.testing.io, base_dir);
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings(current_session.id, sessions[0].id);
+}
+
 test "include core session tests" {
     _ = @import("core/session.zig");
 }
