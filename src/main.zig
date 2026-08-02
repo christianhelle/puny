@@ -223,7 +223,6 @@ pub fn main(init: std.process.Init) !void {
         try skill_registry.lightScan(init.io, repo_path);
     }
     skill_registry.fullScan(init.io) catch {};
-    skills.setGlobalRegistry(&skill_registry);
 
     var tool_ctx = tools.ToolContext.init(arena, init.io, &skill_registry);
     defer tool_ctx.deinit();

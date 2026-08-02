@@ -558,12 +558,12 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
 
         if (result.was_cancelled) {
             rollBackCancelledTurn(ctx.messages);
-            while (skills.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
+            while (ctx.tool_ctx.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
             ctx.session_stats.finalizeTurn(null, false);
             break;
         }
 
-        if (skills.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
+        if (ctx.tool_ctx.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = pending.content });
             try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, pending.name, ansi.reset });
             try ctx.stdout_writer.flush();

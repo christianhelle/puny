@@ -164,39 +164,6 @@ pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
     }
 }
 
-var global_registry: ?*Registry = null;
-
-pub fn setGlobalRegistry(reg: *Registry) void {
-    global_registry = reg;
-}
-
-pub fn getGlobalRegistry() ?*Registry {
-    return global_registry;
-}
-
-const PendingSkill = struct { name: []const u8, content: []const u8 };
-
-var pending_queue: std.ArrayList(PendingSkill) = .empty;
-
-pub fn takePendingSkill(allocator: std.mem.Allocator) ?PendingSkill {
-    if (pending_queue.items.len == 0) return null;
-    const item = pending_queue.orderedRemove(0);
-    return .{
-        .name = allocator.dupe(u8, item.name) catch return null,
-        .content = allocator.dupe(u8, item.content) catch return null,
-    };
-}
-
-pub fn setPendingSkill(name: []const u8, content: []const u8, allocator: std.mem.Allocator) void {
-    const dup_name = allocator.dupe(u8, name) catch return;
-    const dup_content = allocator.dupe(u8, content) catch return;
-    pending_queue.append(allocator, .{ .name = dup_name, .content = dup_content }) catch {
-        allocator.free(dup_name);
-        allocator.free(dup_content);
-        return;
-    };
-}
-
 fn trimCr(maybe_cr: []const u8) []const u8 {
     if (maybe_cr.len > 0 and maybe_cr[maybe_cr.len - 1] == '\r') return maybe_cr[0 .. maybe_cr.len - 1];
     return maybe_cr;

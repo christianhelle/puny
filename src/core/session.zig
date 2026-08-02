@@ -614,7 +614,6 @@ test "sessionBaseDir extracts from environ map" {
     }
 }
 
-<<<<<<< HEAD
 test "sessionHasPlan returns false when no plan files exist" {
     const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
     defer {
