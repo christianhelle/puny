@@ -133,6 +133,33 @@ pub fn main(init: std.process.Init) !void {
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
     defer prov.deinit();
 
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(messages_arena);
+
+    var current_session: core_sess.Session = undefined;
+    const restore_target = try resolveStartupSessionInfo(
+        arena,
+        messages_arena,
+        init.io,
+        random,
+        base_dir,
+        parsed,
+        stdout_writer,
+        &current_session,
+    );
+
+    try welcome.print(stdout_writer, .{
+        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
+        .provider_url = provider_url,
+        .model_key = model_key,
+        .reasoning_effort = reasoning_effort,
+        .session_id = current_session.id,
+        .oneshot = parsed.oneshot,
+        .prefilled = parsed.prompt != null,
+    });
+
+    try printStartupTime(init.io, stdout_writer, startup_time);
+
     var full_tool_definitions = try buildToolDefinitions(arena);
     defer full_tool_definitions.deinit(arena);
 
@@ -154,36 +181,21 @@ pub fn main(init: std.process.Init) !void {
     skill_registry.fullScan(init.io) catch {};
     skills.setGlobalRegistry(&skill_registry);
 
-    var current_session: core_sess.Session = undefined;
-    var messages: std.ArrayList(openai.Message) = .empty;
-    defer messages.deinit(messages_arena);
-
-    const startup = try resolveStartupSession(
-        arena,
-        messages_arena,
-        init.io,
-        random,
-        base_dir,
-        parsed,
-        &planning_mode,
-        &messages,
-        stdout_writer,
-        &current_session,
-    );
-    const session_restored = startup.restored;
-    const restore_incomplete = startup.restore_incomplete;
-
-    try welcome.print(stdout_writer, .{
-        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
-        .provider_url = provider_url,
-        .model_key = model_key,
-        .reasoning_effort = reasoning_effort,
-        .session_id = current_session.id,
-        .oneshot = parsed.oneshot,
-        .prefilled = parsed.prompt != null,
-    });
-
-    try printStartupTime(init.io, stdout_writer, startup_time);
+    var session_restored = false;
+    var restore_incomplete = false;
+    if (restore_target) |t| {
+        const restore_result = try restoreSessionAtStartup(
+            messages_arena,
+            init.io,
+            base_dir,
+            t,
+            &planning_mode,
+            &messages,
+            stdout_writer,
+        );
+        session_restored = restore_result.restored;
+        restore_incomplete = restore_result.incomplete;
+    }
 
     if (!session_restored) {
         const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
@@ -267,48 +279,26 @@ const RestoreResult = struct {
     incomplete: bool,
 };
 
-const StartupSessionResult = struct {
-    restored: bool,
-    restore_incomplete: bool,
-};
-
-fn resolveStartupSession(
+fn resolveRestoreTarget(
     arena: std.mem.Allocator,
-    msg_alloc: std.mem.Allocator,
     io: std.Io,
-    random: std.Random,
     base_dir: []const u8,
     parsed: cli.Options,
-    planning_mode: *bool,
-    messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
-    current_session: *core_sess.Session,
-) !StartupSessionResult {
-    var session_restored = false;
-    var restore_incomplete = false;
-
+) !?core_sess.SessionInfo {
     if (parsed.session) |sid| {
         if (core_sess.findSessionByPrefix(arena, io, base_dir, sid)) |maybe_s| {
             if (maybe_s) |s| {
-                const restore_result = try restoreSessionAtStartup(
-                    arena,
-                    msg_alloc,
-                    io,
-                    base_dir,
-                    s,
-                    current_session,
-                    planning_mode,
-                    messages,
-                    stdout_writer,
-                );
-                session_restored = restore_result.restored;
-                restore_incomplete = restore_result.incomplete;
+                return s;
             } else {
                 try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
                 try stdout_writer.flush();
             }
         } else |_| {}
-    } else if (parsed.do_resume) {
+        return null;
+    }
+
+    if (parsed.do_resume) {
         if (core_sess.listSessions(arena, io, base_dir)) |sessions| {
             var conv_count: usize = 0;
             var found: ?core_sess.SessionInfo = null;
@@ -318,23 +308,8 @@ fn resolveStartupSession(
                     found = s;
                 }
             }
-            if (conv_count == 1) {
-                if (found) |s| {
-                    const restore_result = try restoreSessionAtStartup(
-                        arena,
-                        msg_alloc,
-                        io,
-                        base_dir,
-                        s,
-                        current_session,
-                        planning_mode,
-                        messages,
-                        stdout_writer,
-                    );
-                    session_restored = restore_result.restored;
-                    restore_incomplete = restore_result.incomplete;
-                }
-            } else if (conv_count > 1) {
+            if (conv_count == 1) return found;
+            if (conv_count > 1) {
                 try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_count});
                 try stdout_writer.flush();
             } else {
@@ -342,22 +317,57 @@ fn resolveStartupSession(
                 try stdout_writer.flush();
             }
         } else |_| {}
+        return null;
     }
 
-    if (!session_restored) {
-        current_session.* = try core_sess.Session.init(arena, base_dir, random, io);
+    return null;
+}
+
+fn sessionFromDir(
+    arena: std.mem.Allocator,
+    msg_alloc: std.mem.Allocator,
+    base_dir: []const u8,
+    id: []const u8,
+) !core_sess.Session {
+    const dir = try std.fs.path.join(msg_alloc, &.{ base_dir, "sessions", id });
+    return try core_sess.Session.fromDir(
+        arena,
+        id,
+        base_dir,
+        dir,
+        try std.fs.path.join(msg_alloc, &.{ dir, "plan.md" }),
+        try std.fs.path.join(msg_alloc, &.{ dir, "plan.html" }),
+    );
+}
+
+fn resolveStartupSessionInfo(
+    arena: std.mem.Allocator,
+    msg_alloc: std.mem.Allocator,
+    io: std.Io,
+    random: std.Random,
+    base_dir: []const u8,
+    parsed: cli.Options,
+    stdout_writer: *std.Io.Writer,
+    current_session: *core_sess.Session,
+) !?core_sess.SessionInfo {
+    if (try resolveRestoreTarget(arena, io, base_dir, parsed, stdout_writer)) |t| {
+        if (t.has_conversation) {
+            current_session.* = try sessionFromDir(arena, msg_alloc, base_dir, t.id);
+            return t;
+        }
+        try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{t.id});
+        try stdout_writer.flush();
     }
 
-    return .{ .restored = session_restored, .restore_incomplete = restore_incomplete };
+    current_session.* = try core_sess.Session.init(arena, base_dir, random, io);
+    return null;
 }
 
 fn restoreSessionAtStartup(
-    arena: std.mem.Allocator,
     msg_alloc: std.mem.Allocator,
     io: std.Io,
     base_dir: []const u8,
     s: core_sess.SessionInfo,
-    current_session: *core_sess.Session,
     planning_mode: *bool,
     messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
@@ -397,14 +407,6 @@ fn restoreSessionAtStartup(
         try stdout_writer.flush();
     }
 
-    current_session.* = try core_sess.Session.fromDir(
-        arena,
-        s.id,
-        base_dir,
-        dir,
-        try std.fs.path.join(msg_alloc, &.{ dir, "plan.md" }),
-        try std.fs.path.join(msg_alloc, &.{ dir, "plan.html" }),
-    );
     planning_mode.* = s.planning_mode;
     const now = std.Io.Clock.Timestamp.now(io, .awake);
     const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
@@ -648,7 +650,7 @@ fn createTestSessionDirWithConversation(io: std.Io, base_dir: []const u8, id: []
     try meta_file.writeStreamingAll(io, "{\"planning_mode\":false,\"first_prompt\":\"Hello from old session\"}");
 }
 
-test "resolveStartupSession resumes by id without creating a new session directory" {
+test "resolveStartupSessionInfo resumes by id without creating a new session directory" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const base_dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
@@ -663,18 +665,15 @@ test "resolveStartupSession resumes by id without creating a new session directo
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    var messages: std.ArrayList(openai.Message) = .empty;
-    defer messages.deinit(arena);
-    var planning_mode = false;
     var current_session: core_sess.Session = undefined;
     var out = std.Io.Writer.Allocating.init(arena);
     defer out.deinit();
 
     const parsed = cli.Options{ .session = "abc-111" };
-    const result = try resolveStartupSession(arena, arena, std.testing.io, random, base_dir, parsed, &planning_mode, &messages, &out.writer, &current_session);
+    const target = try resolveStartupSessionInfo(arena, arena, std.testing.io, random, base_dir, parsed, &out.writer, &current_session);
 
-    try std.testing.expect(result.restored);
-    try std.testing.expect(!result.restore_incomplete);
+    try std.testing.expect(target != null);
+    try std.testing.expectEqualStrings("abc-111-aaa", target.?.id);
     try std.testing.expectEqualStrings("abc-111-aaa", current_session.id);
 
     const sessions = try core_sess.listSessions(arena, std.testing.io, base_dir);
@@ -682,7 +681,7 @@ test "resolveStartupSession resumes by id without creating a new session directo
     try std.testing.expectEqualStrings("abc-111-aaa", sessions[0].id);
 }
 
-test "resolveStartupSession resumes the only conversation with --resume without creating a new session directory" {
+test "resolveStartupSessionInfo resumes the only conversation with --resume without creating a new session directory" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const base_dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
@@ -697,17 +696,15 @@ test "resolveStartupSession resumes the only conversation with --resume without 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    var messages: std.ArrayList(openai.Message) = .empty;
-    defer messages.deinit(arena);
-    var planning_mode = false;
     var current_session: core_sess.Session = undefined;
     var out = std.Io.Writer.Allocating.init(arena);
     defer out.deinit();
 
     const parsed = cli.Options{ .do_resume = true };
-    const result = try resolveStartupSession(arena, arena, std.testing.io, random, base_dir, parsed, &planning_mode, &messages, &out.writer, &current_session);
+    const target = try resolveStartupSessionInfo(arena, arena, std.testing.io, random, base_dir, parsed, &out.writer, &current_session);
 
-    try std.testing.expect(result.restored);
+    try std.testing.expect(target != null);
+    try std.testing.expectEqualStrings("conv-1-aaa", target.?.id);
     try std.testing.expectEqualStrings("conv-1-aaa", current_session.id);
 
     const sessions = try core_sess.listSessions(arena, std.testing.io, base_dir);
@@ -715,7 +712,7 @@ test "resolveStartupSession resumes the only conversation with --resume without 
     try std.testing.expectEqualStrings("conv-1-aaa", sessions[0].id);
 }
 
-test "resolveStartupSession creates a fresh session when nothing is resumed" {
+test "resolveStartupSessionInfo creates a fresh session when nothing is resumed" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const base_dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
@@ -728,17 +725,14 @@ test "resolveStartupSession creates a fresh session when nothing is resumed" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    var messages: std.ArrayList(openai.Message) = .empty;
-    defer messages.deinit(arena);
-    var planning_mode = false;
     var current_session: core_sess.Session = undefined;
     var out = std.Io.Writer.Allocating.init(arena);
     defer out.deinit();
 
     const parsed = cli.Options{};
-    const result = try resolveStartupSession(arena, arena, std.testing.io, random, base_dir, parsed, &planning_mode, &messages, &out.writer, &current_session);
+    const target = try resolveStartupSessionInfo(arena, arena, std.testing.io, random, base_dir, parsed, &out.writer, &current_session);
 
-    try std.testing.expect(!result.restored);
+    try std.testing.expect(target == null);
     try std.testing.expectEqual(@as(usize, 36), current_session.id.len);
 
     const sessions = try core_sess.listSessions(arena, std.testing.io, base_dir);
