@@ -582,3 +582,7 @@ test "include upgrade module tests" {
 test "include stream markdown tests" {
     _ = @import("tui/stream_markdown.zig");
 }
+
+test "include tool context tests" {
+    _ = @import("tools/context.zig");
+}
