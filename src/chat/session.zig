@@ -187,6 +187,7 @@ pub const ChatSession = struct {
                     }
 
                     ctx.session.* = try core_session.Session.init(ctx.arena, ctx.session.base, ctx.random, ctx.io);
+                    ctx.tool_ctx.setSession(ctx.session);
 
                     ctx.session_stats.deinit();
                     ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
@@ -284,6 +285,7 @@ pub const ChatSession = struct {
                             try std.fs.path.join(ctx.arena, &.{ dir, "plan.md" }),
                             try std.fs.path.join(ctx.arena, &.{ dir, "plan.html" }),
                         );
+                        ctx.tool_ctx.setSession(ctx.session);
 
                         ctx.session_stats.deinit();
                         ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);

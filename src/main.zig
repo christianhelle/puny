@@ -227,6 +227,7 @@ pub fn main(init: std.process.Init) !void {
 
     var tool_ctx = tools.ToolContext.init(arena, init.io, &skill_registry);
     defer tool_ctx.deinit();
+    tool_ctx.setSession(&current_session);
 
     if (!session_restored) {
         const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
