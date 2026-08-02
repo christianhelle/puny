@@ -105,9 +105,7 @@ pub const ChatSession = struct {
         defer loaded_skills.deinit(ctx.arena);
         while (true) {
             if (sigint.isTriggered()) {
-                saveMessages(ctx) catch {};
-                saveSessionMeta(ctx) catch {};
-                printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+                finalizeSession(ctx);
                 return;
             }
 
@@ -156,9 +154,7 @@ pub const ChatSession = struct {
 
             switch (action) {
                 .exit => {
-                    saveMessages(ctx) catch {};
-                    saveSessionMeta(ctx) catch {};
-                    printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+                    finalizeSession(ctx);
                     return;
                 },
                 .continue_ => continue,
@@ -337,6 +333,7 @@ pub const ChatSession = struct {
                     if (ctx.parsed.oneshot) {
                         try ctx.stdout_writer.print("\n", .{});
                         try ctx.stdout_writer.flush();
+                        finalizeSession(ctx);
                         return;
                     }
                     try ctx.stdout_writer.print("\nUse /<skill-name> to load a skill.\n", .{});
@@ -508,7 +505,7 @@ fn readUserInput(
 
     const maybe_input = input.readLine(ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history) catch |err| {
         if (sigint.isTriggered()) {
-            printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+            finalizeSession(ctx);
             return .exit;
         }
         return err;
@@ -521,9 +518,7 @@ fn readUserInput(
             return .continue_loop;
         },
         .interrupted, .eof => {
-            if (sigint.isTriggered()) {
-                printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
-            }
+            finalizeSession(ctx);
             return .exit;
         },
     };
@@ -579,6 +574,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
 
     if (ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});
+        finalizeSession(ctx);
         return .exit;
     }
 
@@ -1196,4 +1192,15 @@ fn sessionHasContent(messages: []const openai.Message) bool {
         }
     }
     return false;
+}
+
+fn finalizeSession(ctx: *ChatLoopContext) void {
+    saveMessages(ctx) catch {};
+    saveSessionMeta(ctx) catch {};
+    const has_content = sessionHasContent(ctx.messages.items);
+    const has_plan = core_session.sessionHasPlan(ctx.io, ctx.session.dir);
+    if (!has_content and !has_plan) {
+        core_session.removeSessionDir(ctx.io, ctx.session.dir);
+    }
+    printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
 }
