@@ -108,7 +108,6 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
-    var current_session = try core_sess.Session.init(arena, base_dir, random, init.io);
 
     var prov: provider.Provider = undefined;
     var selected_provider: ModelProvider = undefined;
@@ -130,18 +129,6 @@ pub fn main(init: std.process.Init) !void {
         &model_key,
         &reasoning_effort,
     );
-
-    try welcome.print(stdout_writer, .{
-        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
-        .provider_url = provider_url,
-        .model_key = model_key,
-        .reasoning_effort = reasoning_effort,
-        .session_id = current_session.id,
-        .oneshot = parsed.oneshot,
-        .prefilled = parsed.prompt != null,
-    });
-
-    try printStartupTime(init.io, stdout_writer, startup_time);
 
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
     defer prov.deinit();
@@ -167,67 +154,36 @@ pub fn main(init: std.process.Init) !void {
     skill_registry.fullScan(init.io) catch {};
     skills.setGlobalRegistry(&skill_registry);
 
-    var session_restored = false;
-    var restore_incomplete = false;
+    var current_session: core_sess.Session = undefined;
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
-    if (parsed.session) |sid| {
-        if (core_sess.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
-            if (maybe_s) |s| {
-                const restore_result = try restoreSessionAtStartup(
-                    arena,
-                    messages_arena,
-                    init.io,
-                    base_dir,
-                    s,
-                    &current_session,
-                    &planning_mode,
-                    &messages,
-                    stdout_writer,
-                );
-                session_restored = restore_result.restored;
-                restore_incomplete = restore_result.incomplete;
-            } else {
-                try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
-                try stdout_writer.flush();
-            }
-        } else |_| {}
-    } else if (parsed.do_resume) {
-        if (core_sess.listSessions(arena, init.io, base_dir)) |sessions| {
-            var conv_count: usize = 0;
-            var found: ?core_sess.SessionInfo = null;
-            for (sessions) |s| {
-                if (s.has_conversation) {
-                    conv_count += 1;
-                    found = s;
-                }
-            }
-            if (conv_count == 1) {
-                if (found) |s| {
-                    const restore_result = try restoreSessionAtStartup(
-                        arena,
-                        messages_arena,
-                        init.io,
-                        base_dir,
-                        s,
-                        &current_session,
-                        &planning_mode,
-                        &messages,
-                        stdout_writer,
-                    );
-                    session_restored = restore_result.restored;
-                    restore_incomplete = restore_result.incomplete;
-                }
-            } else if (conv_count > 1) {
-                try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_count});
-                try stdout_writer.flush();
-            } else {
-                try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
-                try stdout_writer.flush();
-            }
-        } else |_| {}
-    }
+    const startup = try resolveStartupSession(
+        arena,
+        messages_arena,
+        init.io,
+        random,
+        base_dir,
+        parsed,
+        &planning_mode,
+        &messages,
+        stdout_writer,
+        &current_session,
+    );
+    const session_restored = startup.restored;
+    const restore_incomplete = startup.restore_incomplete;
+
+    try welcome.print(stdout_writer, .{
+        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
+        .provider_url = provider_url,
+        .model_key = model_key,
+        .reasoning_effort = reasoning_effort,
+        .session_id = current_session.id,
+        .oneshot = parsed.oneshot,
+        .prefilled = parsed.prompt != null,
+    });
+
+    try printStartupTime(init.io, stdout_writer, startup_time);
 
     if (!session_restored) {
         const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
@@ -310,6 +266,88 @@ const RestoreResult = struct {
     restored: bool,
     incomplete: bool,
 };
+
+const StartupSessionResult = struct {
+    restored: bool,
+    restore_incomplete: bool,
+};
+
+fn resolveStartupSession(
+    arena: std.mem.Allocator,
+    msg_alloc: std.mem.Allocator,
+    io: std.Io,
+    random: std.Random,
+    base_dir: []const u8,
+    parsed: cli.Options,
+    planning_mode: *bool,
+    messages: *std.ArrayList(openai.Message),
+    stdout_writer: *std.Io.Writer,
+    current_session: *core_sess.Session,
+) !StartupSessionResult {
+    current_session.* = try core_sess.Session.init(arena, base_dir, random, io);
+
+    var session_restored = false;
+    var restore_incomplete = false;
+
+    if (parsed.session) |sid| {
+        if (core_sess.findSessionByPrefix(arena, io, base_dir, sid)) |maybe_s| {
+            if (maybe_s) |s| {
+                const restore_result = try restoreSessionAtStartup(
+                    arena,
+                    msg_alloc,
+                    io,
+                    base_dir,
+                    s,
+                    current_session,
+                    planning_mode,
+                    messages,
+                    stdout_writer,
+                );
+                session_restored = restore_result.restored;
+                restore_incomplete = restore_result.incomplete;
+            } else {
+                try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
+                try stdout_writer.flush();
+            }
+        } else |_| {}
+    } else if (parsed.do_resume) {
+        if (core_sess.listSessions(arena, io, base_dir)) |sessions| {
+            var conv_count: usize = 0;
+            var found: ?core_sess.SessionInfo = null;
+            for (sessions) |s| {
+                if (s.has_conversation) {
+                    conv_count += 1;
+                    found = s;
+                }
+            }
+            if (conv_count == 1) {
+                if (found) |s| {
+                    const restore_result = try restoreSessionAtStartup(
+                        arena,
+                        msg_alloc,
+                        io,
+                        base_dir,
+                        s,
+                        current_session,
+                        planning_mode,
+                        messages,
+                        stdout_writer,
+                    );
+                    session_restored = restore_result.restored;
+                    restore_incomplete = restore_result.incomplete;
+                }
+            } else if (conv_count > 1) {
+                try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_count});
+                try stdout_writer.flush();
+            } else {
+                try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
+                try stdout_writer.flush();
+            }
+        } else |_| {}
+    }
+
+    return .{ .restored = session_restored, .restore_incomplete = restore_incomplete };
+}
 
 fn restoreSessionAtStartup(
     arena: std.mem.Allocator,
