@@ -60,6 +60,13 @@ pub fn computeDelay(cfg: Config, attempt: usize, random: std.Random) u64 {
     return std.math.add(u64, delay_ms, jitter) catch std.math.maxInt(u64);
 }
 
+/// Sleep for the exponential backoff delay after the `attempt`-th failure
+/// (1-based), including jitter. Uses `computeDelay`.
+pub fn sleep(cfg: Config, io: std.Io, attempt: usize, random: std.Random) void {
+    const delay_ms = computeDelay(cfg, attempt, random);
+    io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
+}
+
 test "isTransientError recognizes network and transport errors" {
     const network_errors = [_]anyerror{
         error.ConnectionRefused,
@@ -129,4 +136,22 @@ test "computeDelay saturates jitter addition at u64 max" {
     const random = random_source.interface();
     const cfg: Config = .{ .max_retries = 3, .base_delay_ms = std.math.maxInt(u64), .jitter_max_ms = std.math.maxInt(u64) };
     try std.testing.expectEqual(std.math.maxInt(u64), computeDelay(cfg, 3, random));
+}
+
+test "sleep waits for the computed backoff delay" {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const cfg: Config = .{ .max_retries = 3, .base_delay_ms = 50, .jitter_max_ms = 0 };
+    const start = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    sleep(cfg, std.testing.io, 3, random);
+    const now = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    const elapsed_ns = start.raw.durationTo(now.raw).nanoseconds;
+    try std.testing.expect(elapsed_ns >= 50 * std.time.ns_per_ms);
+}
+
+test "sleep accepts a zero-delay config" {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const cfg: Config = .{ .max_retries = 1, .base_delay_ms = 0, .jitter_max_ms = 0 };
+    sleep(cfg, std.testing.io, 1, random);
 }
