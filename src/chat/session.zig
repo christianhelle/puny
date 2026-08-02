@@ -1184,6 +1184,34 @@ test "sessionHasContent returns true for user and assistant messages" {
     try std.testing.expect(sessionHasContent(&messages));
 }
 
+test "rollBackCancelledTurn keeps the user message on a cancelled turn" {
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "You are a helpful assistant." });
+    try messages.append(std.testing.allocator, .{ .user = "Hello!" });
+
+    rollBackCancelledTurn(&messages);
+
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "Hello!" }, messages.items[1]);
+}
+
+test "rollBackCancelledTurn rolls back partial tool messages but keeps the user message" {
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "You are a helpful assistant." });
+    try messages.append(std.testing.allocator, .{ .user = "Read the file" });
+    try messages.append(std.testing.allocator, .{ .assistant = .{ .content = null, .tool_calls = &.{
+        .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+    } } });
+    try messages.append(std.testing.allocator, .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } });
+
+    rollBackCancelledTurn(&messages);
+
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "Read the file" }, messages.items[1]);
+}
+
 fn sessionHasContent(messages: []const openai.Message) bool {
     for (messages) |msg| {
         switch (msg) {
@@ -1192,6 +1220,15 @@ fn sessionHasContent(messages: []const openai.Message) bool {
         }
     }
     return false;
+}
+
+fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
+    while (messages.items.len > 0) {
+        switch (messages.items[messages.items.len - 1]) {
+            .assistant, .tool => _ = messages.pop(),
+            else => break,
+        }
+    }
 }
 
 fn finalizeSession(ctx: *ChatLoopContext) void {
