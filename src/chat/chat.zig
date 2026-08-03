@@ -254,9 +254,16 @@ pub const OpenAiAccumulator = struct {
         if (self.stream) |*s| s.deinit();
         var it = self.partial_calls.iterator();
         while (it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.id);
+            self.allocator.free(entry.value_ptr.name);
             entry.value_ptr.args.deinit(self.allocator);
         }
         self.partial_calls.deinit(self.allocator);
+        for (self.tool_calls.items) |tc| {
+            self.allocator.free(tc.id);
+            self.allocator.free(tc.function.name);
+            self.allocator.free(tc.function.arguments);
+        }
         self.tool_calls.deinit(self.allocator);
     }
 
