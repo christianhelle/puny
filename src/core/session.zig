@@ -103,6 +103,7 @@ pub const Session = struct {
     }
 
     pub fn fromDir(arena: std.mem.Allocator, id: []const u8, base_dir: []const u8, dir: []const u8, prd_path: []const u8, html_path: []const u8) !Session {
+        setSessionPaths(prd_path, html_path);
         return .{
             .id = try arena.dupe(u8, id),
             .base = try arena.dupe(u8, base_dir),
@@ -349,6 +350,36 @@ test "Session.init creates directory with correct paths" {
 
     var session_dir = try std.Io.Dir.cwd().openDir(std.testing.io, session.dir, .{});
     session_dir.close(std.testing.io);
+}
+
+test "fromDir sets global session paths and does not create a directory" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createSessionDir(std.testing.io, test_dir);
+
+    const id = "restore-1";
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", id });
+    defer std.testing.allocator.free(dir);
+    const prd_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "plan.md" });
+    defer std.testing.allocator.free(prd_path);
+    const html_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "plan.html" });
+    defer std.testing.allocator.free(html_path);
+
+    const session = try Session.fromDir(std.testing.allocator, id, test_dir, dir, prd_path, html_path);
+    defer {
+        std.testing.allocator.free(session.id);
+        std.testing.allocator.free(session.base);
+        std.testing.allocator.free(session.dir);
+        std.testing.allocator.free(session.prd_path);
+        std.testing.allocator.free(session.html_path);
+    }
+
+    try std.testing.expectEqualStrings(prd_path, prd_path_global);
+    try std.testing.expectEqualStrings(html_path, html_path_global);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, dir, .{}));
 }
 
 fn createTestSessionDir(io: std.Io, base_dir: []const u8, uuid: []const u8, has_prd: bool) !void {
