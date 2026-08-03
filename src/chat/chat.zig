@@ -280,6 +280,16 @@ pub const OpenAiAccumulator = struct {
         return self.tool_calls.items.len > 0;
     }
 
+    /// Output chars for providers that do not report usage: content plus
+    /// tool-call arguments, matching what addStreamingOutput counts.
+    pub fn estimatedOutputChars(self: *const @This()) usize {
+        var chars: usize = self.content.items.len;
+        for (self.tool_calls.items) |tc| {
+            chars += tc.function.arguments.len;
+        }
+        return chars;
+    }
+
     pub fn assistantContent(self: *const @This()) ?openai.AssistantContent {
         if (self.content.items.len == 0 and !self.hasToolCalls()) return null;
         return .{
@@ -506,7 +516,7 @@ pub fn runTurn(
         },
     }
 
-    const turn_usage = if (accumulator.usage) |u| u else usage_estimator.estimateUsage(messages.items, accumulator.content.items.len);
+    const turn_usage = if (accumulator.usage) |u| u else usage_estimator.estimateUsage(messages.items, accumulator.estimatedOutputChars());
 
     const has_content = accumulator.content.items.len > 0;
     const has_streamed_content_after = accumulator.has_streamed_output or accumulator.hasToolCalls() or has_content;
@@ -705,6 +715,22 @@ test "OpenAiAccumulator keeps partial stats on cancellation" {
     try std.testing.expectEqual(@as(i64, 16), model_stats.input_tokens);
     try std.testing.expectEqual(@as(i64, 2), model_stats.output_tokens);
     try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
+}
+
+test "OpenAiAccumulator estimates output chars including tool call args" {
+    cancel.reset();
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "Hello" });
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"path\": \"x\"}" } });
+    try acc.onEvent(.{ .finish = "tool_calls" });
+
+    try std.testing.expectEqual(@as(usize, 18), acc.estimatedOutputChars());
 }
 
 test "OpenAiAccumulator assembles tool call" {
