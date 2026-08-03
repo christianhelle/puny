@@ -108,7 +108,6 @@ pub fn main(init: std.process.Init) !void {
     const random = random_source.interface();
 
     const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
-    var current_session = try core_sess.Session.init(arena, base_dir, random, init.io);
 
     var prov: provider.Provider = undefined;
     var selected_provider: ModelProvider = undefined;
@@ -131,63 +130,22 @@ pub fn main(init: std.process.Init) !void {
         &reasoning_effort,
     );
 
-    try welcome.print(stdout_writer, .{
-        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
-        .provider_url = provider_url,
-        .model_key = model_key,
-        .reasoning_effort = reasoning_effort,
-        .session_id = current_session.id,
-        .oneshot = parsed.oneshot,
-        .prefilled = parsed.prompt != null,
-    });
-
-    try printStartupTime(init.io, stdout_writer, startup_time);
-
-    if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
-    defer prov.deinit();
-
-    var full_tool_definitions = try buildToolDefinitions(arena);
-    defer full_tool_definitions.deinit(arena);
-
-    var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
-    defer planning_tool_definitions.deinit(arena);
-
-    var planning_mode = false;
-
-    var skill_registry = skills.Registry.init(arena);
-    defer skill_registry.deinit();
-    if (try skills.homeDir(arena, init.environ_map)) |home| {
-        const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
-        try skill_registry.lightScan(init.io, global_path);
-    }
-    if (try skills.findGitRepoRoot(arena, init.io)) |repo_root| {
-        const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
-        try skill_registry.lightScan(init.io, repo_path);
-    }
-    skill_registry.fullScan(init.io) catch {};
-    skills.setGlobalRegistry(&skill_registry);
-
     var session_restored = false;
     var restore_incomplete = false;
+    var planning_mode = false;
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
+    var restore_target: ?core_sess.SessionInfo = null;
     if (parsed.session) |sid| {
         if (core_sess.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
             if (maybe_s) |s| {
-                const restore_result = try restoreSessionAtStartup(
-                    arena,
-                    messages_arena,
-                    init.io,
-                    base_dir,
-                    s,
-                    &current_session,
-                    &planning_mode,
-                    &messages,
-                    stdout_writer,
-                );
-                session_restored = restore_result.restored;
-                restore_incomplete = restore_result.incomplete;
+                if (s.has_conversation) {
+                    restore_target = s;
+                } else {
+                    try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{sid});
+                    try stdout_writer.flush();
+                }
             } else {
                 try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
                 try stdout_writer.flush();
@@ -204,21 +162,7 @@ pub fn main(init: std.process.Init) !void {
                 }
             }
             if (conv_count == 1) {
-                if (found) |s| {
-                    const restore_result = try restoreSessionAtStartup(
-                        arena,
-                        messages_arena,
-                        init.io,
-                        base_dir,
-                        s,
-                        &current_session,
-                        &planning_mode,
-                        &messages,
-                        stdout_writer,
-                    );
-                    session_restored = restore_result.restored;
-                    restore_incomplete = restore_result.incomplete;
-                }
+                restore_target = found;
             } else if (conv_count > 1) {
                 try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_count});
                 try stdout_writer.flush();
@@ -228,6 +172,70 @@ pub fn main(init: std.process.Init) !void {
             }
         } else |_| {}
     }
+
+    var current_session: core_sess.Session = undefined;
+    if (restore_target) |s| {
+        const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", s.id });
+        current_session = try core_sess.Session.fromDir(
+            arena,
+            s.id,
+            base_dir,
+            dir,
+            try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
+            try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
+        );
+    } else {
+        current_session = try core_sess.Session.init(arena, base_dir, random, init.io);
+    }
+
+    try welcome.print(stdout_writer, .{
+        .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
+        .provider_url = provider_url,
+        .model_key = model_key,
+        .reasoning_effort = reasoning_effort,
+        .session_id = current_session.id,
+        .oneshot = parsed.oneshot,
+        .prefilled = parsed.prompt != null,
+    });
+
+    try printStartupTime(init.io, stdout_writer, startup_time);
+
+    if (restore_target) |s| {
+        const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
+        const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &planning_mode, &messages, stdout_writer);
+        const now = std.Io.Clock.Timestamp.now(init.io, .awake);
+        const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
+        session_restored = restore_result.restored;
+        restore_incomplete = restore_result.incomplete;
+        if (restore_result.restored) {
+            var header_buf: [256]u8 = undefined;
+            try stdout_writer.print("\n\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
+            try session.printConversation(stdout_writer, messages.items);
+            try stdout_writer.flush();
+        }
+    }
+
+    if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
+    defer prov.deinit();
+
+    var full_tool_definitions = try buildToolDefinitions(arena);
+    defer full_tool_definitions.deinit(arena);
+
+    var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
+    defer planning_tool_definitions.deinit(arena);
+
+    var skill_registry = skills.Registry.init(arena);
+    defer skill_registry.deinit();
+    if (try skills.homeDir(arena, init.environ_map)) |home| {
+        const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
+        try skill_registry.lightScan(init.io, global_path);
+    }
+    if (try skills.findGitRepoRoot(arena, init.io)) |repo_root| {
+        const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
+        try skill_registry.lightScan(init.io, repo_path);
+    }
+    skill_registry.fullScan(init.io) catch {};
+    skills.setGlobalRegistry(&skill_registry);
 
     if (!session_restored) {
         const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
@@ -311,13 +319,11 @@ const RestoreResult = struct {
     incomplete: bool,
 };
 
-fn restoreSessionAtStartup(
-    arena: std.mem.Allocator,
+fn loadRestoredSession(
     msg_alloc: std.mem.Allocator,
     io: std.Io,
     base_dir: []const u8,
     s: core_sess.SessionInfo,
-    current_session: *core_sess.Session,
     planning_mode: *bool,
     messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
@@ -327,8 +333,6 @@ fn restoreSessionAtStartup(
 
     const msg_path = try std.fs.path.join(msg_alloc, &.{ dir, "messages.json" });
     defer msg_alloc.free(msg_path);
-
-    const load_start = std.Io.Clock.Timestamp.now(io, .awake);
 
     var file = std.Io.Dir.cwd().openFile(io, msg_path, .{}) catch {
         try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{s.id});
@@ -357,21 +361,7 @@ fn restoreSessionAtStartup(
         try stdout_writer.flush();
     }
 
-    current_session.* = try core_sess.Session.fromDir(
-        arena,
-        s.id,
-        base_dir,
-        dir,
-        try std.fs.path.join(msg_alloc, &.{ dir, "plan.md" }),
-        try std.fs.path.join(msg_alloc, &.{ dir, "plan.html" }),
-    );
     planning_mode.* = s.planning_mode;
-    const now = std.Io.Clock.Timestamp.now(io, .awake);
-    const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
-    var header_buf: [256]u8 = undefined;
-    try stdout_writer.print("\n\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
-    try session.printConversation(stdout_writer, messages.items);
-    try stdout_writer.flush();
     return .{ .restored = true, .incomplete = restore_incomplete };
 }
 
