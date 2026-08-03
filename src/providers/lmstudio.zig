@@ -729,10 +729,24 @@ fn stringifyStreamRequest(allocator: std.mem.Allocator, requestBody: anytype) ![
     if (written.len > 0 and written[written.len - 1] == '}') {
         return try std.mem.concat(allocator, u8, &.{
             written[0 .. written.len - 1],
-            ",\"stream\":true}",
+            ",\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
         });
     }
     return buf.toOwnedSlice();
+}
+
+test "stringifyStreamRequest requests usage in stream" {
+    const request = struct { model: []const u8 = "test" }{};
+    const payload = try stringifyStreamRequest(std.testing.allocator, request);
+    defer std.testing.allocator.free(payload);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqual(true, root.get("stream").?.bool);
+    const stream_options = root.get("stream_options").?.object;
+    try std.testing.expectEqual(true, stream_options.get("include_usage").?.bool);
 }
 
 fn streamJsonTyped(comptime T: type, client: *Client, path: []const u8, requestBody: anytype, callback: anytype, cancellation_token: ?*CancellationToken) !void {
