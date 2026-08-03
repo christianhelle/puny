@@ -40,7 +40,9 @@ pub const DebugLog = struct {
     }
 
     fn printBody(self: *DebugLog, body: []const u8) void {
-        self.print("{s}\n", .{formatBody(self.allocator, body)});
+        const formatted = formatBody(self.allocator, body);
+        defer if (formatted.owned) self.allocator.free(formatted.text);
+        self.print("{s}\n", .{formatted.text});
     }
 };
 
@@ -1031,12 +1033,19 @@ fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
     log.printBody(data);
 }
 
+const FormattedBody = struct {
+    text: []const u8,
+    owned: bool,
+};
+
 /// Pretty-prints `body` when it is valid JSON, otherwise returns it unchanged.
-fn formatBody(allocator: std.mem.Allocator, body: []const u8) []const u8 {
-    if (body.len == 0) return body;
-    const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return body;
+/// `owned` is true only when `text` was allocated and must be freed.
+fn formatBody(allocator: std.mem.Allocator, body: []const u8) FormattedBody {
+    if (body.len == 0) return .{ .text = body, .owned = false };
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return .{ .text = body, .owned = false };
     defer parsed.deinit();
-    return std.json.Stringify.valueAlloc(allocator, parsed.value, .{ .whitespace = .indent_2 }) catch body;
+    const formatted = std.json.Stringify.valueAlloc(allocator, parsed.value, .{ .whitespace = .indent_2 }) catch return .{ .text = body, .owned = false };
+    return .{ .text = formatted, .owned = true };
 }
 
 test "formatBody pretty-prints valid JSON" {
@@ -1045,6 +1054,7 @@ test "formatBody pretty-prints valid JSON" {
     const allocator = arena_state.allocator();
 
     const formatted = formatBody(allocator, "{\"a\":1,\"b\":[true,null,\"x\"]}");
+    defer if (formatted.owned) allocator.free(formatted.text);
     try std.testing.expectEqualStrings(
         \\{
         \\  "a": 1,
@@ -1054,7 +1064,8 @@ test "formatBody pretty-prints valid JSON" {
         \\    "x"
         \\  ]
         \\}
-    , formatted);
+    , formatted.text);
+    try std.testing.expect(formatted.owned);
 }
 
 test "formatBody returns plain text unchanged" {
@@ -1064,7 +1075,8 @@ test "formatBody returns plain text unchanged" {
 
     const body = "data: {\"hello\":\"world\"}\n\n";
     const formatted = formatBody(allocator, body);
-    try std.testing.expectEqualStrings(body, formatted);
+    try std.testing.expectEqualStrings(body, formatted.text);
+    try std.testing.expect(!formatted.owned);
 }
 
 test "formatBody returns malformed JSON unchanged" {
@@ -1074,7 +1086,8 @@ test "formatBody returns malformed JSON unchanged" {
 
     const body = "{\"a\":1,}";
     const formatted = formatBody(allocator, body);
-    try std.testing.expectEqualStrings(body, formatted);
+    try std.testing.expectEqualStrings(body, formatted.text);
+    try std.testing.expect(!formatted.owned);
 }
 
 test "formatBody returns empty body unchanged" {
@@ -1083,14 +1096,11 @@ test "formatBody returns empty body unchanged" {
     const allocator = arena_state.allocator();
 
     const formatted = formatBody(allocator, "");
-    try std.testing.expectEqualStrings("", formatted);
+    try std.testing.expectEqualStrings("", formatted.text);
+    try std.testing.expect(!formatted.owned);
 }
 
 test "DebugLog printBody writes pretty-printed JSON to the log file" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const allocator = arena_state.allocator();
-
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -1101,13 +1111,14 @@ test "DebugLog printBody writes pretty-printed JSON to the log file" {
     var log = DebugLog{
         .file = file,
         .writer = &file_writer.interface,
-        .allocator = allocator,
+        .allocator = std.testing.allocator,
     };
 
     log.printBody("{\"a\":1}");
 
     try file_writer.interface.flush();
-    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", std.testing.allocator, std.Io.Limit.limited(64 * 1024));
+    defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("{\n  \"a\": 1\n}\n", content);
 }
 
