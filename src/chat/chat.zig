@@ -172,9 +172,13 @@ pub const SessionStats = struct {
         try writer.print("  Turns:               {d}\n", .{self.totalTurns()});
         for (self.models.items) |entry| {
             const stats = entry.stats;
-            if (stats.turn_count == 0) continue;
+            if (stats.turn_count == 0 and stats.input_tokens == 0 and stats.output_tokens == 0) continue;
             try writer.print("\n{s}─── {s} ───{s}\n", .{ ansi.dim, entry.model_key, ansi.reset });
-            try writer.print("  Turns:               {d}\n", .{stats.turn_count});
+            if (stats.turn_count == 0) {
+                try writer.print("  Turns:               {d} (no completed turns)\n", .{stats.turn_count});
+            } else {
+                try writer.print("  Turns:               {d}\n", .{stats.turn_count});
+            }
             try writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
             try writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.output_tokens, stats.reasoning_output_tokens });
             try writer.print("  Total tokens:        {d}\n", .{stats.input_tokens + stats.output_tokens});
@@ -850,6 +854,25 @@ test "SessionStats skips models without finalized turns" {
 
     try std.testing.expectEqual(@as(usize, 2), stats.models.items.len);
     try std.testing.expectEqual(@as(usize, 1), stats.totalTurns());
+}
+
+test "SessionStats.print shows model with partial turn" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    stats.beginTurn("model-a", 10);
+    stats.addStreamingOutput(2, null);
+    stats.finalizeTurn(null, false);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try stats.print(std.testing.io, &output.writer);
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "model-a") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "no completed turns") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "Input tokens:        10") != null);
 }
 
 test "SessionStats.print includes memory section" {
