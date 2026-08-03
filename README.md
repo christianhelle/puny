@@ -737,7 +737,7 @@ To log all HTTP requests and responses to `puny_debug.log`, use `--debug`:
 puny --debug
 ```
 
-The debug log captures request payloads, response headers, and SSE chunks for troubleshooting.
+The debug log captures request payloads, response headers, and SSE chunks for troubleshooting. JSON bodies are pretty-printed for readability.
 
 ## License
 
