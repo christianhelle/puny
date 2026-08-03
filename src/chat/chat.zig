@@ -696,6 +696,7 @@ test "OpenAiAccumulator keeps partial stats on cancellation" {
 }
 
 test "OpenAiAccumulator assembles tool call" {
+    cancel.reset();
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.beginTurn("model-a", 0);
