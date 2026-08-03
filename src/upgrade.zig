@@ -398,6 +398,21 @@ fn testTmpSubDir() !struct { std.testing.TmpDir, std.Io.Dir, []const u8 } {
     return .{ tmp, dir, sub_path };
 }
 
+test "testTmpSubDir creates upgrade dir inside the tmp dir" {
+    var tmp, var dir, const sub_path = try testTmpSubDir();
+    defer {
+        dir.close(std.testing.io);
+        std.testing.allocator.free(sub_path);
+        tmp.cleanup();
+    }
+
+    var probe = try dir.createFile(std.testing.io, "probe.txt", .{});
+    defer probe.close(std.testing.io);
+
+    var probe_via_tmp = try tmp.dir.openFile(std.testing.io, "upgrade/probe.txt", .{});
+    probe_via_tmp.close(std.testing.io);
+}
+
 test "verifyDownloadSize accepts a download of the expected size" {
     var tmp, var dir, const sub_path = try testTmpSubDir();
     defer {
