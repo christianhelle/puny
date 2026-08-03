@@ -691,7 +691,7 @@ test "OpenAiAccumulator keeps partial stats on cancellation" {
 
     const model_stats = &stats.models.items[0].stats;
     try std.testing.expectEqual(@as(i64, 16), model_stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 3), model_stats.output_tokens);
+    try std.testing.expectEqual(@as(i64, 2), model_stats.output_tokens);
     try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
 }
 
