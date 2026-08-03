@@ -60,6 +60,7 @@ pub fn main(init: std.process.Init) !void {
         break :blk DebugLog{
             .file = file,
             .writer = &debug_file_writer.interface,
+            .allocator = arena,
         };
     } else null;
     defer if (debug_log) |*log| {
