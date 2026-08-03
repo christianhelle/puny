@@ -283,7 +283,6 @@ pub const ChatSession = struct {
                             try std.fs.path.join(ctx.arena, &.{ dir, "plan.md" }),
                             try std.fs.path.join(ctx.arena, &.{ dir, "plan.html" }),
                         );
-                        core_session.setSessionPaths(ctx.session.prd_path, ctx.session.html_path);
 
                         ctx.session_stats.deinit();
                         ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
