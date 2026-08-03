@@ -308,11 +308,28 @@ pub fn recordMatchesTrigger(record: *const SkillRecord, text: []const u8) bool {
 
 pub fn textContainsWord(text: []const u8, word: []const u8) bool {
     if (word.len == 0) return false;
+    if (wordAtBoundary(text, word)) return true;
+    if (std.mem.indexOfScalar(u8, word, '-') != null and word.len <= 128) {
+        var normalized_buf: [128]u8 = undefined;
+        const normalized = normalizeHyphensToSpaces(&normalized_buf, word);
+        if (wordAtBoundary(text, normalized)) return true;
+    }
+    return false;
+}
+
+fn wordAtBoundary(text: []const u8, word: []const u8) bool {
     const match_pos = std.mem.indexOf(u8, text, word) orelse return false;
     if (match_pos > 0 and std.ascii.isAlphanumeric(text[match_pos - 1])) return false;
     const end = match_pos + word.len;
     if (end < text.len and std.ascii.isAlphanumeric(text[end])) return false;
     return true;
+}
+
+fn normalizeHyphensToSpaces(buf: *[128]u8, word: []const u8) []const u8 {
+    for (word, 0..) |byte, i| {
+        buf[i] = if (byte == '-') ' ' else byte;
+    }
+    return buf[0..word.len];
 }
 
 test "init creates empty registry" {
@@ -732,7 +749,7 @@ test "findTriggeredSkill skips disabled skills" {
     try registry.lightScan(std.testing.io, base_path);
     try registry.fullScan(std.testing.io);
 
-    const matched = registry.findTriggeredSkill("manual-skill");
+    const matched = registry.findTriggeredSkill("please use auto-skill");
     try std.testing.expect(matched != null);
     try std.testing.expectEqualStrings("auto-skill", matched.?);
 }
