@@ -23,7 +23,8 @@ jobs:
         uses: christianhelle/changelog-generator-action@v1
         with:
           output: CHANGELOG.md
-          github-token: ${{ github.token }}
+        env:
+          INPUT_GITHUB_TOKEN: ${{ github.token }}
 
       - name: Commit changelog
         if: steps.changelog.outputs.changed == 'true'
