@@ -1050,6 +1050,35 @@ test "formatBody pretty-prints valid JSON" {
     , formatted);
 }
 
+test "formatBody returns plain text unchanged" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const body = "data: {\"hello\":\"world\"}\n\n";
+    const formatted = formatBody(allocator, body);
+    try std.testing.expectEqualStrings(body, formatted);
+}
+
+test "formatBody returns malformed JSON unchanged" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const body = "{\"a\":1,}";
+    const formatted = formatBody(allocator, body);
+    try std.testing.expectEqualStrings(body, formatted);
+}
+
+test "formatBody returns empty body unchanged" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const formatted = formatBody(allocator, "");
+    try std.testing.expectEqualStrings("", formatted);
+}
+
 test "createProvider returns mock for mock flag or provider name" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
