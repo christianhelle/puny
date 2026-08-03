@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Format JSON in debug log output ([#92](https://github.com/christianhelle/puny/pull/92)) ([@christianhelle](https://github.com/christianhelle/))
 - Upgrade regression tests uses temp dir instead of repo root ([#91](https://github.com/christianhelle/puny/pull/91)) ([@christianhelle](https://github.com/christianhelle/))
 - Resume the most recent session without creating a new session id ([#90](https://github.com/christianhelle/puny/pull/90)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove empty sessions on exit so empty session folders don't accumulate ([#87](https://github.com/christianhelle/puny/pull/87)) ([@christianhelle](https://github.com/christianhelle/))
