@@ -206,7 +206,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, va
             },
         }
 
-        if (display_length + escaped_display_length + 1 > max_value_length) {
+        if (display_length + escaped_display_length + 4 > max_value_length) {
             try output.appendSlice(allocator, "...");
             try output.append(allocator, '"');
             return;
