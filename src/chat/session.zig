@@ -996,7 +996,8 @@ fn logHttpRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, he
         log.print("  {s}: {s}\n", .{ h.name, h.value });
     }
     if (body) |b| {
-        log.print("Body ({d} bytes):\n{s}\n", .{ b.len, b });
+        log.print("Body ({d} bytes):\n", .{b.len});
+        log.printBody(b);
     }
 }
 
@@ -1107,6 +1108,32 @@ test "DebugLog printBody writes pretty-printed JSON to the log file" {
     try file_writer.interface.flush();
     const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
     try std.testing.expectEqualStrings("{\n  \"a\": 1\n}\n", content);
+}
+
+test "logHttpRequest writes pretty-printed JSON body to the log file" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    const ctx: ?*anyopaque = @ptrCast(&log);
+    logHttpRequest(ctx, .POST, "http://example.com", &.{}, "{\"a\":1}");
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, content, "{\n  \"a\": 1\n}") != null);
 }
 
 test "createProvider returns mock for mock flag or provider name" {
