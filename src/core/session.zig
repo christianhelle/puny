@@ -263,6 +263,40 @@ pub fn findSessionByPrefix(arena: std.mem.Allocator, io: std.Io, base_dir: []con
     return null;
 }
 
+pub const ResumeSelection = struct {
+    target: ?SessionInfo = null,
+    notice: ?[]const u8 = null,
+};
+
+pub fn resolveResumeSelection(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    requested_id: ?[]const u8,
+    do_resume: bool,
+) !ResumeSelection {
+    if (requested_id) |sid| {
+        const maybe = try findSessionByPrefix(arena, io, base_dir, sid);
+        if (maybe) |s| return .{ .target = s };
+        return .{ .notice = try std.fmt.allocPrint(arena, "Session '{s}' not found. Starting fresh.", .{sid}) };
+    }
+    if (do_resume) {
+        const sessions = try listSessions(arena, io, base_dir);
+        var conv_count: usize = 0;
+        var found: ?SessionInfo = null;
+        for (sessions) |s| {
+            if (s.has_conversation) {
+                conv_count += 1;
+                found = s;
+            }
+        }
+        if (conv_count == 1) return .{ .target = found.? };
+        if (conv_count > 1) return .{ .notice = try std.fmt.allocPrint(arena, "{d} sessions have saved conversations. Use /resume in the chat to pick one.", .{conv_count}) };
+        return .{ .notice = try std.fmt.allocPrint(arena, "No saved conversations found. Starting fresh.", .{}) };
+    }
+    return .{};
+}
+
 pub fn generateUuid(random: std.Random, arena: std.mem.Allocator) ![]const u8 {
     var bytes: [16]u8 = undefined;
     random.bytes(&bytes);
@@ -522,6 +556,142 @@ test "sessionBaseDir honors config_dir override" {
     const dir = try sessionBaseDir(allocator, &env, "C:\\tmp\\puny-override");
     defer allocator.free(dir);
     try std.testing.expectEqualStrings("C:\\tmp\\puny-override", dir);
+}
+
+test "resolveResumeSelection returns target on exact session match" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-111", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-222", false, true);
+
+    const selection = try resolveResumeSelection(arena, std.testing.io, test_dir, "abc-111", false);
+
+    try std.testing.expect(selection.notice == null);
+    try std.testing.expect(selection.target != null);
+    try std.testing.expectEqualStrings("abc-111", selection.target.?.id);
+    try std.testing.expect(selection.target.?.has_conversation);
+}
+
+test "resolveResumeSelection returns target on prefix match" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-111", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-222", false, true);
+
+    const selection = try resolveResumeSelection(arena, std.testing.io, test_dir, "abc-1", false);
+
+    try std.testing.expect(selection.notice == null);
+    try std.testing.expect(selection.target != null);
+    try std.testing.expectEqualStrings("abc-111", selection.target.?.id);
+}
+
+test "resolveResumeSelection notice when prefix matches nothing" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-111", false, true);
+
+    const selection = try resolveResumeSelection(arena, std.testing.io, test_dir, "xyz", false);
+
+    try std.testing.expect(selection.target == null);
+    try std.testing.expect(selection.notice != null);
+    try std.testing.expectEqualStrings("Session 'xyz' not found. Starting fresh.", selection.notice.?);
+}
+
+test "resolveResumeSelection picks sole conversation on resume" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-111", false, true);
+
+    const selection = try resolveResumeSelection(arena, std.testing.io, test_dir, null, true);
+
+    try std.testing.expect(selection.notice == null);
+    try std.testing.expect(selection.target != null);
+    try std.testing.expectEqualStrings("abc-111", selection.target.?.id);
+}
+
+test "resolveResumeSelection notice when resume finds no conversations" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111", false);
+
+    const selection = try resolveResumeSelection(arena, std.testing.io, test_dir, null, true);
+
+    try std.testing.expect(selection.target == null);
+    try std.testing.expect(selection.notice != null);
+    try std.testing.expectEqualStrings("No saved conversations found. Starting fresh.", selection.notice.?);
+}
+
+test "resolveResumeSelection notice when resume finds multiple conversations" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-111", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-222", false, true);
+
+    const selection = try resolveResumeSelection(arena, std.testing.io, test_dir, null, true);
+
+    try std.testing.expect(selection.target == null);
+    try std.testing.expect(selection.notice != null);
+    try std.testing.expectEqualStrings("2 sessions have saved conversations. Use /resume in the chat to pick one.", selection.notice.?);
+}
+
+test "resolveResumeSelection returns nothing with no flags" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDirFull(std.testing.io, test_dir, "abc-111", false, true);
+
+    const selection = try resolveResumeSelection(arena, std.testing.io, test_dir, null, false);
+
+    try std.testing.expect(selection.target == null);
+    try std.testing.expect(selection.notice == null);
 }
 
 test "sessionHasPlan returns false when no plan files exist" {
