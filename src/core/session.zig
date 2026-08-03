@@ -113,7 +113,8 @@ pub const Session = struct {
     }
 };
 
-pub fn sessionBaseDir(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+pub fn sessionBaseDir(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map, override_dir: ?[]const u8) ![]const u8 {
+    if (override_dir) |dir| return arena.dupe(u8, dir);
     const path = try configPunyDir(arena, environ_map);
     return path;
 }
@@ -502,15 +503,25 @@ test "sessionBaseDir extracts from environ map" {
 
     if (comptime builtin.os.tag == .windows) {
         try env.put("USERPROFILE", "C:\\Users\\test");
-        const dir = try sessionBaseDir(allocator, &env);
+        const dir = try sessionBaseDir(allocator, &env, null);
         defer allocator.free(dir);
         try std.testing.expectEqualStrings("C:\\Users\\test\\puny", dir);
     } else {
         try env.put("HOME", "/tmp/test-home");
-        const dir = try sessionBaseDir(allocator, &env);
+        const dir = try sessionBaseDir(allocator, &env, null);
         defer allocator.free(dir);
         try std.testing.expectEqualStrings("/tmp/test-home/.config/puny", dir);
     }
+}
+
+test "sessionBaseDir honors config_dir override" {
+    const allocator = std.testing.allocator;
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    const dir = try sessionBaseDir(allocator, &env, "C:\\tmp\\puny-override");
+    defer allocator.free(dir);
+    try std.testing.expectEqualStrings("C:\\tmp\\puny-override", dir);
 }
 
 test "sessionHasPlan returns false when no plan files exist" {

@@ -20,6 +20,7 @@ pub const Options = struct {
     force_upgrade: bool = false,
     session: ?[]const u8 = null,
     do_resume: bool = false,
+    config_dir: ?[]const u8 = null,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -89,6 +90,10 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.session = args[i];
         } else if (std.mem.eql(u8, arg, "--resume")) {
             opts.do_resume = true;
+        } else if (std.mem.eql(u8, arg, "--config-dir")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.config_dir = args[i];
         } else if (std.mem.eql(u8, arg, "--prune")) {
             opts.prune = true;
         } else if (std.mem.eql(u8, arg, "--upgrade") or std.mem.eql(u8, arg, "-U")) {
@@ -160,6 +165,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --show-thinking         Show reasoning/thinking output from the model
         \\      --session <id>          Resume a previous session by ID or prefix
         \\      --resume                Pick a session to resume interactively
+        \\      --config-dir <dir>      Use <dir> as the puny config directory (overrides APPDATA/XDG_CONFIG_HOME)
         \\      --prune                 Delete old sessions (use --session to keep one)
         \\      --chat-log              Log conversation to puny_chat.log
         \\      --debug                 Log HTTP requests and responses to puny_debug.log
@@ -325,6 +331,15 @@ test "parseArgs sets resume from flag" {
     const args = &[_][:0]const u8{ "puny", "--resume" };
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expect(opts.do_resume);
+}
+
+test "parseArgs sets config_dir from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--config-dir", "C:\\tmp\\puny-test" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqualStrings("C:\\tmp\\puny-test", opts.config_dir.?);
 }
 
 test "parseArgs sets prune from flag" {

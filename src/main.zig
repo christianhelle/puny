@@ -40,7 +40,7 @@ pub fn main(init: std.process.Init) !void {
     if (parsed.prune) {
         var buf: [1024]u8 = undefined;
         var out: std.Io.File.Writer = .init(.stdout(), init.io, &buf);
-        const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
+        const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map, parsed.config_dir);
         const keep_id = parsed.session orelse "";
         try core_sess.pruneSessions(arena, init.io, base_dir, keep_id);
         if (keep_id.len > 0) {
@@ -107,7 +107,7 @@ pub fn main(init: std.process.Init) !void {
     var random_source: std.Random.IoSource = .{ .io = init.io };
     const random = random_source.interface();
 
-    const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
+    const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map, parsed.config_dir);
     var current_session = try core_sess.Session.init(arena, base_dir, random, init.io);
 
     var prov: provider.Provider = undefined;
