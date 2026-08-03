@@ -462,6 +462,7 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 
     try w.writeByte(']');
 
     try w.writeAll(",\"stream\":true");
+    try w.writeAll(",\"stream_options\":{\"include_usage\":true}");
 
     if (request.temperature) |temp| {
         try w.writeAll(",\"temperature\":");
@@ -559,6 +560,25 @@ test "requestPayload includes reasoning_effort and thinking for each level" {
         try std.testing.expectEqualStrings(@tagName(effort), root.get("reasoning_effort").?.string);
         try std.testing.expectEqualStrings("enabled", root.get("thinking").?.object.get("type").?.string);
     }
+}
+
+test "requestPayload requests usage in stream" {
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{},
+        .tools = &.{},
+    };
+
+    const payload = try requestPayload(std.testing.allocator, request);
+    defer std.testing.allocator.free(payload);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqual(true, root.get("stream").?.bool);
+    const stream_options = root.get("stream_options").?.object;
+    try std.testing.expectEqual(true, stream_options.get("include_usage").?.bool);
 }
 
 test "requestPayload omits reasoning_effort when default" {
