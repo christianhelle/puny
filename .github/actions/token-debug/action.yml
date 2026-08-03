@@ -1,9 +1,0 @@
-name: token-debug
-description: "Debug whether with: values reach INPUT_* env vars"
-inputs:
-  test-token:
-    required: false
-    default: ''
-runs:
-  using: node20
-  main: index.js
