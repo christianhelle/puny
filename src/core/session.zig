@@ -88,7 +88,6 @@ pub const Session = struct {
     pub fn fromDir(arena: std.mem.Allocator, id: []const u8, base_dir: []const u8, dir: []const u8, prd_path: []const u8, html_path: []const u8) !Session {
         const owned_prd = try arena.dupe(u8, prd_path);
         const owned_html = try arena.dupe(u8, html_path);
-        setSessionPaths(owned_prd, owned_html);
         return .{
             .id = try arena.dupe(u8, id),
             .base = try arena.dupe(u8, base_dir),
@@ -371,7 +370,7 @@ test "Session.init creates directory with correct paths" {
     session_dir.close(std.testing.io);
 }
 
-test "fromDir sets global session paths and does not create a directory" {
+test "fromDir sets session paths and does not create a directory" {
     const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
@@ -396,8 +395,8 @@ test "fromDir sets global session paths and does not create a directory" {
         std.testing.allocator.free(session.html_path);
     }
 
-    try std.testing.expectEqualStrings(prd_path, prd_path_global);
-    try std.testing.expectEqualStrings(html_path, html_path_global);
+    try std.testing.expectEqualStrings(prd_path, session.prd_path);
+    try std.testing.expectEqualStrings(html_path, session.html_path);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, dir, .{}));
 }
 
