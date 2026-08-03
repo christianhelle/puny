@@ -41,6 +41,24 @@ pub fn listDirectory(allocator: std.mem.Allocator, io: std.Io, path: []const u8)
     return ownedSliceOrEmpty(&list, allocator);
 }
 
+const PipeRead = struct {
+    io: std.Io,
+    file: std.Io.File,
+    list: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    err: ?anyerror = null,
+};
+
+fn pipeReaderThread(p: *PipeRead) void {
+    p.err = if (readPipe(p.io, p.file, p.list, p.allocator)) |_| null else |e| e;
+}
+
+fn readPipe(io: std.Io, file: std.Io.File, list: *std.ArrayList(u8), allocator: std.mem.Allocator) anyerror!void {
+    var buffer: [4096]u8 = undefined;
+    var reader = file.reader(io, &buffer);
+    try reader.interface.appendRemainingUnlimited(allocator, list);
+}
+
 pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []const u8, cwd: ?[]const u8) ![]const u8 {
     var child = try std.process.spawn(io, .{
         .argv = argv,
@@ -54,16 +72,22 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
     var stderr: std.ArrayList(u8) = .empty;
     defer stderr.deinit(allocator);
 
-    if (child.stdout) |file| {
-        var buffer: [4096]u8 = undefined;
-        var reader = file.reader(io, &buffer);
-        try reader.interface.appendRemainingUnlimited(allocator, &stdout);
+    // Read both pipes concurrently: the child blocks once either pipe fills,
+    // so draining them one at a time can deadlock when both produce lots of output.
+    var stderr_read: ?PipeRead = null;
+    var stderr_thread: ?std.Thread = null;
+    if (child.stderr) |file| {
+        stderr_read = .{ .io = io, .file = file, .list = &stderr, .allocator = allocator };
+        stderr_thread = try std.Thread.spawn(.{}, pipeReaderThread, .{&stderr_read.?});
     }
 
-    if (child.stderr) |file| {
-        var buffer: [4096]u8 = undefined;
-        var reader = file.reader(io, &buffer);
-        try reader.interface.appendRemainingUnlimited(allocator, &stderr);
+    if (child.stdout) |file| {
+        try readPipe(io, file, &stdout, allocator);
+    }
+
+    if (stderr_thread) |t| {
+        t.join();
+        if (stderr_read.?.err) |e| return e;
     }
 
     const term = try child.wait(io);
@@ -226,7 +250,7 @@ test "runCommand reads stdout and stderr larger than its read buffer" {
     // leave bytes buffered in the reader, and the next readSliceShort call
     // memcpy'd a slice onto itself, aborting with "@memcpy arguments alias".
     const argv: []const []const u8 = if (builtin.os.tag == .windows)
-        &[_][]const u8{ "cmd", "/c", "for /l %i in (1,1,20000) do @(echo 0123456789 & echo error_line 1>&2)" }
+        &[_][]const u8{ "cmd", "/c", "for /l %i in (1,1,20000) do @(echo 0000000000 & echo 1111111111 1>&2)" }
     else
         &[_][]const u8{ "sh", "-c", "awk 'BEGIN{printf \"%01000000d\",0}' ; awk 'BEGIN{printf \"%0500000d\",1}' 1>&2" };
 
