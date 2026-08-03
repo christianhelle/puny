@@ -1,6 +1,8 @@
 name: Token Debug
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - changelog-generator
 
 jobs:
   debug:
