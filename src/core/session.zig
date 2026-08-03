@@ -103,13 +103,15 @@ pub const Session = struct {
     }
 
     pub fn fromDir(arena: std.mem.Allocator, id: []const u8, base_dir: []const u8, dir: []const u8, prd_path: []const u8, html_path: []const u8) !Session {
-        setSessionPaths(prd_path, html_path);
+        const owned_prd = try arena.dupe(u8, prd_path);
+        const owned_html = try arena.dupe(u8, html_path);
+        setSessionPaths(owned_prd, owned_html);
         return .{
             .id = try arena.dupe(u8, id),
             .base = try arena.dupe(u8, base_dir),
             .dir = try arena.dupe(u8, dir),
-            .prd_path = try arena.dupe(u8, prd_path),
-            .html_path = try arena.dupe(u8, html_path),
+            .prd_path = owned_prd,
+            .html_path = owned_html,
         };
     }
 };
@@ -235,6 +237,18 @@ pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8,
     }
 }
 
+fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
+    const id = try arena.dupe(u8, s.id);
+    const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
+    return SessionInfo{
+        .id = id,
+        .has_prd = s.has_prd,
+        .has_conversation = s.has_conversation,
+        .planning_mode = s.planning_mode,
+        .first_prompt = first_prompt,
+    };
+}
+
 pub fn findSessionByPrefix(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, prefix: []const u8) !?SessionInfo {
     var tmp_arena = std.heap.ArenaAllocator.init(arena);
     defer tmp_arena.deinit();
@@ -249,15 +263,7 @@ pub fn findSessionByPrefix(arena: std.mem.Allocator, io: std.Io, base_dir: []con
 
     for (sessions) |s| {
         if (std.mem.startsWith(u8, s.id, prefix)) {
-            const id = try arena.dupe(u8, s.id);
-            const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
-            return SessionInfo{
-                .id = id,
-                .has_prd = s.has_prd,
-                .has_conversation = s.has_conversation,
-                .planning_mode = s.planning_mode,
-                .first_prompt = first_prompt,
-            };
+            return try dupeSessionInfo(arena, s);
         }
     }
     return null;
@@ -288,15 +294,7 @@ pub fn findLatestSession(arena: std.mem.Allocator, io: std.Io, base_dir: []const
     }
 
     if (best) |s| {
-        const id = try arena.dupe(u8, s.id);
-        const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
-        return SessionInfo{
-            .id = id,
-            .has_prd = s.has_prd,
-            .has_conversation = s.has_conversation,
-            .planning_mode = s.planning_mode,
-            .first_prompt = first_prompt,
-        };
+        return try dupeSessionInfo(arena, s);
     }
     return null;
 }
