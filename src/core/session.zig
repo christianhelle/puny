@@ -263,6 +263,44 @@ pub fn findSessionByPrefix(arena: std.mem.Allocator, io: std.Io, base_dir: []con
     return null;
 }
 
+pub fn findLatestSession(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) !?SessionInfo {
+    var tmp_arena = std.heap.ArenaAllocator.init(arena);
+    defer tmp_arena.deinit();
+    const tmp = tmp_arena.allocator();
+
+    const sessions_dir_path = try std.fs.path.join(tmp, &.{ base_dir, "sessions" });
+    const sessions = try listSessions(tmp, io, base_dir);
+    var best: ?SessionInfo = null;
+    var best_mtime: ?std.Io.Timestamp = null;
+    for (sessions) |s| {
+        if (!s.has_conversation) continue;
+        const msg_path = try messagesPath(tmp, sessions_dir_path, s.id);
+        const stat = std.Io.Dir.cwd().statFile(io, msg_path, .{}) catch continue;
+        if (best_mtime) |current| {
+            if (current.nanoseconds < stat.mtime.nanoseconds) {
+                best_mtime = stat.mtime;
+                best = s;
+            }
+        } else {
+            best_mtime = stat.mtime;
+            best = s;
+        }
+    }
+
+    if (best) |s| {
+        const id = try arena.dupe(u8, s.id);
+        const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
+        return SessionInfo{
+            .id = id,
+            .has_prd = s.has_prd,
+            .has_conversation = s.has_conversation,
+            .planning_mode = s.planning_mode,
+            .first_prompt = first_prompt,
+        };
+    }
+    return null;
+}
+
 pub fn generateUuid(random: std.Random, arena: std.mem.Allocator) ![]const u8 {
     var bytes: [16]u8 = undefined;
     random.bytes(&bytes);
@@ -524,6 +562,57 @@ test "findSessionByPrefix returns null on ambiguous or no match" {
 
     const none = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "xyz");
     try std.testing.expect(none == null);
+}
+
+fn setFileMtime(io: std.Io, path: []const u8, ts: std.Io.Timestamp) !void {
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{ .mode = .read_write });
+    defer file.close(io);
+    try file.setTimestamps(io, .{ .modify_timestamp = .{ .new = ts } });
+}
+
+test "findLatestSession returns most recently modified session with conversation" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDirFull(std.testing.io, test_dir, "a-older", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "z-newer", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "no-conv", false, false);
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+
+    const older_msg = try messagesPath(std.testing.allocator, sessions_dir, "a-older");
+    defer std.testing.allocator.free(older_msg);
+    try setFileMtime(std.testing.io, older_msg, std.Io.Timestamp.fromNanoseconds(1_000_000_000_000));
+
+    const newer_msg = try messagesPath(std.testing.allocator, sessions_dir, "z-newer");
+    defer std.testing.allocator.free(newer_msg);
+    try setFileMtime(std.testing.io, newer_msg, std.Io.Timestamp.fromNanoseconds(1_001_000_000_000));
+
+    const found = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
+    try std.testing.expect(found != null);
+    try std.testing.expectEqualStrings("z-newer", found.?.id);
+    if (found) |s| {
+        std.testing.allocator.free(s.id);
+        if (s.first_prompt) |p| std.testing.allocator.free(p);
+    }
+}
+
+test "findLatestSession returns null when no session has a conversation" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "plain-1", false);
+    try createTestSessionDir(std.testing.io, test_dir, "plain-2", true);
+
+    const found = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
+    try std.testing.expect(found == null);
 }
 
 test "sessionBaseDir extracts from environ map" {
