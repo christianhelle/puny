@@ -1028,7 +1028,7 @@ fn logHttpError(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, err_
 fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
     const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
     log.print("=== CHUNK ===\n", .{});
-    log.print("{s}\n", .{data});
+    log.printBody(data);
 }
 
 /// Pretty-prints `body` when it is valid JSON, otherwise returns it unchanged.
@@ -1157,6 +1157,32 @@ test "logHttpResponse writes pretty-printed JSON body to the log file" {
 
     const ctx: ?*anyopaque = @ptrCast(&log);
     logHttpResponse(ctx, .POST, "http://example.com", .ok, &.{}, "{\"a\":1}", 1_000_000);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, content, "{\n  \"a\": 1\n}") != null);
+}
+
+test "logHttpChunk writes pretty-printed JSON body to the log file" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    const ctx: ?*anyopaque = @ptrCast(&log);
+    logHttpChunk(ctx, "{\"a\":1}");
 
     try file_writer.interface.flush();
     const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
