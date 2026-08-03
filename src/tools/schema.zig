@@ -94,8 +94,12 @@ const TestParams = struct {
 };
 
 test "schema generation" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
     const Schema = ToolDefinition("test_tool", "A test tool.", TestParams);
-    const schema_value = try Schema.schema(std.testing.allocator);
+    const schema_value = try Schema.schema(arena);
 
     try std.testing.expectEqualStrings("test_tool", schema_value.object.get("name").?.string);
     try std.testing.expectEqualStrings("A test tool.", schema_value.object.get("description").?.string);
@@ -124,8 +128,12 @@ const AllOptionalParams = struct {
 };
 
 test "schema omits empty required array" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
     const Schema = ToolDefinition("all_optional", "All params optional.", AllOptionalParams);
-    const schema_value = try Schema.schema(std.testing.allocator);
+    const schema_value = try Schema.schema(arena);
     // Leaky parse is fine for test — schema_json is embedded in binary, allocation is tiny
 
     const params = schema_value.object.get("parameters").?.object;
