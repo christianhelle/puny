@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Resume the most recent session without creating a new session id ([#90](https://github.com/christianhelle/puny/pull/90)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove empty sessions on exit so empty session folders don't accumulate ([#87](https://github.com/christianhelle/puny/pull/87)) ([@christianhelle](https://github.com/christianhelle/))
 - Add real-time markdown rendering ([#85](https://github.com/christianhelle/puny/pull/85)) ([@christianhelle](https://github.com/christianhelle/))
 
