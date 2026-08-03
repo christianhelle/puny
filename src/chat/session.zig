@@ -1323,6 +1323,14 @@ test "include chat retry tests" {
     _ = @import("retry.zig");
 }
 
+test "include chat tests" {
+    _ = @import("chat.zig");
+}
+
+test "include chat usage tests" {
+    _ = @import("usage.zig");
+}
+
 test "sessionHasContent returns false for empty message list" {
     const messages = [_]openai.Message{};
     try std.testing.expect(!sessionHasContent(&messages));
