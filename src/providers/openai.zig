@@ -210,10 +210,15 @@ pub const StreamCallback = struct {
     context: *anyopaque,
     vtable: *const struct {
         event: *const fn (context: *anyopaque, ev: StreamEvent) anyerror!void,
+        reset: ?*const fn (context: *anyopaque) void = null,
     },
 
     pub fn emit(self: StreamCallback, ev: StreamEvent) !void {
         try self.vtable.event(self.context, ev);
+    }
+
+    pub fn reset(self: StreamCallback) void {
+        if (self.vtable.reset) |r| r(self.context);
     }
 };
 
