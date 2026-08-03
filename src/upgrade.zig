@@ -387,22 +387,18 @@ test "upgradeTempParent falls back to the platform default temp dir" {
     try std.testing.expectEqualStrings(expected, result);
 }
 
-fn testTmpSubDir() !struct { std.testing.TmpDir, std.Io.Dir, []const u8 } {
+fn testTmpSubDir() !struct { std.testing.TmpDir, std.Io.Dir } {
     var tmp = std.testing.tmpDir(.{});
     errdefer tmp.cleanup();
-    const sub_path = try std.fs.path.join(std.testing.allocator, &.{ tmp.sub_path[0..], "upgrade" });
-    errdefer std.testing.allocator.free(sub_path);
-    try std.Io.Dir.cwd().createDirPath(std.testing.io, sub_path);
-    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, sub_path, .{ .iterate = true });
+    var dir = try tmp.dir.createDirPathOpen(std.testing.io, "upgrade", .{ .open_options = .{ .iterate = true } });
     errdefer dir.close(std.testing.io);
-    return .{ tmp, dir, sub_path };
+    return .{ tmp, dir };
 }
 
 test "testTmpSubDir creates upgrade dir inside the tmp dir" {
-    var tmp, var dir, const sub_path = try testTmpSubDir();
+    var tmp, var dir = try testTmpSubDir();
     defer {
         dir.close(std.testing.io);
-        std.testing.allocator.free(sub_path);
         tmp.cleanup();
     }
 
@@ -414,10 +410,9 @@ test "testTmpSubDir creates upgrade dir inside the tmp dir" {
 }
 
 test "verifyDownloadSize accepts a download of the expected size" {
-    var tmp, var dir, const sub_path = try testTmpSubDir();
+    var tmp, var dir = try testTmpSubDir();
     defer {
         dir.close(std.testing.io);
-        std.testing.allocator.free(sub_path);
         tmp.cleanup();
     }
 
@@ -429,10 +424,9 @@ test "verifyDownloadSize accepts a download of the expected size" {
 }
 
 test "verifyDownloadSize rejects a truncated download" {
-    var tmp, var dir, const sub_path = try testTmpSubDir();
+    var tmp, var dir = try testTmpSubDir();
     defer {
         dir.close(std.testing.io);
-        std.testing.allocator.free(sub_path);
         tmp.cleanup();
     }
 
@@ -444,10 +438,9 @@ test "verifyDownloadSize rejects a truncated download" {
 }
 
 test "clearDirContents removes files and subdirectories" {
-    var tmp, var dir, const sub_path = try testTmpSubDir();
+    var tmp, var dir = try testTmpSubDir();
     defer {
         dir.close(std.testing.io);
-        std.testing.allocator.free(sub_path);
         tmp.cleanup();
     }
 
