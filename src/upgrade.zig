@@ -502,13 +502,11 @@ test "retryExtract clears the temp dir so stale files do not block a retry" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const sub_path = try std.fs.path.join(std.testing.allocator, &.{ tmp.sub_path[0..], "upgrade" });
-    defer std.testing.allocator.free(sub_path);
-    try std.Io.Dir.cwd().createDirPath(std.testing.io, sub_path);
-    var tmp_dir = try std.Io.Dir.cwd().openDir(std.testing.io, sub_path, .{ .iterate = true });
-    defer tmp_dir.close(std.testing.io);
+    var tmp, var tmp_dir = try testTmpSubDir();
+    defer {
+        tmp_dir.close(std.testing.io);
+        tmp.cleanup();
+    }
 
     var progress_buf: [128]u8 = undefined;
     var progress_writer = std.Io.Writer.fixed(&progress_buf);
@@ -569,13 +567,11 @@ test "retryExtract re-downloads when archive size does not match expected" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const sub_path = try std.fs.path.join(std.testing.allocator, &.{ tmp.sub_path[0..], "upgrade" });
-    defer std.testing.allocator.free(sub_path);
-    try std.Io.Dir.cwd().createDirPath(std.testing.io, sub_path);
-    var tmp_dir = try std.Io.Dir.cwd().openDir(std.testing.io, sub_path, .{ .iterate = true });
-    defer tmp_dir.close(std.testing.io);
+    var tmp, var tmp_dir = try testTmpSubDir();
+    defer {
+        tmp_dir.close(std.testing.io);
+        tmp.cleanup();
+    }
 
     var progress_buf: [128]u8 = undefined;
     var progress_writer = std.Io.Writer.fixed(&progress_buf);
