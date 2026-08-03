@@ -583,11 +583,14 @@ fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall)
 }
 
 test "prints human-friendly tool call output" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
     try printToolCall(
-        std.testing.allocator,
+        arena_state.allocator(),
         &output.writer,
         .{
             .id = "call_1",
