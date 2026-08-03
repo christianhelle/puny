@@ -494,6 +494,8 @@ pub fn runTurn(
     var accumulator = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
     accumulator.show_thinking = show_thinking;
     defer accumulator.deinit();
+    // Record partial tokens even when an error interrupts the turn mid-stream.
+    errdefer session_stats.finalizeTurn(accumulator.usage, false);
     const callback = accumulator.streamCallback();
 
     const outcome = try chat_retry.runChatWithRetry(prov, request, callback, io, random, stdout_writer);
