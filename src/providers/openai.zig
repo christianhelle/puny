@@ -247,6 +247,7 @@ const UsageJson = struct {
     prompt_tokens: i64,
     completion_tokens: i64,
     reasoning_output_tokens: ?i64 = null,
+    reasoning_tokens: ?i64 = null,
     tokens_per_second: ?f64 = null,
     time_to_first_token_seconds: ?f64 = null,
 };
@@ -303,7 +304,7 @@ pub const SseCallback = struct {
             try self.callback.emit(.{ .usage = .{
                 .input_tokens = usage.prompt_tokens,
                 .output_tokens = usage.completion_tokens,
-                .reasoning_output_tokens = usage.reasoning_output_tokens,
+                .reasoning_output_tokens = usage.reasoning_output_tokens orelse usage.reasoning_tokens,
                 .tokens_per_second = usage.tokens_per_second,
                 .time_to_first_token_seconds = usage.time_to_first_token_seconds,
             } });
@@ -597,6 +598,39 @@ test "requestPayload omits reasoning_effort when default" {
 
     try std.testing.expect(parsed.value.object.get("reasoning_effort") == null);
     try std.testing.expect(parsed.value.object.get("thinking") == null);
+}
+
+test "usage event falls back to reasoning_tokens field" {
+    var events: std.ArrayList(TurnUsage) = .empty;
+    defer events.deinit(std.testing.allocator);
+
+    const UsageListener = struct {
+        events: *std.ArrayList(TurnUsage),
+
+        pub fn event(self: *@This(), ev: StreamEvent) !void {
+            if (ev == .usage) try self.events.append(std.testing.allocator, ev.usage);
+        }
+    };
+
+    var listener = UsageListener{ .events = &events };
+    const callback = StreamCallback{
+        .context = &listener,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(ctx: *anyopaque, ev: StreamEvent) !void {
+                    const state: *UsageListener = @ptrCast(@alignCast(ctx));
+                    try state.event(ev);
+                }
+            }.event,
+        },
+    };
+
+    var sse = SseCallback{ .allocator = std.testing.allocator, .callback = callback };
+
+    try sse.event("{\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"reasoning_tokens\":5}}");
+
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqual(@as(i64, 5), events.items[0].reasoning_output_tokens.?);
 }
 
 test "requestPayload omits reasoning_effort when null" {
