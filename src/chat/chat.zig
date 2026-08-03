@@ -116,7 +116,12 @@ pub const SessionStats = struct {
         const stats = self.activeModelStats();
         if (usage) |u| {
             stats.input_tokens += u.input_tokens - self.current_turn_input;
-            stats.output_tokens += u.output_tokens - self.current_turn_output;
+
+            // Providers count reasoning tokens inside the output total; track
+            // them separately so totals are not double-counted.
+            const reasoning = u.reasoning_output_tokens orelse 0;
+            const plain_output = @max(@as(i64, 0), u.output_tokens - reasoning);
+            stats.output_tokens += plain_output - self.current_turn_output;
 
             if (u.reasoning_output_tokens) |r| {
                 stats.reasoning_output_tokens += r - self.current_turn_reasoning;
@@ -768,7 +773,7 @@ test "SessionStats finalizes turn and reconciles usage" {
     const model_stats = &stats.models.items[0].stats;
     try std.testing.expectEqual(@as(usize, 1), model_stats.turn_count);
     try std.testing.expectEqual(@as(i64, 12), model_stats.input_tokens);
-    try std.testing.expectEqual(@as(i64, 8), model_stats.output_tokens);
+    try std.testing.expectEqual(@as(i64, 7), model_stats.output_tokens);
     try std.testing.expectEqual(@as(usize, 1), model_stats.ttft_count);
     try std.testing.expectEqual(@as(usize, 1), model_stats.tps_count);
     try std.testing.expectEqual(@as(i64, 1), model_stats.reasoning_output_tokens);
