@@ -11,7 +11,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Test token input propagation
-        uses: ./.github/actions/token-debug
+      - name: Generate changelog with INPUT_GITHUB_TOKEN env
+        id: changelog
+        uses: christianhelle/changelog-generator-action@v1
         with:
-          test-token: ${{ github.token }}
+          output: CHANGELOG_VERIFY.md
+        env:
+          INPUT_GITHUB_TOKEN: ${{ github.token }}
