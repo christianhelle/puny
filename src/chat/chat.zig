@@ -442,6 +442,29 @@ pub const OpenAiAccumulator = struct {
         return 0;
     }
 
+    /// Drop streamed content and usage from a failed attempt so a retry
+    /// attempt starts from a clean slate. Display state is left untouched.
+    pub fn resetForRetry(self: *@This()) void {
+        self.content.clearRetainingCapacity();
+        self.reasoning.clearRetainingCapacity();
+        self.usage = null;
+        self.first_token_recorded = false;
+        self.has_streamed_output = false;
+        for (self.tool_calls.items) |tc| {
+            self.allocator.free(tc.id);
+            self.allocator.free(tc.function.name);
+            self.allocator.free(tc.function.arguments);
+        }
+        self.tool_calls.clearRetainingCapacity();
+        var it = self.partial_calls.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.id);
+            self.allocator.free(entry.value_ptr.name);
+            entry.value_ptr.args.deinit(self.allocator);
+        }
+        self.partial_calls.clearRetainingCapacity();
+    }
+
     pub fn streamCallback(self: *@This()) openai.StreamCallback {
         return .{
             .context = self,
@@ -452,6 +475,12 @@ pub const OpenAiAccumulator = struct {
                         try acc.onEvent(ev);
                     }
                 }.event,
+                .reset = struct {
+                    pub fn reset(ctx: *anyopaque) void {
+                        const acc: *OpenAiAccumulator = @ptrCast(@alignCast(ctx));
+                        acc.resetForRetry();
+                    }
+                }.reset,
             },
         };
     }
