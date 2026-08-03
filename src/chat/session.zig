@@ -33,9 +33,14 @@ pub const ReconfigurePrompt = struct {
 pub const DebugLog = struct {
     file: std.Io.File,
     writer: *std.Io.Writer,
+    allocator: std.mem.Allocator,
 
     fn print(self: *DebugLog, comptime fmt: []const u8, args: anytype) void {
         self.writer.print(fmt, args) catch {};
+    }
+
+    fn printBody(self: *DebugLog, body: []const u8) void {
+        self.print("{s}\n", .{formatBody(self.allocator, body)});
     }
 };
 
@@ -1077,6 +1082,31 @@ test "formatBody returns empty body unchanged" {
 
     const formatted = formatBody(allocator, "");
     try std.testing.expectEqualStrings("", formatted);
+}
+
+test "DebugLog printBody writes pretty-printed JSON to the log file" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    log.printBody("{\"a\":1}");
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    try std.testing.expectEqualStrings("{\n  \"a\": 1\n}\n", content);
 }
 
 test "createProvider returns mock for mock flag or provider name" {
