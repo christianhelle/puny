@@ -562,7 +562,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         if (result.was_cancelled) {
             rollBackCancelledTurn(ctx.messages);
             while (skills.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
-            ctx.session_stats.finalizeTurn(null, false);
+            ctx.session_stats.finalizeTurn(result.usage, false);
             break;
         }
 
