@@ -159,7 +159,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --reconfigure           Re-run first-run setup and update config
         \\      --show-thinking         Show reasoning/thinking output from the model
         \\      --session <id>          Resume a previous session by ID or prefix
-        \\      --resume                Pick a session to resume interactively
+        \\      --resume                Resume the most recent session
         \\      --prune                 Delete old sessions (use --session to keep one)
         \\      --chat-log              Log conversation to puny_chat.log
         \\      --debug                 Log HTTP requests and responses to puny_debug.log

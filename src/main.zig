@@ -152,21 +152,9 @@ pub fn main(init: std.process.Init) !void {
             }
         } else |_| {}
     } else if (parsed.do_resume) {
-        if (core_sess.listSessions(arena, init.io, base_dir)) |sessions| {
-            var conv_count: usize = 0;
-            var found: ?core_sess.SessionInfo = null;
-            for (sessions) |s| {
-                if (s.has_conversation) {
-                    conv_count += 1;
-                    found = s;
-                }
-            }
-            if (conv_count == 1) {
-                restore_target = found;
-            } else if (conv_count > 1) {
-                try stdout_writer.print("{d} sessions have saved conversations. Use /resume in the chat to pick one.\n", .{conv_count});
-                try stdout_writer.flush();
-            } else {
+        if (core_sess.findLatestSession(arena, init.io, base_dir)) |maybe_latest| {
+            restore_target = maybe_latest;
+            if (maybe_latest == null) {
                 try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
                 try stdout_writer.flush();
             }
