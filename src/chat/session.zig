@@ -1024,6 +1024,32 @@ fn logHttpChunk(ctx: ?*anyopaque, data: []const u8) void {
     log.print("{s}\n", .{data});
 }
 
+/// Pretty-prints `body` when it is valid JSON, otherwise returns it unchanged.
+fn formatBody(allocator: std.mem.Allocator, body: []const u8) []const u8 {
+    if (body.len == 0) return body;
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return body;
+    defer parsed.deinit();
+    return std.json.Stringify.valueAlloc(allocator, parsed.value, .{ .whitespace = .indent_2 }) catch body;
+}
+
+test "formatBody pretty-prints valid JSON" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const formatted = formatBody(allocator, "{\"a\":1,\"b\":[true,null,\"x\"]}");
+    try std.testing.expectEqualStrings(
+        \\{
+        \\  "a": 1,
+        \\  "b": [
+        \\    true,
+        \\    null,
+        \\    "x"
+        \\  ]
+        \\}
+    , formatted);
+}
+
 test "createProvider returns mock for mock flag or provider name" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
