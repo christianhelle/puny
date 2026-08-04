@@ -128,6 +128,19 @@ zig build
 
 The compiled binary is written to `zig-out/bin/puny`.
 
+To build a release binary and install it to `$HOME/.local/bin` (the same directory used by the install scripts), run:
+
+```bash
+zig build install-release
+```
+
+The install directory can be overridden with the `INSTALL_DIR` environment variable or the `--prefix` flag:
+
+```bash
+INSTALL_DIR=/custom/path zig build install-release
+zig build install-release --prefix /custom/path
+```
+
 ### Docker
 
 Puny is published as a container image to both Docker Hub and GitHub Container Registry.
@@ -667,6 +680,19 @@ zig build
 ```
 
 The compiled binary is written to `zig-out/bin/puny`. Copy it to a directory on your PATH to run it from anywhere.
+
+To build a release binary and install it to `$HOME/.local/bin` (the same directory used by the install scripts), run:
+
+```bash
+zig build install-release
+```
+
+The install directory can be overridden with the `INSTALL_DIR` environment variable or the `--prefix` flag:
+
+```bash
+INSTALL_DIR=/custom/path zig build install-release
+zig build install-release --prefix /custom/path
+```
 
 Run the test suite:
 

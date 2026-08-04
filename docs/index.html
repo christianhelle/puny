@@ -243,6 +243,11 @@
             <code>git clone https://github.com/christianhelle/puny.git<br>cd puny<br>zig build</code>
           </div>
           <p>The compiled binary is written to <code>zig-out/bin/puny</code>.</p>
+          <p>To install a release build to <code>~/.local/bin</code> (the same directory used by the install scripts):</p>
+          <div class="install-code">
+            <code>zig build install-release</code>
+          </div>
+          <p>Override the install directory with <code>INSTALL_DIR</code> or <code>--prefix</code>.</p>
         </div>
 
         <div class="install-card">
