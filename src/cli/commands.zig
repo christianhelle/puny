@@ -51,6 +51,23 @@ pub const Context = struct {
     session_prd_path: []const u8 = "",
 };
 
+/// The interactive slash commands recognized by `parse`, in display order.
+pub const command_tokens = [_][]const u8{
+    "/quit",
+    "/exit",
+    "/reset",
+    "/stats",
+    "/config",
+    "/plan",
+    "/build",
+    "/model",
+    "/provider",
+    "/sessions",
+    "/resume",
+    "/prune",
+    "/skills",
+};
+
 pub fn parse(user_message: []const u8) Command {
     if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit"))
         return .quit;
@@ -232,6 +249,14 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqualDeep(Command{ .skill = "nano-commits" }, parse("/nano-commits"));
 
     try std.testing.expectEqualDeep(Command{ .prompt = "hello" }, parse("hello"));
+}
+
+test "every registered command token parses as a command" {
+    for (command_tokens) |token| {
+        const cmd = parse(token);
+        try std.testing.expect(cmd != .prompt);
+        try std.testing.expect(cmd != .skill);
+    }
 }
 
 test "dispatch quit returns exit" {
