@@ -19,6 +19,7 @@
         <li><a href="#features" class="nav-link">Features</a></li>
         <li><a href="#installation" class="nav-link">Installation</a></li>
         <li><a href="#usage" class="nav-link">Usage</a></li>
+        <li><a href="#docker" class="nav-link">Docker</a></li>
         <li><a href="https://github.com/christianhelle/puny" class="nav-link external">GitHub</a></li>
       </ul>
     </div>
@@ -182,11 +183,6 @@
           <h3>Model Picker</h3>
           <p>Interactive model selection on startup</p>
         </div>
-        <div class="feature-card">
-          <span class="feature-icon">🐳</span>
-          <h3>Docker</h3>
-          <p>Published as a container image to Docker Hub and GHCR</p>
-        </div>
       </div>
     </div>
   </section>
@@ -311,6 +307,25 @@
           <div class="install-code">
             <code>puny --provider copilot</code>
           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="docker" class="features">
+    <div class="container">
+      <h2 class="section-title">Docker</h2>
+      <div class="features-grid" style="grid-template-columns: 1fr;">
+        <div class="install-card">
+          <h3>Run with Docker</h3>
+          <p>Puny is published as a container image to both Docker Hub and GitHub Container Registry.</p>
+          <div class="install-code">
+            <code>docker pull christianhelle/puny:latest</code>
+          </div>
+          <div class="install-code">
+            <code>docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny</code>
+          </div>
+          <p>For detailed Docker documentation, including LM Studio integration, one-shot prompts, and building locally, see <a href="docker.html">Docker Documentation</a>.</p>
         </div>
       </div>
     </div>
