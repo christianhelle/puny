@@ -53,21 +53,7 @@ function Show-Usage
 
 function Get-DefaultInstallDir
 {
-  $candidates = @(
-    "$env:LOCALAPPDATA\Programs\puny",
-    "$env:USERPROFILE\.local\bin",
-    "$env:USERPROFILE\bin"
-  )
-
-  foreach ($candidate in $candidates)
-  {
-    if (Test-Path $candidate -PathType Container)
-    {
-      return $candidate
-    }
-  }
-
-  return "$env:LOCALAPPDATA\Programs\puny"
+  return "$env:USERPROFILE\.local\bin"
 }
 
 function Test-IsInPath
