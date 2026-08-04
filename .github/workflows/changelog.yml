@@ -23,6 +23,7 @@ jobs:
         uses: christianhelle/changelog-generator-action@v1
         with:
           output: CHANGELOG.md
+          github-token: ${{ secrets.PAT }}
 
       - name: Commit changelog
         if: steps.changelog.outputs.changed == 'true'
