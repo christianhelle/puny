@@ -54,6 +54,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         try printCommand(writer, "/model [id]", "Switch to another model");
         try printCommand(writer, "/provider [name]", "Switch to another provider");
         try printCommand(writer, "/sessions", "List saved sessions");
+        try printCommand(writer, "/resume [id]", "Resume a saved session");
         try printCommand(writer, "/prune", "Remove old sessions");
         try printCommand(writer, "/skills", "List global and repository skills");
         try writer.print("\n", .{});
@@ -102,6 +103,24 @@ test "print writes banner, provider, model and commands" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/config"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/plan"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/provider"));
+}
+
+test "banner lists every registered command" {
+    const commands = @import("../cli/commands.zig");
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try print(&out.writer, .{
+        .provider_name = "LM Studio",
+        .provider_url = "http://127.0.0.1:1234",
+        .model_key = "test-model",
+    });
+
+    const text = out.written();
+    for (commands.command_tokens) |token| {
+        try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, token));
+    }
 }
 
 test "oneshot mode omits interactive commands" {
