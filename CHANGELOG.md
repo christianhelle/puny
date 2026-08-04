@@ -3,7 +3,8 @@
 ## [Unreleased Changes]
 
 ### Features
-- Add zig build install-release step for docs install directory ([#94](https://github.com/christianhelle/puny/pull/94)) ([@christianhelle](https://github.com/christianhelle/))
+- Remove Dockerfile and generate on demand instead ([#95](https://github.com/christianhelle/puny/pull/95)) ([@christianhelle](https://github.com/christianhelle/))
+- Add zig build install-release step ([#94](https://github.com/christianhelle/puny/pull/94)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix session statistics accuracy and request provider usage ([#93](https://github.com/christianhelle/puny/pull/93)) ([@christianhelle](https://github.com/christianhelle/))
 - Format JSON in debug log output ([#92](https://github.com/christianhelle/puny/pull/92)) ([@christianhelle](https://github.com/christianhelle/))
 - Upgrade regression tests uses temp dir instead of repo root ([#91](https://github.com/christianhelle/puny/pull/91)) ([@christianhelle](https://github.com/christianhelle/))
