@@ -74,9 +74,12 @@ pub fn build(b: *std.Build) !void {
     );
     dockerfile_step.dependOn(&generate_dockerfile.step);
 
+    const dockerfile_path = generate_dockerfile.getDirectory().path(b, "Dockerfile");
     const docker_build_image = b.addSystemCommand(&.{
-        "docker", "build", "-t", "puny:local", ".",
+        "docker", "build", "-t", "puny:local", "--file",
     });
+    docker_build_image.addFileArg(dockerfile_path);
+    docker_build_image.addArg(".");
     docker_build_image.step.dependOn(&docker_build.step);
     docker_build_image.step.dependOn(dockerfile_step);
     docker_step.dependOn(&docker_build_image.step);
