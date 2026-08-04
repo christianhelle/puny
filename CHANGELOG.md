@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Fix welcome screen available commands ([#96](https://github.com/christianhelle/puny/pull/96)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove Dockerfile and generate on demand instead ([#95](https://github.com/christianhelle/puny/pull/95)) ([@christianhelle](https://github.com/christianhelle/))
 - Add zig build install-release step ([#94](https://github.com/christianhelle/puny/pull/94)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix session statistics accuracy and request provider usage ([#93](https://github.com/christianhelle/puny/pull/93)) ([@christianhelle](https://github.com/christianhelle/))
