@@ -584,3 +584,11 @@ test "include upgrade module tests" {
 test "include stream markdown tests" {
     _ = @import("tui/stream_markdown.zig");
 }
+
+test "include welcome tests" {
+    _ = @import("tui/welcome.zig");
+}
+
+test "include commands tests" {
+    _ = @import("cli/commands.zig");
+}

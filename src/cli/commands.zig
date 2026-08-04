@@ -373,7 +373,7 @@ test "dispatch plan without text enters planning mode and continues" {
     try std.testing.expectEqual(Action.continue_, action);
     try std.testing.expect(planning_mode);
     try std.testing.expectEqual(@as(usize, 1), messages.items.len);
-    try std.testing.expectEqual(openai.Message.system, messages.items[0]);
+    try std.testing.expect(messages.items[0] == .system);
 }
 
 test "dispatch plan with text enters planning mode and runs chat turn" {
@@ -399,7 +399,7 @@ test "dispatch plan with text enters planning mode and runs chat turn" {
     try std.testing.expectEqual(Action.run_chat_turn, action);
     try std.testing.expect(planning_mode);
     try std.testing.expectEqual(@as(usize, 2), messages.items.len);
-    try std.testing.expectEqual(openai.Message.system, messages.items[0]);
+    try std.testing.expect(messages.items[0] == .system);
     try std.testing.expectEqualDeep(openai.Message{ .user = "do thing" }, messages.items[1]);
 }
 

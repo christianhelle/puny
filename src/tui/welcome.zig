@@ -80,7 +80,7 @@ pub fn printSummary(writer: *std.Io.Writer, info: Info) !void {
     try writer.flush();
 }
 
-test "print writes banner, provider, model, commands and hint" {
+test "print writes banner, provider, model and commands" {
     const allocator = std.testing.allocator;
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
@@ -102,7 +102,6 @@ test "print writes banner, provider, model, commands and hint" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/config"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/plan"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/provider"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
 
 test "oneshot mode omits interactive commands" {
@@ -124,7 +123,7 @@ test "oneshot mode omits interactive commands" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
 
-test "prefilled prompt mode shows automatic submission hint" {
+test "prefilled prompt mode renders the same banner without prompt hints" {
     const allocator = std.testing.allocator;
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
@@ -139,8 +138,8 @@ test "prefilled prompt mode shows automatic submission hint" {
     const text = out.written();
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Welcome to Puny"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Prefilled prompt will be sent automatically"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Prefilled prompt"));
 }
 
 test "print shows reasoning effort when non-default" {
