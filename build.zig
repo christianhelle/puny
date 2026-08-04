@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
 
-    const docker_step = b.step("docker", "Build Linux binary for Docker");
+    const docker_step = b.step("docker", "Build Docker image");
     const docker_build = b.addSystemCommand(&.{
         b.graph.zig_exe,
         "build",
@@ -37,7 +37,49 @@ pub fn build(b: *std.Build) !void {
         "-Doptimize=ReleaseSmall",
         "-Dtarget=x86_64-linux",
     });
-    docker_step.dependOn(&docker_build.step);
+
+    const dockerfile_step = b.step("generate-dockerfile", "Generate Dockerfile for container builds");
+    const generate_dockerfile = b.addWriteFiles();
+    _ = generate_dockerfile.add("Dockerfile",
+        \\# Use a minimal base image
+        \\FROM alpine:latest
+        \\
+        \\# Install necessary runtime dependencies
+        \\RUN apk add --no-cache \
+        \\    ca-certificates \
+        \\    curl
+        \\
+        \\# Create a non-root user
+        \\RUN addgroup -g 1001 -S puny && \
+        \\    adduser -S -D -H -u 1001 -s /sbin/nologin puny -G puny
+        \\
+        \\# Copy the binary from the build artifacts
+        \\COPY zig-out/bin/puny /usr/local/bin/puny
+        \\
+        \\# Make the binary executable
+        \\RUN chmod +x /usr/local/bin/puny
+        \\
+        \\# Create a writable home/config directory for the non-root user.
+        \\RUN mkdir -p /app && chown -R puny:puny /app
+        \\ENV HOME=/app
+        \\
+        \\# Switch to non-root user
+        \\USER puny
+        \\
+        \\# Set the working directory
+        \\WORKDIR /app
+        \\
+        \\# Set the entrypoint
+        \\ENTRYPOINT ["/usr/local/bin/puny"]
+    );
+    dockerfile_step.dependOn(&generate_dockerfile.step);
+
+    const docker_build_image = b.addSystemCommand(&.{
+        "docker", "build", "-t", "puny:local", ".",
+    });
+    docker_build_image.step.dependOn(&docker_build.step);
+    docker_build_image.step.dependOn(dockerfile_step);
+    docker_step.dependOn(&docker_build_image.step);
 
     const release_exe = addPunyExecutable(b, "puny", target, .ReleaseSmall, build_options);
     const install_release_step = b.step("install-release", "Build ReleaseSmall and install to the docs install directory");
