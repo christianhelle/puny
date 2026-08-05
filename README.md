@@ -481,7 +481,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
 | `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
 | `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
-| `--prompt-file <path|url>` | Read first prompt from a file or URL (10 MiB limit) |
+| `--prompt-file <file-or-url>` | Read first prompt from a file or URL (10 MiB limit) |
 | `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                                    |
 | `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
 | `--reconfigure`         | Re-run first-run setup and update config                                                  |
