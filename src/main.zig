@@ -627,3 +627,7 @@ test "include commands tests" {
 test "include prompt file tests" {
     _ = @import("prompts/prompt_file.zig");
 }
+
+test "include prompt history tests" {
+    _ = @import("prompts/history.zig");
+}
