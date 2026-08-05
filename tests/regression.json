@@ -115,4 +115,33 @@
       }
     }
   }
-]
+,
+  {
+    "name": "Prompt file from local file",
+    "args": ["--mock", "--model", "mock-model", "--prompt-file", "tests/fixtures/prompt.md", "--oneshot"],
+    "expect": ["puny-prompt-file-fixture"],
+    "not_expect": []
+  },
+  {
+    "name": "Prompt file from URL",
+    "args": ["--mock", "--model", "mock-model", "--prompt-file", "http://127.0.0.1:{port}/prompt.md", "--oneshot"],
+    "expect": ["puny-prompt-file-fixture"],
+    "not_expect": [],
+    "serve_fixture": true
+  },
+  {
+    "name": "Missing prompt file fails fast",
+    "args": ["--mock", "--model", "mock-model", "--prompt-file", "no-such-file.md", "--oneshot"],
+    "expect": [],
+    "not_expect": [],
+    "exit_code": 1,
+    "expect_stderr": ["Failed to load prompt from"]
+  },
+  {
+    "name": "Empty prompt file errors",
+    "args": ["--mock", "--model", "mock-model", "--prompt-file", "tests/fixtures/empty.md", "--oneshot"],
+    "expect": [],
+    "not_expect": [],
+    "exit_code": 1,
+    "expect_stderr": ["Failed to load prompt from", "prompt file is empty"]
+  }]
