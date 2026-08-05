@@ -224,12 +224,13 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         .skill => |name_text| return .{ .load_skill = name_text },
 
         .file => |source| {
-            if (source == null or source.?.len == 0) {
+            const path = if (source) |s| std.mem.trim(u8, s, &std.ascii.whitespace) else "";
+            if (path.len == 0) {
                 try ctx.stdout_writer.print("\nUsage: /file <path-or-url>\n", .{});
                 try ctx.stdout_writer.flush();
                 return .continue_;
             }
-            return .{ .load_prompt_file = source.? };
+            return .{ .load_prompt_file = path };
         },
 
         .prompt => |text| {
