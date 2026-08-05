@@ -70,12 +70,12 @@ pub fn main(init: std.process.Init) !void {
                 }
                 parsed.prompt = content;
             },
-            .err => |msg| {
-                defer arena.free(msg);
+            .err => |e| {
+                defer if (e.owned) arena.free(e.message);
                 var err_buf: [512]u8 = undefined;
                 var err_writer: std.Io.File.Writer = .init(.stderr(), init.io, &err_buf);
                 const stderr_writer = &err_writer.interface;
-                stderr_writer.print("Failed to load prompt from {s}: {s}\n", .{ source, msg }) catch {};
+                stderr_writer.print("Failed to load prompt from {s}: {s}\n", .{ source, e.message }) catch {};
                 stderr_writer.flush() catch {};
                 std.process.exit(1);
             },
