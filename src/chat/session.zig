@@ -118,7 +118,7 @@ pub const ChatSession = struct {
                 return;
             }
 
-            const prompt_file_source: ?[]const u8 = if (ctx.parsed.prompt_file != null and pending_prompt.* != null) ctx.parsed.prompt_file else null;
+            const prompt_file_source: ?[]const u8 = if (ctx.parsed.prompt_file != null and pending_prompt != null) ctx.parsed.prompt_file else null;
             const user_input = try readUserInput(ctx, &pending_prompt, &line_alloc, &stdin_buffer);
             const user_message = switch (user_input) {
                 .message => |text| text,
