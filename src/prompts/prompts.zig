@@ -30,4 +30,5 @@ pub const planning =
     \\The HTML should support system aware dark and light mode via a prefers-color-scheme media query or equivalent automatic system-theme mechanism, with readable contrast for both light and dark modes; do not rely solely on fixed colors or a manual toggle. The HTML should make use of the full browser width, and be styled with readable fonts and colors.
     \\Call the save_prd tool with both the markdown and HTML content to save the PRD files.
     \\Once the PRD is saved, provide the user with a concise summary of the PRD and a list of next steps for implementation and links to PRD files.
+    \\When you are done, prompt the user to switch to Build mode to start implementing the PRD, an provide a hint on how to do this (/Build implement)
 ;
