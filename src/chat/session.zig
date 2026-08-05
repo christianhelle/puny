@@ -1567,6 +1567,41 @@ test "historyEntryFor returns null for bare /file and other commands" {
     try std.testing.expectEqual(@as(?[]const u8, null), try historyEntryFor(allocator, "/quit", commands.parse("/quit"), null));
 }
 
+test "prompt-file prompts persist in history as /file commands end to end" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const history_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path, "prompt_history.json" });
+    defer allocator.free(history_path);
+
+    var history = prompt_history.History.init(allocator, history_path);
+    defer history.deinit();
+
+    const content = "do the thing";
+
+    // Typing `/file spec.md` records the command, not the file content.
+    const typed = "/file spec.md";
+    try history.add((try historyEntryFor(allocator, typed, commands.parse(typed), null)).?);
+
+    // A prompt loaded via the --prompt-file CLI arg records the same command.
+    try history.add((try historyEntryFor(allocator, content, commands.parse(content), "spec.md")).?);
+
+    try history.save(std.testing.io);
+
+    // A fresh session reloads history and up-arrow restores the command so the
+    // edited file can be re-run.
+    var reloaded = prompt_history.History.init(allocator, history_path);
+    defer reloaded.deinit();
+    try reloaded.load(std.testing.io);
+    try std.testing.expectEqual(@as(usize, 1), reloaded.entries.items.len);
+    try std.testing.expectEqualStrings("/file spec.md", reloaded.entries.items[0]);
+    try std.testing.expectEqualStrings("/file spec.md", reloaded.previous("").?);
+}
+
 fn finalizeSession(ctx: *ChatLoopContext) void {
     saveMessages(ctx) catch {};
     saveSessionMeta(ctx) catch {};
