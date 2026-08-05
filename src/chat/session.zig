@@ -379,6 +379,7 @@ pub const ChatSession = struct {
                     switch (outcome) {
                         .ok => |content| {
                             if (content.len == 0) {
+                                ctx.messages_arena.allocator().free(content);
                                 try ctx.stdout_writer.print("\nPrompt file is empty.\n", .{});
                                 try ctx.stdout_writer.flush();
                                 continue;
