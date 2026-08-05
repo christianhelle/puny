@@ -104,6 +104,216 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
     return ownedSliceOrEmpty(&result, allocator);
 }
 
+/// Timeout applied to shell-backed tools that do not accept a model-supplied
+/// timeout parameter (git_status, git_diff, grep_search).
+pub const run_command_timeout_ns: i96 = 30 * std.time.ns_per_s;
+
+/// Default timeout applied to web_fetch when the model does not provide one.
+pub const web_fetch_timeout_ns: i96 = 15 * std.time.ns_per_s;
+
+/// How long the caller waits after requesting a timed-out command be
+/// terminated before abandoning the worker thread. Long enough for a kill to
+/// land while still bounding the total wall time of a timed-out tool call.
+const kill_grace_ns: i96 = 2 * std.time.ns_per_s;
+
+const RunCommandShared = struct {
+    io: std.Io,
+    argv: [][]const u8,
+    cwd: ?[]const u8,
+    done: *std.Io.Event,
+    ack: *std.Io.Event,
+    cancel: std.atomic.Value(bool),
+    result: anyerror![]const u8,
+    arena: std.heap.ArenaAllocator,
+};
+
+/// Number of timed-out `runCommandTimed` calls whose worker thread was
+/// abandoned because the child could not be terminated within the grace
+/// period. Test-only observability; production code never reads it.
+var test_run_command_worker_detached: usize = 0;
+
+fn runCommandThread(shared: *RunCommandShared) void {
+    shared.result = runCommandInArena(shared.arena.allocator(), shared.io, shared.argv, shared.cwd, &shared.cancel);
+    shared.done.set(shared.io);
+    shared.ack.waitUncancelable(shared.io);
+    shared.arena.deinit();
+}
+
+fn runCommandInArena(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+    cwd: ?[]const u8,
+    cancel: *std.atomic.Value(bool),
+) anyerror![]const u8 {
+    var child = try std.process.spawn(io, .{
+        .argv = argv,
+        .cwd = if (cwd) |p| .{ .path = p } else .inherit,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
+
+    var timed_out = false;
+
+    var stdout: std.ArrayList(u8) = .empty;
+    defer stdout.deinit(allocator);
+    var stderr: std.ArrayList(u8) = .empty;
+    defer stderr.deinit(allocator);
+
+    if (child.stdout) |file| {
+        var buffer: [4096]u8 = undefined;
+        var reader = file.reader(io, &buffer);
+        while (true) {
+            if (cancel.load(.acquire)) {
+                timed_out = true;
+                break;
+            }
+            const n = try reader.interface.readSliceShort(&buffer);
+            if (n == 0) break;
+            try stdout.appendSlice(allocator, buffer[0..n]);
+        }
+    }
+
+    if (!timed_out) if (child.stderr) |file| {
+        var buffer: [4096]u8 = undefined;
+        var reader = file.reader(io, &buffer);
+        while (true) {
+            if (cancel.load(.acquire)) {
+                timed_out = true;
+                break;
+            }
+            const n = try reader.interface.readSliceShort(&buffer);
+            if (n == 0) break;
+            try stderr.appendSlice(allocator, buffer[0..n]);
+        }
+    };
+
+    if (timed_out) {
+        child.kill(io);
+        return error.TimedOut;
+    }
+
+    const term = try child.wait(io);
+
+    var result: std.ArrayList(u8) = .empty;
+    defer result.deinit(allocator);
+
+    switch (term) {
+        .exited => |code| {
+            try result.appendSlice(allocator, "Exit code: ");
+            var buf: [32]u8 = undefined;
+            const n = try std.fmt.bufPrint(&buf, "{d}", .{code});
+            try result.appendSlice(allocator, n);
+        },
+        else => {
+            try result.appendSlice(allocator, "Terminated\n");
+        },
+    }
+
+    if (stdout.items.len > 0) {
+        try result.appendSlice(allocator, "STDOUT:\n");
+        try result.appendSlice(allocator, stdout.items);
+        try result.append(allocator, '\n');
+    }
+    if (stderr.items.len > 0) {
+        try result.appendSlice(allocator, "STDERR:\n");
+        try result.appendSlice(allocator, stderr.items);
+        try result.append(allocator, '\n');
+    }
+
+    return ownedSliceOrEmpty(&result, allocator);
+}
+
+/// Runs `argv` in a worker thread and waits up to `timeout_ns` for it to
+/// finish. If the deadline passes, the child process is terminated and
+/// `error.TimedOut` is returned. The returned output is caller-owned.
+pub fn runCommandTimed(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+    cwd: ?[]const u8,
+    timeout_ns: i96,
+) ![]const u8 {
+    const spawn_ctx = blk: {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        errdefer arena.deinit();
+
+        // The worker owns everything the command touches from here on: argv,
+        // cwd, events, and the result all live in `arena`, which the worker
+        // releases when it finishes, so a timed-out call never reads or writes
+        // caller-owned memory after returning.
+        const shared = arena.allocator().create(RunCommandShared) catch return error.OutOfMemory;
+        shared.* = .{
+            .io = io,
+            .argv = &.{},
+            .cwd = null,
+            .done = undefined,
+            .ack = undefined,
+            .cancel = .init(false),
+            .result = undefined,
+            .arena = arena,
+        };
+
+        shared.argv = arena.allocator().alloc([]const u8, argv.len) catch return error.OutOfMemory;
+        for (argv, 0..) |arg, i| {
+            shared.argv[i] = arena.allocator().dupe(u8, arg) catch return error.OutOfMemory;
+        }
+        if (cwd) |path| {
+            shared.cwd = arena.allocator().dupe(u8, path) catch return error.OutOfMemory;
+        }
+
+        shared.done = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
+        shared.ack = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
+        shared.done.* = .unset;
+        shared.ack.* = .unset;
+
+        const thread = std.Thread.spawn(.{}, runCommandThread, .{shared}) catch |err| return err;
+        break :blk .{ .thread = thread, .shared = shared };
+    };
+    const thread = spawn_ctx.thread;
+    const shared = spawn_ctx.shared;
+
+    const timeout = std.Io.Timeout{ .duration = .{
+        .raw = .{ .nanoseconds = timeout_ns },
+        .clock = .awake,
+    } };
+    shared.done.waitTimeout(io, timeout) catch |wait_err| switch (wait_err) {
+        error.Timeout => {
+            // Ask the worker to terminate the child, then give it a bounded
+            // grace period to finish. The worker kills the process itself, so
+            // this never races with its own wait.
+            shared.cancel.store(true, .release);
+            const grace = std.Io.Timeout{ .duration = .{
+                .raw = .{ .nanoseconds = kill_grace_ns },
+                .clock = .awake,
+            } };
+            shared.done.waitTimeout(io, grace) catch {
+                shared.ack.set(io);
+                thread.detach();
+                test_run_command_worker_detached += 1;
+                return error.TimedOut;
+            };
+            shared.ack.set(io);
+            thread.join();
+            return error.TimedOut;
+        },
+        else => {
+            shared.ack.set(io);
+            thread.detach();
+            test_run_command_worker_detached += 1;
+            return error.TimedOut;
+        },
+    };
+
+    const transferred = if (shared.result) |bytes|
+        allocator.dupe(u8, bytes) catch return error.OutOfMemory
+    else
+        |err| err;
+    shared.ack.set(io);
+    thread.join();
+    return transferred;
+}
+
 pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u8, dest_dir: std.Io.Dir, dest_name: []const u8) !void {
     const uri = try std.Uri.parse(url);
     var client = std.http.Client{ .allocator = allocator, .io = io };
@@ -225,4 +435,14 @@ test "retryDownload fails immediately on non-transient error" {
     const result = retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
     try std.testing.expectEqual(@as(usize, 1), test_download_attempts);
     try std.testing.expectError(error.InvalidArgument, result);
+}
+
+test "runCommandTimed returns output for a command that finishes within the deadline" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "echo hello" }
+    else
+        &.{ "sh", "-c", "echo hello" };
+    const output = try runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "hello"));
 }
