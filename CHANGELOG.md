@@ -3,7 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
-- Add --prompt-file CLI flag and /file command for loading prompts from files or URLs
+- Add --prompt-file flag and /file command to load prompts from files and URLs ([#98](https://github.com/christianhelle/puny/pull/98)) ([@christianhelle](https://github.com/christianhelle/))
 - Update system and planning prompts for concise output ([#97](https://github.com/christianhelle/puny/pull/97)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix welcome screen available commands ([#96](https://github.com/christianhelle/puny/pull/96)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove Dockerfile and generate on demand instead ([#95](https://github.com/christianhelle/puny/pull/95)) ([@christianhelle](https://github.com/christianhelle/))
