@@ -45,8 +45,9 @@ fn loadWithLimit(allocator: std.mem.Allocator, io: std.Io, source: []const u8, l
 }
 
 fn loadLocal(allocator: std.mem.Allocator, io: std.Io, path: []const u8, limit: usize) Outcome {
-    const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(limit)) catch |err| {
-        return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Failed to read prompt file: {s}", .{@errorName(err)}) };
+    const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(limit)) catch |err| switch (err) {
+        error.StreamTooLong => return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "File exceeds {d} byte limit", .{limit}) },
+        else => |e| return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Failed to read prompt file: {s}", .{@errorName(e)}) },
     };
     return finalize(allocator, data);
 }
@@ -291,7 +292,7 @@ test "load rejects a local file that exceeds the limit" {
         },
         .err => |e| {
             defer if (e.owned) std.testing.allocator.free(e.message);
-            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "StreamTooLong"));
+            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "byte limit"));
         },
     }
 }
