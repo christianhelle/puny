@@ -16,6 +16,42 @@ const TestCase = struct {
     expect: []const []const u8,
     not_expect: []const []const u8,
     evidence: ?Evidence = null,
+    /// When true, the checker serves `tests/fixtures/prompt.md` from an
+    /// in-process HTTP server and replaces `{port}` in the test args with the
+    /// actual port.
+    serve_fixture: bool = false,
+    /// Expected exit code; null means 0.
+    exit_code: ?u8 = null,
+    expect_stderr: []const []const u8 = &.{},
+};
+
+const ServerCtx = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    body: []const u8,
+    done: std.atomic.Value(bool) = .init(false),
+
+    fn serve(self: *@This()) void {
+        defer self.done.store(true, .release);
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var req = http_server.receiveHead() catch return;
+        req.respond(self.body, .{}) catch return;
+    }
+};
+
+const RunParams = struct {
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    binary_path: []const u8,
+    fixture_body: []const u8,
 };
 
 pub fn main(init: std.process.Init) !u8 {
@@ -41,13 +77,22 @@ pub fn main(init: std.process.Init) !u8 {
     defer parsed.deinit();
     const tests = parsed.value;
 
+    const fixture_body = try std.Io.Dir.cwd().readFileAlloc(init.io, "tests/fixtures/prompt.md", arena, .limited(1024 * 1024));
+
+    const params = RunParams{
+        .allocator = allocator,
+        .io = init.io,
+        .binary_path = binary_path,
+        .fixture_body = fixture_body,
+    };
+
     var passed: usize = 0;
     var failed: usize = 0;
 
     for (tests) |test_case| {
         std.debug.print("  {s}... ", .{test_case.name});
 
-        const result = runTest(allocator, init.io, binary_path, test_case) catch |err| {
+        const result = runTest(params, test_case) catch |err| {
             std.debug.print("FAILED ({s})\n", .{@errorName(err)});
             failed += 1;
             continue;
@@ -82,12 +127,51 @@ fn removeEvidenceFiles(io: std.Io, test_case: TestCase) void {
     }
 }
 
-fn runTest(allocator: std.mem.Allocator, io: std.Io, binary_path: []const u8, test_case: TestCase) !bool {
+fn runTest(params: RunParams, test_case: TestCase) !bool {
+    const allocator = params.allocator;
+    const io = params.io;
+
     removeEvidenceFiles(io, test_case);
+
+    // Optionally start an in-process HTTP server and substitute the port.
+    var server_ctx: ?ServerCtx = null;
+    var server_thread: ?std.Thread = null;
+    var port_str: ?[]u8 = null;
+    if (test_case.serve_fixture) {
+        const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+        var server = try std.Io.net.IpAddress.listen(&address, io, .{});
+        const port = server.socket.address.getPort();
+        server_ctx = .{ .io = io, .server = server, .body = params.fixture_body };
+        server_thread = try std.Thread.spawn(.{}, ServerCtx.serve, .{&server_ctx.?});
+        port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
+    }
+    defer {
+        if (server_ctx) |*ctx| {
+            var guard: usize = 0;
+            while (!ctx.done.load(.acquire) and guard < 10_000_000) : (guard += 1) {
+                std.Thread.yield() catch {};
+            }
+            if (ctx.done.load(.acquire)) {
+                if (server_thread) |t| t.join();
+            }
+            ctx.server.deinit(io);
+        }
+        if (port_str) |p| allocator.free(p);
+    }
+
     const child_argv = try allocator.alloc([]const u8, test_case.args.len + 1);
     defer allocator.free(child_argv);
-    child_argv[0] = binary_path;
-    @memcpy(child_argv[1..], test_case.args);
+    child_argv[0] = params.binary_path;
+    for (test_case.args, 0..) |arg, i| {
+        if (port_str) |p| {
+            child_argv[i + 1] = try std.mem.replaceOwned(u8, allocator, arg, "{port}", p);
+        } else {
+            child_argv[i + 1] = arg;
+        }
+    }
+    defer for (child_argv[1..]) |arg| {
+        if (port_str != null) allocator.free(arg);
+    };
 
     const result = try std.process.run(allocator, io, .{
         .argv = child_argv,
@@ -101,10 +185,11 @@ fn runTest(allocator: std.mem.Allocator, io: std.Io, binary_path: []const u8, te
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
+    const expected_exit: u8 = test_case.exit_code orelse 0;
     switch (result.term) {
         .exited => |code| {
-            if (code != 0) {
-                std.debug.print("FAILED (exit {d})\n", .{code});
+            if (code != expected_exit) {
+                std.debug.print("FAILED (exit {d}, expected {d})\n", .{ code, expected_exit });
                 return false;
             }
         },
@@ -132,6 +217,13 @@ fn runTest(allocator: std.mem.Allocator, io: std.Io, binary_path: []const u8, te
     for (test_case.not_expect) |not_expected| {
         if (std.mem.indexOf(u8, result.stdout, not_expected) != null) {
             std.debug.print("FAILED\n    unexpected: '{s}'\n", .{not_expected});
+            return false;
+        }
+    }
+
+    for (test_case.expect_stderr) |expected| {
+        if (std.mem.indexOf(u8, result.stderr, expected) == null) {
+            std.debug.print("FAILED\n    missing in stderr: '{s}'\n", .{expected});
             return false;
         }
     }
