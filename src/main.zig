@@ -61,22 +61,14 @@ pub fn main(init: std.process.Init) !void {
         switch (outcome) {
             .ok => |content| {
                 if (content.len == 0) {
-                    var err_buf: [512]u8 = undefined;
-                    var err_writer: std.Io.File.Writer = .init(.stderr(), init.io, &err_buf);
-                    const stderr_writer = &err_writer.interface;
-                    stderr_writer.print("Failed to load prompt from {s}: prompt file is empty\n", .{source}) catch {};
-                    stderr_writer.flush() catch {};
+                    printStartupError(init.io, source, "prompt file is empty");
                     std.process.exit(1);
                 }
                 parsed.prompt = content;
             },
             .err => |e| {
                 defer if (e.owned) arena.free(e.message);
-                var err_buf: [512]u8 = undefined;
-                var err_writer: std.Io.File.Writer = .init(.stderr(), init.io, &err_buf);
-                const stderr_writer = &err_writer.interface;
-                stderr_writer.print("Failed to load prompt from {s}: {s}\n", .{ source, e.message }) catch {};
-                stderr_writer.flush() catch {};
+                printStartupError(init.io, source, e.message);
                 std.process.exit(1);
             },
         }
@@ -308,6 +300,15 @@ pub fn main(init: std.process.Init) !void {
 
     var chat_session = session.ChatSession.init(ctx);
     try chat_session.run();
+}
+
+/// Prints `Failed to load prompt from <source>: <reason>` to stderr and flushes.
+fn printStartupError(io: std.Io, source: []const u8, reason: []const u8) void {
+    var err_buf: [512]u8 = undefined;
+    var err_writer: std.Io.File.Writer = .init(.stderr(), io, &err_buf);
+    const stderr_writer = &err_writer.interface;
+    stderr_writer.print("Failed to load prompt from {s}: {s}\n", .{ source, reason }) catch {};
+    stderr_writer.flush() catch {};
 }
 
 fn printStartupTime(
