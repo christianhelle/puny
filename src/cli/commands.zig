@@ -20,6 +20,7 @@ pub const Command = union(enum) {
     resume_session: ?[]const u8,
     skills,
     skill: []const u8,
+    file: ?[]const u8,
     prompt: []const u8,
 };
 
@@ -37,6 +38,7 @@ pub const Action = union(enum) {
     restore_session: ?[]const u8,
     list_skills,
     load_skill: []const u8,
+    load_prompt_file: []const u8,
 };
 
 pub const Context = struct {
@@ -66,6 +68,7 @@ pub const command_tokens = [_][]const u8{
     "/resume",
     "/prune",
     "/skills",
+    "/file",
 };
 
 pub fn parse(user_message: []const u8) Command {
@@ -123,6 +126,13 @@ pub fn parse(user_message: []const u8) Command {
             return .{ .resume_session = user_message["/resume ".len..] };
         }
         return .{ .resume_session = null };
+    }
+
+    if (std.mem.eql(u8, user_message, "/file") or std.mem.startsWith(u8, user_message, "/file ")) {
+        if (user_message.len > "/file ".len) {
+            return .{ .file = user_message["/file ".len..] };
+        }
+        return .{ .file = null };
     }
 
     if (user_message.len > 0 and user_message[0] == '/')
@@ -213,6 +223,15 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
 
         .skill => |name_text| return .{ .load_skill = name_text },
 
+        .file => |source| {
+            if (source == null or source.?.len == 0) {
+                try ctx.stdout_writer.print("\nUsage: /file <path-or-url>\n", .{});
+                try ctx.stdout_writer.flush();
+                return .continue_;
+            }
+            return .{ .load_prompt_file = source.? };
+        },
+
         .prompt => |text| {
             try ctx.messages.append(ctx.messages_alloc, .{ .user = try ctx.messages_alloc.dupe(u8, text) });
             return .run_chat_turn;
@@ -249,6 +268,12 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqualDeep(Command{ .skill = "nano-commits" }, parse("/nano-commits"));
 
     try std.testing.expectEqualDeep(Command{ .prompt = "hello" }, parse("hello"));
+}
+
+test "parse recognizes the file command before the skill fallback" {
+    try std.testing.expectEqualDeep(Command{ .file = null }, parse("/file"));
+    try std.testing.expectEqualDeep(Command{ .file = "spec.md" }, parse("/file spec.md"));
+    try std.testing.expectDeepEqual(Command{ .file = "https://example.com/prompt.md" }, parse("/file https://example.com/prompt.md"));
 }
 
 test "every registered command token parses as a command" {
@@ -640,4 +665,51 @@ test "dispatch prompt appends user message and runs chat turn" {
     try std.testing.expectEqual(Action.run_chat_turn, action);
     try std.testing.expectEqual(@as(usize, 1), messages.items.len);
     try std.testing.expectEqualDeep(openai.Message{ .user = "hello" }, messages.items[0]);
+}
+
+test "dispatch file without text prints usage and continues" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .file = null }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+    try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, "Usage: /file"));
+}
+
+test "dispatch file returns load_prompt_file action" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .file = "spec.md" }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .load_prompt_file = "spec.md" }, action);
 }
