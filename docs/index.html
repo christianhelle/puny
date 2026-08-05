@@ -109,7 +109,8 @@
               <span class="output">&nbsp;&nbsp;</span><span class="output green">/prune</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Remove old sessions</span>
             </div>
             <div class="terminal-line">
-              <span class="output">&nbsp;&nbsp;</span><span class="output green">/skills</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; List global and repository skills</span>
+              <span class="output">&nbsp;&nbsp;</span><span class="output green">/skills</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; List global and repository skills</span><br />
+              <span class="output">&nbsp;&nbsp;</span><span class="output green">/file [path|url]</span><span class="output">&nbsp; Load a prompt from a file or URL</span>
               <br /><br />
             </div>
             <div class="terminal-line">
@@ -309,6 +310,13 @@
           <h3>GitHub Copilot</h3>
           <div class="install-code">
             <code>puny --provider copilot</code>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3>Prompt Files</h3>
+          <p>Load the first prompt from a local file or an <code>http://</code>/<code>https://</code> URL via <code>--prompt-file</code> at startup or <code>/file</code> in a session:</p>
+          <div class="install-code">
+            <code>puny --prompt-file spec.md --oneshot</code>
           </div>
         </div>
       </div>
