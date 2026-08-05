@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Update system and planning prompts for concise output ([#97](https://github.com/christianhelle/puny/pull/97)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix welcome screen available commands ([#96](https://github.com/christianhelle/puny/pull/96)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove Dockerfile and generate on demand instead ([#95](https://github.com/christianhelle/puny/pull/95)) ([@christianhelle](https://github.com/christianhelle/))
 - Add zig build install-release step ([#94](https://github.com/christianhelle/puny/pull/94)) ([@christianhelle](https://github.com/christianhelle/))
