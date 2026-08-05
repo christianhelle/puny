@@ -315,6 +315,30 @@ test "load reads a local file and trims surrounding whitespace" {
     }
 }
 
+test "load returns owned empty content for a whitespace-only file" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "blank.md", .data = "\n  \n" });
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path, "blank.md" });
+    defer std.testing.allocator.free(path);
+
+    const outcome = load(std.testing.allocator, std.testing.io, path);
+    switch (outcome) {
+        .ok => |content| {
+            // Empty content is still caller-owned: the caller must free it.
+            // Sessions that discard empty prompts (e.g. /file with a blank
+            // file) rely on this contract.
+            defer std.testing.allocator.free(content);
+            try std.testing.expectEqual(@as(usize, 0), content.len);
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            return error.UnexpectedFailure;
+        },
+    }
+}
+
 test "load reports a missing local file" {
     const path = "definitely-not-here-puny-prompt.md";
     const outcome = load(std.testing.allocator, std.testing.io, path);
