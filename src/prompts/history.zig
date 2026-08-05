@@ -69,6 +69,20 @@ pub const History = struct {
             return;
         };
 
+        // Tighten an existing history file to owner-only before overwriting it
+        // so prompts are never left group/other-readable after a rewrite.
+        if (comptime builtin.os.tag != .windows) {
+            if (cwd.statFile(io, self.path, .{})) |st| {
+                if (st.permissions.toMode() & 0o077 != 0) {
+                    std.log.warn(
+                        "prompt history file {s} is readable or writable by other users; tightening to owner-only.",
+                        .{self.path},
+                    );
+                    cwd.setFilePermissions(io, self.path, @enumFromInt(0o600), .{}) catch {};
+                }
+            } else |_| {}
+        }
+
         const buffer = try std.json.Stringify.valueAlloc(
             self.allocator,
             self.entries.items,
@@ -84,6 +98,11 @@ pub const History = struct {
             return;
         };
         defer file.close(io);
+        // A freshly created file can inherit a permissive umask, and truncating
+        // an existing file keeps its previous mode; force owner-only either way.
+        if (comptime builtin.os.tag != .windows) {
+            cwd.setFilePermissions(io, self.path, @enumFromInt(0o600), .{}) catch {};
+        }
         file.writeStreamingAll(io, buffer) catch |err| {
             std.log.warn("failed to write prompt history to {s}: {s}.", .{ self.path, @errorName(err) });
             return;
@@ -368,6 +387,33 @@ test "save tolerates inaccessible history path" {
     try history.add("alpha");
 
     try history.save(io);
+}
+
+test "save writes history with owner-only permissions" {
+    if (comptime builtin.os.tag == .windows) return;
+
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
+
+    const path = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-history-permissions.json" });
+    defer allocator.free(path);
+
+    std.Io.Dir.cwd().deleteFile(io, path) catch {};
+
+    {
+        var history = History.init(allocator, path);
+        try history.add("alpha");
+        try history.save(io);
+        history.deinit();
+    }
+
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0), st.permissions.toMode() & 0o077);
+
+    try std.Io.Dir.cwd().deleteFile(io, path);
 }
 
 test "history size is capped" {
