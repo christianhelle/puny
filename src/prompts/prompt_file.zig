@@ -20,9 +20,9 @@ pub const Outcome = union(enum) {
 /// Returns true when `source` looks like an http:// or https:// URL.
 pub fn isHttpUrl(source: []const u8) bool {
     const uri = std.Uri.parse(source) catch return false;
-    const scheme = uri.scheme orelse return false;
-    return std.ascii.eqlIgnoreCase(scheme, "http") or
-        std.ascii.eqlIgnoreCase(scheme, "https");
+    if (uri.scheme.len == 0) return false;
+    return std.ascii.eqlIgnoreCase(uri.scheme, "http") or
+        std.ascii.eqlIgnoreCase(uri.scheme, "https");
 }
 
 /// Loads a prompt from a local file or remote URL. Never fails: every failure
@@ -249,24 +249,24 @@ test "load fetches a remote prompt and trims it" {
         body: []const u8,
         done: std.atomic.Value(bool) = .init(false),
 
-        fn serve(self: *Ctx) void {
+        fn serve(self: *@This()) void {
             defer self.done.store(true, .release);
             var stream = self.server.accept(self.io) catch return;
             defer stream.close(self.io);
 
             var in_buf: [4096]u8 = undefined;
             var out_buf: [4096]u8 = undefined;
-            const reader = stream.reader(self.io, &in_buf);
-            const writer = stream.writer(self.io, &out_buf);
+            var reader = stream.reader(self.io, &in_buf);
+            var writer = stream.writer(self.io, &out_buf);
 
             var http_server = std.http.Server.init(&reader.interface, &writer.interface);
-            const req = http_server.receiveHead() catch return;
+            var req = http_server.receiveHead() catch return;
             req.respond(self.body, .{}) catch return;
         }
     };
 
-    const address = std.Io.net.Ip4Address.loopback(0);
-    var server = std.Io.net.Ip4Address.listen(&address, std.testing.io, .{}) catch |err| {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch |err| {
         std.debug.print("listen failed: {s}\n", .{@errorName(err)});
         return error.ListenFailed;
     };
