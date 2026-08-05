@@ -1495,6 +1495,79 @@ fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
     }
 }
 
+/// Returns the entry to record in prompt history for `command`, or `null` when
+/// nothing should be recorded. Prompt-file prompts are recorded as their
+/// `/file <source>` command so the user can re-run the prompt after editing the
+/// file. `prompt_file_source` is the `--prompt-file` source of the pending
+/// prompt, if any.
+fn historyEntryFor(
+    allocator: std.mem.Allocator,
+    user_message: []const u8,
+    command: commands.Command,
+    prompt_file_source: ?[]const u8,
+) !?[]const u8 {
+    switch (command) {
+        .file => |source| {
+            const path = if (source) |s| std.mem.trim(u8, s, &std.ascii.whitespace) else "";
+            if (path.len == 0) return null;
+            return try std.fmt.allocPrint(allocator, "/file {s}", .{path});
+        },
+        .prompt => {
+            if (prompt_file_source) |source| {
+                return try std.fmt.allocPrint(allocator, "/file {s}", .{source});
+            }
+            return user_message;
+        },
+        else => return null,
+    }
+}
+
+test "historyEntryFor records a typed /file input as its command" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const entry = (try historyEntryFor(allocator, "/file spec.md", commands.parse("/file spec.md"), null)).?;
+    try std.testing.expectEqualStrings("/file spec.md", entry);
+}
+
+test "historyEntryFor trims surrounding whitespace from the /file argument" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const entry = (try historyEntryFor(allocator, "/file   spec.md  ", commands.parse("/file   spec.md  "), null)).?;
+    try std.testing.expectEqualStrings("/file spec.md", entry);
+}
+
+test "historyEntryFor records the /file command for a prompt loaded from --prompt-file" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const content = "do the thing";
+    const entry = (try historyEntryFor(allocator, content, commands.parse(content), "spec.md")).?;
+    try std.testing.expectEqualStrings("/file spec.md", entry);
+}
+
+test "historyEntryFor keeps plain prompts as the message itself" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const entry = (try historyEntryFor(allocator, "hello", commands.parse("hello"), null)).?;
+    try std.testing.expectEqualStrings("hello", entry);
+}
+
+test "historyEntryFor returns null for bare /file and other commands" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    try std.testing.expectEqual(@as(?[]const u8, null), try historyEntryFor(allocator, "/file", commands.parse("/file"), null));
+    try std.testing.expectEqual(@as(?[]const u8, null), try historyEntryFor(allocator, "/quit", commands.parse("/quit"), null));
+}
+
 fn finalizeSession(ctx: *ChatLoopContext) void {
     saveMessages(ctx) catch {};
     saveSessionMeta(ctx) catch {};
