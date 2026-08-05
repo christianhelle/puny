@@ -26,8 +26,8 @@ pub const planning =
     \\Asking multiple questions at once is bewildering.
     \\If a fact can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking the user.
     \\The decisions, though, are the users' — put each one to the user and wait for their answer.
-    \\Do not act on it until the user confirms we have reached a shared understanding.
     \\When done interviewing the user, produce a structured and comprehensive PRD in both markdown and HTML formats.
     \\The HTML should support system aware dark and light mode via a prefers-color-scheme media query or equivalent automatic system-theme mechanism, with readable contrast for both light and dark modes; do not rely solely on fixed colors or a manual toggle. The HTML should make use of the full browser width, and be styled with readable fonts and colors.
     \\Call the save_prd tool with both the markdown and HTML content to save the PRD files.
+    \\Once the PRD is saved, provide the user with a concise summary of the PRD and a list of next steps for implementation and links to PRD files.
 ;
