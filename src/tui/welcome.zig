@@ -57,6 +57,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         try printCommand(writer, "/resume [id]", "Resume a saved session");
         try printCommand(writer, "/prune", "Remove old sessions");
         try printCommand(writer, "/skills", "List global and repository skills");
+        try printCommand(writer, "/file [path|url]", "Load a prompt from a file or URL");
         try writer.print("\n", .{});
     }
 
