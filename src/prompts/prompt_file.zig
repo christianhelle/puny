@@ -456,9 +456,10 @@ test "load times out on a server that never responds" {
     const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/never", .{port});
     defer std.testing.allocator.free(url);
 
-    // The timeout path deliberately leaks its heap state, so use an allocator
-    // that does not leak-check.
-    const outcome = loadRemote(std.heap.page_allocator, std.testing.io, url, max_prompt_bytes, 100 * std.time.ns_per_ms);
+    // The caller must not retain any allocations after a timed-out fetch: the
+    // fetch thread finishes asynchronously, so nothing it touches may live in
+    // the caller's allocator. A leak-checking allocator catches violations.
+    const outcome = loadRemote(std.testing.allocator, std.testing.io, url, max_prompt_bytes, 100 * std.time.ns_per_ms);
 
     // Wait for the server thread to finish before tearing down the socket.
     var guard: usize = 0;
@@ -470,11 +471,11 @@ test "load times out on a server that never responds" {
 
     switch (outcome) {
         .ok => |content| {
-            std.heap.page_allocator.free(content);
+            std.testing.allocator.free(content);
             return error.UnexpectedSuccess;
         },
         .err => |e| {
-            defer if (e.owned) std.heap.page_allocator.free(e.message);
+            defer if (e.owned) std.testing.allocator.free(e.message);
             try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "timed out"));
         },
     }
