@@ -9,6 +9,7 @@ pub const Options = struct {
     model: ?[]const u8 = null,
     model_explicit: bool = false,
     prompt: ?[]const u8 = null,
+    prompt_file: ?[]const u8 = null,
     oneshot: bool = false,
     mock: bool = false,
     reconfigure: bool = false,
@@ -33,6 +34,17 @@ fn fatal(io: std.Io, comptime fmt: []const u8, args: anytype) noreturn {
     writeErr(io, fmt, args);
     printHelp(io);
     std.process.exit(1);
+}
+
+/// Returns an error when the combination of options is invalid. Kept separate
+/// from `parseArgs` so it is testable without triggering a process exit.
+pub fn validate(opts: Options) !void {
+    if (opts.prompt != null and opts.prompt_file != null) {
+        return error.ConflictingPrompts;
+    }
+    if (opts.oneshot and opts.prompt == null and opts.prompt_file == null) {
+        return error.OneshotRequiresPrompt;
+    }
 }
 
 pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: []const [:0]const u8) Options {
@@ -75,6 +87,10 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.prompt = args[i];
+        } else if (std.mem.eql(u8, arg, "--prompt-file")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.prompt_file = args[i];
         } else if (std.mem.eql(u8, arg, "--reconfigure")) {
             opts.reconfigure = true;
         } else if (std.mem.eql(u8, arg, "--show-thinking")) {
@@ -99,9 +115,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
     }
-    if (opts.oneshot and opts.prompt == null) {
-        fatal(io, "--oneshot requires --prompt\n\n", .{});
-    }
+
+    validate(opts) catch |err| switch (err) {
+        error.ConflictingPrompts => fatal(io, "Cannot use both --prompt and --prompt-file\n\n", .{}),
+        error.OneshotRequiresPrompt => fatal(io, "--oneshot requires --prompt or --prompt-file\n\n", .{}),
+    };
 
     if (opts.provider == null) {
         if (environ_map.get("PUNY_PROVIDER")) |value| {
@@ -148,25 +166,26 @@ pub fn printHelp(io: std.Io) void {
         \\Usage: puny [options]
         \\
         \\Options:
-        \\      --provider <name>       Provider to use: lmstudio, opencode, opencode-go, or copilot (env/config/CLI precedence)
-        \\  -u, --url <url>             LM Studio endpoint URL (config/env/CLI precedence)
-        \\  -k, --api-key <key>         Provider API token (env/CLI precedence, session only)
-        \\      --api-key-file <path>   Read API token from file
-        \\  -m, --model <id>            Model identifier (skip picker if found in running models)
-        \\  -p, --prompt <text>         Pre-fill prompt as first user message
-        \\  -1, --oneshot, --one-shot   Exit after processing the prompt (requires --prompt)
-        \\  -M, --mock                  Use mock provider (no network calls, for testing)
-        \\      --reconfigure           Re-run first-run setup and update config
-        \\      --show-thinking         Show reasoning/thinking output from the model
-        \\      --session <id>          Resume a previous session by ID or prefix
-        \\      --resume                Resume the most recent session
-        \\      --prune                 Delete old sessions (use --session to keep one)
-        \\      --chat-log              Log conversation to puny_chat.log
-        \\      --debug                 Log HTTP requests and responses to puny_debug.log
-        \\  -U, --upgrade               Upgrade to the latest release
-        \\      --force                 Force upgrade even if same version (use with --upgrade)
-        \\  -h, --help                  Show this help text
-        \\  -V, --version               Print version
+        \\      --provider <name>        Provider to use: lmstudio, opencode, opencode-go, or copilot (env/config/CLI precedence)
+        \\  -u, --url <url>              LM Studio endpoint URL (config/env/CLI precedence)
+        \\  -k, --api-key <key>          Provider API token (env/CLI precedence, session only)
+        \\      --api-key-file <path>    Read API token from file
+        \\  -m, --model <id>             Model identifier (skip picker if found in running models)
+        \\  -p, --prompt <text>          Pre-fill prompt as first user message
+        \\      --prompt-file <path|url> Read first prompt from a file or URL
+        \\  -1, --oneshot, --one-shot    Exit after processing the prompt (requires --prompt or --prompt-file)
+        \\  -M, --mock                   Use mock provider (no network calls, for testing)
+        \\      --reconfigure            Re-run first-run setup and update config
+        \\      --show-thinking          Show reasoning/thinking output from the model
+        \\      --session <id>           Resume a previous session by ID or prefix
+        \\      --resume                 Resume the most recent session
+        \\      --prune                  Delete old sessions (use --session to keep one)
+        \\      --chat-log               Log conversation to puny_chat.log
+        \\      --debug                  Log HTTP requests and responses to puny_debug.log
+        \\  -U, --upgrade                Upgrade to the latest release
+        \\      --force                  Force upgrade even if same version (use with --upgrade)
+        \\  -h, --help                   Show this help text
+        \\  -V, --version                Print version
         \\
     , .{version_line});
 }
@@ -344,4 +363,37 @@ test "parseArgs sets prune with session" {
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expect(opts.prune);
     try std.testing.expectEqualStrings("abc-123", opts.session.?);
+}
+
+test "parseArgs sets prompt_file from flag" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--prompt-file", "spec.md" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqualStrings("spec.md", opts.prompt_file.?);
+}
+
+test "validate rejects both prompt and prompt-file" {
+    const opts = Options{ .prompt = "hello", .prompt_file = "spec.md" };
+    try std.testing.expectError(error.ConflictingPrompts, validate(opts));
+}
+
+test "validate allows prompt-file with oneshot" {
+    const opts = Options{ .prompt_file = "spec.md", .oneshot = true };
+    try validate(opts);
+}
+
+test "validate allows prompt with oneshot" {
+    const opts = Options{ .prompt = "hello", .oneshot = true };
+    try validate(opts);
+}
+
+test "validate rejects oneshot without prompt or prompt-file" {
+    const opts = Options{ .oneshot = true };
+    try std.testing.expectError(error.OneshotRequiresPrompt, validate(opts));
 }
