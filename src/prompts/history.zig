@@ -136,11 +136,11 @@ pub const History = struct {
         }
     }
 
-    /// `/file` commands are stored so a user can re-run a prompt file from
+    /// `/file <source>` commands are stored so a user can re-run a prompt file from
     /// history after editing it. Other slash commands are transient input and
     /// are not stored.
     fn isFileCommand(text: []const u8) bool {
-        return std.mem.eql(u8, text, "/file") or std.mem.startsWith(u8, text, "/file ");
+        return std.mem.startsWith(u8, text, "/file ");
     }
 
     /// Returns true when `source` is an http(s) URL that embeds credentials in
