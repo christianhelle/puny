@@ -17,6 +17,7 @@ const opencode_go = @import("../providers/opencode_go.zig");
 const copilot = @import("../providers/copilot.zig");
 const prompt_history = @import("../prompts/history.zig");
 const prompts = @import("../prompts/prompts.zig");
+const prompt_file = @import("../prompts/prompt_file.zig");
 const provider = @import("../providers/provider.zig");
 const instructions = @import("../agents/instructions.zig");
 const sigint = @import("../core/sigint.zig");
@@ -380,6 +381,43 @@ pub const ChatSession = struct {
                         if (turn_result == .exit) return;
                     }
                     continue;
+                },
+                .load_prompt_file => |source| {
+                    const outcome = prompt_file.load(ctx.messages_arena.allocator(), ctx.io, source);
+                    switch (outcome) {
+                        .ok => |content| {
+                            if (content.len == 0) {
+                                try ctx.stdout_writer.print("\nPrompt file is empty.\n", .{});
+                                try ctx.stdout_writer.flush();
+                                continue;
+                            }
+                            try ctx.stdout_writer.print("\n{s}Loaded prompt from {s} ({d} bytes){s}\n", .{ ansi.dim, source, content.len, ansi.reset });
+                            try ctx.stdout_writer.flush();
+                            if (ctx.chat_log) |log| {
+                                log.print("[USER]\nLoaded from {s}:\n{s}\n\n", .{ source, content });
+                            }
+                            for (ctx.skill_registry.records.items) |*r| {
+                                if (loaded_skills.contains(r.name)) continue;
+                                if (!skills.recordMatchesTrigger(r, content)) continue;
+                                const skill_content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
+                                try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = skill_content });
+                                try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
+                                try ctx.stdout_writer.flush();
+                                loaded_skills.put(ctx.arena, r.name, {}) catch {};
+                            }
+                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = content });
+                            if (!ctx.parsed.oneshot) {
+                                try ctx.history.add(content);
+                                try ctx.history.save(ctx.io);
+                            }
+                        },
+                        .err => |msg| {
+                            defer ctx.messages_arena.allocator().free(msg);
+                            try ctx.stdout_writer.print("\nFailed to load prompt from {s}: {s}\n", .{ source, msg });
+                            try ctx.stdout_writer.flush();
+                            continue;
+                        },
+                    }
                 },
                 .run_chat_turn => {},
             }

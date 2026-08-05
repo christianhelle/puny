@@ -8,6 +8,7 @@ const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const core_sess = @import("core/session.zig");
 const prompt_history = @import("prompts/history.zig");
+const prompt_file = @import("prompts/prompt_file.zig");
 const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
 const session = @import("chat/session.zig");
@@ -50,6 +51,35 @@ pub fn main(init: std.process.Init) !void {
         }
         try out.interface.flush();
         return;
+    }
+
+    // Load the prompt file up front so a missing file or URL fails fast,
+    // before any provider/model initialization work happens. The loaded
+    // content becomes the pending prompt, exactly like `--prompt`.
+    if (parsed.prompt_file) |source| {
+        const outcome = prompt_file.load(arena, init.io, source);
+        switch (outcome) {
+            .ok => |content| {
+                if (content.len == 0) {
+                    var err_buf: [512]u8 = undefined;
+                    var err_writer: std.Io.File.Writer = .init(.stderr(), init.io, &err_buf);
+                    const stderr_writer = &err_writer.interface;
+                    stderr_writer.print("Failed to load prompt from {s}: prompt file is empty\n", .{source}) catch {};
+                    stderr_writer.flush() catch {};
+                    std.process.exit(1);
+                }
+                parsed.prompt = content;
+            },
+            .err => |msg| {
+                defer arena.free(msg);
+                var err_buf: [512]u8 = undefined;
+                var err_writer: std.Io.File.Writer = .init(.stderr(), init.io, &err_buf);
+                const stderr_writer = &err_writer.interface;
+                stderr_writer.print("Failed to load prompt from {s}: {s}\n", .{ source, msg }) catch {};
+                stderr_writer.flush() catch {};
+                std.process.exit(1);
+            },
+        }
     }
 
     var debug_buffer: [4096]u8 = undefined;
@@ -591,4 +621,8 @@ test "include welcome tests" {
 
 test "include commands tests" {
     _ = @import("cli/commands.zig");
+}
+
+test "include prompt file tests" {
+    _ = @import("prompts/prompt_file.zig");
 }
