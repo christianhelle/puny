@@ -145,15 +145,7 @@ pub const ChatSession = struct {
             core_session.setWriteBlocked(ctx.planning_mode.*);
 
             if (command == .prompt) {
-                for (ctx.skill_registry.records.items) |*r| {
-                    if (loaded_skills.contains(r.name)) continue;
-                    if (!skills.recordMatchesTrigger(r, user_message)) continue;
-                    const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
-                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-                    try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
-                    try ctx.stdout_writer.flush();
-                    loaded_skills.put(ctx.arena, r.name, {}) catch {};
-                }
+                try maybeLoadTriggeredSkills(ctx, user_message, &loaded_skills);
             }
 
             if (command == .prompt and !ctx.parsed.oneshot) {
@@ -396,24 +388,16 @@ pub const ChatSession = struct {
                             if (ctx.chat_log) |log| {
                                 log.print("[USER]\nLoaded from {s}:\n{s}\n\n", .{ source, content });
                             }
-                            for (ctx.skill_registry.records.items) |*r| {
-                                if (loaded_skills.contains(r.name)) continue;
-                                if (!skills.recordMatchesTrigger(r, content)) continue;
-                                const skill_content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
-                                try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = skill_content });
-                                try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
-                                try ctx.stdout_writer.flush();
-                                loaded_skills.put(ctx.arena, r.name, {}) catch {};
-                            }
+                            try maybeLoadTriggeredSkills(ctx, content, &loaded_skills);
                             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = content });
                             if (!ctx.parsed.oneshot) {
                                 try ctx.history.add(content);
                                 try ctx.history.save(ctx.io);
                             }
                         },
-                        .err => |msg| {
-                            defer ctx.messages_arena.allocator().free(msg);
-                            try ctx.stdout_writer.print("\nFailed to load prompt from {s}: {s}\n", .{ source, msg });
+                        .err => |e| {
+                            defer if (e.owned) ctx.messages_arena.allocator().free(e.message);
+                            try ctx.stdout_writer.print("\nFailed to load prompt from {s}: {s}\n", .{ source, e.message });
                             try ctx.stdout_writer.flush();
                             continue;
                         },
@@ -427,6 +411,25 @@ pub const ChatSession = struct {
         }
     }
 };
+
+/// Loads any skill whose trigger phrase matches `text` into the message list,
+/// skipping skills that were already loaded. Shared by the plain prompt path
+/// and the prompt-file path.
+fn maybeLoadTriggeredSkills(
+    ctx: *ChatLoopContext,
+    text: []const u8,
+    loaded_skills: *std.StringHashMapUnmanaged(void),
+) !void {
+    for (ctx.skill_registry.records.items) |*r| {
+        if (loaded_skills.contains(r.name)) continue;
+        if (!skills.recordMatchesTrigger(r, text)) continue;
+        const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
+        try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
+        try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
+        try ctx.stdout_writer.flush();
+        loaded_skills.put(ctx.arena, r.name, {}) catch {};
+    }
+}
 
 fn saveMessages(ctx: *ChatLoopContext) !void {
     const dir = ctx.session.dir;
