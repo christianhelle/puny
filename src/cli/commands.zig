@@ -273,7 +273,7 @@ test "parse recognizes all slash commands" {
 test "parse recognizes the file command before the skill fallback" {
     try std.testing.expectEqualDeep(Command{ .file = null }, parse("/file"));
     try std.testing.expectEqualDeep(Command{ .file = "spec.md" }, parse("/file spec.md"));
-    try std.testing.expectDeepEqual(Command{ .file = "https://example.com/prompt.md" }, parse("/file https://example.com/prompt.md"));
+    try std.testing.expectEqualDeep(Command{ .file = "https://example.com/prompt.md" }, parse("/file https://example.com/prompt.md"));
 }
 
 test "every registered command token parses as a command" {
