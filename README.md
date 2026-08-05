@@ -247,6 +247,27 @@ Run a single prompt and exit. Useful for scripts or quick tasks:
 puny --prompt "List all source files" --oneshot
 ```
 
+
+### Prompt from a file or URL
+
+Load the first prompt from a local file or an `http://`/`https://` URL, either
+at startup via the CLI or interactively with `/file`:
+
+```bash
+# CLI: local file or remote URL, optionally one-shot
+puny --prompt-file spec.md --oneshot
+puny --prompt-file https://example.com/spec.md
+
+# Interactive
+/file spec.md
+/file https://example.com/spec.md
+```
+
+The loaded content is sent as the first user message, exactly like `--prompt`.
+`--oneshot` accepts `--prompt-file` in place of `--prompt`. Using both
+`--prompt` and `--prompt-file` is an error. Local files and remote responses
+are limited to 10 MiB, and remote fetches time out after 30 seconds.
+
 ### Select a provider
 
 Use `--provider` to switch between LM Studio (`lmstudio`, the default), OpenCode Zen (`opencode`), OpenCode Go (`opencode-go`), and GitHub Copilot (`copilot`). You can also set `PUNY_PROVIDER` or the `provider` field in `config.json`.
@@ -455,7 +476,8 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
 | `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
 | `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
-| `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt`)                                    |
+| `--prompt-file <path|url>` | Read first prompt from a file or URL (10 MiB limit) |
+| `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                                    |
 | `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
 | `--reconfigure`         | Re-run first-run setup and update config                                                  |
 | `--show-thinking`       | Show reasoning/thinking output from the model                                             |
@@ -496,6 +518,7 @@ While in a chat session:
 - `/resume [id]` — list saved sessions and pick one to restore, or restore a specific session by UUID prefix
 - `/prune` — delete all session directories except the current one
 - `/skills` — list all available global and repository skills
+- `/file <path|url>` — load a prompt from a local file or URL and send it as the next message
 
 Any unrecognized slash command (e.g. `/nano-commits`, `/grill-me`) is treated as a
 skill name and loads the matching skill if found.
