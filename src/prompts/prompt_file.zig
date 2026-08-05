@@ -53,13 +53,21 @@ fn loadLocal(allocator: std.mem.Allocator, io: std.Io, path: []const u8, limit: 
 }
 
 const FetchShared = struct {
-    allocator: std.mem.Allocator,
     io: std.Io,
+    /// Worker-owned copies: url and user_agent live in `arena`, which the
+    /// worker releases when it finishes, so it never reads caller-owned memory
+    /// after a timeout has let loadRemote return.
     url: []const u8,
     user_agent: []const u8,
     limit: usize,
+    /// Worker -> caller: the result is ready to read.
     event: *std.Io.Event,
+    /// Caller -> worker: the result has been consumed (or abandoned), so the
+    /// worker may release its arena. Always set before the caller returns.
+    ack: *std.Io.Event,
     result: FetchResult,
+    /// Allocator owned exclusively by the worker.
+    arena: std.heap.ArenaAllocator,
 };
 
 const FetchResult = union(enum) {
@@ -74,28 +82,56 @@ fn loadRemote(allocator: std.mem.Allocator, io: std.Io, url: []const u8, limit: 
         if (user_agent.owned) allocator.free(user_agent.message);
         return .{ .err = dupeOr(allocator, "Out of memory") };
     };
-    // The event must outlive this frame: on timeout the fetch thread keeps
-    // running and signals it after we have returned.
-    const event = allocator.create(std.Io.Event) catch {
-        allocator.destroy(shared);
+    shared.* = .{
+        .io = io,
+        .url = &.{},
+        .user_agent = &.{},
+        .limit = limit,
+        .event = undefined,
+        .ack = undefined,
+        .result = undefined,
+        .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+    };
+    // The fetch thread may outlive this call (on timeout), so give it heap
+    // copies of the URL and user agent plus an allocator it exclusively owns;
+    // the worker releases all of it when it finishes.
+    shared.url = shared.arena.allocator().dupe(u8, url) catch {
         if (user_agent.owned) allocator.free(user_agent.message);
+        shared.arena.deinit();
+        allocator.destroy(shared);
+        return .{ .err = dupeOr(allocator, "Out of memory") };
+    };
+    shared.user_agent = shared.arena.allocator().dupe(u8, user_agent.message) catch {
+        if (user_agent.owned) allocator.free(user_agent.message);
+        shared.arena.deinit();
+        allocator.destroy(shared);
+        return .{ .err = dupeOr(allocator, "Out of memory") };
+    };
+    if (user_agent.owned) allocator.free(user_agent.message);
+
+    // The events must outlive this frame: on timeout the fetch thread keeps
+    // running and signals them after we have returned.
+    const event = allocator.create(std.Io.Event) catch {
+        shared.arena.deinit();
+        allocator.destroy(shared);
+        return .{ .err = dupeOr(allocator, "Out of memory") };
+    };
+    const ack = allocator.create(std.Io.Event) catch {
+        allocator.destroy(event);
+        shared.arena.deinit();
+        allocator.destroy(shared);
         return .{ .err = dupeOr(allocator, "Out of memory") };
     };
     event.* = .unset;
-    shared.* = .{
-        .allocator = allocator,
-        .io = io,
-        .url = url,
-        .user_agent = user_agent.message,
-        .limit = limit,
-        .event = event,
-        .result = undefined,
-    };
+    ack.* = .unset;
+    shared.event = event;
+    shared.ack = ack;
 
     const thread = std.Thread.spawn(.{}, fetchThread, .{shared}) catch |err| {
+        allocator.destroy(ack);
         allocator.destroy(event);
+        shared.arena.deinit();
         allocator.destroy(shared);
-        if (user_agent.owned) allocator.free(user_agent.message);
         return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Failed to start fetch: {s}", .{@errorName(err)}) };
     };
 
@@ -105,37 +141,66 @@ fn loadRemote(allocator: std.mem.Allocator, io: std.Io, url: []const u8, limit: 
     } };
     event.waitTimeout(io, timeout) catch |err| switch (err) {
         error.Timeout => {
-            // Deliberate leak: the fetch thread may still be running and holds
-            // references to shared, event, and user_agent, all heap-allocated
-            // so it never touches this stack frame after we return. This is
-            // the pre-existing behaviour (the startup path exits immediately);
-            // the leak is bounded and reclaimed by the arena on normal paths.
+            // The fetch thread may still be running, but from here on it owns
+            // everything it touches: url and user_agent live in its arena and
+            // every allocation goes through that arena, never this frame or
+            // the caller's allocator. Set `ack` so it can clean itself up,
+            // then detach; it finishes on its own.
+            ack.set(io);
+            thread.detach();
             return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Request timed out after {d} seconds", .{@divTrunc(timeout_ns, std.time.ns_per_s)}) };
         },
         else => |e| {
+            ack.set(io);
             thread.join();
+            allocator.destroy(ack);
             allocator.destroy(event);
             allocator.destroy(shared);
-            if (user_agent.owned) allocator.free(user_agent.message);
             return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Request failed: {s}", .{@errorName(e)}) };
         },
     };
 
+    // The worker finished fetching and is waiting on `ack`; copy the result
+    // out of its arena before releasing it.
+    const outcome: Outcome = switch (shared.result) {
+        .ok => |body| transferBody(allocator, body),
+        .err => |e| .{ .err = transferErr(allocator, e) },
+    };
+    ack.set(io);
     thread.join();
-    const result = shared.result;
+    allocator.destroy(ack);
     allocator.destroy(event);
     allocator.destroy(shared);
-    if (user_agent.owned) allocator.free(user_agent.message);
-
-    return switch (result) {
-        .ok => |body| finalize(allocator, body),
-        .err => |e| .{ .err = e },
-    };
+    return outcome;
 }
 
 fn fetchThread(shared: *FetchShared) void {
-    defer shared.event.set(shared.io);
-    shared.result = doFetch(shared.allocator, shared.io, shared.url, shared.user_agent, shared.limit);
+    shared.result = doFetch(shared.arena.allocator(), shared.io, shared.url, shared.user_agent, shared.limit);
+    shared.event.set(shared.io);
+    // The arena (and the result it holds) must stay alive until the caller has
+    // copied the result out or abandoned the wait. `ack` is always set: by the
+    // caller after copying on the normal path, or immediately on the timeout
+    // path. Wait for it before releasing our storage.
+    shared.ack.waitUncancelable(shared.io);
+    shared.arena.deinit();
+}
+
+/// Copies a trimmed worker body into a caller-owned allocation. The worker
+/// releases the original with its arena after `ack`, so nothing is freed here.
+fn transferBody(allocator: std.mem.Allocator, body: []const u8) Outcome {
+    const trimmed = std.mem.trim(u8, body, &std.ascii.whitespace);
+    const owned = allocator.dupe(u8, trimmed) catch {
+        return .{ .err = dupeOr(allocator, "Out of memory") };
+    };
+    return .{ .ok = owned };
+}
+
+/// Copies a worker-allocated error message into a caller-owned allocation so
+/// the caller can free it safely after the worker releases its arena. Falls
+/// back to a static message on OOM rather than aliasing the arena memory.
+fn transferErr(allocator: std.mem.Allocator, e: Error) Error {
+    const owned = allocator.dupe(u8, e.message) catch return .{ .message = "Failed to load prompt", .owned = false };
+    return .{ .message = owned, .owned = true };
 }
 
 fn doFetch(allocator: std.mem.Allocator, io: std.Io, url_str: []const u8, user_agent: []const u8, limit: usize) FetchResult {
