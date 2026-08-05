@@ -149,7 +149,7 @@ pub const ChatSession = struct {
                 try maybeLoadTriggeredSkills(ctx, user_message, &loaded_skills);
             }
 
-            if ((command == .prompt or command == .file) and !ctx.parsed.oneshot) {
+            if ((command == .prompt or command == .file or prompt_file_source != null) and !ctx.parsed.oneshot) {
                 if (try historyEntryFor(ctx.arena, user_message, command, prompt_file_source)) |entry| {
                     try ctx.history.add(entry);
                     try ctx.history.save(ctx.io);
@@ -1497,26 +1497,25 @@ fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
 /// Returns the entry to record in prompt history for `command`, or `null` when
 /// nothing should be recorded. Prompt-file prompts are recorded as their
 /// `/file <source>` command so the user can re-run the prompt after editing the
-/// file. `prompt_file_source` is the `--prompt-file` source of the pending
-/// prompt, if any.
+/// file. A pending `prompt_file_source` takes precedence over the parsed
+/// command: the `/file <source>` command is recorded even when the file content
+/// itself parses as a command (e.g. it begins with `/quit` or `/file`).
 fn historyEntryFor(
     allocator: std.mem.Allocator,
     user_message: []const u8,
     command: commands.Command,
     prompt_file_source: ?[]const u8,
 ) !?[]const u8 {
+    if (prompt_file_source) |source| {
+        return try std.fmt.allocPrint(allocator, "/file {s}", .{source});
+    }
     switch (command) {
         .file => |source| {
             const path = if (source) |s| std.mem.trim(u8, s, &std.ascii.whitespace) else "";
             if (path.len == 0) return null;
             return try std.fmt.allocPrint(allocator, "/file {s}", .{path});
         },
-        .prompt => {
-            if (prompt_file_source) |source| {
-                return try std.fmt.allocPrint(allocator, "/file {s}", .{source});
-            }
-            return user_message;
-        },
+        .prompt => return user_message,
         else => return null,
     }
 }
@@ -1545,6 +1544,26 @@ test "historyEntryFor records the /file command for a prompt loaded from --promp
     const allocator = arena_state.allocator();
 
     const content = "do the thing";
+    const entry = (try historyEntryFor(allocator, content, commands.parse(content), "spec.md")).?;
+    try std.testing.expectEqualStrings("/file spec.md", entry);
+}
+
+test "historyEntryFor prioritizes the pending --prompt-file source over a /file command" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const content = "/file notes.txt";
+    const entry = (try historyEntryFor(allocator, content, commands.parse(content), "spec.md")).?;
+    try std.testing.expectEqualStrings("/file spec.md", entry);
+}
+
+test "historyEntryFor records the pending --prompt-file source for /quit content" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const content = "/quit";
     const entry = (try historyEntryFor(allocator, content, commands.parse(content), "spec.md")).?;
     try std.testing.expectEqualStrings("/file spec.md", entry);
 }
@@ -1587,8 +1606,11 @@ test "prompt-file prompts persist in history as /file commands end to end" {
     const typed = "/file spec.md";
     try history.add((try historyEntryFor(allocator, typed, commands.parse(typed), null)).?);
 
-    // A prompt loaded via the --prompt-file CLI arg records the same command.
+    // A prompt loaded via the --prompt-file CLI arg records the same command,
+    // even when its content parses as a slash command like /quit.
     try history.add((try historyEntryFor(allocator, content, commands.parse(content), "spec.md")).?);
+    const quit_content = "/quit";
+    try history.add((try historyEntryFor(allocator, quit_content, commands.parse(quit_content), "spec.md")).?);
 
     try history.save(std.testing.io);
 
