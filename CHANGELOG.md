@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Store /file command in prompt history for prompt-file prompts ([#99](https://github.com/christianhelle/puny/pull/99)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --prompt-file flag and /file command to load prompts from files and URLs ([#98](https://github.com/christianhelle/puny/pull/98)) ([@christianhelle](https://github.com/christianhelle/))
 - Update system and planning prompts for concise output ([#97](https://github.com/christianhelle/puny/pull/97)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix welcome screen available commands ([#96](https://github.com/christianhelle/puny/pull/96)) ([@christianhelle](https://github.com/christianhelle/))
