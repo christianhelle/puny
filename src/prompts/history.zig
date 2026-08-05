@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const prompt_file = @import("prompt_file.zig");
 
 pub const History = struct {
     allocator: std.mem.Allocator,
@@ -99,6 +100,7 @@ pub const History = struct {
         const trimmed = std.mem.trim(u8, text, &std.ascii.whitespace);
         if (trimmed.len == 0) return;
         if (std.mem.startsWith(u8, trimmed, "/") and !isFileCommand(trimmed)) return;
+        if (std.mem.startsWith(u8, trimmed, "/file ") and fileSourceHasCredentials(trimmed["/file ".len..])) return;
 
         // Avoid consecutive duplicates.
         if (self.entries.items.len > 0) {
@@ -120,6 +122,18 @@ pub const History = struct {
     /// are not stored.
     fn isFileCommand(text: []const u8) bool {
         return std.mem.eql(u8, text, "/file") or std.mem.startsWith(u8, text, "/file ");
+    }
+
+    /// Returns true when `source` is an http(s) URL that embeds credentials in
+    /// its userinfo (e.g. `https://user:secret@host/...`). Such URLs must not
+    /// be written to prompt history in plaintext.
+    fn fileSourceHasCredentials(source: []const u8) bool {
+        if (!prompt_file.isHttpUrl(source)) return false;
+        const scheme_end = (std.mem.indexOf(u8, source, "://") orelse return false) + 3;
+        const rest = source[scheme_end..];
+        const path_start = std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len;
+        const at = std.mem.indexOfScalar(u8, rest, '@') orelse return false;
+        return at < path_start;
     }
 
     pub fn clear(self: *History) void {
@@ -210,6 +224,26 @@ test "add stores /file commands so they can be re-run from history" {
     try std.testing.expectEqual(@as(usize, 2), history.entries.items.len);
     try std.testing.expectEqualStrings("/file spec.md", history.entries.items[0]);
     try std.testing.expectEqualStrings("/file https://example.com/prompt.md", history.entries.items[1]);
+}
+
+test "add does not persist /file urls that embed credentials in the userinfo" {
+    var history = History.init(std.testing.allocator, "");
+    defer history.deinit();
+
+    try history.add("/file https://user:secret@example.com/prompt.md");
+    try history.add("/file https://token@example.com/prompt.md");
+    try history.add("/file https://example.com/prompt.md");
+    try std.testing.expectEqual(@as(usize, 1), history.entries.items.len);
+    try std.testing.expectEqualStrings("/file https://example.com/prompt.md", history.entries.items[0]);
+}
+
+test "add persists /file urls with an @ inside the path" {
+    var history = History.init(std.testing.allocator, "");
+    defer history.deinit();
+
+    try history.add("/file https://example.com/repos/@user/prompt.md");
+    try std.testing.expectEqual(@as(usize, 1), history.entries.items.len);
+    try std.testing.expectEqualStrings("/file https://example.com/repos/@user/prompt.md", history.entries.items[0]);
 }
 
 test "add stores prompts and avoids consecutive duplicates" {
