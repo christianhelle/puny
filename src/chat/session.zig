@@ -118,6 +118,7 @@ pub const ChatSession = struct {
                 return;
             }
 
+            const prompt_file_source: ?[]const u8 = if (ctx.parsed.prompt_file != null and pending_prompt.* != null) ctx.parsed.prompt_file else null;
             const user_input = try readUserInput(ctx, &pending_prompt, &line_alloc, &stdin_buffer);
             const user_message = switch (user_input) {
                 .message => |text| text,
@@ -148,9 +149,11 @@ pub const ChatSession = struct {
                 try maybeLoadTriggeredSkills(ctx, user_message, &loaded_skills);
             }
 
-            if (command == .prompt and !ctx.parsed.oneshot) {
-                try ctx.history.add(user_message);
-                try ctx.history.save(ctx.io);
+            if ((command == .prompt or command == .file) and !ctx.parsed.oneshot) {
+                if (try historyEntryFor(ctx.arena, user_message, command, prompt_file_source)) |entry| {
+                    try ctx.history.add(entry);
+                    try ctx.history.save(ctx.io);
+                }
             }
 
             switch (action) {
@@ -391,10 +394,6 @@ pub const ChatSession = struct {
                             }
                             try maybeLoadTriggeredSkills(ctx, content, &loaded_skills);
                             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = content });
-                            if (!ctx.parsed.oneshot) {
-                                try ctx.history.add(content);
-                                try ctx.history.save(ctx.io);
-                            }
                         },
                         .err => |e| {
                             defer if (e.owned) ctx.messages_arena.allocator().free(e.message);
