@@ -47,6 +47,15 @@ const ServerCtx = struct {
     }
 };
 
+/// Makes a `serve` thread stuck in `accept()` return so it can always be
+/// joined. The child process may exit without ever connecting, leaving `accept`
+/// blocked; a probe connection and immediate close makes it return, after which
+/// `serve` fails reading the closed connection and exits.
+fn unblockAccept(ctx: *ServerCtx, io: std.Io) void {
+    const stream = ctx.server.socket.address.connect(io, .{ .mode = .stream }) catch return;
+    stream.close(io);
+}
+
 const RunParams = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -137,6 +146,19 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
     var server_ctx: ?ServerCtx = null;
     var server_thread: ?std.Thread = null;
     var port_str: ?[]u8 = null;
+    // Install teardown before any fallible setup below so a failed listen,
+    // spawn, or port format can never bypass the thread join and socket
+    // deinit.
+    defer {
+        if (server_ctx) |*ctx| {
+            if (server_thread) |t| {
+                unblockAccept(ctx, io);
+                t.join();
+            }
+            ctx.server.deinit(io);
+        }
+        if (port_str) |p| allocator.free(p);
+    }
     if (test_case.serve_fixture) {
         const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
         var server = try std.Io.net.IpAddress.listen(&address, io, .{});
@@ -144,19 +166,6 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
         server_ctx = .{ .io = io, .server = server, .body = params.fixture_body };
         server_thread = try std.Thread.spawn(.{}, ServerCtx.serve, .{&server_ctx.?});
         port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
-    }
-    defer {
-        if (server_ctx) |*ctx| {
-            var guard: usize = 0;
-            while (!ctx.done.load(.acquire) and guard < 10_000_000) : (guard += 1) {
-                std.Thread.yield() catch {};
-            }
-            if (ctx.done.load(.acquire)) {
-                if (server_thread) |t| t.join();
-            }
-            ctx.server.deinit(io);
-        }
-        if (port_str) |p| allocator.free(p);
     }
 
     const child_argv = try allocator.alloc([]const u8, test_case.args.len + 1);
