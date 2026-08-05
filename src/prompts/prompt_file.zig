@@ -54,9 +54,9 @@ fn loadLocal(allocator: std.mem.Allocator, io: std.Io, path: []const u8, limit: 
 
 const FetchShared = struct {
     io: std.Io,
-    /// Worker-owned copies: url and user_agent live in `arena`, which the
-    /// worker releases when it finishes, so it never reads caller-owned memory
-    /// after a timeout has let loadRemote return.
+    /// Worker-owned copies: the URL, user agent, events, and result all live in
+    /// `arena`, which the worker releases when it finishes, so it never reads
+    /// or writes caller-owned memory after a timeout has let loadRemote return.
     url: []const u8,
     user_agent: []const u8,
     limit: usize,
@@ -66,7 +66,8 @@ const FetchShared = struct {
     /// worker may release its arena. Always set before the caller returns.
     ack: *std.Io.Event,
     result: FetchResult,
-    /// Allocator owned exclusively by the worker.
+    /// Allocator owned exclusively by the worker. The whole struct, its events,
+    /// and every fetched byte live here so a detached worker can tear down.
     arena: std.heap.ArenaAllocator,
 };
 
@@ -78,8 +79,14 @@ const FetchResult = union(enum) {
 fn loadRemote(allocator: std.mem.Allocator, io: std.Io, url: []const u8, limit: usize, timeout_ns: i96) Outcome {
     const user_agent = allocPrintOr(allocator, "puny", "puny/{s}", .{version.version});
 
-    const shared = allocator.create(FetchShared) catch {
+    // Everything the fetch thread touches lives in one arena that the worker
+    // owns and releases when it finishes. The caller allocates nothing it must
+    // keep or free: on timeout it simply abandons the arena, so a timed-out
+    // fetch never reads or writes caller-owned memory after loadRemote returns.
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const shared = arena.allocator().create(FetchShared) catch {
         if (user_agent.owned) allocator.free(user_agent.message);
+        arena.deinit();
         return .{ .err = dupeOr(allocator, "Out of memory") };
     };
     shared.* = .{
@@ -90,48 +97,36 @@ fn loadRemote(allocator: std.mem.Allocator, io: std.Io, url: []const u8, limit: 
         .event = undefined,
         .ack = undefined,
         .result = undefined,
-        .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+        .arena = arena,
     };
-    // The fetch thread may outlive this call (on timeout), so give it heap
-    // copies of the URL and user agent plus an allocator it exclusively owns;
-    // the worker releases all of it when it finishes.
     shared.url = shared.arena.allocator().dupe(u8, url) catch {
         if (user_agent.owned) allocator.free(user_agent.message);
-        shared.arena.deinit();
-        allocator.destroy(shared);
+        arena.deinit();
         return .{ .err = dupeOr(allocator, "Out of memory") };
     };
     shared.user_agent = shared.arena.allocator().dupe(u8, user_agent.message) catch {
         if (user_agent.owned) allocator.free(user_agent.message);
-        shared.arena.deinit();
-        allocator.destroy(shared);
+        arena.deinit();
         return .{ .err = dupeOr(allocator, "Out of memory") };
     };
     if (user_agent.owned) allocator.free(user_agent.message);
 
     // The events must outlive this frame: on timeout the fetch thread keeps
-    // running and signals them after we have returned.
-    const event = allocator.create(std.Io.Event) catch {
-        shared.arena.deinit();
-        allocator.destroy(shared);
+    // running and signals them after we have returned. They live in the arena
+    // so the worker's teardown releases them along with everything else.
+    shared.event = shared.arena.allocator().create(std.Io.Event) catch {
+        arena.deinit();
         return .{ .err = dupeOr(allocator, "Out of memory") };
     };
-    const ack = allocator.create(std.Io.Event) catch {
-        allocator.destroy(event);
-        shared.arena.deinit();
-        allocator.destroy(shared);
+    shared.ack = shared.arena.allocator().create(std.Io.Event) catch {
+        arena.deinit();
         return .{ .err = dupeOr(allocator, "Out of memory") };
     };
-    event.* = .unset;
-    ack.* = .unset;
-    shared.event = event;
-    shared.ack = ack;
+    shared.event.* = .unset;
+    shared.ack.* = .unset;
 
     const thread = std.Thread.spawn(.{}, fetchThread, .{shared}) catch |err| {
-        allocator.destroy(ack);
-        allocator.destroy(event);
-        shared.arena.deinit();
-        allocator.destroy(shared);
+        arena.deinit();
         return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Failed to start fetch: {s}", .{@errorName(err)}) };
     };
 
@@ -139,38 +134,34 @@ fn loadRemote(allocator: std.mem.Allocator, io: std.Io, url: []const u8, limit: 
         .raw = .{ .nanoseconds = timeout_ns },
         .clock = .awake,
     } };
-    event.waitTimeout(io, timeout) catch |err| switch (err) {
+    shared.event.waitTimeout(io, timeout) catch |err| switch (err) {
         error.Timeout => {
             // The fetch thread may still be running, but from here on it owns
-            // everything it touches: url and user_agent live in its arena and
-            // every allocation goes through that arena, never this frame or
-            // the caller's allocator. Set `ack` so it can clean itself up,
-            // then detach; it finishes on its own.
-            ack.set(io);
+            // everything it touches: shared, the events, the URL, and the
+            // response all live in its arena, which it releases when it
+            // finishes. Signal `ack` so it can clean up, then detach.
+            shared.ack.set(io);
             thread.detach();
             return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Request timed out after {d} seconds", .{@divTrunc(timeout_ns, std.time.ns_per_s)}) };
         },
         else => |e| {
-            ack.set(io);
-            thread.join();
-            allocator.destroy(ack);
-            allocator.destroy(event);
-            allocator.destroy(shared);
+            // Same as the timeout path: the worker may still be blocked in the
+            // fetch, so never join without a deadline. Detach and let it clean
+            // up its arena when it finishes.
+            shared.ack.set(io);
+            thread.detach();
             return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Request failed: {s}", .{@errorName(e)}) };
         },
     };
 
     // The worker finished fetching and is waiting on `ack`; copy the result
-    // out of its arena before releasing it.
+    // out of its arena before releasing it. The worker frees the arena itself.
     const outcome: Outcome = switch (shared.result) {
         .ok => |body| transferBody(allocator, body),
         .err => |e| .{ .err = transferErr(allocator, e) },
     };
-    ack.set(io);
+    shared.ack.set(io);
     thread.join();
-    allocator.destroy(ack);
-    allocator.destroy(event);
-    allocator.destroy(shared);
     return outcome;
 }
 
