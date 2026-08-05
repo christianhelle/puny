@@ -263,10 +263,15 @@ puny --prompt-file https://example.com/spec.md
 /file https://example.com/spec.md
 ```
 
-The loaded content is sent as the first user message, exactly like `--prompt`.
-`--oneshot` accepts `--prompt-file` in place of `--prompt`. Using both
-`--prompt` and `--prompt-file` is an error. Local files and remote responses
-are limited to 10 MiB, and remote fetches time out after 30 seconds.
+At startup, `--prompt-file` loads the content and sends it as the first user
+message, exactly like `--prompt`. `--oneshot` accepts `--prompt-file` in place
+of `--prompt`, and using both `--prompt` and `--prompt-file` is an error.
+
+In the interactive loop, `/file` loads the content and sends it as the next
+user message instead.
+
+Both flows load from local files or remote URLs; local files and remote
+responses are limited to 10 MiB, and remote fetches time out after 30 seconds.
 
 ### Select a provider
 
