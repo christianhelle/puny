@@ -98,7 +98,7 @@ pub const History = struct {
 
         const trimmed = std.mem.trim(u8, text, &std.ascii.whitespace);
         if (trimmed.len == 0) return;
-        if (std.mem.startsWith(u8, trimmed, "/")) return;
+        if (std.mem.startsWith(u8, trimmed, "/") and !isFileCommand(trimmed)) return;
 
         // Avoid consecutive duplicates.
         if (self.entries.items.len > 0) {
@@ -113,6 +113,13 @@ pub const History = struct {
             self.allocator.free(self.entries.items[0]);
             _ = self.entries.orderedRemove(0);
         }
+    }
+
+    /// `/file` commands are stored so a user can re-run a prompt file from
+    /// history after editing it. Other slash commands are transient input and
+    /// are not stored.
+    fn isFileCommand(text: []const u8) bool {
+        return std.mem.eql(u8, text, "/file") or std.mem.startsWith(u8, text, "/file ");
     }
 
     pub fn clear(self: *History) void {
@@ -183,7 +190,7 @@ pub fn historyPath(allocator: std.mem.Allocator, environ_map: *const std.process
     return std.fs.path.join(allocator, &.{ home, ".config", "puny", "prompt_history.json" });
 }
 
-test "add ignores empty and slash commands" {
+test "add ignores empty and non-file slash commands" {
     var history = History.init(std.testing.allocator, "");
     defer history.deinit();
 
@@ -191,6 +198,18 @@ test "add ignores empty and slash commands" {
     try history.add("/quit");
     try history.add(" /quit");
     try std.testing.expectEqual(@as(usize, 0), history.entries.items.len);
+}
+
+test "add stores /file commands so they can be re-run from history" {
+    var history = History.init(std.testing.allocator, "");
+    defer history.deinit();
+
+    try history.add("/file spec.md");
+    try history.add("/file spec.md");
+    try history.add(" /file https://example.com/prompt.md ");
+    try std.testing.expectEqual(@as(usize, 2), history.entries.items.len);
+    try std.testing.expectEqualStrings("/file spec.md", history.entries.items[0]);
+    try std.testing.expectEqualStrings("/file https://example.com/prompt.md", history.entries.items[1]);
 }
 
 test "add stores prompts and avoids consecutive duplicates" {
