@@ -41,6 +41,9 @@
 - Add coding agent instruction file support ([#71](https://github.com/christianhelle/puny/pull/71)) ([@christianhelle](https://github.com/christianhelle/))
 - Native self-upgrade for --upgrade (fixes Windows Defender false positive) ([#70](https://github.com/christianhelle/puny/pull/70)) ([@christianhelle](https://github.com/christianhelle/))
 
+### Closed Issues
+- Thread blocked - running `puny --upgrade` blocked by Windows ([#69](https://github.com/christianhelle/puny/issues/69)) ([@christianhelle](https://github.com/christianhelle/))
+
 
 ## [v0.2.2](https://github.com/christianhelle/puny/releases/tag/v0.2.2) (2026-07-29)
 
