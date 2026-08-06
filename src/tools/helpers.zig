@@ -108,6 +108,11 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
 /// timeout parameter (git_status, git_diff, grep_search).
 pub const run_command_timeout_ns: i96 = 30 * std.time.ns_per_s;
 
+/// Default timeout applied to execute_shell when the model does not provide
+/// one. Generous for real work (builds, test suites) while still a hard bound
+/// so the agent can never hang on a single command.
+pub const execute_shell_timeout_ns: i96 = 120 * std.time.ns_per_s;
+
 /// Default timeout applied to web_fetch when the model does not provide one.
 pub const web_fetch_timeout_ns: i96 = 15 * std.time.ns_per_s;
 
@@ -115,6 +120,24 @@ pub const web_fetch_timeout_ns: i96 = 15 * std.time.ns_per_s;
 /// terminated before abandoning the worker thread. Long enough for a kill to
 /// land while still bounding the total wall time of a timed-out tool call.
 const kill_grace_ns: i96 = 2 * std.time.ns_per_s;
+
+/// Floor applied to a model-supplied `timeout_seconds` value, in seconds.
+const min_timeout_s = 1;
+
+/// Ceiling applied to a model-supplied `timeout_seconds` value, in seconds.
+/// Keeps the guard in force even when the model asks for a huge deadline.
+const max_timeout_s = 300;
+
+/// Resolves the effective timeout for a tool call. When the model supplies a
+/// `timeout_seconds` value it is clamped to [min_timeout_s, max_timeout_s] and
+/// converted to nanoseconds; otherwise `default_ns` (a trusted compile-time
+/// constant) is returned unchanged.
+pub fn resolveTimeoutSeconds(model_value: ?i64, default_ns: i96) i96 {
+    const value = model_value orelse return default_ns;
+    const seconds: i96 = @intCast(value);
+    const clamped: i96 = std.math.clamp(seconds, min_timeout_s, max_timeout_s);
+    return clamped * std.time.ns_per_s;
+}
 
 const RunCommandShared = struct {
     io: std.Io,
@@ -464,4 +487,23 @@ test "runCommandTimed returns TimedOut and terminates a command that never exits
     try std.testing.expectEqual(before, test_run_command_worker_detached);
     // Must return long before the child could ever finish on its own.
     try std.testing.expect(elapsed < 10 * std.time.ns_per_s);
+}
+
+test "resolveTimeoutSeconds falls back to the default when no value is supplied" {
+    try std.testing.expectEqual(run_command_timeout_ns, resolveTimeoutSeconds(null, run_command_timeout_ns));
+    try std.testing.expectEqual(web_fetch_timeout_ns, resolveTimeoutSeconds(null, web_fetch_timeout_ns));
+}
+
+test "resolveTimeoutSeconds converts whole seconds to nanoseconds" {
+    try std.testing.expectEqual(30 * std.time.ns_per_s, resolveTimeoutSeconds(30, run_command_timeout_ns));
+    try std.testing.expectEqual(2 * std.time.ns_per_s, resolveTimeoutSeconds(2, web_fetch_timeout_ns));
+}
+
+test "resolveTimeoutSeconds clamps values below the floor to one second" {
+    try std.testing.expectEqual(std.time.ns_per_s, resolveTimeoutSeconds(0, run_command_timeout_ns));
+    try std.testing.expectEqual(std.time.ns_per_s, resolveTimeoutSeconds(-10, run_command_timeout_ns));
+}
+
+test "resolveTimeoutSeconds clamps values above the ceiling to five minutes" {
+    try std.testing.expectEqual(300 * std.time.ns_per_s, resolveTimeoutSeconds(999999999, run_command_timeout_ns));
 }
