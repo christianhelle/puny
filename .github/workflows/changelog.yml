@@ -20,7 +20,7 @@ jobs:
 
       - name: Generate changelog
         id: changelog
-        uses: christianhelle/changelog-generator-action@v1
+        uses: christianhelle/changelog-generator-action@main
         with:
           output: CHANGELOG.md
           github-token: ${{ secrets.PAT }}
