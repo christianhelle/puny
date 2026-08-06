@@ -141,3 +141,25 @@ test "schema omits empty required array" {
     // Gemini rejects "required": [] with 400 INVALID_ARGUMENT, so it must be absent.
     try std.testing.expect(params.get("required") == null);
 }
+
+const TimeoutParams = struct {
+    command: []const u8,
+    timeout_seconds: ?i64 = null,
+};
+
+test "schema exposes optional integer params without marking them required" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const Schema = ToolDefinition("timed_tool", "A tool with a timeout.", TimeoutParams);
+    const schema_value = try Schema.schema(arena);
+
+    const params = schema_value.object.get("parameters").?.object;
+    const props = params.get("properties").?.object;
+    try std.testing.expectEqualStrings("integer", props.get("timeout_seconds").?.object.get("type").?.string);
+    // Only the required command appears in the required list.
+    const required = params.get("required").?.array;
+    try std.testing.expectEqual(@as(usize, 1), required.items.len);
+    try std.testing.expectEqualStrings("command", required.items[0].string);
+}
