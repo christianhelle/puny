@@ -446,3 +446,22 @@ test "runCommandTimed returns output for a command that finishes within the dead
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "hello"));
 }
+
+test "runCommandTimed returns TimedOut and terminates a command that never exits" {
+    const before = test_run_command_worker_detached;
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "powershell", "-NoProfile", "-Command", "while ($true) { 'x'; Start-Sleep -Milliseconds 10 }" }
+    else
+        &.{ "sh", "-c", "while true; do echo x; sleep 0.01; done" };
+
+    const started = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    const result = runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 200 * std.time.ns_per_ms);
+    const elapsed = started.durationTo(std.Io.Clock.Timestamp.now(std.testing.io, .awake)).raw.nanoseconds;
+
+    try std.testing.expectError(error.TimedOut, result);
+    // The worker must have been joined, not abandoned: the hung child was
+    // terminated in-process rather than left running in the background.
+    try std.testing.expectEqual(before, test_run_command_worker_detached);
+    // Must return long before the child could ever finish on its own.
+    try std.testing.expect(elapsed < 10 * std.time.ns_per_s);
+}
