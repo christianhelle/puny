@@ -428,6 +428,89 @@ pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]con
     return response_body.toOwnedSlice();
 }
 
+const HttpGetShared = struct {
+    io: std.Io,
+    /// Worker-owned copy of the URL: it, the events, and the result all live
+    /// in `arena`, which the worker releases when it finishes, so a timed-out
+    /// call never reads or writes caller-owned memory after returning.
+    url: []const u8,
+    done: *std.Io.Event,
+    ack: *std.Io.Event,
+    result: anyerror![]const u8,
+    arena: std.heap.ArenaAllocator,
+};
+
+fn httpGetThread(shared: *HttpGetShared) void {
+    shared.result = httpGet(shared.arena.allocator(), shared.io, shared.url);
+    shared.done.set(shared.io);
+    shared.ack.waitUncancelable(shared.io);
+    shared.arena.deinit();
+}
+
+/// Fetches `url` in a worker thread and waits up to `timeout_ns` for the
+/// request to finish. If the deadline passes, `error.TimedOut` is returned and
+/// the in-flight request is abandoned: it cannot be aborted mid-flight, so the
+/// worker thread keeps running until the socket settles, then releases
+/// everything it owns. The returned body is caller-owned.
+pub fn httpGetTimed(allocator: std.mem.Allocator, io: std.Io, url: []const u8, timeout_ns: i96) ![]const u8 {
+    const spawn_ctx = blk: {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        // Only active during setup below: once the worker thread starts it owns
+        // the arena and frees it when it finishes, so the caller must never
+        // deinit it again on the timeout path.
+        errdefer arena.deinit();
+
+        const shared = arena.allocator().create(HttpGetShared) catch return error.OutOfMemory;
+        shared.* = .{
+            .io = io,
+            .url = &.{},
+            .done = undefined,
+            .ack = undefined,
+            .result = undefined,
+            .arena = arena,
+        };
+        shared.url = arena.allocator().dupe(u8, url) catch return error.OutOfMemory;
+
+        shared.done = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
+        shared.ack = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
+        shared.done.* = .unset;
+        shared.ack.* = .unset;
+
+        const thread = std.Thread.spawn(.{}, httpGetThread, .{shared}) catch |err| return err;
+        break :blk .{ .thread = thread, .shared = shared };
+    };
+    const thread = spawn_ctx.thread;
+    const shared = spawn_ctx.shared;
+
+    const timeout = std.Io.Timeout{ .duration = .{
+        .raw = .{ .nanoseconds = timeout_ns },
+        .clock = .awake,
+    } };
+    shared.done.waitTimeout(io, timeout) catch |wait_err| switch (wait_err) {
+        error.Timeout => {
+            // The request cannot be aborted mid-flight. The worker owns
+            // everything it touches and tears it down when the fetch settles,
+            // so abandoning the wait never reads or writes caller-owned memory.
+            shared.ack.set(io);
+            thread.detach();
+            return error.TimedOut;
+        },
+        else => {
+            shared.ack.set(io);
+            thread.detach();
+            return error.TimedOut;
+        },
+    };
+
+    const transferred = if (shared.result) |bytes|
+        allocator.dupe(u8, bytes) catch return error.OutOfMemory
+    else
+        |err| err;
+    shared.ack.set(io);
+    thread.join();
+    return transferred;
+}
+
 var test_download_attempts: usize = 0;
 var test_download_fail_until: usize = 0;
 var test_download_error: anyerror = error.ConnectionTimedOut;
@@ -550,4 +633,53 @@ test "resolveTimeoutSeconds clamps values below the floor to one second" {
 
 test "resolveTimeoutSeconds clamps values above the ceiling to five minutes" {
     try std.testing.expectEqual(300 * std.time.ns_per_s, resolveTimeoutSeconds(999999999, run_command_timeout_ns));
+}
+
+test "httpGetTimed returns TimedOut when the server never responds" {
+    const Ctx = struct {
+        io: std.Io,
+        server: std.Io.net.Server,
+        done: std.atomic.Value(bool) = .init(false),
+
+        fn serve(self: *@This()) void {
+            defer self.done.store(true, .release);
+            var stream = self.server.accept(self.io) catch return;
+            defer stream.close(self.io);
+
+            var in_buf: [4096]u8 = undefined;
+            var out_buf: [4096]u8 = undefined;
+            var reader = stream.reader(self.io, &in_buf);
+            var writer = stream.writer(self.io, &out_buf);
+
+            var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+            _ = http_server.receiveHead() catch return;
+            // Hold the connection open past the client timeout, then close.
+            self.io.sleep(.{ .nanoseconds = 500 * std.time.ns_per_ms }, .awake) catch {};
+        }
+    };
+
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch |err| {
+        std.debug.print("listen failed: {s}\n", .{@errorName(err)});
+        return error.ListenFailed;
+    };
+    const port = server.socket.address.getPort();
+
+    var ctx = Ctx{ .io = std.testing.io, .server = server };
+    const thread = try std.Thread.spawn(.{}, Ctx.serve, .{&ctx});
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/never", .{port});
+    defer std.testing.allocator.free(url);
+
+    const result = httpGetTimed(std.testing.allocator, std.testing.io, url, 100 * std.time.ns_per_ms);
+    try std.testing.expectError(error.TimedOut, result);
+
+    // Wait for the server thread to finish before tearing down the socket so
+    // the abandoned fetch thread can settle against a closed connection.
+    var guard: usize = 0;
+    while (!ctx.done.load(.acquire) and guard < 100_000_000) : (guard += 1) {
+        std.Thread.yield() catch {};
+    }
+    thread.join();
+    ctx.server.deinit(std.testing.io);
 }
