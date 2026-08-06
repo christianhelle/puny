@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.2.5](https://github.com/christianhelle/puny/releases/tag/v0.2.5) (2026-08-06)
 
 ### Features
 - Store /file command in prompt history for prompt-file prompts ([#99](https://github.com/christianhelle/puny/pull/99)) ([@christianhelle](https://github.com/christianhelle/))
