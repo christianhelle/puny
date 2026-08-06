@@ -147,11 +147,13 @@ Built-in tools:
 - `read_file` — read a file's contents
 - `write_file` — write/overwrite a file
 - `list_directory` — list directory entries
-- `execute_shell` — run a shell command
-- `grep_search` — search files with ripgrep
-- `git_status` — run `git status --short --branch`
-- `git_diff` — run `git diff`
-- `web_fetch` — fetch a URL over HTTP
+- `execute_shell` — run a shell command (default timeout 120s, override with `timeout_seconds`)
+- `grep_search` — search files with ripgrep (30s timeout)
+- `git_status` — run `git status --short --branch` (30s timeout)
+- `git_diff` — run `git diff` (30s timeout)
+- `web_fetch` — fetch a URL over HTTP (default timeout 15s, override with `timeout_seconds`)
+
+Tool calls that exceed their timeout are terminated and reported to the model so it can retry with a larger `timeout_seconds` if appropriate.
 
 **Safety note:** Puny executes all tool calls automatically without asking for confirmation. This includes `write_file` and `execute_shell`, which can modify or delete data. Use at your own risk.
 
