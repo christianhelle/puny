@@ -386,6 +386,12 @@ test "save tolerates inaccessible history path" {
     defer history.deinit();
     try history.add("alpha");
 
+    // The obstruction is intentional, so the warning it triggers is expected
+    // noise. Silence it so the test output stays clean.
+    const prev_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = prev_log_level;
+
     try history.save(io);
 }
 
