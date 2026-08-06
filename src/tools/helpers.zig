@@ -141,8 +141,7 @@ pub fn resolveTimeoutSeconds(model_value: ?i64, default_ns: i96) i96 {
 
 const RunCommandShared = struct {
     io: std.Io,
-    argv: [][]const u8,
-    cwd: ?[]const u8,
+    child: *std.process.Child,
     done: *std.Io.Event,
     ack: *std.Io.Event,
     cancel: std.atomic.Value(bool),
@@ -156,7 +155,7 @@ const RunCommandShared = struct {
 var test_run_command_worker_detached: usize = 0;
 
 fn runCommandThread(shared: *RunCommandShared) void {
-    shared.result = runCommandInArena(shared.arena.allocator(), shared.io, shared.argv, shared.cwd, &shared.cancel);
+    shared.result = runCommandInArena(shared.arena.allocator(), shared.io, shared.child, &shared.cancel);
     shared.done.set(shared.io);
     shared.ack.waitUncancelable(shared.io);
     shared.arena.deinit();
@@ -165,16 +164,10 @@ fn runCommandThread(shared: *RunCommandShared) void {
 fn runCommandInArena(
     allocator: std.mem.Allocator,
     io: std.Io,
-    argv: []const []const u8,
-    cwd: ?[]const u8,
+    child: *std.process.Child,
     cancel: *std.atomic.Value(bool),
 ) anyerror![]const u8 {
-    var child = try std.process.spawn(io, .{
-        .argv = argv,
-        .cwd = if (cwd) |p| .{ .path = p } else .inherit,
-        .stdout = .pipe,
-        .stderr = .pipe,
-    });
+    errdefer child.kill(io);
 
     var timed_out = false;
 
@@ -212,7 +205,7 @@ fn runCommandInArena(
     };
 
     if (timed_out) {
-        child.kill(io);
+        killProcessTree(io, child);
         return error.TimedOut;
     }
 
@@ -247,8 +240,46 @@ fn runCommandInArena(
     return ownedSliceOrEmpty(&result, allocator);
 }
 
+/// Forcibly terminates the child and every process it spawned. Killing only
+/// the direct child leaves grandchildren running (e.g. `cmd /c zig build`
+/// where zig.exe is a grandchild of cmd.exe), which keeps the output pipes
+/// open and can block the worker forever. On Windows the whole tree is
+/// terminated with `taskkill /T`; on POSIX the child is spawned as a process
+/// group leader so a group kill reaches everything it started.
+fn killProcessTree(io: std.Io, child: *std.process.Child) void {
+    if (@import("builtin").os.tag == .windows) {
+        const handle = child.id orelse return;
+        // Resolve the OS process id from the hProcess handle, then kill the
+        // whole tree with taskkill /T.
+        var info: std.os.windows.PROCESS.BASIC_INFORMATION = undefined;
+        const pid = switch (std.os.windows.ntdll.NtQueryInformationProcess(
+            handle,
+            .BasicInformation,
+            &info,
+            @sizeOf(std.os.windows.PROCESS.BASIC_INFORMATION),
+            null,
+        )) {
+            .SUCCESS => info.UniqueProcessId,
+            else => return,
+        };
+        var buf: [64]u8 = undefined;
+        const pid_str = std.fmt.bufPrint(&buf, "{d}", .{pid}) catch return;
+        const argv = [_][]const u8{ "taskkill", "/PID", pid_str, "/T", "/F" };
+        var killer = std.process.spawn(io, .{
+            .argv = &argv,
+            .stdout = .ignore,
+            .stderr = .ignore,
+            .create_no_window = true,
+        }) catch return;
+        _ = killer.wait(io) catch {};
+    } else {
+        const pid = child.id orelse return;
+        std.posix.kill(-pid, .KILL) catch {};
+    }
+}
+
 /// Runs `argv` in a worker thread and waits up to `timeout_ns` for it to
-/// finish. If the deadline passes, the child process is terminated and
+/// finish. If the deadline passes, the child process tree is terminated and
 /// `error.TimedOut` is returned. The returned output is caller-owned.
 pub fn runCommandTimed(
     allocator: std.mem.Allocator,
@@ -259,17 +290,32 @@ pub fn runCommandTimed(
 ) ![]const u8 {
     const spawn_ctx = blk: {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        // Only active during setup below: once the worker thread starts it owns
+        // the arena and frees it when it finishes, so the caller must never
+        // deinit it again on the timeout path.
         errdefer arena.deinit();
 
-        // The worker owns everything the command touches from here on: argv,
-        // cwd, events, and the result all live in `arena`, which the worker
-        // releases when it finishes, so a timed-out call never reads or writes
-        // caller-owned memory after returning.
+        // The worker owns everything the command touches from here on: the
+        // child, the events, and the result all live in `arena`, which the
+        // worker releases when it finishes, so a timed-out call never reads or
+        // writes caller-owned memory after returning.
         const shared = arena.allocator().create(RunCommandShared) catch return error.OutOfMemory;
+        const child = arena.allocator().create(std.process.Child) catch return error.OutOfMemory;
+
+        child.* = try std.process.spawn(io, .{
+            .argv = argv,
+            .cwd = if (cwd) |p| .{ .path = p } else .inherit,
+            .stdout = .pipe,
+            .stderr = .pipe,
+            // On POSIX the child leads its own process group so a group kill
+            // reaches the whole tree. On Windows process groups do not exist;
+            // the tree is handled by `taskkill /T` instead.
+            .pgid = if (@import("builtin").os.tag == .windows) null else 0,
+        });
+
         shared.* = .{
             .io = io,
-            .argv = &.{},
-            .cwd = null,
+            .child = child,
             .done = undefined,
             .ack = undefined,
             .cancel = .init(false),
@@ -277,24 +323,20 @@ pub fn runCommandTimed(
             .arena = arena,
         };
 
-        shared.argv = arena.allocator().alloc([]const u8, argv.len) catch return error.OutOfMemory;
-        for (argv, 0..) |arg, i| {
-            shared.argv[i] = arena.allocator().dupe(u8, arg) catch return error.OutOfMemory;
-        }
-        if (cwd) |path| {
-            shared.cwd = arena.allocator().dupe(u8, path) catch return error.OutOfMemory;
-        }
-
         shared.done = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
         shared.ack = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
         shared.done.* = .unset;
         shared.ack.* = .unset;
 
-        const thread = std.Thread.spawn(.{}, runCommandThread, .{shared}) catch |err| return err;
-        break :blk .{ .thread = thread, .shared = shared };
+        const thread = std.Thread.spawn(.{}, runCommandThread, .{shared}) catch |err| {
+            child.kill(io);
+            return err;
+        };
+        break :blk .{ .thread = thread, .shared = shared, .child = child };
     };
     const thread = spawn_ctx.thread;
     const shared = spawn_ctx.shared;
+    const child = spawn_ctx.child;
 
     const timeout = std.Io.Timeout{ .duration = .{
         .raw = .{ .nanoseconds = timeout_ns },
@@ -302,10 +344,12 @@ pub fn runCommandTimed(
     } };
     shared.done.waitTimeout(io, timeout) catch |wait_err| switch (wait_err) {
         error.Timeout => {
-            // Ask the worker to terminate the child, then give it a bounded
-            // grace period to finish. The worker kills the process itself, so
-            // this never races with its own wait.
+            // The worker may be blocked reading the child's pipes and unable
+            // to observe `cancel`, so terminate the whole process tree from
+            // here. Killing the tree closes the pipes, which unblocks the
+            // worker; it then finishes and can be joined.
             shared.cancel.store(true, .release);
+            killProcessTree(io, child);
             const grace = std.Io.Timeout{ .duration = .{
                 .raw = .{ .nanoseconds = kill_grace_ns },
                 .clock = .awake,
