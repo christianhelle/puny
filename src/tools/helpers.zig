@@ -374,8 +374,8 @@ pub fn runCommandTimed(
 
     const transferred = if (shared.result) |bytes|
         allocator.dupe(u8, bytes) catch return error.OutOfMemory
-    else
-        |err| err;
+    else |err|
+        err;
     shared.ack.set(io);
     thread.join();
     return transferred;
@@ -504,8 +504,8 @@ pub fn httpGetTimed(allocator: std.mem.Allocator, io: std.Io, url: []const u8, t
 
     const transferred = if (shared.result) |bytes|
         allocator.dupe(u8, bytes) catch return error.OutOfMemory
-    else
-        |err| err;
+    else |err|
+        err;
     shared.ack.set(io);
     thread.join();
     return transferred;
