@@ -30,7 +30,10 @@ fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams
         try argv.append(allocator, ".");
     }
 
-    return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommandTimed(allocator, io, argv.items, null, helpers.run_command_timeout_ns) catch |err| switch (err) {
+        error.TimedOut => std.fmt.allocPrint(allocator, "Tool grep_search timed out after {d} seconds.", .{@divTrunc(helpers.run_command_timeout_ns, std.time.ns_per_s)}),
+        else => return err,
+    };
 }
 
 pub const grep_search = tools.defineTool(
