@@ -13,7 +13,10 @@ fn gitStatus(allocator: std.mem.Allocator, io: std.Io, params: GitStatusParams) 
     if (params.path) |path| {
         try argv.append(allocator, path);
     }
-    return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommandTimed(allocator, io, argv.items, null, helpers.run_command_timeout_ns) catch |err| switch (err) {
+        error.TimedOut => std.fmt.allocPrint(allocator, "Tool git_status timed out after {d} seconds.", .{@divTrunc(helpers.run_command_timeout_ns, std.time.ns_per_s)}),
+        else => return err,
+    };
 }
 
 const GitDiffParams = struct {
@@ -34,7 +37,10 @@ fn gitDiff(allocator: std.mem.Allocator, io: std.Io, params: GitDiffParams) ![]c
         try argv.append(allocator, "--");
         try argv.append(allocator, path);
     }
-    return helpers.runCommand(allocator, io, argv.items, null);
+    return helpers.runCommandTimed(allocator, io, argv.items, null, helpers.run_command_timeout_ns) catch |err| switch (err) {
+        error.TimedOut => std.fmt.allocPrint(allocator, "Tool git_diff timed out after {d} seconds.", .{@divTrunc(helpers.run_command_timeout_ns, std.time.ns_per_s)}),
+        else => return err,
+    };
 }
 
 pub const git_status = tools.defineTool(
