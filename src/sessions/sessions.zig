@@ -346,7 +346,13 @@ pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8,
 }
 
 fn truncateFirstPrompt(arena: std.mem.Allocator, prompt: []const u8) ![]const u8 {
-    const end = @min(prompt.len, first_prompt_limit);
+    var end = @min(prompt.len, first_prompt_limit);
+    // Never cut a UTF-8 code point in half: if the limit lands on a
+    // continuation byte, back up to the nearest leading byte so the truncated
+    // slice stays valid. Prompts already within the limit are untouched.
+    while (end < prompt.len and end > 0 and (prompt[end] & 0xC0) == 0x80) {
+        end -= 1;
+    }
     return arena.dupe(u8, prompt[0..end]);
 }
 
@@ -377,6 +383,32 @@ fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
 
 fn lessThan(_: void, a: SessionInfo, b: SessionInfo) bool {
     return std.mem.lessThan(u8, a.id, b.id);
+}
+
+test "truncateFirstPrompt stays within the limit and on a UTF-8 boundary" {
+    const arena = std.testing.allocator;
+
+    // Prompt within the limit is returned unchanged.
+    const short = "hello";
+    const short_out = try truncateFirstPrompt(arena, short);
+    defer arena.free(short_out);
+    try std.testing.expectEqualStrings(short, short_out);
+
+    // A plain truncation keeps exactly first_prompt_limit bytes.
+    const ascii = try std.fmt.allocPrint(arena, "{s}", .{"a" ** (first_prompt_limit + 10)});
+    defer arena.free(ascii);
+    const ascii_out = try truncateFirstPrompt(arena, ascii);
+    defer arena.free(ascii_out);
+    try std.testing.expectEqual(@as(usize, first_prompt_limit), ascii_out.len);
+
+    // When the limit lands inside a multi-byte code point, back up to the
+    // preceding boundary. The euro sign is 3 bytes (E2 82 AC).
+    const long = try std.fmt.allocPrint(arena, "{s}\xE2\x82\xAC{s}", .{ "b" ** (first_prompt_limit - 1), "ccc" });
+    defer arena.free(long);
+    const long_out = try truncateFirstPrompt(arena, long);
+    defer arena.free(long_out);
+    try std.testing.expectEqual(@as(usize, first_prompt_limit - 1), long_out.len);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(long_out));
 }
 
 fn timestampToNs(ts: std.Io.Timestamp) ?u64 {
