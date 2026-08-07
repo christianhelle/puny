@@ -316,3 +316,53 @@ fn argsToSlice(arena: std.mem.Allocator, args: std.process.Args) ![]const []cons
     const slice = try args.toSlice(arena);
     return slice;
 }
+
+test "skill fixtures materialize in the target directory and clean up" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    defer created_skill_names.clearAndFree(std.testing.allocator);
+
+    const test_case = TestCase{
+        .name = "fixture-lifecycle",
+        .args = &.{},
+        .expect = &.{},
+        .not_expect = &.{},
+        .skills = &.{ .{ .name = "mock-skill", .body = "mock-skill-body" } },
+    };
+
+    try setupSkillFixtures(tmp.dir, std.testing.allocator, std.testing.io, test_case);
+
+    const content = try tmp.dir.readFileAlloc(std.testing.io, ".agents/skills/mock-skill/SKILL.md", std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("mock-skill-body", content);
+
+    cleanupSkillFixtures(tmp.dir, std.testing.allocator, std.testing.io);
+
+    // The fixture and the scaffolding parents are gone.
+    try std.testing.expectError(error.FileNotFound, tmp.dir.openDir(std.testing.io, ".agents", .{}));
+}
+
+test "skill fixtures refuse to overwrite an existing skill directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    defer created_skill_names.clearAndFree(std.testing.allocator);
+
+    // A developer's real skill living in the scanned repository path.
+    try tmp.dir.createDirPath(std.testing.io, ".agents/skills/mock-skill");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".agents/skills/mock-skill/SKILL.md", .data = "real skill content" });
+
+    const test_case = TestCase{
+        .name = "fixture-collision",
+        .args = &.{},
+        .expect = &.{},
+        .not_expect = &.{},
+        .skills = &.{ .{ .name = "mock-skill", .body = "mock-skill-body" } },
+    };
+
+    try std.testing.expectError(error.SkillFixtureCollision, setupSkillFixtures(tmp.dir, std.testing.allocator, std.testing.io, test_case));
+
+    // The real skill is untouched.
+    const content = try tmp.dir.readFileAlloc(std.testing.io, ".agents/skills/mock-skill/SKILL.md", std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("real skill content", content);
+}
