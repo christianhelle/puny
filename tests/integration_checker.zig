@@ -108,7 +108,7 @@ fn runTest(
         .timeout = .{ .duration = .{
             .raw = std.Io.Duration.fromSeconds(120),
             .clock = .real,
-        }},
+        } },
     }) catch |err| {
         std.debug.print("FAILED (error: {s})\n", .{@errorName(err)});
         return false;
