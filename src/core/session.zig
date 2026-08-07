@@ -226,7 +226,12 @@ test "generateUuid produces unique values" {
 fn testBaseDir(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
     const cwd = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd);
-    return try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions" });
+    const dir = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions" });
+    // Start from a clean slate: a run that crashed mid-test leaves session
+    // directories behind, which would otherwise break tests that assert a
+    // directory does not exist on the next run.
+    cleanupTestDir(io, dir);
+    return dir;
 }
 
 fn cleanupTestDir(io: std.Io, path: []const u8) void {
@@ -289,6 +294,32 @@ test "fromDir sets global session paths and does not create a directory" {
     try std.testing.expectEqualStrings(prd_path, prd_path_global);
     try std.testing.expectEqualStrings(html_path, html_path_global);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, dir, .{}));
+}
+
+test "testBaseDir wipes leftovers from an interrupted run" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    // Simulate the state a crashed run leaves behind: a session directory
+    // (with a plan file) in the shared test directory.
+    try createTestSessionDir(std.testing.io, test_dir, "stale-1", true);
+
+    const stale_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "stale-1" });
+    defer std.testing.allocator.free(stale_dir);
+
+    // Resolving the test base dir again (as the next test does) must start
+    // from a clean slate; otherwise the stale session directory survives and
+    // breaks tests that assert a directory does not exist.
+    const reset = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, reset);
+        std.testing.allocator.free(reset);
+    }
+
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, stale_dir, .{}));
 }
 
 fn createTestSessionDir(io: std.Io, base_dir: []const u8, uuid: []const u8, has_prd: bool) !void {
