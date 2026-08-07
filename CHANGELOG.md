@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Introduce sessions.json index for fast session listing ([#106](https://github.com/christianhelle/puny/pull/106)) ([@christianhelle](https://github.com/christianhelle/))
 - Add /new command to create new session ([#105](https://github.com/christianhelle/puny/pull/105)) ([@christianhelle](https://github.com/christianhelle/))
 
 
