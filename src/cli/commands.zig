@@ -58,6 +58,7 @@ pub const command_tokens = [_][]const u8{
     "/quit",
     "/exit",
     "/reset",
+    "/new",
     "/stats",
     "/config",
     "/plan",
@@ -75,7 +76,7 @@ pub fn parse(user_message: []const u8) Command {
     if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit"))
         return .quit;
 
-    if (std.mem.eql(u8, user_message, "/reset"))
+    if (std.mem.eql(u8, user_message, "/reset") or std.mem.eql(u8, user_message, "/new"))
         return .reset;
 
     if (std.mem.eql(u8, user_message, "/stats"))
@@ -244,6 +245,7 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqual(Command.quit, parse("/quit"));
     try std.testing.expectEqual(Command.quit, parse("/exit"));
     try std.testing.expectEqual(Command.reset, parse("/reset"));
+    try std.testing.expectEqual(Command.reset, parse("/new"));
     try std.testing.expectEqual(Command.stats, parse("/stats"));
     try std.testing.expectEqual(Command.config, parse("/config"));
     try std.testing.expectEqual(Command.sessions, parse("/sessions"));
