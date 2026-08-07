@@ -132,7 +132,12 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
         const has_conversation = msg_stat != null;
 
         const meta_path = try core_session.sessionMetaPath(entry_tmp, sessions_dir_path, id);
-        const meta = try core_session.readSessionMetaJson(io, entry_tmp, meta_path);
+        const meta = core_session.readSessionMetaJson(io, entry_tmp, meta_path) catch |err| blk: {
+            // One unreadable session.json must not fail the whole listing; fall
+            // back to a default entry like the missing/oversized cases do.
+            std.log.warn("failed to read session meta at {s}: {s}", .{ meta_path, @errorName(err) });
+            break :blk core_session.SessionMeta{ .planning_mode = false, .first_prompt = null };
+        };
 
         const first_prompt = if (meta.first_prompt) |p| try truncateFirstPrompt(arena, p) else null;
 
@@ -828,6 +833,35 @@ test "listSessions rebuilds when the index contains an invalid session id" {
 
     try std.testing.expectEqual(@as(usize, 1), sessions.len);
     try std.testing.expectEqualStrings("valid-1", sessions[0].id);
+}
+
+test "listSessions tolerates an unreadable session meta file" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "blocked-1", false);
+
+    // Replace session.json with a directory so it cannot be opened for
+    // reading; the listing must fall back to a default entry instead of
+    // failing the whole scan.
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const meta_path = try core_session.sessionMetaPath(std.testing.allocator, sessions_dir, "blocked-1");
+    defer std.testing.allocator.free(meta_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, meta_path);
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("blocked-1", sessions[0].id);
+    try std.testing.expect(sessions[0].first_prompt == null);
 }
 
 test "listSessions rebuilds from scan on an oversized index" {
