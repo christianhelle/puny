@@ -344,9 +344,9 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .load_skill => |full_text| {
-                    const space = std.mem.indexOfScalar(u8, full_text, ' ');
+                    const space = std.mem.indexOfAny(u8, full_text, " \t\r\n");
                     const skill_name = if (space) |s| full_text[0..s] else full_text;
-                    const user_text = if (space) |s| std.mem.trimStart(u8, full_text[s..], " ") else null;
+                    const user_text = if (space) |s| std.mem.trimStart(u8, full_text[s..], " \t\r\n") else null;
 
                     const content = ctx.skill_registry.loadContent(ctx.io, skill_name, ctx.messages_arena.allocator()) catch |err| switch (err) {
                         error.SkillNotFound => {
