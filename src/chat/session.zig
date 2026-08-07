@@ -4,6 +4,7 @@ const chat = @import("chat.zig");
 const cli = @import("../cli/args.zig");
 const commands = @import("../cli/commands.zig");
 const core_session = @import("../core/session.zig");
+const sessions = @import("../sessions/sessions.zig");
 const config = @import("../config/config.zig");
 const indicator = @import("../tui/indicator.zig");
 const input = @import("../tui/input.zig");
@@ -165,6 +166,7 @@ pub const ChatSession = struct {
                 .full_reset => {
                     try saveMessages(ctx);
                     try saveSessionMeta(ctx);
+                    upsertCurrentSession(ctx);
 
                     try ctx.stdout_writer.print(" Performing full memory reset...", .{});
                     try ctx.stdout_writer.flush();
@@ -211,12 +213,12 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .list_sessions => {
-                    const sessions = try core_session.listSessions(ctx.arena, ctx.io, ctx.session.base);
+                    const session_list = try sessions.listSessions(ctx.arena, ctx.io, ctx.session.base);
                     try ctx.stdout_writer.print("\n{s}Saved sessions:{s}\n", .{ ansi.bright, ansi.reset });
-                    if (sessions.len == 0) {
+                    if (session_list.len == 0) {
                         try ctx.stdout_writer.print("  (none)\n", .{});
                     } else {
-                        for (sessions) |s| {
+                        for (session_list) |s| {
                             const has_conv = if (s.has_conversation) "  (conversation)" else "";
                             const prd_mark = if (s.has_prd) "  (has plan.md)" else "";
                             const current_mark = if (std.mem.eql(u8, s.id, ctx.session.id)) "  <-- current" else "";
@@ -235,24 +237,24 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .prune_sessions => {
-                    try core_session.pruneSessions(ctx.arena, ctx.io, ctx.session.base, ctx.session.id);
+                    try sessions.pruneSessions(ctx.arena, ctx.io, ctx.session.base, ctx.session.id);
                     try ctx.stdout_writer.print("\nCleaned up old sessions. Current session preserved.\n", .{});
                     try ctx.stdout_writer.flush();
                     continue;
                 },
                 .restore_session => |session_id| {
                     const base = ctx.session.base;
-                    const found = if (session_id) |sid| try core_session.findSessionByPrefix(ctx.arena, ctx.io, base, sid) else blk: {
-                        const sessions = try core_session.listSessions(ctx.arena, ctx.io, base);
+                    const found = if (session_id) |sid| try sessions.findSessionByPrefix(ctx.arena, ctx.io, base, sid) else blk: {
+                        const session_list = try sessions.listSessions(ctx.arena, ctx.io, base);
                         var conv_count: usize = 0;
-                        for (sessions) |s| {
+                        for (session_list) |s| {
                             if (s.has_conversation) conv_count += 1;
                         }
                         if (conv_count == 0) {
                             try ctx.stdout_writer.print("\nNo saved conversations found.\n", .{});
                             try ctx.stdout_writer.flush();
                         } else if (conv_count == 1) {
-                            for (sessions) |s| {
+                            for (session_list) |s| {
                                 if (s.has_conversation) break :blk s;
                             }
                         } else {
@@ -490,13 +492,7 @@ fn saveSessionMeta(ctx: *ChatLoopContext) !void {
     const meta_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "session.json" });
     defer ctx.messages_arena.allocator().free(meta_path);
 
-    var first_prompt: ?[]const u8 = null;
-    for (ctx.messages.items) |m| {
-        if (m == .user) {
-            first_prompt = m.user;
-            break;
-        }
-    }
+    const first_prompt = firstUserPrompt(ctx.messages.items);
 
     const MetaStruct = struct {
         planning_mode: bool,
@@ -636,6 +632,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
 
     try saveMessages(ctx);
     try saveSessionMeta(ctx);
+    upsertCurrentSession(ctx);
 
     if (ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});
@@ -1646,6 +1643,34 @@ fn finalizeSession(ctx: *ChatLoopContext) void {
     saveSessionMeta(ctx) catch {};
     if (shouldRemoveSessionDir(ctx.restore_incomplete, ctx.messages.items, ctx.io, ctx.session.dir)) {
         core_session.removeSessionDir(ctx.io, ctx.session.dir);
+        sessions.removeSessionFromIndex(ctx.arena, ctx.io, ctx.session.base, ctx.session.id) catch {};
+    } else {
+        upsertCurrentSession(ctx);
     }
     printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
+}
+
+/// Refreshes the current session's entry in the sessions index after a content
+/// mutation. Best-effort like saveMessages/saveSessionMeta: a failed index
+/// write must not interrupt the chat loop.
+fn upsertCurrentSession(ctx: *ChatLoopContext) void {
+    const now_ns: u64 = @intCast(std.Io.Timestamp.now(ctx.io, .awake).nanoseconds);
+    sessions.upsertSessionInfo(ctx.arena, ctx.io, ctx.session.base, .{
+        .id = ctx.session.id,
+        .has_prd = core_session.sessionHasPlan(ctx.io, ctx.session.dir),
+        .has_conversation = ctx.messages.items.len > 0,
+        .planning_mode = ctx.planning_mode.*,
+        .first_prompt = firstUserPrompt(ctx.messages.items),
+        .last_modified = now_ns,
+    }) catch |err| {
+        std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
+    };
+}
+
+/// The first user message in the conversation, or null when there is none.
+fn firstUserPrompt(messages: []const openai.Message) ?[]const u8 {
+    for (messages) |m| {
+        if (m == .user) return m.user;
+    }
+    return null;
 }
