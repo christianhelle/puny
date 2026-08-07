@@ -581,6 +581,116 @@ test "listSessions survives a session meta larger than the read limit" {
     try std.testing.expect(sessions[0].first_prompt == null);
 }
 
+/// Test allocator that records the peak number of live bytes it has been asked
+/// to hold. Lets a test assert that transient work (like reading each session
+/// meta file) is released instead of accumulating in a shared arena.
+const PeakTrackingAllocator = struct {
+    backing: std.mem.Allocator,
+    live: usize = 0,
+    peak: usize = 0,
+
+    fn allocator(self: *PeakTrackingAllocator) std.mem.Allocator {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .alloc = alloc,
+                .resize = resize,
+                .remap = remap,
+                .free = free,
+            },
+        };
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        const ptr = self.backing.rawAlloc(len, alignment, ret_addr) orelse return null;
+        self.live += len;
+        if (self.live > self.peak) self.peak = self.live;
+        return ptr;
+    }
+
+    fn resize(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        if (!self.backing.rawResize(memory, alignment, new_len, ret_addr)) return false;
+        self.live -= memory.len;
+        self.live += new_len;
+        if (self.live > self.peak) self.peak = self.live;
+        return true;
+    }
+
+    fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        const ptr = self.backing.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
+        self.live -= memory.len;
+        self.live += new_len;
+        if (self.live > self.peak) self.peak = self.live;
+        return ptr;
+    }
+
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        self.live -= memory.len;
+        self.backing.rawFree(memory, alignment, ret_addr);
+    }
+};
+
+test "listSessions does not retain every session's metadata in the shared arena" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    // Four sessions, each with a ~512KB first prompt. The listing must keep
+    // only the returned copies (id plus one first_prompt per session) in the
+    // caller's arena; the file contents and parsed metadata of every entry
+    // must be released before the next entry is processed.
+    const prompt_len = 512 * 1024;
+    const chunk = [_]u8{'x'} ** (64 * 1024);
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        const id = try std.fmt.allocPrint(std.testing.allocator, "big-{d}", .{i});
+        defer std.testing.allocator.free(id);
+        try createTestSessionDir(std.testing.io, test_dir, id, false);
+
+        const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+        defer std.testing.allocator.free(sessions_dir);
+        const meta_path = try sessionMetaPath(std.testing.allocator, sessions_dir, id);
+        defer std.testing.allocator.free(meta_path);
+
+        var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
+        defer meta_file.close(std.testing.io);
+        try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
+        var written: usize = 0;
+        while (written < prompt_len) : (written += chunk.len) {
+            try meta_file.writeStreamingAll(std.testing.io, &chunk);
+        }
+        try meta_file.writeStreamingAll(std.testing.io, "\"}");
+    }
+
+    var tracking = PeakTrackingAllocator{ .backing = std.testing.allocator };
+    const sessions = try listSessions(tracking.allocator(), std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 4), sessions.len);
+    for (sessions) |s| {
+        try std.testing.expectEqual(prompt_len, s.first_prompt.?.len);
+    }
+
+    // The retained results are ~2MB (one full first_prompt copy per session).
+    // The file contents and parsed metadata for every entry used to be kept in
+    // the shared arena until the listing finished, far past that; bound the
+    // peak to the retained results plus a small constant.
+    const retained = 4 * prompt_len;
+    try std.testing.expect(tracking.peak < retained + 2 * 1024 * 1024);
+}
+
 test "pruneSessions removes all but current" {
     const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
     defer {
