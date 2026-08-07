@@ -265,6 +265,64 @@ pub fn removeSessionFromIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []
     try writeIndex(io, scratch, base_dir, entries.items);
 }
 
+/// Returns the single session whose id starts with `prefix`, or `null` when
+/// there is no match or the prefix is ambiguous. Index-backed; no per-session
+/// filesystem access.
+pub fn findSessionByPrefix(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, prefix: []const u8) !?SessionInfo {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const sessions = try listSessions(scratch, io, base_dir);
+    var matches: usize = 0;
+    for (sessions) |s| {
+        if (std.mem.startsWith(u8, s.id, prefix)) matches += 1;
+    }
+    if (matches != 1) return null;
+
+    for (sessions) |s| {
+        if (std.mem.startsWith(u8, s.id, prefix)) {
+            return try dupeSessionInfo(arena, s);
+        }
+    }
+    return null;
+}
+
+/// Returns the session with a conversation and the largest `last_modified`,
+/// or `null` when no session has a conversation. Pure in-memory comparison of
+/// the index; no per-session `stat` calls.
+pub fn findLatestSession(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) !?SessionInfo {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const sessions = try listSessions(scratch, io, base_dir);
+    var best: ?SessionInfo = null;
+    for (sessions) |s| {
+        if (!s.has_conversation) continue;
+        if (best == null or s.last_modified > best.?.last_modified) best = s;
+    }
+    if (best) |s| return try dupeSessionInfo(arena, s);
+    return null;
+}
+
+/// Deletes every session directory except `current_id` ("" deletes all, as
+/// today), then rebuilds the index from the remaining directories so pruned
+/// entries disappear and any other drift heals in one step.
+pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, current_id: []const u8) !void {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const sessions = try listSessions(scratch, io, base_dir);
+    for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, current_id)) continue;
+        const dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions", s.id });
+        std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
+    }
+    _ = try rebuildSessionsIndex(scratch, io, base_dir);
+}
+
 fn truncateFirstPrompt(arena: std.mem.Allocator, prompt: []const u8) ![]const u8 {
     const end = @min(prompt.len, first_prompt_limit);
     return arena.dupe(u8, prompt[0..end]);
@@ -1005,4 +1063,179 @@ test "upsert leaves no temp file behind" {
     const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json.tmp" });
     defer std.testing.allocator.free(tmp_path);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openFile(std.testing.io, tmp_path, .{}));
+}
+
+test "findSessionByPrefix matches unique prefix" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111-aaa", false);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-222-bbb", false);
+
+    const found = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "abc-111");
+    try std.testing.expect(found != null);
+    try std.testing.expectEqualStrings("abc-111-aaa", found.?.id);
+    if (found) |s| {
+        std.testing.allocator.free(s.id);
+        if (s.first_prompt) |p| std.testing.allocator.free(p);
+    }
+}
+
+test "findSessionByPrefix returns null on ambiguous or no match" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111-aaa", false);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111-bbb", false);
+
+    const found = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "abc-111");
+    try std.testing.expect(found == null);
+
+    const none = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "xyz");
+    try std.testing.expect(none == null);
+}
+
+test "findLatestSession returns most recently modified session with conversation" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    // Sessions exist on disk; the last_modified values come from upserts,
+    // which is what --resume now reads instead of messages.json mtimes.
+    try createTestSessionDirFull(std.testing.io, test_dir, "a-older", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "z-newer", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "no-conv", false, false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "a-older",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 100,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "z-newer",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 200,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "no-conv",
+        .has_prd = false,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 300,
+    });
+
+    const found = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
+    try std.testing.expect(found != null);
+    try std.testing.expectEqualStrings("z-newer", found.?.id);
+    if (found) |s| {
+        std.testing.allocator.free(s.id);
+        if (s.first_prompt) |p| std.testing.allocator.free(p);
+    }
+}
+
+test "findLatestSession returns null when no session has a conversation" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "plain-1", false);
+    try createTestSessionDir(std.testing.io, test_dir, "plain-2", true);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "plain-1",
+        .has_prd = false,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "plain-2",
+        .has_prd = true,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 2,
+    });
+
+    const found = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
+    try std.testing.expect(found == null);
+}
+
+test "pruneSessions removes all but current and rebuilds the index" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "current-1", true);
+    try createTestSessionDir(std.testing.io, test_dir, "old-1", true);
+    try createTestSessionDir(std.testing.io, test_dir, "old-2", false);
+
+    // Seed the index so prune has entries to remove from it.
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "current-1",
+        .has_prd = true,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "old-1",
+        .has_prd = true,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 2,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "old-2",
+        .has_prd = false,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 3,
+    });
+
+    try pruneSessions(std.testing.allocator, std.testing.io, test_dir, "current-1");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("current-1", sessions[0].id);
+
+    // The rebuilt index no longer contains the pruned ids.
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, index_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "old-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "old-2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "current-1") != null);
 }
