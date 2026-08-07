@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.2.6](https://github.com/christianhelle/puny/releases/tag/v0.2.6) (2026-08-07)
 
 ### Features
 - Bound session metadata memory in listSessions ([#104](https://github.com/christianhelle/puny/pull/104)) ([@christianhelle](https://github.com/christianhelle/))
