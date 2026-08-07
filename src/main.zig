@@ -604,6 +604,10 @@ test "include core session tests" {
     _ = @import("core/session.zig");
 }
 
+test "include sessions module tests" {
+    _ = @import("sessions/sessions.zig");
+}
+
 test "include chat session tests" {
     _ = @import("chat/session.zig");
 }
