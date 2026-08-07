@@ -79,7 +79,7 @@
               <span class="output">&nbsp;&nbsp;</span><span class="output green">/quit, /exit</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Exit Puny</span>
             </div>
             <div class="terminal-line">
-              <span class="output">&nbsp;&nbsp;</span><span class="output green">/reset</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Clear the conversation</span>
+              <span class="output">&nbsp;&nbsp;</span><span class="output green">/new, /reset</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Clear the conversation</span>
             </div>
             <div class="terminal-line">
               <span class="output">&nbsp;&nbsp;</span><span class="output green">/stats</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Show session statistics</span>
@@ -110,7 +110,7 @@
             </div>
             <div class="terminal-line">
               <span class="output">&nbsp;&nbsp;</span><span class="output green">/skills</span><span class="output">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; List global and repository skills</span><br />
-              <span class="output">&nbsp;&nbsp;</span><span class="output green">/file [path|url]</span><span class="output">&nbsp; Load a prompt from a file or URL</span>
+              <span class="output">&nbsp;&nbsp;</span><span class="output green">/file [path|url]</span><span class="output">&nbsp;&nbsp; Load a prompt from a file or URL</span>
               <br /><br />
             </div>
             <div class="terminal-line">
@@ -273,7 +273,7 @@
       <div class="features-grid" style="grid-template-columns: 1fr;">
         <div class="install-card">
           <h3>Sessions</h3>
-          <p>Each session is identified by a UUID. A new session is created on every start and <code>/reset</code>. Use <code>/sessions</code> to list saved sessions and <code>/prune</code> to clean up old ones. In <code>/plan</code> mode, once you confirm the plan is ready, the model saves the final PRD as both <code>plan.md</code> and <code>plan.html</code> to the session folder via the <code>save_prd</code> tool.</p>
+          <p>Each session is identified by a UUID. A new session is created on every start, <code>/new</code>, or <code>/reset</code>. Use <code>/sessions</code> to list saved sessions and <code>/prune</code> to clean up old ones. In <code>/plan</code> mode, once you confirm the plan is ready, the model saves the final PRD as both <code>plan.md</code> and <code>plan.html</code> to the session folder via the <code>save_prd</code> tool.</p>
         </div>
         <div class="install-card">
           <h3>Skills</h3>
@@ -364,8 +364,8 @@
       </div>
       <div class="footer-disclaimer">
         <p>
-          This website was 100% vibe coded because I can't be bothered with web dev. 
-          No, I didn't read the fucking HTML, CSS, or JS. 
+          This website was 100% vibe coded because I can't be bothered with web dev.
+          No, I didn't read the fucking HTML, CSS, or JS.
           I don't give a shit. It works. Move on.
         </p>
       </div>
