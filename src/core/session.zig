@@ -147,8 +147,12 @@ pub fn sessionMetaPath(allocator: std.mem.Allocator, sessions_dir: []const u8, i
 }
 
 fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !SessionMeta {
-    const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(1024)) catch |err| switch (err) {
+    const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| switch (err) {
         error.FileNotFound => return SessionMeta{ .planning_mode = false, .first_prompt = null },
+        error.StreamTooLong => {
+            std.log.warn("session meta at {s} exceeds the read limit", .{path});
+            return SessionMeta{ .planning_mode = false, .first_prompt = null };
+        },
         else => |e| return e,
     };
     defer allocator.free(data);
