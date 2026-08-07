@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Bound session metadata memory in listSessions ([#104](https://github.com/christianhelle/puny/pull/104)) ([@christianhelle](https://github.com/christianhelle/))
 - fix `/sessions` crash on oversized session meta files ([#103](https://github.com/christianhelle/puny/pull/103)) ([@christianhelle](https://github.com/christianhelle/))
 - Send skill content to the model on bare skill load ([#102](https://github.com/christianhelle/puny/pull/102)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove auto-commit instructions from system prompt ([#101](https://github.com/christianhelle/puny/pull/101)) ([@christianhelle](https://github.com/christianhelle/))
