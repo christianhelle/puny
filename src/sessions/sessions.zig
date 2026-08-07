@@ -330,16 +330,34 @@ pub fn findLatestSession(arena: std.mem.Allocator, io: std.Io, base_dir: []const
 
 /// Deletes every session directory except `current_id` ("" deletes all, as
 /// today), then rebuilds the index from the remaining directories so pruned
-/// entries disappear and any other drift heals in one step.
+/// entries disappear and any other drift heals in one step. The deletion set
+/// is derived from the on-disk sessions directory, not the index, so a stale
+/// or corrupt index cannot protect or resurrect orphaned directories.
 pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, current_id: []const u8) !void {
     var scratch_arena = std.heap.ArenaAllocator.init(arena);
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
 
-    const sessions = try listSessions(scratch, io, base_dir);
-    for (sessions) |s| {
-        if (std.mem.eql(u8, s.id, current_id)) continue;
-        const dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions", s.id });
+    const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
+    var sessions_dir = std.Io.Dir.cwd().openDir(io, sessions_dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => |e| return e,
+    };
+    defer sessions_dir.close(io);
+
+    // Collect directory names first so deleting entries cannot disturb the
+    // live iterator.
+    var to_delete: std.ArrayList([]const u8) = .empty;
+    defer to_delete.deinit(scratch);
+    var it = sessions_dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .directory) continue;
+        if (std.mem.eql(u8, entry.name, current_id)) continue;
+        try to_delete.append(scratch, try scratch.dupe(u8, entry.name));
+    }
+
+    for (to_delete.items) |id| {
+        const dir_path = try std.fs.path.join(scratch, &.{ sessions_dir_path, id });
         std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
     }
     _ = try rebuildSessionsIndex(scratch, io, base_dir);
@@ -1415,4 +1433,42 @@ test "pruneSessions removes all but current and rebuilds the index" {
     try std.testing.expect(std.mem.indexOf(u8, raw, "old-1") == null);
     try std.testing.expect(std.mem.indexOf(u8, raw, "old-2") == null);
     try std.testing.expect(std.mem.indexOf(u8, raw, "current-1") != null);
+}
+
+test "pruneSessions removes orphaned directories absent from the index" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "keep-1", true);
+    // An orphaned session directory that never made it into the index.
+    try createTestSessionDir(std.testing.io, test_dir, "orphan-1", true);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "keep-1",
+        .has_prd = true,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+
+    try pruneSessions(std.testing.allocator, std.testing.io, test_dir, "keep-1");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("keep-1", sessions[0].id);
+
+    const orphan_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "orphan-1" });
+    defer std.testing.allocator.free(orphan_dir);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, orphan_dir, .{}));
 }
