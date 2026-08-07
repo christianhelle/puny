@@ -473,7 +473,8 @@ test "sessionsPath resolves under Windows and POSIX env maps" {
         defer allocator.free(xdg);
         try std.testing.expectEqualStrings("/tmp/cfg/puny/sessions.json", xdg);
 
-        env.clearRetainingCapacity();
+        env.deinit();
+        env = std.process.Environ.Map.init(allocator);
         try env.put("HOME", "/tmp/test-home");
         const home = try sessionsPath(allocator, &env);
         defer allocator.free(home);
