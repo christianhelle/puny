@@ -50,7 +50,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
 
     // Cheap O(1) staleness check: a session directory was added or removed
     // outside the upsert path, or a plan file was created mid-session.
-    if (dir_stat.mtime.nanoseconds > index_stat.mtime.nanoseconds) {
+    if (dir_stat.mtime.nanoseconds >= index_stat.mtime.nanoseconds) {
         return try rebuildSessionsIndex(arena, io, base_dir);
     }
 
