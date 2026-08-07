@@ -12,7 +12,7 @@ and stays out of your way.
 - **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
-- **Session management**: each run and `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
+- **Session management**: each run, `/new`, or `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
 - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
@@ -512,7 +512,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
-- `/reset` — clear the conversation, start a new session, and unload all skills
+- `/new` or `/reset` — clear the conversation, start a new session, and unload all skills
 - `/stats` — show session statistics and memory usage
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`
@@ -535,7 +535,7 @@ load skills on its own via the `load_skill` tool.
 ### Sessions
 
 Each Puny session is identified by a UUID. A new session is created every time you
-start Puny or run `/reset`. The session ID is shown in the welcome screen and in
+start Puny or run `/new` (or `/reset`). The session ID is shown in the welcome screen and in
 the `/stats` header.
 
 #### Storage
