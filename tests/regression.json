@@ -181,6 +181,15 @@
     ]
   },
   {
+    "name": "Skill with tab separator loads and runs as bare skill",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/mock-skill\t", "--oneshot"],
+    "expect": ["mock-skill-body", "Skill: mock-skill", "mock response"],
+    "not_expect": [],
+    "skills": [
+      { "name": "mock-skill", "body": "mock-skill-body" }
+    ]
+  },
+  {
     "name": "Unknown skill sends raw command text as the prompt",
     "args": ["--mock", "--model", "mock-model", "--prompt", "/nosuchskill", "--oneshot"],
     "expect": ["nosuchskill", "mock response"],
