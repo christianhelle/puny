@@ -218,6 +218,23 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
     file.close(io);
     file_open = false;
 
+    // Stamp the temp file's modify time strictly after the sessions
+    // directory's mtime (1s margin) so a freshly written index is never judged
+    // stale by listSessions' `>=` check on filesystems with coarse timestamp
+    // granularity, where the dir and the fresh index round to the same tick
+    // and trigger a spurious rebuild that discards upserted metadata. The
+    // rename below carries this timestamp to the final path.
+    const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
+    if (cwd.statFile(io, sessions_dir_path, .{}) catch null) |dir_stat| {
+        const now_ns = std.Io.Timestamp.now(io, .awake).nanoseconds;
+        const desired = std.Io.Timestamp.fromNanoseconds(@max(now_ns, dir_stat.mtime.nanoseconds) + std.time.ns_per_s);
+        var stamp_file = cwd.openFile(io, tmp_path, .{ .mode = .read_write }) catch null;
+        if (stamp_file) |*f| {
+            defer f.close(io);
+            f.setTimestamps(io, .{ .modify_timestamp = .{ .new = desired } }) catch {};
+        }
+    }
+
     // Force owner-only on the final file (mirrors prompt_history.json's
     // tightening behavior). Setting it before the rename avoids a window where
     // the final path exists with permissive mode.
