@@ -190,6 +190,15 @@
     ]
   },
   {
+    "name": "Empty skill body with trailing text does not run a chat turn",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/empty-skill hello", "--oneshot"],
+    "expect": ["has no content"],
+    "not_expect": ["mock response"],
+    "skills": [
+      { "name": "empty-skill", "body": "" }
+    ]
+  },
+  {
     "name": "Unknown skill sends raw command text as the prompt",
     "args": ["--mock", "--model", "mock-model", "--prompt", "/nosuchskill", "--oneshot"],
     "expect": ["nosuchskill", "mock response"],
