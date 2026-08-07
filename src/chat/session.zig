@@ -363,6 +363,15 @@ pub const ChatSession = struct {
                         else => |e| return e,
                     };
 
+                    // Skill with no content: report and skip, even when trailing
+                    // text was supplied (e.g. `/empty-skill hello`), so no empty
+                    // system message is appended and no chat turn is run.
+                    if (std.mem.trim(u8, content, " \t\r\n").len == 0) {
+                        try ctx.stdout_writer.print("\n\n{s}Skill '{s}' has no content.{s}\n", .{ ansi.dim, skill_name, ansi.reset });
+                        try ctx.stdout_writer.flush();
+                        continue;
+                    }
+
                     const has_text = if (user_text) |text| std.mem.trim(u8, text, " \t\r\n").len > 0 else false;
                     if (has_text) {
                         // Skill loaded as system context, trailing text as the user request.
@@ -378,11 +387,6 @@ pub const ChatSession = struct {
                     }
 
                     // Bare skill command: send the skill content itself as the prompt.
-                    if (std.mem.trim(u8, content, " \t\r\n").len == 0) {
-                        try ctx.stdout_writer.print("\n\n{s}Skill '{s}' has no content.{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                        try ctx.stdout_writer.flush();
-                        continue;
-                    }
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = content });
                     try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
                     try ctx.stdout_writer.flush();
