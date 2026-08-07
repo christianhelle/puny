@@ -175,7 +175,7 @@ fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []const u
 }
 
 pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) ![]SessionInfo {
-    var tmp_arena = std.heap.ArenaAllocator.init(arena);
+    var tmp_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer tmp_arena.deinit();
     const tmp = tmp_arena.allocator();
 
@@ -194,14 +194,21 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
         if (entry.kind != .directory) continue;
         const id = try arena.dupe(u8, entry.name);
 
-        const prd_path = try std.fs.path.join(tmp, &.{ sessions_dir_path, id, "plan.md" });
+        // Read and parse each session's files into a fresh arena released at
+        // the end of this iteration, so no entry's metadata accumulates in the
+        // caller's shared arena.
+        var entry_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer entry_arena.deinit();
+        const entry_tmp = entry_arena.allocator();
+
+        const prd_path = try std.fs.path.join(entry_tmp, &.{ sessions_dir_path, id, "plan.md" });
         const has_prd = hasFile(io, prd_path);
 
-        const msg_path = try messagesPath(tmp, sessions_dir_path, id);
+        const msg_path = try messagesPath(entry_tmp, sessions_dir_path, id);
         const has_conversation = hasFile(io, msg_path);
 
-        const meta_path = try sessionMetaPath(tmp, sessions_dir_path, id);
-        const meta = try readSessionMetaJson(io, tmp, meta_path);
+        const meta_path = try sessionMetaPath(entry_tmp, sessions_dir_path, id);
+        const meta = try readSessionMetaJson(io, entry_tmp, meta_path);
 
         const first_prompt = if (meta.first_prompt) |p| try arena.dupe(u8, p) else null;
 
