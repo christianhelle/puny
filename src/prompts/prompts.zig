@@ -31,6 +31,6 @@ pub const planning =
     \\If the plan contains diagrams, then make sure that they are readable in both light and dark mode, and that they are not too small to read.
     \\Call the save_prd tool with both the markdown and HTML content to save the PRD files.
     \\Once the PRD is saved, provide the user with a concise summary of the PRD and a list of next steps for implementation.
-    \\Show the absolute path to the PRD files to enable the terminal user to open them in their preferred editor or web browser.
+    \\Show the absolute path to the PRD files to enable the terminal user to open them in their preferred editor by clicking on the path.
     \\When you are done, prompt the user to switch to Build mode to start implementing the PRD, and provide a hint on how to do this (/build implement)
 ;
