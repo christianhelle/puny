@@ -29,17 +29,6 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
 
-    const checker_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/regression_checker.zig"),
-            .target = b.graph.host,
-            .optimize = .Debug,
-        }),
-    });
-
-    const run_checker_tests = b.addRunArtifact(checker_tests);
-    test_step.dependOn(&run_checker_tests.step);
-
     const docker_step = b.step("docker", "Build Docker image");
     const docker_build = b.addSystemCommand(&.{
         b.graph.zig_exe,
@@ -139,6 +128,10 @@ pub fn build(b: *std.Build) !void {
     run_regression.addArtifactArg(exe);
     run_regression.addFileArg(b.path("tests/regression.json"));
     test_regression_step.dependOn(&run_regression.step);
+
+    // `zig build test` also runs the full regression suite against
+    // tests/regression.json via the regression_checker executable.
+    test_step.dependOn(&run_regression.step);
 
     const integration_checker = b.addExecutable(.{
         .name = "integration_checker",
