@@ -5,6 +5,11 @@ const FileContains = struct {
     patterns: []const []const u8,
 };
 
+const SkillFixture = struct {
+    name: []const u8,
+    body: []const u8,
+};
+
 const Evidence = struct {
     file_exists: []const []const u8 = &.{},
     file_contains: ?FileContains = null,
@@ -23,6 +28,10 @@ const TestCase = struct {
     /// Expected exit code; null means 0.
     exit_code: ?u8 = null,
     expect_stderr: []const []const u8 = &.{},
+    /// Skills to materialize under `<cwd>/.agents/skills/<name>/SKILL.md`
+    /// before the test runs, so the binary under test discovers them as
+    /// repository skills. Removed after the test.
+    skills: []const SkillFixture = &.{},
 };
 
 const ServerCtx = struct {
@@ -125,7 +134,7 @@ pub fn main(init: std.process.Init) !u8 {
     return if (failed == 0) 0 else 1;
 }
 
-fn removeEvidenceFiles(io: std.Io, test_case: TestCase) void {
+fn removeEvidenceFiles(allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) void {
     if (test_case.evidence) |evidence| {
         for (evidence.file_exists) |path| {
             std.Io.Dir.cwd().deleteFile(io, path) catch {};
@@ -134,13 +143,42 @@ fn removeEvidenceFiles(io: std.Io, test_case: TestCase) void {
             std.Io.Dir.cwd().deleteFile(io, fc.path) catch {};
         }
     }
+    removeSkillFixtures(allocator, io, test_case);
+}
+
+fn skillDirPath(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    return std.fs.path.join(allocator, &.{ ".agents", "skills", name });
+}
+
+fn setupSkillFixtures(allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) !void {
+    for (test_case.skills) |skill| {
+        const dir_path = try skillDirPath(allocator, skill.name);
+        defer allocator.free(dir_path);
+        try std.Io.Dir.cwd().createDirPath(io, dir_path);
+        const skill_path = try std.fs.path.join(allocator, &.{ dir_path, "SKILL.md" });
+        defer allocator.free(skill_path);
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = skill_path, .data = skill.body });
+    }
+}
+
+fn removeSkillFixtures(allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) void {
+    for (test_case.skills) |skill| {
+        const dir_path = skillDirPath(allocator, skill.name) catch continue;
+        defer allocator.free(dir_path);
+        std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
+    }
+    // Remove the scaffolding directories only if they are now empty, so a
+    // developer's real `.agents/skills` directory is never touched.
+    std.Io.Dir.cwd().deleteDir(io, ".agents/skills") catch {};
+    std.Io.Dir.cwd().deleteDir(io, ".agents") catch {};
 }
 
 fn runTest(params: RunParams, test_case: TestCase) !bool {
     const allocator = params.allocator;
     const io = params.io;
 
-    removeEvidenceFiles(io, test_case);
+    removeEvidenceFiles(allocator, io, test_case);
+    try setupSkillFixtures(allocator, io, test_case);
 
     // Optionally start an in-process HTTP server and substitute the port.
     var server_ctx: ?ServerCtx = null;
