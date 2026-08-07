@@ -72,6 +72,16 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     };
     defer parsed.deinit();
 
+    // A corrupted index could carry a session id that escapes the sessions
+    // directory (empty, path-like, or "." / ".."); refuse it and rebuild from
+    // the directory scan rather than surfacing such entries to callers.
+    for (parsed.value) |s| {
+        if (!isValidSessionId(s.id)) {
+            std.log.warn("sessions index at {s} contains an invalid session id; rebuilding", .{index_path});
+            return try rebuildSessionsIndex(arena, io, base_dir);
+        }
+    }
+
     // parseFromSlice may have returned string slices pointing into `data` (or
     // other scratch memory), so duplicate id and first_prompt into the
     // caller's arena before the scratch arena is released.
@@ -327,6 +337,18 @@ pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8,
 fn truncateFirstPrompt(arena: std.mem.Allocator, prompt: []const u8) ![]const u8 {
     const end = @min(prompt.len, first_prompt_limit);
     return arena.dupe(u8, prompt[0..end]);
+}
+
+/// A session id must be a non-empty path-safe component that is neither "."
+/// nor "..", so a corrupted index can never direct file access outside the
+/// sessions directory.
+fn isValidSessionId(id: []const u8) bool {
+    if (id.len == 0) return false;
+    if (std.mem.eql(u8, id, ".") or std.mem.eql(u8, id, "..")) return false;
+    for (id) |c| {
+        if (c == '/' or c == '\\') return false;
+    }
+    return true;
 }
 
 fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
@@ -776,6 +798,36 @@ test "listSessions rebuilds from scan on a corrupt index" {
     try std.testing.expect(sessions[0].has_prd);
     try std.testing.expect(sessions[0].has_conversation);
     try std.testing.expectEqualStrings("hello", sessions[0].first_prompt.?);
+}
+
+test "listSessions rebuilds when the index contains an invalid session id" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "valid-1", false);
+
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    var idx = try std.Io.Dir.cwd().createFile(std.testing.io, index_path, .{});
+    defer idx.close(std.testing.io);
+    try idx.writeStreamingAll(std.testing.io,
+        \\[{"id":"../evil","has_prd":false,"has_conversation":false,"planning_mode":false,"first_prompt":null,"last_modified":1}]
+    );
+    // Make the index strictly newer than the sessions dir so the staleness
+    // check cannot mask the invalid-id path.
+    try setFileMtime(std.testing.io, index_path, std.Io.Timestamp.fromNanoseconds(2_000_000_000_000_000_000));
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("valid-1", sessions[0].id);
 }
 
 test "listSessions rebuilds from scan on an oversized index" {
