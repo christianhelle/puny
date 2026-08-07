@@ -130,7 +130,7 @@ pub fn main(init: std.process.Init) !u8 {
     }
 
     // Remove any skill fixtures left behind by the last test.
-    cleanupSkillFixtures(allocator, init.io);
+    cleanupSkillFixtures(std.Io.Dir.cwd(), allocator, init.io);
     created_skill_names.deinit(allocator);
 
     const total = passed + failed;
@@ -152,36 +152,36 @@ fn removeEvidenceFiles(allocator: std.mem.Allocator, io: std.Io, test_case: Test
             std.Io.Dir.cwd().deleteFile(io, fc.path) catch {};
         }
     }
-    cleanupSkillFixtures(allocator, io);
+    cleanupSkillFixtures(std.Io.Dir.cwd(), allocator, io);
 }
 
 fn skillDirPath(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     return std.fs.path.join(allocator, &.{ ".agents", "skills", name });
 }
 
-fn setupSkillFixtures(allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) !void {
+fn setupSkillFixtures(dir: std.Io.Dir, allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) !void {
     for (test_case.skills) |skill| {
         const dir_path = try skillDirPath(allocator, skill.name);
         defer allocator.free(dir_path);
-        try std.Io.Dir.cwd().createDirPath(io, dir_path);
+        try dir.createDirPath(io, dir_path);
         const skill_path = try std.fs.path.join(allocator, &.{ dir_path, "SKILL.md" });
         defer allocator.free(skill_path);
-        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = skill_path, .data = skill.body });
+        try dir.writeFile(io, .{ .sub_path = skill_path, .data = skill.body });
         try created_skill_names.append(allocator, skill.name);
     }
 }
 
-fn cleanupSkillFixtures(allocator: std.mem.Allocator, io: std.Io) void {
+fn cleanupSkillFixtures(dir: std.Io.Dir, allocator: std.mem.Allocator, io: std.Io) void {
     for (created_skill_names.items) |name| {
         const dir_path = skillDirPath(allocator, name) catch continue;
-        std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
+        dir.deleteTree(io, dir_path) catch {};
         allocator.free(dir_path);
     }
     created_skill_names.clearRetainingCapacity();
     // Remove the scaffolding directories only if they are now empty, so a
     // developer's real `.agents/skills` directory is never touched.
-    std.Io.Dir.cwd().deleteDir(io, ".agents/skills") catch {};
-    std.Io.Dir.cwd().deleteDir(io, ".agents") catch {};
+    dir.deleteDir(io, ".agents/skills") catch {};
+    dir.deleteDir(io, ".agents") catch {};
 }
 
 fn runTest(params: RunParams, test_case: TestCase) !bool {
@@ -189,7 +189,7 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
     const io = params.io;
 
     removeEvidenceFiles(allocator, io, test_case);
-    try setupSkillFixtures(allocator, io, test_case);
+    try setupSkillFixtures(std.Io.Dir.cwd(), allocator, io, test_case);
 
     // Optionally start an in-process HTTP server and substitute the port.
     var server_ctx: ?ServerCtx = null;
