@@ -13,13 +13,14 @@ pub const SessionInfo = struct {
 
 const first_prompt_limit = 1024;
 const index_read_limit = 64 * 1024 * 1024;
+const index_filename = "sessions.json";
 
 /// Resolves `<puny_dir>/sessions.json` from the environment, reusing the
 /// puny-dir resolution owned by `src/core/session.zig`.
 pub fn sessionsPath(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
     const base = try core_session.configPunyDir(arena, environ_map);
     defer arena.free(base);
-    return std.fs.path.join(arena, &.{ base, "sessions.json" });
+    return std.fs.path.join(arena, &.{ base, index_filename });
 }
 
 /// Returns the session index (`sessions.json`) contents as `[]SessionInfo`
@@ -34,7 +35,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     const scratch = scratch_arena.allocator();
 
     const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
-    const index_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions.json" });
+    const index_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename });
 
     // A missing sessions dir means there are no sessions; same as today's
     // directory scan, and no index is written.
@@ -168,8 +169,8 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
     const scratch = scratch_arena.allocator();
 
     const cwd = std.Io.Dir.cwd();
-    const tmp_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions.json.tmp" });
-    const final_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions.json" });
+    const tmp_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename ++ ".tmp" });
+    const final_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename });
 
     const buffer = try std.json.Stringify.valueAlloc(scratch, entries, .{ .whitespace = .indent_2 });
 
