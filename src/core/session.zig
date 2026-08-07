@@ -121,7 +121,7 @@ pub fn sessionBaseDir(arena: std.mem.Allocator, environ_map: *const std.process.
     return path;
 }
 
-fn configPunyDir(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+pub fn configPunyDir(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
     if (comptime builtin.os.tag == .windows) {
         const base = environ_map.get("APPDATA") orelse environ_map.get("USERPROFILE") orelse return error.NoConfigDir;
         return std.fs.path.join(arena, &.{ base, "puny" });
@@ -146,7 +146,7 @@ pub fn sessionMetaPath(allocator: std.mem.Allocator, sessions_dir: []const u8, i
     return std.fs.path.join(allocator, &.{ sessions_dir, id, "session.json" });
 }
 
-fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !SessionMeta {
+pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !SessionMeta {
     const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| switch (err) {
         error.FileNotFound => return SessionMeta{ .planning_mode = false, .first_prompt = null },
         error.StreamTooLong => {
@@ -229,7 +229,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     return list.toOwnedSlice(arena);
 }
 
-fn hasFile(io: std.Io, path: []const u8) bool {
+pub fn hasFile(io: std.Io, path: []const u8) bool {
     var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return false;
     file.close(io);
     return true;
