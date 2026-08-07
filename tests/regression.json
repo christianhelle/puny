@@ -114,8 +114,7 @@
         "patterns": ["[TOOL_CALL]", "[TOOL_RESULT]"]
       }
     }
-  }
-,
+  },
   {
     "name": "Prompt file from local file",
     "args": ["--mock", "--model", "mock-model", "--prompt-file", "tests/fixtures/prompt.md", "--oneshot"],
@@ -144,4 +143,47 @@
     "not_expect": [],
     "exit_code": 1,
     "expect_stderr": ["Failed to load prompt from", "prompt file is empty"]
-  }]
+  },
+  {
+    "name": "Bare skill load sends skill content to the model",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/mock-skill", "--oneshot"],
+    "expect": ["mock-skill-body", "Skill: mock-skill", "mock response"],
+    "not_expect": [],
+    "skills": [
+      { "name": "mock-skill", "body": "mock-skill-body" }
+    ]
+  },
+  {
+    "name": "Whitespace-only skill argument acts as bare skill load",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/mock-skill   ", "--oneshot"],
+    "expect": ["mock-skill-body", "mock response"],
+    "not_expect": [],
+    "skills": [
+      { "name": "mock-skill", "body": "mock-skill-body" }
+    ]
+  },
+  {
+    "name": "Skill with trailing text keeps system context and user text",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/mock-skill hello", "--oneshot"],
+    "expect": ["Skill: mock-skill", "hello", "mock response"],
+    "not_expect": [],
+    "skills": [
+      { "name": "mock-skill", "body": "mock-skill-body" }
+    ]
+  },
+  {
+    "name": "Empty skill body is guarded without a chat turn",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/empty-skill", "--oneshot"],
+    "expect": ["has no content"],
+    "not_expect": ["mock response"],
+    "skills": [
+      { "name": "empty-skill", "body": "" }
+    ]
+  },
+  {
+    "name": "Unknown skill sends raw command text as the prompt",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/nosuchskill", "--oneshot"],
+    "expect": ["nosuchskill", "mock response"],
+    "not_expect": []
+  }
+]
