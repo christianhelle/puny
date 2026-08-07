@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Add /new command to create new session ([#105](https://github.com/christianhelle/puny/pull/105)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.2.6](https://github.com/christianhelle/puny/releases/tag/v0.2.6) (2026-08-07)
 
 ### Features
