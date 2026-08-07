@@ -439,10 +439,10 @@ fn timestampToNs(ts: std.Io.Timestamp) ?u64 {
 
 // ---- tests ----
 
-fn testBaseDir(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
+fn testBaseDir(allocator: std.mem.Allocator, io: std.Io, name: []const u8) ![]const u8 {
     const cwd = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd);
-    const dir = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions-index" });
+    const dir = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions-index", name });
     // Start from a clean slate: a run that crashed mid-test leaves sessions and
     // an index behind, which would otherwise poison assertions that expect an
     // empty directory (e.g. the missing-sessions-dir case) on the next run.
@@ -570,7 +570,7 @@ test "sessionsPath resolves under Windows and POSIX env maps" {
 }
 
 test "listSessions returns empty when the sessions dir is missing and writes no index" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -587,7 +587,7 @@ test "listSessions returns empty when the sessions dir is missing and writes no 
 }
 
 test "testBaseDir wipes leftovers from an interrupted run" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -609,7 +609,7 @@ test "testBaseDir wipes leftovers from an interrupted run" {
     // Resolving the test base dir again (as the next test does) must start
     // from a clean slate; otherwise stale sessions leak into the listing and
     // poison assertions that expect an empty directory.
-    const reset = try testBaseDir(std.testing.allocator, std.testing.io);
+    const reset = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, reset);
         std.testing.allocator.free(reset);
@@ -627,7 +627,7 @@ test "testBaseDir wipes leftovers from an interrupted run" {
 }
 
 test "listSessions rebuilds and writes the index from discovered sessions" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -659,7 +659,7 @@ test "listSessions rebuilds and writes the index from discovered sessions" {
 }
 
 test "listSessions detects conversation" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -690,7 +690,7 @@ test "listSessions detects conversation" {
 }
 
 test "listSessions stores a 1024-char preview for first prompts longer than 1024 bytes" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -737,7 +737,7 @@ test "listSessions stores a 1024-char preview for first prompts longer than 1024
 }
 
 test "listSessions survives a session meta larger than the read limit" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -777,7 +777,7 @@ test "listSessions survives a session meta larger than the read limit" {
 }
 
 test "listSessions does not retain every session's metadata in the shared arena" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -836,7 +836,7 @@ test "listSessions does not retain every session's metadata in the shared arena"
 }
 
 test "listSessions rebuilds from scan on a corrupt index" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -867,7 +867,7 @@ test "listSessions rebuilds from scan on a corrupt index" {
 }
 
 test "listSessions rebuilds when the index contains an invalid session id" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -897,7 +897,7 @@ test "listSessions rebuilds when the index contains an invalid session id" {
 }
 
 test "listSessions tolerates an unreadable session meta file" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -932,7 +932,7 @@ test "listSessions rebuilds from scan on an oversized index" {
     index_read_limit = 4 * 1024;
     defer index_read_limit = default_index_read_limit;
 
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -966,7 +966,7 @@ test "listSessions rebuilds from scan on an oversized index" {
 }
 
 test "listSessions rebuilds when the sessions dir is newer than the index" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1006,7 +1006,7 @@ test "listSessions rebuilds when the sessions dir is newer than the index" {
 }
 
 test "upsertSessionInfo adds a new entry and reads it back" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1041,7 +1041,7 @@ test "upsertSessionInfo adds a new entry and reads it back" {
 }
 
 test "upsertSessionInfo updates an existing entry and refreshes last_modified" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1091,7 +1091,7 @@ test "upsertSessionInfo updates an existing entry and refreshes last_modified" {
 }
 
 test "upsertSessionInfo keeps the index sorted by id" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1131,7 +1131,7 @@ test "upsertSessionInfo keeps the index sorted by id" {
 }
 
 test "upsertSessionInfo truncates first_prompt beyond 1024 chars and preserves null" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1178,7 +1178,7 @@ test "upsertSessionInfo truncates first_prompt beyond 1024 chars and preserves n
 }
 
 test "removeSessionFromIndex removes a single entry" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1221,7 +1221,7 @@ test "removeSessionFromIndex removes a single entry" {
 test "upsert writes the index with owner-only permissions" {
     if (comptime builtin.os.tag == .windows) return;
 
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1244,7 +1244,7 @@ test "upsert writes the index with owner-only permissions" {
 }
 
 test "upsert leaves no temp file behind" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1272,7 +1272,7 @@ test "upsert leaves no temp file behind" {
 }
 
 test "findSessionByPrefix matches unique prefix" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1291,7 +1291,7 @@ test "findSessionByPrefix matches unique prefix" {
 }
 
 test "findSessionByPrefix returns null on ambiguous or no match" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1308,7 +1308,7 @@ test "findSessionByPrefix returns null on ambiguous or no match" {
 }
 
 test "findLatestSession returns most recently modified session with conversation" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1355,7 +1355,7 @@ test "findLatestSession returns most recently modified session with conversation
 }
 
 test "findLatestSession returns null when no session has a conversation" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1386,7 +1386,7 @@ test "findLatestSession returns null when no session has a conversation" {
 }
 
 test "pruneSessions removes all but current and rebuilds the index" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
@@ -1447,7 +1447,7 @@ test "pruneSessions removes all but current and rebuilds the index" {
 }
 
 test "pruneSessions removes orphaned directories absent from the index" {
-    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
         std.testing.allocator.free(test_dir);
