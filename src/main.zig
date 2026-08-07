@@ -7,6 +7,7 @@ const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const core_sess = @import("core/session.zig");
+const sessions = @import("sessions/sessions.zig");
 const prompt_history = @import("prompts/history.zig");
 const prompt_file = @import("prompts/prompt_file.zig");
 const prompts = @import("prompts/prompts.zig");
@@ -43,7 +44,7 @@ pub fn main(init: std.process.Init) !void {
         var out: std.Io.File.Writer = .init(.stdout(), init.io, &buf);
         const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
         const keep_id = parsed.session orelse "";
-        try core_sess.pruneSessions(arena, init.io, base_dir, keep_id);
+        try sessions.pruneSessions(arena, init.io, base_dir, keep_id);
         if (keep_id.len > 0) {
             try out.interface.print("Pruned all sessions except '{s}'.\n", .{keep_id});
         } else {
@@ -159,9 +160,9 @@ pub fn main(init: std.process.Init) !void {
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
-    var restore_target: ?core_sess.SessionInfo = null;
+    var restore_target: ?sessions.SessionInfo = null;
     if (parsed.session) |sid| {
-        if (core_sess.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
+        if (sessions.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
             if (maybe_s) |s| {
                 if (s.has_conversation) {
                     restore_target = s;
@@ -175,7 +176,7 @@ pub fn main(init: std.process.Init) !void {
             }
         } else |_| {}
     } else if (parsed.do_resume) {
-        if (core_sess.findLatestSession(arena, init.io, base_dir)) |maybe_latest| {
+        if (sessions.findLatestSession(arena, init.io, base_dir)) |maybe_latest| {
             restore_target = maybe_latest;
             if (maybe_latest == null) {
                 try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
@@ -343,7 +344,7 @@ fn loadRestoredSession(
     msg_alloc: std.mem.Allocator,
     io: std.Io,
     base_dir: []const u8,
-    s: core_sess.SessionInfo,
+    s: sessions.SessionInfo,
     planning_mode: *bool,
     messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
