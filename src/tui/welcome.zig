@@ -46,7 +46,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     if (!info.oneshot) {
         try writer.print("{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
         try printCommand(writer, "/quit, /exit", "Exit Puny");
-        try printCommand(writer, "/new, /reset", "Clear the conversation");
+        try printCommand(writer, "/new, /reset", "New session");
         try printCommand(writer, "/stats", "Show session statistics");
         try printCommand(writer, "/config", "Reconfigure URL and API key");
         try printCommand(writer, "/plan [task]", "Enter planning mode");
