@@ -12,7 +12,9 @@ pub const SessionInfo = struct {
 };
 
 const first_prompt_limit = 1024;
-const index_read_limit = 64 * 1024 * 1024;
+/// Read limit for the sessions index file. A `var` so tests can override it
+/// and exercise the StreamTooLong path without writing tens of megabytes.
+var index_read_limit: usize = 64 * 1024 * 1024;
 const index_filename = "sessions.json";
 
 /// Resolves `<puny_dir>/sessions.json` from the environment, reusing the
@@ -924,6 +926,12 @@ test "listSessions tolerates an unreadable session meta file" {
 }
 
 test "listSessions rebuilds from scan on an oversized index" {
+    // Override the shared read limit so the oversized index only needs a few
+    // kilobytes on disk; restore the default before the test ends.
+    const default_index_read_limit = index_read_limit;
+    index_read_limit = 4 * 1024;
+    defer index_read_limit = default_index_read_limit;
+
     const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
     defer {
         cleanupTestDir(std.testing.io, test_dir);
@@ -932,15 +940,15 @@ test "listSessions rebuilds from scan on an oversized index" {
 
     try createTestSessionDir(std.testing.io, test_dir, "over-1", false);
 
-    // An index larger than the 64 MB read limit must trigger a rebuild rather
+    // An index larger than the read limit must trigger a rebuild rather
     // than a crash or a truncated listing.
     const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
     defer std.testing.allocator.free(index_path);
     var big = try std.Io.Dir.cwd().createFile(std.testing.io, index_path, .{});
     defer big.close(std.testing.io);
-    const chunk = [_]u8{'x'} ** (1024 * 1024);
+    const chunk = [_]u8{'x'} ** 1024;
     var written: usize = 0;
-    while (written < 64 * 1024 * 1024 + 1024) : (written += chunk.len) {
+    while (written < index_read_limit + 64) : (written += chunk.len) {
         try big.writeStreamingAll(std.testing.io, &chunk);
     }
 
