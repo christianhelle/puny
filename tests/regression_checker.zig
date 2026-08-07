@@ -163,6 +163,12 @@ fn setupSkillFixtures(dir: std.Io.Dir, allocator: std.mem.Allocator, io: std.Io,
     for (test_case.skills) |skill| {
         const dir_path = try skillDirPath(allocator, skill.name);
         defer allocator.free(dir_path);
+        // Refuse to overwrite a skill directory that already exists: it may
+        // hold a developer's real skill, and cleanup would later delete it.
+        if (dir.openDir(io, dir_path, .{})) |existing| {
+            existing.close(io);
+            return error.SkillFixtureCollision;
+        } else |_| {}
         try dir.createDirPath(io, dir_path);
         const skill_path = try std.fs.path.join(allocator, &.{ dir_path, "SKILL.md" });
         defer allocator.free(skill_path);
@@ -327,7 +333,7 @@ test "skill fixtures materialize in the target directory and clean up" {
         .args = &.{},
         .expect = &.{},
         .not_expect = &.{},
-        .skills = &.{ .{ .name = "mock-skill", .body = "mock-skill-body" } },
+        .skills = &.{.{ .name = "mock-skill", .body = "mock-skill-body" }},
     };
 
     try setupSkillFixtures(tmp.dir, std.testing.allocator, std.testing.io, test_case);
@@ -356,7 +362,7 @@ test "skill fixtures refuse to overwrite an existing skill directory" {
         .args = &.{},
         .expect = &.{},
         .not_expect = &.{},
-        .skills = &.{ .{ .name = "mock-skill", .body = "mock-skill-body" } },
+        .skills = &.{.{ .name = "mock-skill", .body = "mock-skill-body" }},
     };
 
     try std.testing.expectError(error.SkillFixtureCollision, setupSkillFixtures(tmp.dir, std.testing.allocator, std.testing.io, test_case));
