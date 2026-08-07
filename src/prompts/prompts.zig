@@ -8,10 +8,6 @@ pub const system =
     \\When you have enough information, produce a concise final text answer.
     \\Be extremely concise. Sacrifice grammar for the sake of concision.
     \\If you are unsure, ask the user for clarification.
-    \\If you are writing code, commit changes as often as possible in super small increments,
-    \\and explain your reasoning in a human readable one-liner commit message.
-    \\Never commit directly to the main or master branch.
-    \\If the user is currently on the main or master branch, create a new branch for your commits.
 ;
 
 pub const planning =
