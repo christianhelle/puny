@@ -33,7 +33,7 @@ no Node.js dependencies, no JavaScript.
 ## Why the feature set is intentionally limited
 
 Puny is designed around the way I work. It is highly opinionated. That means it will
-never try to be everything to everyone. It's a tool and will take credit itself for your work
+never try to be everything to everyone. It's a tool and will never take credit itself for your work
 by adding itself as a co-author to your commits. It will never try to be a platform, a framework, 
 or a plugin ecosystem. 
 
@@ -56,16 +56,10 @@ The four supported providers are the ones I use personally:
 - [LM Studio](https://lmstudio.ai/) — local inference on my own hardware
 - [OpenCode Zen](https://opencode.ai/zen) — wide selection of reliable optimized models
 - [OpenCode Go](https://opencode.ai/go) — cheaper hosted models when I need them
-- [GitHub Copilot](https://github.com/features/copilot) — comes with my GitHub subscription
+- [GitHub Copilot](https://github.com/features/copilot) — comes with my sponsored GitHub subscription
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can
 read, edit, search, and inspect your codebase.
-
-## Screenshots
-
-| Welcome screen               | Provider picker                      | Model picker                      |
-| ---------------------------- | ------------------------------------ | --------------------------------- |
-| ![](docs/images/welcome.png) | ![](docs/images/change-provider.png) | ![](docs/images/change-model.png) |
 
 ## Installation
 
