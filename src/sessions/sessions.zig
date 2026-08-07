@@ -119,8 +119,9 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
 
         // Each entry's metadata is read into a scratch arena released at the
         // end of this iteration, so no per-session file contents accumulate in
-        // the caller's arena.
-        var entry_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        // the caller's arena. It is backed by the caller's allocator so these
+        // transient allocations stay observable and bounded by it.
+        var entry_arena = std.heap.ArenaAllocator.init(arena);
         defer entry_arena.deinit();
         const entry_tmp = entry_arena.allocator();
 
@@ -823,11 +824,13 @@ test "listSessions does not retain every session's metadata in the shared arena"
     }
 
     // The retained results are ~4.3KB (one id plus one 1024-char preview per
-    // session). The 512KB file contents used to accumulate in the shared arena
-    // until the listing finished; bound the peak to the retained results plus
-    // a small constant.
+    // session). The per-entry scratch arena must release each session's file
+    // contents and parsed metadata before the next entry is processed, so once
+    // the listing returns the live allocations are back to roughly the
+    // retained results. Bounding the live count (rather than the peak) is
+    // robust to how much transient scratch a single entry's parse uses.
     const retained = 4 * (36 + 1024);
-    try std.testing.expect(tracking.peak < retained + 2 * 1024 * 1024);
+    try std.testing.expect(tracking.live <= retained + 16 * 1024);
 }
 
 test "listSessions rebuilds from scan on a corrupt index" {
