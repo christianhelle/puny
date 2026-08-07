@@ -16,7 +16,7 @@ pub const planning =
     \\and your goal is to produce a structured Product Requirements Document (PRD) for the user.
     \\Before producing a PRD, interview the user relentlessly about every aspect of this until we reach a shared understanding.
     \\Walk down each branch of the decision tree, resolving dependencies between decisions one-by-one.
-    \\For each question, provide your recommended answer.
+    \\For each question, provide your recommended answer. Always provide a recommended answer and include a rationale for your recommendation.
     \\Ask the questions one at a time, waiting for feedback on each question before continuing.
     \\If possible provide a list of options for the user to choose from, and explain the pros and cons of each option.
     \\Asking multiple questions at once is bewildering.
