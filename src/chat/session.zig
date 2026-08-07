@@ -1658,7 +1658,7 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
     sessions.upsertSessionInfo(ctx.arena, ctx.io, ctx.session.base, .{
         .id = ctx.session.id,
         .has_prd = core_session.sessionHasPlan(ctx.io, ctx.session.dir),
-        .has_conversation = ctx.messages.items.len > 0,
+        .has_conversation = sessionHasContent(ctx.messages.items),
         .planning_mode = ctx.planning_mode.*,
         .first_prompt = firstUserPrompt(ctx.messages.items),
         .last_modified = now_ns,
