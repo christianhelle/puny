@@ -1,0 +1,689 @@
+const std = @import("std");
+const builtin = @import("builtin");
+const core_session = @import("../core/session.zig");
+
+pub const SessionInfo = struct {
+    id: []const u8,
+    has_prd: bool,
+    has_conversation: bool,
+    planning_mode: bool,
+    first_prompt: ?[]const u8,
+    last_modified: u64,
+};
+
+const first_prompt_limit = 1024;
+const index_read_limit = 64 * 1024 * 1024;
+
+/// Resolves `<puny_dir>/sessions.json` from the environment, reusing the
+/// puny-dir resolution owned by `src/core/session.zig`.
+pub fn sessionsPath(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+    const base = try core_session.configPunyDir(arena, environ_map);
+    defer arena.free(base);
+    return std.fs.path.join(arena, &.{ base, "sessions.json" });
+}
+
+/// Returns the session index (`sessions.json`) contents as `[]SessionInfo`
+/// sorted by id. A missing, stale, corrupt, or oversized index is rebuilt from
+/// a directory scan (and the index rewritten) before returning.
+///
+/// Only the returned entries (id and first_prompt slices) are allocated in
+/// `arena`; all transient path and parse memory is released before returning.
+pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) ![]SessionInfo {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
+    const index_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions.json" });
+
+    // A missing sessions dir means there are no sessions; same as today's
+    // directory scan, and no index is written.
+    const dir_stat = std.Io.Dir.cwd().statFile(io, sessions_dir_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return &[_]SessionInfo{},
+        else => |e| return e,
+    };
+
+    const index_stat = std.Io.Dir.cwd().statFile(io, index_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return try rebuildSessionsIndex(arena, io, base_dir),
+        else => |e| return e,
+    };
+
+    // Cheap O(1) staleness check: a session directory was added or removed
+    // outside the upsert path, or a plan file was created mid-session.
+    if (dir_stat.mtime.nanoseconds > index_stat.mtime.nanoseconds) {
+        return try rebuildSessionsIndex(arena, io, base_dir);
+    }
+
+    const data = std.Io.Dir.cwd().readFileAlloc(io, index_path, scratch, std.Io.Limit.limited(index_read_limit)) catch |err| switch (err) {
+        error.StreamTooLong => {
+            std.log.warn("sessions index at {s} exceeds the read limit; rebuilding", .{index_path});
+            return try rebuildSessionsIndex(arena, io, base_dir);
+        },
+        else => |e| return e,
+    };
+
+    const parsed = std.json.parseFromSlice([]SessionInfo, scratch, data, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    }) catch |err| {
+        std.log.warn("failed to parse sessions index at {s}: {s}; rebuilding", .{ index_path, @errorName(err) });
+        return try rebuildSessionsIndex(arena, io, base_dir);
+    };
+    defer parsed.deinit();
+
+    // parseFromSlice may have returned string slices pointing into `data` (or
+    // other scratch memory), so duplicate id and first_prompt into the
+    // caller's arena before the scratch arena is released.
+    const entries = try arena.alloc(SessionInfo, parsed.value.len);
+    for (parsed.value, 0..) |s, i| {
+        entries[i] = try dupeSessionInfo(arena, s);
+    }
+    return entries;
+}
+
+/// Full directory scan: computes every `SessionInfo` field from the session
+/// files (last_modified from file mtimes), sorts by id, writes the index, and
+/// returns the entries. This is the self-healing path for a missing, stale,
+/// corrupt, or oversized index, and the one-time migration for existing
+/// installs.
+fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) ![]SessionInfo {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
+    var sessions_dir = std.Io.Dir.cwd().openDir(io, sessions_dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return &[_]SessionInfo{},
+        else => |e| return e,
+    };
+    defer sessions_dir.close(io);
+
+    var list: std.ArrayList(SessionInfo) = .empty;
+    errdefer list.deinit(arena);
+
+    var it = sessions_dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .directory) continue;
+        const id = try arena.dupe(u8, entry.name);
+
+        // Each entry's metadata is read into a scratch arena released at the
+        // end of this iteration, so no per-session file contents accumulate in
+        // the caller's arena.
+        var entry_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer entry_arena.deinit();
+        const entry_tmp = entry_arena.allocator();
+
+        const dir_path = try std.fs.path.join(entry_tmp, &.{ sessions_dir_path, id });
+        const has_prd = core_session.sessionHasPlan(io, dir_path);
+
+        const msg_path = try core_session.messagesPath(entry_tmp, sessions_dir_path, id);
+        const msg_stat = std.Io.Dir.cwd().statFile(io, msg_path, .{}) catch null;
+        const has_conversation = msg_stat != null;
+
+        const meta_path = try core_session.sessionMetaPath(entry_tmp, sessions_dir_path, id);
+        const meta = try core_session.readSessionMetaJson(io, entry_tmp, meta_path);
+
+        const first_prompt = if (meta.first_prompt) |p| try truncateFirstPrompt(arena, p) else null;
+
+        // last_modified: messages.json mtime when present, else the plan
+        // file mtime when present, else 0.
+        var last_modified: u64 = 0;
+        if (msg_stat) |st| {
+            last_modified = timestampToNs(st.mtime) orelse 0;
+        }
+        if (last_modified == 0 and has_prd) {
+            const md_path = try std.fs.path.join(entry_tmp, &.{ dir_path, "plan.md" });
+            if (std.Io.Dir.cwd().statFile(io, md_path, .{})) |st| {
+                last_modified = timestampToNs(st.mtime) orelse 0;
+            } else |_| {
+                const html_path = try std.fs.path.join(entry_tmp, &.{ dir_path, "plan.html" });
+                if (std.Io.Dir.cwd().statFile(io, html_path, .{})) |st| {
+                    last_modified = timestampToNs(st.mtime) orelse 0;
+                } else |_| {}
+            }
+        }
+
+        try list.append(arena, .{
+            .id = id,
+            .has_prd = has_prd,
+            .has_conversation = has_conversation,
+            .planning_mode = meta.planning_mode,
+            .first_prompt = first_prompt,
+            .last_modified = last_modified,
+        });
+    }
+
+    std.mem.sort(SessionInfo, list.items, {}, lessThan);
+    const entries = try list.toOwnedSlice(arena);
+    try writeIndex(io, arena, base_dir, entries);
+    return entries;
+}
+
+/// Writes `entries` to `base_dir/sessions.json` as a bare JSON array, using a
+/// temp file + atomic rename and owner-only permissions. All transient path
+/// and buffer memory lives in a scratch arena released before returning.
+fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, entries: []const SessionInfo) !void {
+    var scratch_arena = std.heap.ArenaAllocator.init(allocator);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const cwd = std.Io.Dir.cwd();
+    const tmp_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions.json.tmp" });
+    const final_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions.json" });
+
+    const buffer = try std.json.Stringify.valueAlloc(scratch, entries, .{ .whitespace = .indent_2 });
+
+    var file = cwd.createFile(io, tmp_path, .{}) catch |err| {
+        std.log.warn("failed to create sessions index temp file {s}: {s}", .{ tmp_path, @errorName(err) });
+        return err;
+    };
+    errdefer {
+        file.close(io);
+        cwd.deleteFile(io, tmp_path) catch {};
+    }
+
+    file.writeStreamingAll(io, buffer) catch |err| {
+        std.log.warn("failed to write sessions index {s}: {s}", .{ tmp_path, @errorName(err) });
+        return err;
+    };
+    file.writeStreamingAll(io, "\n") catch |err| {
+        std.log.warn("failed to write sessions index newline {s}: {s}", .{ tmp_path, @errorName(err) });
+        return err;
+    };
+    file.close(io);
+
+    // Force owner-only on the final file (mirrors prompt_history.json's
+    // tightening behavior). Setting it before the rename avoids a window where
+    // the final path exists with permissive mode.
+    if (comptime builtin.os.tag != .windows) {
+        cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{}) catch {};
+    }
+
+    std.Io.Dir.renameAbsolute(tmp_path, final_path, io) catch |err| {
+        std.log.warn("failed to rename sessions index into place {s}: {s}", .{ final_path, @errorName(err) });
+        cwd.deleteFile(io, tmp_path) catch {};
+        return err;
+    };
+}
+
+fn truncateFirstPrompt(arena: std.mem.Allocator, prompt: []const u8) ![]const u8 {
+    const end = @min(prompt.len, first_prompt_limit);
+    return arena.dupe(u8, prompt[0..end]);
+}
+
+fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
+    const id = try arena.dupe(u8, s.id);
+    const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
+    return .{
+        .id = id,
+        .has_prd = s.has_prd,
+        .has_conversation = s.has_conversation,
+        .planning_mode = s.planning_mode,
+        .first_prompt = first_prompt,
+        .last_modified = s.last_modified,
+    };
+}
+
+fn lessThan(_: void, a: SessionInfo, b: SessionInfo) bool {
+    return std.mem.lessThan(u8, a.id, b.id);
+}
+
+fn timestampToNs(ts: std.Io.Timestamp) ?u64 {
+    if (ts.nanoseconds < 0) return null;
+    return @intCast(ts.nanoseconds);
+}
+
+// ---- tests ----
+
+fn testBaseDir(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
+    return try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions-index" });
+}
+
+fn cleanupTestDir(io: std.Io, path: []const u8) void {
+    std.Io.Dir.cwd().deleteTree(io, path) catch {};
+}
+
+fn createSessionDir(io: std.Io, dir: []const u8) !void {
+    try std.Io.Dir.cwd().createDirPath(io, dir);
+}
+
+fn createTestSessionDir(io: std.Io, base_dir: []const u8, uuid: []const u8, has_prd: bool) !void {
+    try createTestSessionDirFull(io, base_dir, uuid, has_prd, false);
+}
+
+fn createTestSessionDirFull(io: std.Io, base_dir: []const u8, uuid: []const u8, has_prd: bool, has_conversation: bool) !void {
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ base_dir, "sessions", uuid });
+    defer std.testing.allocator.free(dir);
+    try createSessionDir(io, dir);
+    if (has_prd) {
+        const prd_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "plan.md" });
+        defer std.testing.allocator.free(prd_path);
+        var file = try std.Io.Dir.cwd().createFile(io, prd_path, .{});
+        file.close(io);
+    }
+    if (has_conversation) {
+        const msg_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "messages.json" });
+        defer std.testing.allocator.free(msg_path);
+        var file = try std.Io.Dir.cwd().createFile(io, msg_path, .{});
+        file.close(io);
+        const meta_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "session.json" });
+        defer std.testing.allocator.free(meta_path);
+        var meta_file = try std.Io.Dir.cwd().createFile(io, meta_path, .{});
+        defer meta_file.close(io);
+        try meta_file.writeStreamingAll(io, "{\"planning_mode\":false,\"first_prompt\":\"hello\"}");
+    }
+}
+
+fn setFileMtime(io: std.Io, path: []const u8, ts: std.Io.Timestamp) !void {
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{ .mode = .read_write });
+    defer file.close(io);
+    try file.setTimestamps(io, .{ .modify_timestamp = .{ .new = ts } });
+}
+
+/// Test allocator that records the peak number of live bytes it has been asked
+/// to hold. Lets a test assert that transient work (like reading each session
+/// meta file) is released instead of accumulating in a shared arena.
+const PeakTrackingAllocator = struct {
+    backing: std.mem.Allocator,
+    live: usize = 0,
+    peak: usize = 0,
+
+    fn allocator(self: *PeakTrackingAllocator) std.mem.Allocator {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .alloc = alloc,
+                .resize = resize,
+                .remap = remap,
+                .free = free,
+            },
+        };
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        const ptr = self.backing.rawAlloc(len, alignment, ret_addr) orelse return null;
+        self.live += len;
+        if (self.live > self.peak) self.peak = self.live;
+        return ptr;
+    }
+
+    fn resize(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        if (!self.backing.rawResize(memory, alignment, new_len, ret_addr)) return false;
+        self.live -= memory.len;
+        self.live += new_len;
+        if (self.live > self.peak) self.peak = self.live;
+        return true;
+    }
+
+    fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        const ptr = self.backing.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
+        self.live -= memory.len;
+        self.live += new_len;
+        if (self.live > self.peak) self.peak = self.live;
+        return ptr;
+    }
+
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const self: *PeakTrackingAllocator = @ptrCast(@alignCast(ctx));
+        self.live -= memory.len;
+        self.backing.rawFree(memory, alignment, ret_addr);
+    }
+};
+
+test "sessionsPath resolves under Windows and POSIX env maps" {
+    const allocator = std.testing.allocator;
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    if (comptime builtin.os.tag == .windows) {
+        try env.put("USERPROFILE", "C:\\Users\\test");
+        const path = try sessionsPath(allocator, &env);
+        defer allocator.free(path);
+        try std.testing.expectEqualStrings("C:\\Users\\test\\puny\\sessions.json", path);
+    } else {
+        try env.put("XDG_CONFIG_HOME", "/tmp/cfg");
+        const xdg = try sessionsPath(allocator, &env);
+        defer allocator.free(xdg);
+        try std.testing.expectEqualStrings("/tmp/cfg/puny/sessions.json", xdg);
+
+        env.clearRetainingCapacity();
+        try env.put("HOME", "/tmp/test-home");
+        const home = try sessionsPath(allocator, &env);
+        defer allocator.free(home);
+        try std.testing.expectEqualStrings("/tmp/test-home/.config/puny/sessions.json", home);
+    }
+}
+
+test "listSessions returns empty when the sessions dir is missing and writes no index" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createSessionDir(std.testing.io, test_dir);
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer std.testing.allocator.free(sessions);
+    try std.testing.expectEqual(@as(usize, 0), sessions.len);
+
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, index_path, .{}));
+}
+
+test "listSessions rebuilds and writes the index from discovered sessions" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "abc-111", true);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-222", false);
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    try std.testing.expectEqualStrings("abc-111", sessions[0].id);
+    try std.testing.expect(sessions[0].has_prd);
+    try std.testing.expect(!sessions[0].has_conversation);
+    try std.testing.expect(!sessions[1].has_conversation);
+
+    // The rebuild wrote the index beside config.json.
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    const st = try std.Io.Dir.cwd().statFile(std.testing.io, index_path, .{});
+    try std.testing.expect(st.size > 0);
+}
+
+test "listSessions detects conversation" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDirFull(std.testing.io, test_dir, "conv-1", false, true);
+    try createTestSessionDir(std.testing.io, test_dir, "plain-2", false);
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    const conv = for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, "conv-1")) break s;
+    } else unreachable;
+    const plain = for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, "plain-2")) break s;
+    } else unreachable;
+    try std.testing.expect(conv.has_conversation);
+    try std.testing.expect(!plain.has_conversation);
+    try std.testing.expectEqualStrings("hello", conv.first_prompt.?);
+}
+
+test "listSessions stores a 1024-char preview for first prompts longer than 1024 bytes" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "big-meta", false);
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const meta_path = try core_session.sessionMetaPath(std.testing.allocator, sessions_dir, "big-meta");
+    defer std.testing.allocator.free(meta_path);
+
+    const long_prompt = [_]u8{'x'} ** 2048;
+    var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
+    defer meta_file.close(std.testing.io);
+    try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
+    try meta_file.writeStreamingAll(std.testing.io, &long_prompt);
+    try meta_file.writeStreamingAll(std.testing.io, "\"}");
+
+    // First listing rebuilds from scan; the index stores the truncated preview.
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("big-meta", sessions[0].id);
+    try std.testing.expectEqual(@as(usize, 1024), sessions[0].first_prompt.?.len);
+
+    // Second listing reads the index and still returns the truncated preview.
+    const again = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (again) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(again);
+    }
+    try std.testing.expectEqual(@as(usize, 1), again.len);
+    try std.testing.expectEqual(@as(usize, 1024), again[0].first_prompt.?.len);
+}
+
+test "listSessions survives a session meta larger than the read limit" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "huge-meta", false);
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const meta_path = try core_session.sessionMetaPath(std.testing.allocator, sessions_dir, "huge-meta");
+    defer std.testing.allocator.free(meta_path);
+
+    // A meta file that exceeds the read limit must not crash the listing; the
+    // session is listed without a preview.
+    var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
+    defer meta_file.close(std.testing.io);
+    try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
+    const chunk = [_]u8{'x'} ** 4096;
+    var written: usize = 0;
+    while (written < 10 * 1024 * 1024) : (written += chunk.len) {
+        try meta_file.writeStreamingAll(std.testing.io, &chunk);
+    }
+    try meta_file.writeStreamingAll(std.testing.io, "\"}");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("huge-meta", sessions[0].id);
+    try std.testing.expect(sessions[0].first_prompt == null);
+}
+
+test "listSessions does not retain every session's metadata in the shared arena" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    // Four sessions, each with a ~512KB first prompt. The rebuild must keep
+    // only the retained results (id plus one truncated 1024-char preview per
+    // session) in the caller's arena; the file contents and parsed metadata of
+    // every entry must be released before the next entry is processed.
+    const prompt_len = 512 * 1024;
+    const chunk = [_]u8{'x'} ** (64 * 1024);
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        const id = try std.fmt.allocPrint(std.testing.allocator, "big-{d}", .{i});
+        defer std.testing.allocator.free(id);
+        try createTestSessionDir(std.testing.io, test_dir, id, false);
+
+        const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+        defer std.testing.allocator.free(sessions_dir);
+        const meta_path = try core_session.sessionMetaPath(std.testing.allocator, sessions_dir, id);
+        defer std.testing.allocator.free(meta_path);
+
+        var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
+        defer meta_file.close(std.testing.io);
+        try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
+        var written: usize = 0;
+        while (written < prompt_len) : (written += chunk.len) {
+            try meta_file.writeStreamingAll(std.testing.io, &chunk);
+        }
+        try meta_file.writeStreamingAll(std.testing.io, "\"}");
+    }
+
+    var tracking = PeakTrackingAllocator{ .backing = std.testing.allocator };
+    const sessions = try listSessions(tracking.allocator(), std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 4), sessions.len);
+    for (sessions) |s| {
+        try std.testing.expectEqual(@as(usize, 1024), s.first_prompt.?.len);
+    }
+
+    // The retained results are ~4.3KB (one id plus one 1024-char preview per
+    // session). The 512KB file contents used to accumulate in the shared arena
+    // until the listing finished; bound the peak to the retained results plus
+    // a small constant.
+    const retained = 4 * (36 + 1024);
+    try std.testing.expect(tracking.peak < retained + 2 * 1024 * 1024);
+}
+
+test "listSessions rebuilds from scan on a corrupt index" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDirFull(std.testing.io, test_dir, "corrupt-1", true, true);
+
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    var bad = try std.Io.Dir.cwd().createFile(std.testing.io, index_path, .{});
+    defer bad.close(std.testing.io);
+    try bad.writeStreamingAll(std.testing.io, "this is not json {{{");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("corrupt-1", sessions[0].id);
+    try std.testing.expect(sessions[0].has_prd);
+    try std.testing.expect(sessions[0].has_conversation);
+    try std.testing.expectEqualStrings("hello", sessions[0].first_prompt.?);
+}
+
+test "listSessions rebuilds from scan on an oversized index" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "over-1", false);
+
+    // An index larger than the 64 MB read limit must trigger a rebuild rather
+    // than a crash or a truncated listing.
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    var big = try std.Io.Dir.cwd().createFile(std.testing.io, index_path, .{});
+    defer big.close(std.testing.io);
+    const chunk = [_]u8{'x'} ** (1024 * 1024);
+    var written: usize = 0;
+    while (written < 64 * 1024 * 1024 + 1024) : (written += chunk.len) {
+        try big.writeStreamingAll(std.testing.io, &chunk);
+    }
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("over-1", sessions[0].id);
+}
+
+test "listSessions rebuilds when the sessions dir is newer than the index" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "a-1", false);
+    try createTestSessionDir(std.testing.io, test_dir, "b-2", false);
+
+    // First listing writes the index; the sessions dir is then older than it.
+    const first = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (first) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(first);
+    }
+    try std.testing.expectEqual(@as(usize, 2), first.len);
+
+    // Age the index and add a session directory so the sessions dir mtime is
+    // newer than the index mtime; the next listing must rebuild.
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    try setFileMtime(std.testing.io, index_path, std.Io.Timestamp.fromNanoseconds(1_000_000_000_000));
+    try createTestSessionDir(std.testing.io, test_dir, "c-3", false);
+
+    const second = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (second) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(second);
+    }
+    try std.testing.expectEqual(@as(usize, 3), second.len);
+    const has_c = for (second) |s| {
+        if (std.mem.eql(u8, s.id, "c-3")) break true;
+    } else false;
+    try std.testing.expect(has_c);
+}
