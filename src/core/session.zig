@@ -500,6 +500,83 @@ test "listSessions detects conversation" {
     try std.testing.expectEqualStrings("hello", conv.first_prompt.?);
 }
 
+test "listSessions recovers a first prompt longer than 1024 bytes" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "big-meta", false);
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const meta_path = try sessionMetaPath(std.testing.allocator, sessions_dir, "big-meta");
+    defer std.testing.allocator.free(meta_path);
+
+    // A first prompt over the old 1024-byte read limit used to make /sessions
+    // crash with error.StreamTooLong.
+    const long_prompt = [_]u8{'x'} ** 2048;
+    var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
+    defer meta_file.close(std.testing.io);
+    try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
+    try meta_file.writeStreamingAll(std.testing.io, &long_prompt);
+    try meta_file.writeStreamingAll(std.testing.io, "\"}");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("big-meta", sessions[0].id);
+    try std.testing.expectEqual(@as(usize, 2048), sessions[0].first_prompt.?.len);
+}
+
+test "listSessions survives a session meta larger than the read limit" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDir(std.testing.io, test_dir, "huge-meta", false);
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const meta_path = try sessionMetaPath(std.testing.allocator, sessions_dir, "huge-meta");
+    defer std.testing.allocator.free(meta_path);
+
+    // A meta file that exceeds even the raised read limit must not crash the
+    // whole session listing; the session is listed without a preview.
+    var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
+    defer meta_file.close(std.testing.io);
+    try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
+    const chunk = [_]u8{'x'} ** 4096;
+    var written: usize = 0;
+    while (written < 10 * 1024 * 1024) : (written += chunk.len) {
+        try meta_file.writeStreamingAll(std.testing.io, &chunk);
+    }
+    try meta_file.writeStreamingAll(std.testing.io, "\"}");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("huge-meta", sessions[0].id);
+    try std.testing.expect(sessions[0].first_prompt == null);
+}
+
 test "pruneSessions removes all but current" {
     const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
     defer {
