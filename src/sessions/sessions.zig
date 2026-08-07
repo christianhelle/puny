@@ -184,7 +184,12 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
     const scratch = scratch_arena.allocator();
 
     const cwd = std.Io.Dir.cwd();
-    const tmp_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename ++ ".tmp" });
+    // Use a unique temp name per write so a concurrent or leftover write can
+    // never collide with this one; the suffix is only for uniqueness and is
+    // discarded by the rename below.
+    const ts = std.Io.Timestamp.now(io, .awake);
+    const tmp_name = try std.fmt.allocPrint(scratch, "{s}.{d}.tmp", .{ index_filename, ts.nanoseconds });
+    const tmp_path = try std.fs.path.join(scratch, &.{ base_dir, tmp_name });
     const final_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename });
 
     const buffer = try std.json.Stringify.valueAlloc(scratch, entries, .{ .whitespace = .indent_2 });
@@ -193,8 +198,9 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
         std.log.warn("failed to create sessions index temp file {s}: {s}", .{ tmp_path, @errorName(err) });
         return err;
     };
+    var file_open = true;
     errdefer {
-        file.close(io);
+        if (file_open) file.close(io);
         cwd.deleteFile(io, tmp_path) catch {};
     }
 
@@ -207,6 +213,7 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
         return err;
     };
     file.close(io);
+    file_open = false;
 
     // Force owner-only on the final file (mirrors prompt_history.json's
     // tightening behavior). Setting it before the rename avoids a window where
@@ -217,7 +224,6 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
 
     std.Io.Dir.renameAbsolute(tmp_path, final_path, io) catch |err| {
         std.log.warn("failed to rename sessions index into place {s}: {s}", .{ final_path, @errorName(err) });
-        cwd.deleteFile(io, tmp_path) catch {};
         return err;
     };
 }
@@ -1193,9 +1199,15 @@ test "upsert leaves no temp file behind" {
         .last_modified = 1,
     });
 
-    const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json.tmp" });
-    defer std.testing.allocator.free(tmp_path);
-    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openFile(std.testing.io, tmp_path, .{}));
+    // No temp file (sessions.json.<timestamp>.tmp) may remain in the
+    // directory after the atomic rename.
+    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, test_dir, .{ .iterate = true });
+    defer dir.close(std.testing.io);
+    var it = dir.iterate();
+    while (try it.next(std.testing.io)) |entry| {
+        try std.testing.expect(!std.mem.startsWith(u8, entry.name, index_filename ++ "."));
+        try std.testing.expect(!std.mem.endsWith(u8, entry.name, ".tmp"));
+    }
 }
 
 test "findSessionByPrefix matches unique prefix" {
