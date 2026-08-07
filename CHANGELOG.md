@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Remove auto-commit instructions from system prompt ([#101](https://github.com/christianhelle/puny/pull/101)) ([@christianhelle](https://github.com/christianhelle/))
+- Add timeouts to tool execution so a hung command or fetch cannot stall the agent ([#100](https://github.com/christianhelle/puny/pull/100)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.2.5](https://github.com/christianhelle/puny/releases/tag/v0.2.5) (2026-08-06)
 
 ### Features
