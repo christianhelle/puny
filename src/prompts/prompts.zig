@@ -27,6 +27,7 @@ pub const planning =
     \\with readable contrast for both light and dark modes; do not rely solely on fixed colors or a manual toggle.
     \\The HTML should make use of the full browser width, and be styled with readable fonts and colors.
     \\Call the save_prd tool with both the markdown and HTML content to save the PRD files.
-    \\Once the PRD is saved, provide the user with a concise summary of the PRD and a list of next steps for implementation and links to PRD files.
+    \\Once the PRD is saved, provide the user with a concise summary of the PRD and a list of next steps for implementation.
+    \\Show the absolute path to the PRD files to enable the terminal user to open them in their preferred editor or web browser.
     \\When you are done, prompt the user to switch to Build mode to start implementing the PRD, and provide a hint on how to do this (/build implement)
 ;
