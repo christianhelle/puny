@@ -206,6 +206,65 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
     };
 }
 
+/// Adds or updates a single session entry in the index and rewrites it.
+/// A missing, stale, corrupt, or oversized index is rebuilt first, so the
+/// upsert is applied to the freshest state and self-heals drift.
+pub fn upsertSessionInfo(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, info: SessionInfo) !void {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const current = try listSessions(scratch, io, base_dir);
+
+    const id = try scratch.dupe(u8, info.id);
+    const first_prompt = if (info.first_prompt) |p| try truncateFirstPrompt(scratch, p) else null;
+    const updated = SessionInfo{
+        .id = id,
+        .has_prd = info.has_prd,
+        .has_conversation = info.has_conversation,
+        .planning_mode = info.planning_mode,
+        .first_prompt = first_prompt,
+        .last_modified = info.last_modified,
+    };
+
+    var entries: std.ArrayList(SessionInfo) = .empty;
+    defer entries.deinit(scratch);
+    var found = false;
+    for (current) |s| {
+        if (std.mem.eql(u8, s.id, id)) {
+            try entries.append(scratch, updated);
+            found = true;
+        } else {
+            try entries.append(scratch, s);
+        }
+    }
+    if (!found) try entries.append(scratch, updated);
+
+    std.mem.sort(SessionInfo, entries.items, {}, lessThan);
+    try writeIndex(io, scratch, base_dir, entries.items);
+}
+
+/// Removes a single session entry from the index and rewrites it. Used by
+/// `finalizeSession` when a fully-restored empty session directory is removed,
+/// where a targeted update avoids a full scan on every exit.
+pub fn removeSessionFromIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8, id: []const u8) !void {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const current = try listSessions(scratch, io, base_dir);
+    var entries: std.ArrayList(SessionInfo) = .empty;
+    defer entries.deinit(scratch);
+    for (current) |s| {
+        if (std.mem.eql(u8, s.id, id)) continue;
+        try entries.append(scratch, s);
+    }
+    // Nothing was removed (e.g. the id was never indexed); leave the index
+    // untouched rather than rewriting it.
+    if (entries.items.len == current.len) return;
+    try writeIndex(io, scratch, base_dir, entries.items);
+}
+
 fn truncateFirstPrompt(arena: std.mem.Allocator, prompt: []const u8) ![]const u8 {
     const end = @min(prompt.len, first_prompt_limit);
     return arena.dupe(u8, prompt[0..end]);
@@ -686,4 +745,264 @@ test "listSessions rebuilds when the sessions dir is newer than the index" {
         if (std.mem.eql(u8, s.id, "c-3")) break true;
     } else false;
     try std.testing.expect(has_c);
+}
+
+test "upsertSessionInfo adds a new entry and reads it back" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "sess-1", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "sess-1",
+        .has_prd = true,
+        .has_conversation = true,
+        .planning_mode = true,
+        .first_prompt = "hello",
+        .last_modified = 100,
+    });
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("sess-1", sessions[0].id);
+    try std.testing.expect(sessions[0].has_prd);
+    try std.testing.expect(sessions[0].has_conversation);
+    try std.testing.expect(sessions[0].planning_mode);
+    try std.testing.expectEqualStrings("hello", sessions[0].first_prompt.?);
+    try std.testing.expectEqual(@as(u64, 100), sessions[0].last_modified);
+}
+
+test "upsertSessionInfo updates an existing entry and refreshes last_modified" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "sess-1", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "sess-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = "one",
+        .last_modified = 100,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "sess-1",
+        .has_prd = true,
+        .has_conversation = true,
+        .planning_mode = true,
+        .first_prompt = "two",
+        .last_modified = 200,
+    });
+    // Re-upserting the same id must not create a duplicate entry.
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "sess-1",
+        .has_prd = true,
+        .has_conversation = true,
+        .planning_mode = true,
+        .first_prompt = "two",
+        .last_modified = 300,
+    });
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expect(sessions[0].has_prd);
+    try std.testing.expect(sessions[0].planning_mode);
+    try std.testing.expectEqualStrings("two", sessions[0].first_prompt.?);
+    try std.testing.expectEqual(@as(u64, 300), sessions[0].last_modified);
+}
+
+test "upsertSessionInfo keeps the index sorted by id" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "z-9", false);
+    try createTestSessionDir(std.testing.io, test_dir, "a-1", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "z-9",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "a-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 2,
+    });
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    try std.testing.expectEqualStrings("a-1", sessions[0].id);
+    try std.testing.expectEqualStrings("z-9", sessions[1].id);
+}
+
+test "upsertSessionInfo truncates first_prompt beyond 1024 chars and preserves null" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "long-1", false);
+    try createTestSessionDir(std.testing.io, test_dir, "null-2", false);
+
+    const long_prompt = [_]u8{'x'} ** 2048;
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "long-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = &long_prompt,
+        .last_modified = 1,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "null-2",
+        .has_prd = false,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 2,
+    });
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    const long = for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, "long-1")) break s;
+    } else unreachable;
+    const null_ = for (sessions) |s| {
+        if (std.mem.eql(u8, s.id, "null-2")) break s;
+    } else unreachable;
+    try std.testing.expectEqual(@as(usize, 1024), long.first_prompt.?.len);
+    try std.testing.expect(null_.first_prompt == null);
+}
+
+test "removeSessionFromIndex removes a single entry" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "keep-1", false);
+    try createTestSessionDir(std.testing.io, test_dir, "drop-2", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "keep-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "drop-2",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 2,
+    });
+
+    try removeSessionFromIndex(std.testing.allocator, std.testing.io, test_dir, "drop-2");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("keep-1", sessions[0].id);
+}
+
+test "upsert writes the index with owner-only permissions" {
+    if (comptime builtin.os.tag == .windows) return;
+
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "perm-1", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "perm-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    const st = try std.Io.Dir.cwd().statFile(std.testing.io, index_path, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0), st.permissions.toMode() & 0o077);
+}
+
+test "upsert leaves no temp file behind" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try createTestSessionDir(std.testing.io, test_dir, "atomic-1", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "atomic-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+
+    const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json.tmp" });
+    defer std.testing.allocator.free(tmp_path);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openFile(std.testing.io, tmp_path, .{}));
 }
