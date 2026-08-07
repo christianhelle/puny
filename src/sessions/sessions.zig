@@ -355,7 +355,12 @@ fn timestampToNs(ts: std.Io.Timestamp) ?u64 {
 fn testBaseDir(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
     const cwd = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd);
-    return try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions-index" });
+    const dir = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-sessions-index" });
+    // Start from a clean slate: a run that crashed mid-test leaves sessions and
+    // an index behind, which would otherwise poison assertions that expect an
+    // empty directory (e.g. the missing-sessions-dir case) on the next run.
+    cleanupTestDir(io, dir);
+    return dir;
 }
 
 fn cleanupTestDir(io: std.Io, path: []const u8) void {
@@ -491,6 +496,46 @@ test "listSessions returns empty when the sessions dir is missing and writes no 
     const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
     defer std.testing.allocator.free(index_path);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, index_path, .{}));
+}
+
+test "testBaseDir wipes leftovers from an interrupted run" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    // Simulate the state a crashed run leaves behind in the shared test
+    // directory: session directories plus a stale index.
+    try createTestSessionDir(std.testing.io, test_dir, "stale-1", false);
+    try createTestSessionDir(std.testing.io, test_dir, "stale-2", false);
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "stale-1",
+        .has_prd = false,
+        .has_conversation = false,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+
+    // Resolving the test base dir again (as the next test does) must start
+    // from a clean slate; otherwise stale sessions leak into the listing and
+    // poison assertions that expect an empty directory.
+    const reset = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, reset);
+        std.testing.allocator.free(reset);
+    }
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, reset);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+    try std.testing.expectEqual(@as(usize, 0), sessions.len);
 }
 
 test "listSessions rebuilds and writes the index from discovered sessions" {
