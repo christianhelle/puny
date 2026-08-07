@@ -363,18 +363,31 @@ pub const ChatSession = struct {
                         else => |e| return e,
                     };
 
-                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-                    try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                    try ctx.stdout_writer.flush();
-
                     const has_text = if (user_text) |text| std.mem.trim(u8, text, " \t\r\n").len > 0 else false;
                     if (has_text) {
+                        // Skill loaded as system context, trailing text as the user request.
+                        try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
+                        try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
+                        try ctx.stdout_writer.flush();
                         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = user_text.? });
                         try ctx.stdout_writer.print(" {s}\n", .{user_text.?});
                         try ctx.stdout_writer.flush();
                         const turn_result = try runChatTurn(ctx);
                         if (turn_result == .exit) return;
+                        continue;
                     }
+
+                    // Bare skill command: send the skill content itself as the prompt.
+                    if (std.mem.trim(u8, content, " \t\r\n").len == 0) {
+                        try ctx.stdout_writer.print("\n\n{s}Skill '{s}' has no content.{s}\n", .{ ansi.dim, skill_name, ansi.reset });
+                        try ctx.stdout_writer.flush();
+                        continue;
+                    }
+                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = content });
+                    try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
+                    try ctx.stdout_writer.flush();
+                    const turn_result = try runChatTurn(ctx);
+                    if (turn_result == .exit) return;
                     continue;
                 },
                 .load_prompt_file => |source| {
