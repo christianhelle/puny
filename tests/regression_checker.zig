@@ -34,6 +34,11 @@ const TestCase = struct {
     skills: []const SkillFixture = &.{},
 };
 
+// Names of skill fixtures materialized by the harness, tracked so stale
+// scaffolding from a failed or final test can be removed. Slices are
+// borrowed from the parsed test spec, which outlives the whole run.
+var created_skill_names: std.ArrayList([]const u8) = .empty;
+
 const ServerCtx = struct {
     io: std.Io,
     server: std.Io.net.Server,
@@ -124,6 +129,10 @@ pub fn main(init: std.process.Init) !u8 {
         }
     }
 
+    // Remove any skill fixtures left behind by the last test.
+    cleanupSkillFixtures(allocator, init.io);
+    created_skill_names.deinit(allocator);
+
     const total = passed + failed;
     std.debug.print("\n{d} passed, {d} failed (of {d})\n", .{
         passed,
@@ -143,7 +152,7 @@ fn removeEvidenceFiles(allocator: std.mem.Allocator, io: std.Io, test_case: Test
             std.Io.Dir.cwd().deleteFile(io, fc.path) catch {};
         }
     }
-    removeSkillFixtures(allocator, io, test_case);
+    cleanupSkillFixtures(allocator, io);
 }
 
 fn skillDirPath(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
@@ -158,15 +167,17 @@ fn setupSkillFixtures(allocator: std.mem.Allocator, io: std.Io, test_case: TestC
         const skill_path = try std.fs.path.join(allocator, &.{ dir_path, "SKILL.md" });
         defer allocator.free(skill_path);
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = skill_path, .data = skill.body });
+        try created_skill_names.append(allocator, skill.name);
     }
 }
 
-fn removeSkillFixtures(allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) void {
-    for (test_case.skills) |skill| {
-        const dir_path = skillDirPath(allocator, skill.name) catch continue;
-        defer allocator.free(dir_path);
+fn cleanupSkillFixtures(allocator: std.mem.Allocator, io: std.Io) void {
+    for (created_skill_names.items) |name| {
+        const dir_path = skillDirPath(allocator, name) catch continue;
         std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
+        allocator.free(dir_path);
     }
+    created_skill_names.clearRetainingCapacity();
     // Remove the scaffolding directories only if they are now empty, so a
     // developer's real `.agents/skills` directory is never touched.
     std.Io.Dir.cwd().deleteDir(io, ".agents/skills") catch {};
