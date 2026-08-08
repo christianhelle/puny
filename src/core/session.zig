@@ -156,7 +156,10 @@ pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []con
     defer parsed.deinit();
 
     const obj = parsed.value.object;
-    const planning_mode = if (obj.get("planning_mode")) |v| v.bool else false;
+    const planning_mode = if (obj.get("planning_mode")) |v| switch (v) {
+        .bool => |b| b,
+        else => false,
+    } else false;
     const first_prompt = if (obj.get("first_prompt")) |v| switch (v) {
         .null => null,
         .string => |s| try allocator.dupe(u8, s),
@@ -502,6 +505,21 @@ test "readSessionMetaJson tolerates invalid JSON" {
         var f = try cwd.createFile(std.testing.io, path, .{});
         defer f.close(std.testing.io);
         try f.writeStreamingAll(std.testing.io, "not json");
+    }
+
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
+    try std.testing.expect(!meta.planning_mode);
+    try std.testing.expect(meta.first_prompt == null);
+}
+
+test "readSessionMetaJson tolerates a non-boolean planning_mode" {
+    const path = "puny-test-meta-nonbool.json";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    {
+        var f = try cwd.createFile(std.testing.io, path, .{});
+        defer f.close(std.testing.io);
+        try f.writeStreamingAll(std.testing.io, "{\"planning_mode\":\"true\"}");
     }
 
     const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
