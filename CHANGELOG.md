@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Introduce help command ([#109](https://github.com/christianhelle/puny/pull/109)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.2.7](https://github.com/christianhelle/puny/releases/tag/v0.2.7) (2026-08-08)
 
 ### Features
