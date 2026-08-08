@@ -57,6 +57,11 @@ test "web_fetch retrieves a body from a local server" {
 
     var ctx = Ctx{ .io = std.testing.io, .server = server };
     const thread = try std.Thread.spawn(.{}, Ctx.serve, .{&ctx});
+    errdefer {
+        // Unblock accept() on failure so join cannot hang the test runner.
+        ctx.server.deinit(std.testing.io);
+        thread.join();
+    }
 
     const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/test", .{port});
     defer std.testing.allocator.free(url);
@@ -65,10 +70,6 @@ test "web_fetch retrieves a body from a local server" {
     defer std.testing.allocator.free(body);
     try std.testing.expectEqualStrings("hello from test server", body);
 
-    var guard: usize = 0;
-    while (!ctx.done.load(.acquire) and guard < 100_000_000) : (guard += 1) {
-        std.Thread.yield() catch {};
-    }
     thread.join();
     ctx.server.deinit(std.testing.io);
 }
