@@ -11,6 +11,10 @@ fn gitStatus(allocator: std.mem.Allocator, io: std.Io, params: GitStatusParams) 
     defer argv.deinit(allocator);
     try argv.appendSlice(allocator, &[_][]const u8{ "git", "status", "--short", "--branch" });
     if (params.path) |path| {
+        // Terminate option parsing so a path beginning with "-" is not
+        // interpreted as a git flag (mirrors the argument construction in
+        // gitDiff).
+        try argv.append(allocator, "--");
         try argv.append(allocator, path);
     }
     return helpers.runCommandTimed(allocator, io, argv.items, null, helpers.run_command_timeout_ns) catch |err| switch (err) {
@@ -72,7 +76,17 @@ test "git_status reports the current branch and untracked files" {
 }
 
 test "git_status accepts a path argument" {
-    const output = try gitStatus(std.testing.allocator, std.testing.io, .{ .path = "src" });
+    // A leading "-" would be parsed as a git option without the "--"
+    // terminator, so the status output would not reflect this path.
+    const path = "-puny-git-probe.txt";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+
+    var f = try cwd.createFile(std.testing.io, path, .{});
+    f.close(std.testing.io);
+
+    const output = try gitStatus(std.testing.allocator, std.testing.io, .{ .path = path });
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "## ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, path) != null);
 }
