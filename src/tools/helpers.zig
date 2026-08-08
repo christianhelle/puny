@@ -683,3 +683,79 @@ test "httpGetTimed returns TimedOut when the server never responds" {
     thread.join();
     ctx.server.deinit(std.testing.io);
 }
+
+test "dupeString returns an empty string without allocating" {
+    try std.testing.expectEqualStrings("", try dupeString(std.testing.allocator, ""));
+    const duped = try dupeString(std.testing.allocator, "hello");
+    defer std.testing.allocator.free(duped);
+    try std.testing.expectEqualStrings("hello", duped);
+    try std.testing.expect(duped.ptr != "hello".ptr);
+}
+
+test "ownedSliceOrEmpty returns an empty string for an empty list" {
+    var list: std.ArrayList(u8) = .empty;
+    try std.testing.expectEqualStrings("", try ownedSliceOrEmpty(&list, std.testing.allocator));
+}
+
+test "ownedSliceOrEmpty takes ownership of a non-empty list" {
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try list.appendSlice(std.testing.allocator, "abc");
+    const owned = try ownedSliceOrEmpty(&list, std.testing.allocator);
+    defer std.testing.allocator.free(owned);
+    try std.testing.expectEqualStrings("abc", owned);
+}
+
+test "runCommand formats exit code and stdout" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "echo hello" }
+    else
+        &.{ "sh", "-c", "echo hello" };
+    const output = try runCommand(std.testing.allocator, std.testing.io, argv, null);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "hello") != null);
+}
+
+test "runCommand reports a non-zero exit code" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "exit 3" }
+    else
+        &.{ "sh", "-c", "exit 3" };
+    const output = try runCommand(std.testing.allocator, std.testing.io, argv, null);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 3") != null);
+}
+
+test "runCommand captures stderr" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "echo oops 1>&2" }
+    else
+        &.{ "sh", "-c", "echo oops >&2" };
+    const output = try runCommand(std.testing.allocator, std.testing.io, argv, null);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "oops") != null);
+}
+
+test "writeFile readFileAlloc and listDirectory round-trip" {
+    const path = "puny-test-helpers-rt.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try writeFile(std.testing.io, path, "payload");
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("payload", content);
+
+    const listing = try listDirectory(std.testing.allocator, std.testing.io, ".");
+    defer std.testing.allocator.free(listing);
+    try std.testing.expect(std.mem.indexOf(u8, listing, path) != null);
+}
+
+test "readFileAlloc rejects content larger than the limit" {
+    const path = "puny-test-helpers-big.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try writeFile(std.testing.io, path, "123456789");
+    try std.testing.expectError(error.StreamTooLong, readFileAlloc(std.testing.allocator, std.testing.io, path, 4));
+}
