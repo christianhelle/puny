@@ -485,7 +485,13 @@ test "messagesPath and sessionMetaPath join session directories" {
 }
 
 test "readSessionMetaJson returns defaults for a missing file" {
-    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, "puny-test-meta-missing.json");
+    const path = "puny-test-meta-missing.json";
+    const cwd = std.Io.Dir.cwd();
+    // A stale file left by an interrupted prior run would otherwise turn
+    // this into a read of leftover content; start from a clean slate.
+    cwd.deleteFile(std.testing.io, path) catch {};
+
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
     try std.testing.expect(!meta.planning_mode);
     try std.testing.expect(meta.first_prompt == null);
 }
