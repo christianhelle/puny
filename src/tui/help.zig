@@ -27,3 +27,48 @@ fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u
     const pad = if (name.len >= command_column_width) "" else command_padding[name.len..];
     try writer.print("  {s}{s}{s}{s} {s}\n", .{ ansi.green, name, ansi.reset, pad, description });
 }
+
+test "showHelp lists all commands" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    try showHelp(&output.writer);
+    const text = output.written();
+
+    const commands = [_][]const u8{
+        "/quit, /exit", "/new, /reset", "/stats", "/config", "/plan [task]",
+        "/build [task]", "/model [id]", "/provider [name]", "/sessions",
+        "/resume [id]", "/prune", "/skills", "/file [path|url]",
+    };
+    for (commands) |command| {
+        try std.testing.expect(std.mem.indexOf(u8, text, command) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, text, "Available commands:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Exit Puny") != null);
+}
+
+test "printCommand pads short command names to the column width" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    try printCommand(&output.writer, "/stats", "Show session statistics");
+    // "/stats" (6 chars) padded with 12 spaces to reach the 18-column width.
+    try std.testing.expectEqualStrings("  \x1b[32m/stats\x1b[0m             Show session statistics\n", output.written());
+}
+
+test "printCommand does not pad long command names" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    try printCommand(&output.writer, "/provider [name] is long", "Desc");
+    try std.testing.expectEqualStrings("  \x1b[32m/provider [name] is long\x1b[0m Desc\n", output.written());
+}
