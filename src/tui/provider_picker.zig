@@ -103,8 +103,14 @@ test "buildProviderItems creates list picker items" {
     var items = try buildProviderItems(arena, &providers);
     defer items.deinit(arena);
 
-    // Mock is deliberately excluded from the interactive provider list.
+    // Mock is deliberately excluded from the interactive provider list: the
+    // remaining four providers must appear in order and no item may be "mock".
     try std.testing.expectEqual(@as(usize, 4), items.items.len);
     try std.testing.expectEqualStrings("lmstudio", items.items[0].value);
+    try std.testing.expectEqualStrings("opencode_zen", items.items[1].value);
+    try std.testing.expectEqualStrings("opencode_go", items.items[2].value);
     try std.testing.expectEqualStrings("copilot", items.items[3].value);
+    for (items.items) |item| {
+        try std.testing.expect(!std.mem.eql(u8, item.value, "mock"));
+    }
 }
