@@ -336,3 +336,45 @@ test "does not expose write content in summaries" {
     try std.testing.expectEqualStrings("Writing 1 line (12 bytes) to \"secret.txt\"", rendered);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "secret value") == null);
 }
+
+test "renders remaining tool call variants" {
+    try expectRendered("save_prd", "{}", "Saving the plan...");
+    try expectRendered("git_diff", "{}", "Showing git diff");
+    try expectRendered("git_diff", "{\"staged\":false}", "Showing git diff");
+    try expectRendered("execute_shell", "{\"command\":\"zig test\"}", "Running \"zig test\"");
+    try expectRendered("list_directory", "{\"path\":\"src\"}", "Listing \"src\"");
+    try expectRendered("write_file", "{\"path\":\"a.txt\"}", "Calling \"write_file\" with path=\"a.txt\"");
+}
+
+test "renderKnown falls back to generic for unknown args shapes" {
+    try expectRendered("read_file", "{\"file\":\"x\"}", "Calling \"read_file\" with file=\"x\"");
+    try expectRendered("web_fetch", "{\"timeout_seconds\":30}", "Calling \"web_fetch\" with timeout_seconds=30");
+}
+
+test "generic rendering covers empty objects, strings and numbers" {
+    try expectRendered("custom_tool", "{}", "Calling \"custom_tool\" with no arguments");
+    try expectRendered("custom_tool", "\"plain\"", "Calling \"custom_tool\" with \"plain\"");
+    try expectRendered("custom_tool", "42", "Calling \"custom_tool\" with 42");
+    try expectRendered("custom_tool", "{\"a\":1,\"b\":\"two\",\"c\":true}", "Calling \"custom_tool\" with a=1, b=\"two\", c=true");
+}
+
+test "lineCount counts non-empty content" {
+    try std.testing.expectEqual(@as(usize, 0), lineCount(""));
+    try std.testing.expectEqual(@as(usize, 1), lineCount("one"));
+    try std.testing.expectEqual(@as(usize, 2), lineCount("one\ntwo"));
+    try std.testing.expectEqual(@as(usize, 2), lineCount("one\ntwo\n"));
+    try std.testing.expectEqual(@as(usize, 3), lineCount("a\nb\nc\n"));
+    try std.testing.expectEqual(@as(usize, 4), lineCount("a\n\n\nb"));
+}
+
+test "getString and getBool extract typed fields" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena_state.allocator(), "{\"path\":\"src\",\"staged\":true,\"count\":3}", .{});
+    try std.testing.expectEqualStrings("src", getString(parsed, "path").?);
+    try std.testing.expect(getString(parsed, "missing") == null);
+    try std.testing.expect(getString(parsed, "staged") == null);
+    try std.testing.expect(getBool(parsed, "staged").?);
+    try std.testing.expect(getBool(parsed, "missing") == null);
+    try std.testing.expect(getBool(parsed, "path") == null);
+}
