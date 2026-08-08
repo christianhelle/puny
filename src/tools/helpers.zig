@@ -633,19 +633,31 @@ test "runCommandTimed returns output for a command that finishes within the dead
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "hello"));
 }
 
-test "runCommandTimed drains a full stderr pipe without deadlocking stdout" {
+fn fullStderrArgv() []const []const u8 {
+    return if (@import("builtin").os.tag == .windows)
+        &.{ "powershell", "-NoProfile", "-Command", "1..20000 | ForEach-Object { [Console]::Error.WriteLine(\"stderr line $_\"); Write-Output \"stdout line $_\" }" }
+    else
+        &.{ "sh", "-c", "i=0; while [ $i -lt 20000 ]; do echo \"stderr line $i\" >&2; echo \"stdout line $i\"; i=$((i+1)); done" };
+}
+
+test "runCommand drains a full stderr pipe without deadlocking stdout" {
     // A child that writes more than one pipe buffer's worth to stderr while
     // also keeping stdout active would deadlock a sequential stdout-then-
     // stderr drain: the child blocks on the full stderr pipe and can never
     // close stdout, so the parent never sees EOF. The concurrent drain must
-    // let the command complete; the timeout bounds the test if a regression
-    // reintroduces the deadlock.
-    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
-        &.{ "powershell", "-NoProfile", "-Command", "1..20000 | ForEach-Object { [Console]::Error.WriteLine(\"stderr line $_\"); Write-Output \"stdout line $_\" }" }
-    else
-        &.{ "sh", "-c", "i=0; while [ $i -lt 20000 ]; do echo \"stderr line $i\" >&2; echo \"stdout line $i\"; i=$((i+1)); done" };
+    // let the command complete.
+    const output = try runCommand(std.testing.allocator, std.testing.io, fullStderrArgv(), null);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "stderr line 19999") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "stdout line 19999") != null);
+}
 
-    const output = try runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s);
+test "runCommandTimed drains a full stderr pipe without deadlocking stdout" {
+    // The same scenario through the timed path, which drives
+    // runCommandInArena; the timeout bounds the test if a regression
+    // reintroduces the deadlock.
+    const output = try runCommandTimed(std.testing.allocator, std.testing.io, fullStderrArgv(), null, 30 * std.time.ns_per_s);
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "stderr line 19999") != null);
