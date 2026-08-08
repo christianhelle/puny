@@ -163,3 +163,36 @@ test "schema exposes optional integer params without marking them required" {
     try std.testing.expectEqual(@as(usize, 1), required.items.len);
     try std.testing.expectEqualStrings("command", required.items[0].string);
 }
+
+const MixedParams = struct {
+    path: []const u8,
+    ratio: f64,
+    tag: ?[]const u8 = null,
+    threshold: ?f32 = null,
+};
+
+test "schema maps float and optional string parameter types" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const Schema = ToolDefinition("mixed_tool", "Mixed param types.", MixedParams);
+    const schema_value = try Schema.schema(arena);
+
+    const params = schema_value.object.get("parameters").?.object;
+    const props = params.get("properties").?.object;
+    try std.testing.expectEqualStrings("number", props.get("ratio").?.object.get("type").?.string);
+    try std.testing.expectEqualStrings("string", props.get("tag").?.object.get("type").?.string);
+    try std.testing.expectEqualStrings("number", props.get("threshold").?.object.get("type").?.string);
+
+    const required = params.get("required").?.array;
+    try std.testing.expectEqual(@as(usize, 2), required.items.len);
+    try std.testing.expectEqualStrings("path", required.items[0].string);
+    try std.testing.expectEqualStrings("ratio", required.items[1].string);
+}
+
+test "ToolDefinition exposes name description and params type" {
+    try std.testing.expectEqualStrings("named", ToolDefinition("named", "desc", TestParams).tool_name);
+    try std.testing.expectEqualStrings("desc", ToolDefinition("named", "desc", TestParams).tool_description);
+    try std.testing.expect(ToolDefinition("named", "desc", TestParams).ParamsType == TestParams);
+}
