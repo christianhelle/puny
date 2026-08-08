@@ -1500,3 +1500,70 @@ test "pruneSessions removes orphaned directories absent from the index" {
     defer std.testing.allocator.free(orphan_dir);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, orphan_dir, .{}));
 }
+
+test "isValidSessionId accepts path-safe ids" {
+    try std.testing.expect(isValidSessionId("abc"));
+    try std.testing.expect(isValidSessionId("a-b_c.d"));
+    try std.testing.expect(isValidSessionId("9f8e7d6c"));
+}
+
+test "isValidSessionId rejects empty, dot, and path components" {
+    try std.testing.expect(!isValidSessionId(""));
+    try std.testing.expect(!isValidSessionId("."));
+    try std.testing.expect(!isValidSessionId(".."));
+    try std.testing.expect(!isValidSessionId("a/b"));
+    try std.testing.expect(!isValidSessionId("a\\b"));
+    try std.testing.expect(!isValidSessionId("../etc"));
+}
+
+test "lessThan orders session ids" {
+    const a = SessionInfo{ .id = "aaa", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
+    const b = SessionInfo{ .id = "bbb", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
+    try std.testing.expect(lessThan({}, a, b));
+    try std.testing.expect(!lessThan({}, b, a));
+    try std.testing.expect(!lessThan({}, a, a));
+}
+
+test "findSessionByPrefix returns the unique match" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer std.testing.allocator.free(test_dir);
+    defer cleanupTestDir(std.testing.io, test_dir);
+
+    try createTestSessionDir(std.testing.io, test_dir, "abc-1", false);
+    try createTestSessionDir(std.testing.io, test_dir, "abc-2", false);
+    try createTestSessionDir(std.testing.io, test_dir, "xyz-9", false);
+
+    const unique = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "xyz");
+    defer if (unique) |s| {
+        if (s.first_prompt) |p| std.testing.allocator.free(p);
+        std.testing.allocator.free(s.id);
+    };
+    try std.testing.expect(unique != null);
+    try std.testing.expectEqualStrings("xyz-9", unique.?.id);
+
+    // Ambiguous prefixes resolve to null.
+    const ambiguous = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "abc");
+    try std.testing.expect(ambiguous == null);
+
+    const missing = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "nope");
+    try std.testing.expect(missing == null);
+}
+
+test "findLatestSession prefers the most recently modified conversation" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer std.testing.allocator.free(test_dir);
+    defer cleanupTestDir(std.testing.io, test_dir);
+
+    try createTestSessionDirFull(std.testing.io, test_dir, "old-session", false, true);
+    try createTestSessionDirFull(std.testing.io, test_dir, "new-session", false, true);
+    try createTestSessionDir(std.testing.io, test_dir, "no-conversation", false);
+
+    // new-session was created after old-session, so its mtime is larger.
+    const latest = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
+    defer if (latest) |s| {
+        if (s.first_prompt) |p| std.testing.allocator.free(p);
+        std.testing.allocator.free(s.id);
+    };
+    try std.testing.expect(latest != null);
+    try std.testing.expectEqualStrings("new-session", latest.?.id);
+}
