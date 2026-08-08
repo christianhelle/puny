@@ -362,3 +362,58 @@ test "reasoning_effort round-trip via JSON" {
     try std.testing.expectEqualStrings("deepseek-v4-pro", cloned.providerEntryConst(.opencode_go).model);
     try std.testing.expectEqualStrings("high", cloned.providerEntryConst(.opencode_go).reasoning_effort.?);
 }
+
+test "configPath prefers XDG_CONFIG_HOME on non-windows" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("XDG_CONFIG_HOME", "/xdg");
+    try env.put("HOME", "/home/user");
+
+    const path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/xdg/puny/config.json", path);
+}
+
+test "configPath falls back to HOME" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", "/home/user");
+
+    const path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/user/.config/puny/config.json", path);
+}
+
+test "configPath errors without a config dir" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try std.testing.expectError(error.NoConfigDir, configPath(std.testing.allocator, &env));
+}
+
+test "save and load round-trip through a temp HOME" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    var cfg = Config.default();
+    cfg.provider = .opencode_zen;
+    cfg.providerEntry(.opencode_zen).url = "https://example.com";
+    cfg.providerEntry(.opencode_zen).model = "gpt-4o";
+    try save(std.testing.allocator, std.testing.io, cfg, &env);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.file_existed);
+    try std.testing.expect(!loaded.had_error);
+    try std.testing.expectEqual(.opencode_zen, loaded.config.provider);
+    try std.testing.expectEqualStrings("https://example.com", loaded.config.providerEntryConst(.opencode_zen).url);
+    try std.testing.expectEqualStrings("gpt-4o", loaded.config.providerEntryConst(.opencode_zen).model);
+}
