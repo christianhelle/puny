@@ -79,7 +79,12 @@ test "readFile respects the size limit" {
     const path = "puny-test-fs-big.txt";
     defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
 
-    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "x" ** (1024 * 1024 + 1) });
+    // Allocate the oversized payload at runtime: a 1 MiB+ compile-time string
+    // literal would bloat the test binary and slow down compilation.
+    var big = try std.testing.allocator.alloc(u8, 1024 * 1024 + 1);
+    defer std.testing.allocator.free(big);
+    @memset(big, 'x');
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = big });
     try std.testing.expectError(error.StreamTooLong, readFile(std.testing.allocator, std.testing.io, .{ .path = path }));
 }
 
