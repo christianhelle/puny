@@ -469,13 +469,19 @@ pub fn removeSessionDir(io: std.Io, dir: []const u8) void {
 }
 
 test "messagesPath and sessionMetaPath join session directories" {
+    const sep = std.fs.path.sep;
+
+    const expected_msg = try std.fmt.allocPrint(std.testing.allocator, "/sessions{c}abc-1{c}messages.json", .{ sep, sep });
+    defer std.testing.allocator.free(expected_msg);
     const msg = try messagesPath(std.testing.allocator, "/sessions", "abc-1");
     defer std.testing.allocator.free(msg);
-    try std.testing.expectEqualStrings("/sessions/abc-1/messages.json", msg);
+    try std.testing.expectEqualStrings(expected_msg, msg);
 
+    const expected_meta = try std.fmt.allocPrint(std.testing.allocator, "/sessions{c}abc-1{c}session.json", .{ sep, sep });
+    defer std.testing.allocator.free(expected_meta);
     const meta = try sessionMetaPath(std.testing.allocator, "/sessions", "abc-1");
     defer std.testing.allocator.free(meta);
-    try std.testing.expectEqualStrings("/sessions/abc-1/session.json", meta);
+    try std.testing.expectEqualStrings(expected_meta, meta);
 }
 
 test "readSessionMetaJson returns defaults for a missing file" {
