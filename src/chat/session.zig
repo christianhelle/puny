@@ -25,6 +25,7 @@ const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
 const tools = @import("../tools/root.zig");
 const welcome = @import("../tui/welcome.zig");
+const help = @import("../tui/help.zig");
 const ModelProvider = provider.ModelProvider;
 
 pub const ReconfigurePrompt = struct {
@@ -161,6 +162,10 @@ pub const ChatSession = struct {
                 .exit => {
                     finalizeSession(ctx);
                     return;
+                },
+                .help => {
+                    try help.showHelp(ctx.stdout_writer);
+                    continue;
                 },
                 .continue_ => continue,
                 .full_reset => {

@@ -22,6 +22,7 @@ pub const Command = union(enum) {
     skill: []const u8,
     file: ?[]const u8,
     prompt: []const u8,
+    help,
 };
 
 pub const Action = union(enum) {
@@ -39,6 +40,7 @@ pub const Action = union(enum) {
     list_skills,
     load_skill: []const u8,
     load_prompt_file: []const u8,
+    help,
 };
 
 pub const Context = struct {
@@ -136,6 +138,9 @@ pub fn parse(user_message: []const u8) Command {
         return .{ .file = null };
     }
 
+    if (std.mem.eql(u8, user_message, "/help"))
+        return .help;
+
     if (user_message.len > 0 and user_message[0] == '/')
         return .{ .skill = user_message[1..] };
 
@@ -145,6 +150,8 @@ pub fn parse(user_message: []const u8) Command {
 pub fn dispatch(command: Command, ctx: Context) !Action {
     switch (command) {
         .quit => return .exit,
+
+        .help => return .help,
 
         .reset => {
             try ctx.stdout_writer.print("\nConversation reset.", .{});
