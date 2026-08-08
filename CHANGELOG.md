@@ -1,8 +1,9 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.2.7](https://github.com/christianhelle/puny/releases/tag/v0.2.7) (2026-08-08)
 
 ### Features
+- Harden sessions index handling and fix review findings ([#107](https://github.com/christianhelle/puny/pull/107)) ([@christianhelle](https://github.com/christianhelle/))
 - Include diagrams in PRD files using mermaid charts ([#108](https://github.com/christianhelle/puny/pull/108)) ([@christianhelle](https://github.com/christianhelle/))
 - Introduce sessions.json index for fast session listing ([#106](https://github.com/christianhelle/puny/pull/106)) ([@christianhelle](https://github.com/christianhelle/))
 - Add /new command to create new session ([#105](https://github.com/christianhelle/puny/pull/105)) ([@christianhelle](https://github.com/christianhelle/))
