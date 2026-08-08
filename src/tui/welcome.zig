@@ -2,6 +2,7 @@ const std = @import("std");
 const ansi = @import("ansi.zig");
 const openai = @import("../providers/openai.zig");
 const version = @import("../version.zig");
+const help = @import("help.zig");
 
 pub const Info = struct {
     provider_name: []const u8,
@@ -12,14 +13,6 @@ pub const Info = struct {
     oneshot: bool = false,
     prefilled: bool = false,
 };
-
-const command_column_width = 18;
-const command_padding = "                  "[0..command_column_width];
-
-fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u8) !void {
-    const pad = if (name.len >= command_column_width) "" else command_padding[name.len..];
-    try writer.print("  {s}{s}{s}{s} {s}\n", .{ ansi.green, name, ansi.reset, pad, description });
-}
 
 pub fn print(writer: *std.Io.Writer, info: Info) !void {
     var buf: [256]u8 = undefined;
@@ -40,25 +33,9 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
             try writer.print(" - {s}{s}{s}", .{ ansi.bold_start, @tagName(effort), ansi.bold_end });
         }
     }
-    try writer.print("\n", .{});
-    try writer.print("\n", .{});
 
     if (!info.oneshot) {
-        try writer.print("{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
-        try printCommand(writer, "/quit, /exit", "Exit Puny");
-        try printCommand(writer, "/new, /reset", "New session");
-        try printCommand(writer, "/stats", "Show session statistics");
-        try printCommand(writer, "/config", "Reconfigure URL and API key");
-        try printCommand(writer, "/plan [task]", "Enter planning mode");
-        try printCommand(writer, "/build [task]", "Switch to build mode");
-        try printCommand(writer, "/model [id]", "Switch to another model");
-        try printCommand(writer, "/provider [name]", "Switch to another provider");
-        try printCommand(writer, "/sessions", "List saved sessions");
-        try printCommand(writer, "/resume [id]", "Resume a saved session");
-        try printCommand(writer, "/prune", "Remove old sessions");
-        try printCommand(writer, "/skills", "List global and repository skills");
-        try printCommand(writer, "/file [path|url]", "Load a prompt from a file or URL");
-        try writer.print("\n", .{});
+        try help.showHelp(writer);
     }
 
     if (info.session_id.len > 0) {
