@@ -56,3 +56,35 @@ pub const git_diff = tools.defineTool(
     GitDiffParams,
     gitDiff,
 );
+
+test "git_status reports the current branch and untracked files" {
+    const path = "puny-test-git-probe.txt";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+
+    var f = try cwd.createFile(std.testing.io, path, .{});
+    f.close(std.testing.io);
+
+    const output = try gitStatus(std.testing.allocator, std.testing.io, .{});
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "## ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, path) != null);
+}
+
+test "git_status accepts a path argument" {
+    const output = try gitStatus(std.testing.allocator, std.testing.io, .{ .path = "src" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "## ") != null);
+}
+
+test "git_diff runs and returns output" {
+    const output = try gitDiff(std.testing.allocator, std.testing.io, .{});
+    defer std.testing.allocator.free(output);
+    _ = output;
+}
+
+test "git_diff accepts staged and path arguments" {
+    const output = try gitDiff(std.testing.allocator, std.testing.io, .{ .staged = false, .path = "src" });
+    defer std.testing.allocator.free(output);
+    _ = output;
+}
