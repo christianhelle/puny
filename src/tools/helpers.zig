@@ -234,7 +234,8 @@ fn runCommandInArena(
     child: *std.process.Child,
     cancel: *std.atomic.Value(bool),
 ) anyerror![]const u8 {
-    errdefer child.kill(io);
+    var kill_child = true;
+    errdefer if (kill_child) child.kill(io);
 
     var stdout: std.ArrayList(u8) = .empty;
     defer stdout.deinit(allocator);
@@ -243,8 +244,12 @@ fn runCommandInArena(
 
     const timed_out = try drainPipes(allocator, io, child, &stdout, &stderr, cancel);
 
-    // drainPipes already terminated the process tree when timed_out is true.
-    if (timed_out) return error.TimedOut;
+    // drainPipes already terminated the process tree when timed_out is true,
+    // so the errdefer must not kill the child a second time.
+    if (timed_out) {
+        kill_child = false;
+        return error.TimedOut;
+    }
 
     const term = try child.wait(io);
 
