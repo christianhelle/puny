@@ -114,17 +114,12 @@ test "mixed message types all counted" {
 }
 
 test "estimateUsage floors division and handles empty output" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-
     // 7 chars -> 1 token (7/4 floored); 0 output chars -> 0 tokens.
     const usage = estimateUsage(&.{
         .{ .user = "abcdefg" },
     }, 0);
     try std.testing.expectEqual(@as(i64, 1), usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 0), usage.output_tokens);
-    _ = arena;
 }
 
 test "estimateUsage counts tool call names and arguments" {
