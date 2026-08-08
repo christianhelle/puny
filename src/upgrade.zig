@@ -606,7 +606,14 @@ test "archiveNameForTarget names match the current platform" {
         .macos => "macos",
         else => return, // platform does not support upgrade
     };
-    const arch_tag = if (builtin.target.cpu.arch == .aarch64) "aarch64" else "x86_64";
+    // Mirror the arch set supported by archiveNameForTarget: anything else
+    // would raise a compile error there, so asserting on it here would be
+    // misleading.
+    const arch_tag = switch (builtin.target.cpu.arch) {
+        .aarch64 => "aarch64",
+        .x86_64 => "x86_64",
+        else => return, // platform does not support upgrade
+    };
     try std.testing.expect(std.mem.indexOf(u8, name, os_tag) != null);
     try std.testing.expect(std.mem.indexOf(u8, name, arch_tag) != null);
     // Windows releases ship as zips; Linux and macOS releases as tarballs.
