@@ -96,12 +96,15 @@ test "getDefaultProviders returns five known providers" {
 }
 
 test "buildProviderItems creates list picker items" {
-    const arena = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
     const providers = comptime getDefaultProviders();
     var items = try buildProviderItems(arena, &providers);
     defer items.deinit(arena);
 
-    try std.testing.expectEqual(@as(usize, 5), items.items.len);
+    // Mock is deliberately excluded from the interactive provider list.
+    try std.testing.expectEqual(@as(usize, 4), items.items.len);
     try std.testing.expectEqualStrings("lmstudio", items.items[0].value);
-    try std.testing.expectEqualStrings("Mock", items.items[4].label);
+    try std.testing.expectEqualStrings("copilot", items.items[3].value);
 }
