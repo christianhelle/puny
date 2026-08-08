@@ -530,3 +530,127 @@ fn emitDelay(speed: MockSpeed, io: std.Io) !void {
         },
     }
 }
+
+// ── Test helpers ─────────────────────────────────────────────────────
+
+const Recorder = struct {
+    events: std.ArrayList(openai.StreamEvent),
+    allocator: std.mem.Allocator,
+
+    fn callback(self: *Recorder) openai.StreamCallback {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .event = event,
+                .reset = null,
+            },
+        };
+    }
+
+    fn event(context: *anyopaque, ev: openai.StreamEvent) anyerror!void {
+        const self: *Recorder = @ptrCast(@alignCast(context));
+        try self.events.append(self.allocator, ev);
+    }
+};
+
+fn recorder(allocator: std.mem.Allocator) Recorder {
+    return .{ .events = .empty, .allocator = allocator };
+}
+
+fn joinedContent(arena: std.mem.Allocator, events: []const openai.StreamEvent) ![]const u8 {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(arena);
+    for (events) |ev| {
+        switch (ev) {
+            .content => |content| try out.appendSlice(arena, content),
+            else => {},
+        }
+    }
+    return out.toOwnedSlice(arena);
+}
+
+// ── Helper tests ────────────────────────────────────────────────────
+
+test "containsWord matches case-insensitively at word boundaries" {
+    try std.testing.expect(containsWord("read the file", "read"));
+    try std.testing.expect(containsWord("READ THE FILE", "read"));
+    try std.testing.expect(containsWord("a long text", "long"));
+    try std.testing.expect(containsWord("error", "error"));
+    try std.testing.expect(containsWord("ends with echo", "echo"));
+    try std.testing.expect(containsWord("prefix error suffix", "error"));
+    try std.testing.expect(containsWord("(error)", "error"));
+}
+
+test "containsWord rejects substring matches and words with letters on both sides" {
+    try std.testing.expect(!containsWord("terror", "error"));
+    try std.testing.expect(!containsWord("reader", "read"));
+    try std.testing.expect(!containsWord("longest", "long"));
+    try std.testing.expect(!containsWord("errored", "error"));
+    try std.testing.expect(!containsWord("x", "long"));
+}
+
+test "containsWord handles empty and short text" {
+    try std.testing.expect(!containsWord("", "read"));
+    try std.testing.expect(!containsWord("abc", "abcdef"));
+    try std.testing.expect(containsWord("a", "a"));
+}
+
+test "isKeyword maps each mock keyword" {
+    try std.testing.expect(isKeyword("long response", .long));
+    try std.testing.expect(isKeyword("fast mode", .fast));
+    try std.testing.expect(isKeyword("slow mode", .slow));
+    try std.testing.expect(isKeyword("echo this", .echo));
+    try std.testing.expect(isKeyword("empty output", .empty));
+    try std.testing.expect(isKeyword("partial response", .partial));
+    try std.testing.expect(isKeyword("usage stats", .usage));
+    try std.testing.expect(isKeyword("trigger error", .err));
+    try std.testing.expect(isKeyword("timeout please", .timeout));
+    try std.testing.expect(isKeyword("make it fail", .fail));
+    try std.testing.expect(isKeyword("read that file", .read));
+    try std.testing.expect(isKeyword("search for it", .search));
+    try std.testing.expect(isKeyword("shell command", .shell));
+    try std.testing.expect(isKeyword("table of data", .table));
+    try std.testing.expect(isKeyword("markdown it", .markdown));
+}
+
+test "isKeyword rejects words embedded inside other words" {
+    try std.testing.expect(!isKeyword("reader tool", .read));
+    try std.testing.expect(!isKeyword("fastest mode", .fast));
+    try std.testing.expect(!isKeyword("shellfish", .shell));
+    try std.testing.expect(!isKeyword("searching", .search));
+    try std.testing.expect(!isKeyword("markdowns", .markdown));
+}
+
+test "findLastUserMessage returns the most recent user content" {
+    const messages = [_]openai.Message{
+        .{ .system = "be concise" },
+        .{ .user = "first question" },
+        .{ .assistant = .{ .content = "first answer" } },
+        .{ .user = "second question" },
+    };
+    try std.testing.expectEqualStrings("second question", findLastUserMessage(&messages));
+}
+
+test "findLastUserMessage returns empty string when no user message exists" {
+    const messages = [_]openai.Message{
+        .{ .system = "be concise" },
+        .{ .assistant = .{ .content = "answer" } },
+    };
+    try std.testing.expectEqualStrings("", findLastUserMessage(&messages));
+    try std.testing.expectEqualStrings("", findLastUserMessage(&.{}));
+}
+
+test "isToolResultMessage detects a trailing tool result" {
+    const with_tool = [_]openai.Message{
+        .{ .user = "read the file" },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } },
+    };
+    try std.testing.expect(isToolResultMessage(&with_tool));
+
+    const without_tool = [_]openai.Message{
+        .{ .user = "read the file" },
+        .{ .assistant = .{ .content = "done" } },
+    };
+    try std.testing.expect(!isToolResultMessage(&without_tool));
+    try std.testing.expect(!isToolResultMessage(&.{}));
+}
