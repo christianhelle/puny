@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Case insensitive commands ([#111](https://github.com/christianhelle/puny/pull/111)) ([@christianhelle](https://github.com/christianhelle/))
 - Vim style commands ([#110](https://github.com/christianhelle/puny/pull/110)) ([@christianhelle](https://github.com/christianhelle/))
 - Introduce help command ([#109](https://github.com/christianhelle/puny/pull/109)) ([@christianhelle](https://github.com/christianhelle/))
 
