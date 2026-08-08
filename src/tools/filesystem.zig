@@ -67,7 +67,12 @@ test "writeFile and readFile round-trip content" {
 }
 
 test "readFile errors on a missing file" {
-    try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = "puny-test-fs-missing.txt" }));
+    const path = "puny-test-fs-missing.txt";
+    // Remove any stale file from a prior run so the assertion cannot be
+    // affected by leftover state in the CWD.
+    std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = path }));
 }
 
 test "readFile respects the size limit" {
