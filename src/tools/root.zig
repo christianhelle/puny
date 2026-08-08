@@ -99,18 +99,18 @@ test "defineTool executes the handler with parsed JSON args" {
         text: []const u8,
         count: i32 = 1,
     };
-    const Tool = defineTool("echo_tool", "Echoes text.", Params, struct {
+    const tool_def = defineTool("echo_tool", "Echoes text.", Params, struct {
         fn run(allocator: std.mem.Allocator, io: std.Io, params: Params) anyerror![]const u8 {
             _ = io;
             return std.fmt.allocPrint(allocator, "echo {d}: {s}", .{ params.count, params.text });
         }
     }.run);
 
-    try std.testing.expectEqualStrings("echo_tool", Tool.name);
-    try std.testing.expectEqualStrings("Echoes text.", Tool.description);
+    try std.testing.expectEqualStrings("echo_tool", tool_def.name);
+    try std.testing.expectEqualStrings("Echoes text.", tool_def.description);
 
     const args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"text\":\"hi\",\"count\":3}", .{});
-    const result = try Tool.execute(arena, std.testing.io, args);
+    const result = try tool_def.execute(arena, std.testing.io, args);
     try std.testing.expectEqualStrings("echo 3: hi", result);
 }
 
@@ -123,7 +123,7 @@ test "defineTool execution applies default values for omitted optional fields" {
         text: []const u8,
         count: i32 = 1,
     };
-    const Tool = defineTool("echo_tool", "Echoes text.", Params, struct {
+    const tool_def = defineTool("echo_tool", "Echoes text.", Params, struct {
         fn run(allocator: std.mem.Allocator, io: std.Io, params: Params) anyerror![]const u8 {
             _ = io;
             return std.fmt.allocPrint(allocator, "echo {d}: {s}", .{ params.count, params.text });
@@ -131,6 +131,6 @@ test "defineTool execution applies default values for omitted optional fields" {
     }.run);
 
     const args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"text\":\"hi\"}", .{});
-    const result = try Tool.execute(arena, std.testing.io, args);
+    const result = try tool_def.execute(arena, std.testing.io, args);
     try std.testing.expectEqualStrings("echo 1: hi", result);
 }
