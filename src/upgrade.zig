@@ -609,7 +609,9 @@ test "archiveNameForTarget names match the current platform" {
     const arch_tag = if (builtin.target.cpu.arch == .aarch64) "aarch64" else "x86_64";
     try std.testing.expect(std.mem.indexOf(u8, name, os_tag) != null);
     try std.testing.expect(std.mem.indexOf(u8, name, arch_tag) != null);
-    try std.testing.expect(std.mem.endsWith(u8, name, ".zip") or std.mem.endsWith(u8, name, ".tar.gz"));
+    // Windows releases ship as zips; Linux and macOS releases as tarballs.
+    const expected_suffix = if (builtin.target.os.tag == .windows) ".zip" else ".tar.gz";
+    try std.testing.expect(std.mem.endsWith(u8, name, expected_suffix));
 }
 
 test "findInDir locates a file by name" {
@@ -622,6 +624,21 @@ test "findInDir locates a file by name" {
     const found = try findInDir(std.testing.allocator, std.testing.io, tmp.dir, "puny");
     defer if (found) |p| std.testing.allocator.free(p);
     try std.testing.expect(found != null);
+
+    // findInDir also descends into nested directories: a file named puny
+    // inside a subdirectory is located by the recursive walk.
+    try tmp.dir.createDir(std.testing.io, "nested", .default_dir);
+    var nested_dir = try tmp.dir.openDir(std.testing.io, "nested", .{});
+    defer nested_dir.close(std.testing.io);
+    var nested_file = try nested_dir.createFile(std.testing.io, "puny", .{});
+    nested_file.close(std.testing.io);
+    // Drop the root-level file so the walk must descend to find the nested one.
+    try tmp.dir.deleteFile(std.testing.io, "puny");
+
+    const nested_found = try findInDir(std.testing.allocator, std.testing.io, tmp.dir, "puny");
+    defer if (nested_found) |p| std.testing.allocator.free(p);
+    try std.testing.expect(nested_found != null);
+    try std.testing.expect(std.mem.indexOf(u8, nested_found.?, "nested") != null);
 
     const missing = try findInDir(std.testing.allocator, std.testing.io, tmp.dir, "does-not-exist");
     try std.testing.expect(missing == null);
