@@ -20,6 +20,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/skills", "List global and repository skills");
     try printCommand(writer, "/file [path|url]", "Load a prompt from a file or URL");
     try writer.print("\n", .{});
+    try writer.flush();
 }
 
 fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u8) !void {
