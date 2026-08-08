@@ -129,7 +129,9 @@ const PipeDrain = struct {
 /// can never deadlock against a sequential read order. When `cancel` is
 /// observed the child process tree is killed before joining the other drain,
 /// so a reader blocked in a pipe read is unblocked by the kill closing the
-/// pipes. Returns true when cancellation was observed (caller treats it as a
+/// pipes. drainPipes owns process termination on the cancellation path: the
+/// caller must not kill the tree again when the returned value is true.
+/// Returns true when cancellation was observed (caller treats it as a
 /// timeout), false when both pipes reached EOF normally.
 fn drainPipes(
     allocator: std.mem.Allocator,
@@ -240,10 +242,8 @@ fn runCommandInArena(
 
     const timed_out = try drainPipes(allocator, io, child, &stdout, &stderr, cancel);
 
-    if (timed_out) {
-        killProcessTree(io, child);
-        return error.TimedOut;
-    }
+    // drainPipes already terminated the process tree when timed_out is true.
+    if (timed_out) return error.TimedOut;
 
     const term = try child.wait(io);
 
