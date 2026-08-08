@@ -89,3 +89,48 @@ test "dispatch returns known tools" {
     try std.testing.expect(dispatch("load_skill") != null);
     try std.testing.expect(dispatch("unknown_tool") == null);
 }
+
+test "defineTool executes the handler with parsed JSON args" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const Params = struct {
+        text: []const u8,
+        count: i32 = 1,
+    };
+    const Tool = defineTool("echo_tool", "Echoes text.", Params, struct {
+        fn run(allocator: std.mem.Allocator, io: std.Io, params: Params) anyerror![]const u8 {
+            _ = io;
+            return std.fmt.allocPrint(allocator, "echo {d}: {s}", .{ params.count, params.text });
+        }
+    }.run);
+
+    try std.testing.expectEqualStrings("echo_tool", Tool.name);
+    try std.testing.expectEqualStrings("Echoes text.", Tool.description);
+
+    const args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"text\":\"hi\",\"count\":3}", .{});
+    const result = try Tool.execute(arena, std.testing.io, args);
+    try std.testing.expectEqualStrings("echo 3: hi", result);
+}
+
+test "defineTool execution applies default values for omitted optional fields" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const Params = struct {
+        text: []const u8,
+        count: i32 = 1,
+    };
+    const Tool = defineTool("echo_tool", "Echoes text.", Params, struct {
+        fn run(allocator: std.mem.Allocator, io: std.Io, params: Params) anyerror![]const u8 {
+            _ = io;
+            return std.fmt.allocPrint(allocator, "echo {d}: {s}", .{ params.count, params.text });
+        }
+    }.run);
+
+    const args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"text\":\"hi\"}", .{});
+    const result = try Tool.execute(arena, std.testing.io, args);
+    try std.testing.expectEqualStrings("echo 1: hi", result);
+}
