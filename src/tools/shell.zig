@@ -31,3 +31,23 @@ pub const execute_shell = tools.defineTool(
     ExecuteShellParams,
     executeShell,
 );
+
+test "execute_shell runs a command and returns its output" {
+    const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = "echo hello from shell" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "hello from shell") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+}
+
+test "execute_shell reports a failing command exit code" {
+    const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = "exit 5" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 5") != null);
+}
+
+test "execute_shell captures stderr" {
+    const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = "echo problem >&2" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "problem") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
+}
