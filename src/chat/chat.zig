@@ -946,3 +946,11 @@ test "SessionStats.print includes memory section" {
     try std.testing.expect(std.mem.indexOf(u8, written, memory.resident_label) != null);
     try std.testing.expect(std.mem.indexOf(u8, written, memory.private_label) != null);
 }
+
+test "countNewlines counts line breaks" {
+    try std.testing.expectEqual(@as(usize, 0), countNewlines(""));
+    try std.testing.expectEqual(@as(usize, 0), countNewlines("no breaks"));
+    try std.testing.expectEqual(@as(usize, 1), countNewlines("a\nb"));
+    try std.testing.expectEqual(@as(usize, 3), countNewlines("a\nb\nc\n"));
+    try std.testing.expectEqual(@as(usize, 2), countNewlines("\n\n"));
+}

@@ -112,3 +112,32 @@ test "mixed message types all counted" {
     const expected: i64 = @intCast(@divFloor(total, 4));
     try std.testing.expectEqual(expected, result.input_tokens);
 }
+
+test "estimateUsage floors division and handles empty output" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // 7 chars -> 1 token (7/4 floored); 0 output chars -> 0 tokens.
+    const usage = estimateUsage(&.{
+        .{ .user = "abcdefg" },
+    }, 0);
+    try std.testing.expectEqual(@as(i64, 1), usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 0), usage.output_tokens);
+    _ = arena;
+}
+
+test "estimateUsage counts tool call names and arguments" {
+    const messages = [_]openai.Message{
+        .{ .assistant = .{
+            .content = null,
+            .tool_calls = &.{
+                .{ .id = "call_1", .type = "function", .function = .{ .name = "read_file", .arguments = "{\"path\":\"x\"}" } },
+            },
+        } },
+    };
+    const usage = estimateUsage(&messages, 100);
+    // name "read_file" (9) + arguments (14) = 23 chars -> 5 tokens.
+    try std.testing.expectEqual(@as(i64, 5), usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 25), usage.output_tokens);
+}
