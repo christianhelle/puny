@@ -515,6 +515,21 @@ test "readSessionMetaJson tolerates invalid JSON" {
     try std.testing.expect(meta.first_prompt == null);
 }
 
+test "readSessionMetaJson tolerates a non-object root" {
+    const path = "puny-test-meta-nonobject.json";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    {
+        var f = try cwd.createFile(std.testing.io, path, .{});
+        defer f.close(std.testing.io);
+        try f.writeStreamingAll(std.testing.io, "[]");
+    }
+
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
+    try std.testing.expect(!meta.planning_mode);
+    try std.testing.expect(meta.first_prompt == null);
+}
+
 test "readSessionMetaJson tolerates a non-boolean planning_mode" {
     const path = "puny-test-meta-nonbool.json";
     const cwd = std.Io.Dir.cwd();
