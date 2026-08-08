@@ -53,25 +53,7 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
     var stderr: std.ArrayList(u8) = .empty;
     defer stderr.deinit(allocator);
 
-    if (child.stdout) |file| {
-        var buffer: [4096]u8 = undefined;
-        var reader = file.reader(io, &buffer);
-        while (true) {
-            const n = try reader.interface.readSliceShort(&buffer);
-            if (n == 0) break;
-            try stdout.appendSlice(allocator, buffer[0..n]);
-        }
-    }
-
-    if (child.stderr) |file| {
-        var buffer: [4096]u8 = undefined;
-        var reader = file.reader(io, &buffer);
-        while (true) {
-            const n = try reader.interface.readSliceShort(&buffer);
-            if (n == 0) break;
-            try stderr.appendSlice(allocator, buffer[0..n]);
-        }
-    }
+    _ = try drainPipes(allocator, io, &child, &stdout, &stderr, null);
 
     const term = try child.wait(io);
 
@@ -102,6 +84,88 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
     }
 
     return ownedSliceOrEmpty(&result, allocator);
+}
+
+/// Reads a single child pipe into `out`, stopping early when `cancel` is set.
+fn drainPipe(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    file: std.Io.File,
+    out: *std.ArrayList(u8),
+    cancel: ?*const std.atomic.Value(bool),
+) !void {
+    // The sink is separate from the reader's backing buffer: passing the
+    // backing buffer to readSliceShort aliases when a single read returns
+    // more than the buffer size (the reader stores the overflow in its own
+    // buffer, then memcpys between overlapping slices).
+    var backing: [4096]u8 = undefined;
+    var sink: [4096]u8 = undefined;
+    var reader = file.reader(io, &backing);
+    while (true) {
+        if (cancel) |c| {
+            if (c.load(.acquire)) return;
+        }
+        const n = try reader.interface.readSliceShort(&sink);
+        if (n == 0) break;
+        try out.appendSlice(allocator, sink[0..n]);
+    }
+}
+
+const PipeDrain = struct {
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    file: std.Io.File,
+    out: *std.ArrayList(u8),
+    cancel: ?*const std.atomic.Value(bool),
+    result: anyerror!void = {},
+
+    fn run(self: *PipeDrain) void {
+        self.result = drainPipe(self.allocator, self.io, self.file, self.out, self.cancel);
+    }
+};
+
+/// Drains stdout and stderr concurrently so a child that fills one pipe
+/// (more than a pipe buffer's worth of output) while the other is still open
+/// can never deadlock against a sequential read order. When `cancel` is
+/// observed the child process tree is killed before joining the other drain,
+/// so a reader blocked in a pipe read is unblocked by the kill closing the
+/// pipes. Returns true when cancellation was observed (caller treats it as a
+/// timeout), false when both pipes reached EOF normally.
+fn drainPipes(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    child: *std.process.Child,
+    stdout: *std.ArrayList(u8),
+    stderr: *std.ArrayList(u8),
+    cancel: ?*const std.atomic.Value(bool),
+) !bool {
+    var stderr_drain: ?PipeDrain = null;
+    var stderr_thread: ?std.Thread = null;
+    if (child.stderr) |file| {
+        stderr_drain = .{ .allocator = allocator, .io = io, .file = file, .out = stderr, .cancel = cancel };
+        stderr_thread = try std.Thread.spawn(.{}, PipeDrain.run, .{&stderr_drain.?});
+    }
+
+    var timed_out = false;
+    var stdout_result: anyerror!void = {};
+    if (child.stdout) |file| {
+        var stdout_drain = PipeDrain{ .allocator = allocator, .io = io, .file = file, .out = stdout, .cancel = cancel };
+        stdout_drain.run();
+        stdout_result = stdout_drain.result;
+        if (cancel) |c| timed_out = c.load(.acquire);
+    }
+
+    if (timed_out) {
+        killProcessTree(io, child);
+    }
+
+    if (stderr_thread) |t| t.join();
+    if (stderr_drain) |*d| {
+        if (d.result) |_| {} else |err| return err;
+    }
+    if (cancel) |c| timed_out = timed_out or c.load(.acquire);
+    try stdout_result;
+    return timed_out;
 }
 
 /// Timeout applied to shell-backed tools that do not accept a model-supplied
@@ -169,40 +233,12 @@ fn runCommandInArena(
 ) anyerror![]const u8 {
     errdefer child.kill(io);
 
-    var timed_out = false;
-
     var stdout: std.ArrayList(u8) = .empty;
     defer stdout.deinit(allocator);
     var stderr: std.ArrayList(u8) = .empty;
     defer stderr.deinit(allocator);
 
-    if (child.stdout) |file| {
-        var buffer: [4096]u8 = undefined;
-        var reader = file.reader(io, &buffer);
-        while (true) {
-            if (cancel.load(.acquire)) {
-                timed_out = true;
-                break;
-            }
-            const n = try reader.interface.readSliceShort(&buffer);
-            if (n == 0) break;
-            try stdout.appendSlice(allocator, buffer[0..n]);
-        }
-    }
-
-    if (!timed_out) if (child.stderr) |file| {
-        var buffer: [4096]u8 = undefined;
-        var reader = file.reader(io, &buffer);
-        while (true) {
-            if (cancel.load(.acquire)) {
-                timed_out = true;
-                break;
-            }
-            const n = try reader.interface.readSliceShort(&buffer);
-            if (n == 0) break;
-            try stderr.appendSlice(allocator, buffer[0..n]);
-        }
-    };
+    const timed_out = try drainPipes(allocator, io, child, &stdout, &stderr, cancel);
 
     if (timed_out) {
         killProcessTree(io, child);
@@ -595,6 +631,25 @@ test "runCommandTimed returns output for a command that finishes within the dead
     const output = try runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s);
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "hello"));
+}
+
+test "runCommand drains a full stderr pipe without deadlocking stdout" {
+    // A child that writes more than one pipe buffer's worth to stderr while
+    // also keeping stdout active would deadlock a sequential stdout-then-
+    // stderr drain: the child blocks on the full stderr pipe and can never
+    // close stdout, so the parent never sees EOF. The concurrent drain must
+    // let the command complete; the timeout bounds the test if a regression
+    // reintroduces the deadlock.
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "powershell", "-NoProfile", "-Command", "1..20000 | ForEach-Object { [Console]::Error.WriteLine(\"stderr line $_\"); Write-Output \"stdout line $_\" }" }
+    else
+        &.{ "sh", "-c", "i=0; while [ $i -lt 20000 ]; do echo \"stderr line $i\" >&2; echo \"stdout line $i\"; i=$((i+1)); done" };
+
+    const output = try runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "stderr line 19999") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "stdout line 19999") != null);
 }
 
 test "runCommandTimed returns TimedOut and terminates a command that never exits" {
