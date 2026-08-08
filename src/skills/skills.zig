@@ -318,11 +318,20 @@ pub fn textContainsWord(text: []const u8, word: []const u8) bool {
 }
 
 fn wordAtBoundary(text: []const u8, word: []const u8) bool {
-    const match_pos = std.mem.indexOf(u8, text, word) orelse return false;
-    if (match_pos > 0 and std.ascii.isAlphanumeric(text[match_pos - 1])) return false;
-    const end = match_pos + word.len;
-    if (end < text.len and std.ascii.isAlphanumeric(text[end])) return false;
-    return true;
+    var search_from: usize = 0;
+    while (std.mem.indexOfPos(u8, text, search_from, word)) |match_pos| {
+        if (match_pos > 0 and std.ascii.isAlphanumeric(text[match_pos - 1])) {
+            search_from = match_pos + 1;
+            continue;
+        }
+        const end = match_pos + word.len;
+        if (end < text.len and std.ascii.isAlphanumeric(text[end])) {
+            search_from = match_pos + 1;
+            continue;
+        }
+        return true;
+    }
+    return false;
 }
 
 fn normalizeHyphensToSpaces(buf: *[128]u8, word: []const u8) []const u8 {
@@ -769,6 +778,14 @@ test "textContainsWord matches whole words" {
     try std.testing.expect(!textContainsWord("hello world", "ello"));
     try std.testing.expect(textContainsWord("foo-bar baz", "foo-bar"));
     try std.testing.expect(!textContainsWord("hello", ""));
+}
+
+test "textContainsWord finds a later valid occurrence after a rejected one" {
+    // The first "do it" sits inside "undo" (alphanumeric on its left); the
+    // later standalone "do it" must still match.
+    try std.testing.expect(textContainsWord("undo it, then do it", "do it"));
+    try std.testing.expect(textContainsWord("do itty, do it", "do it"));
+    try std.testing.expect(!textContainsWord("undo it", "do it"));
 }
 
 test "normalizeHyphensToSpaces converts hyphens for trigger matching" {
