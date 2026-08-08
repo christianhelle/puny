@@ -47,6 +47,7 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
         .stdout = .pipe,
         .stderr = .pipe,
     });
+    errdefer child.kill(io);
 
     var stdout: std.ArrayList(u8) = .empty;
     defer stdout.deinit(allocator);
