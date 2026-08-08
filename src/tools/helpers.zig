@@ -49,12 +49,14 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
     });
     errdefer child.kill(io);
 
+    // stderr is drained on a separate thread inside drainPipes, so the drain
+    // buffers must come from a thread-safe allocator; page_allocator is.
     var stdout: std.ArrayList(u8) = .empty;
-    defer stdout.deinit(allocator);
+    defer stdout.deinit(std.heap.page_allocator);
     var stderr: std.ArrayList(u8) = .empty;
-    defer stderr.deinit(allocator);
+    defer stderr.deinit(std.heap.page_allocator);
 
-    _ = try drainPipes(allocator, io, &child, &stdout, &stderr, null);
+    _ = try drainPipes(std.heap.page_allocator, io, &child, &stdout, &stderr, null);
 
     const term = try child.wait(io);
 
@@ -132,6 +134,8 @@ const PipeDrain = struct {
 /// so a reader blocked in a pipe read is unblocked by the kill closing the
 /// pipes. drainPipes owns process termination on the cancellation path: the
 /// caller must not kill the tree again when the returned value is true.
+/// The allocator must be thread-safe: stderr is drained on a spawned thread
+/// while stdout is drained on the caller's thread.
 /// Returns true when cancellation was observed (caller treats it as a
 /// timeout), false when both pipes reached EOF normally.
 fn drainPipes(
@@ -237,12 +241,14 @@ fn runCommandInArena(
     var kill_child = true;
     errdefer if (kill_child) child.kill(io);
 
+    // stderr is drained on a separate thread inside drainPipes, so the drain
+    // buffers must come from a thread-safe allocator; page_allocator is.
     var stdout: std.ArrayList(u8) = .empty;
-    defer stdout.deinit(allocator);
+    defer stdout.deinit(std.heap.page_allocator);
     var stderr: std.ArrayList(u8) = .empty;
-    defer stderr.deinit(allocator);
+    defer stderr.deinit(std.heap.page_allocator);
 
-    const timed_out = try drainPipes(allocator, io, child, &stdout, &stderr, cancel);
+    const timed_out = try drainPipes(std.heap.page_allocator, io, child, &stdout, &stderr, cancel);
 
     // drainPipes already terminated the process tree when timed_out is true,
     // so the errdefer must not kill the child a second time.
