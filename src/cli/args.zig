@@ -397,3 +397,85 @@ test "validate rejects oneshot without prompt or prompt-file" {
     const opts = Options{ .oneshot = true };
     try std.testing.expectError(error.OneshotRequiresPrompt, validate(opts));
 }
+
+test "parseArgs sets url from short flag" {
+    const argv = [_][:0]const u8{ "puny", "-u", "http://127.0.0.1:9999" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expectEqualStrings("http://127.0.0.1:9999", opts.url.?);
+}
+
+test "parseArgs sets api key and api key file from flags" {
+    const argv = [_][:0]const u8{ "puny", "-k", "secret-token", "--api-key-file", "/tmp/key.pem" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expectEqualStrings("secret-token", opts.api_key.?);
+    try std.testing.expectEqualStrings("/tmp/key.pem", opts.api_key_file.?);
+}
+
+test "parseArgs sets model and marks it explicit" {
+    const argv = [_][:0]const u8{ "puny", "-m", "gpt-4o" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expectEqualStrings("gpt-4o", opts.model.?);
+    try std.testing.expect(opts.model_explicit);
+}
+
+test "parseArgs sets mock from short flag and oneshot from flag" {
+    const argv = [_][:0]const u8{ "puny", "-M", "--oneshot", "-p", "hi" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(opts.mock);
+    try std.testing.expect(opts.oneshot);
+    try std.testing.expectEqualStrings("hi", opts.prompt.?);
+}
+
+test "parseArgs falls back to PUNY_PROVIDER_URL env" {
+    const argv = [_][:0]const u8{"puny"};
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("PUNY_PROVIDER_URL", "http://env-url:8080");
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expectEqualStrings("http://env-url:8080", opts.url.?);
+}
+
+test "parseArgs falls back to PUNY_MODEL env" {
+    const argv = [_][:0]const u8{"puny"};
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("PUNY_MODEL", "env-model");
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expectEqualStrings("env-model", opts.model.?);
+    try std.testing.expect(!opts.model_explicit);
+}
+
+test "parseArgs falls back to PUNY_MOCK env" {
+    const argv = [_][:0]const u8{"puny"};
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("PUNY_MOCK", "true");
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(opts.mock);
+}
+
+test "parseArgs flag overrides PUNY_MOCK env" {
+    const argv = [_][:0]const u8{"puny"};
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("PUNY_MOCK", "false");
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(!opts.mock);
+}
+
+test "parseArgs sets reconfigure and force flags" {
+    const argv = [_][:0]const u8{ "puny", "--reconfigure", "--force" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(opts.reconfigure);
+    try std.testing.expect(opts.force_upgrade);
+}

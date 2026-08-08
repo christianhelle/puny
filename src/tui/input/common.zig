@@ -122,3 +122,44 @@ test "historyPrevious and historyNext navigate entries" {
     try historyNext(&line_alloc, &out.writer, &history);
     try std.testing.expectEqualStrings("second", line_alloc.written());
 }
+
+test "appendAndEcho appends to the buffer and echoes the byte" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+
+    try appendAndEcho('a', &line_alloc, &output.writer);
+    try appendAndEcho('b', &line_alloc, &output.writer);
+
+    try std.testing.expectEqualStrings("ab", line_alloc.written());
+    try std.testing.expectEqualStrings("ab", output.written());
+}
+
+test "backspace removes the last byte and erases it on screen" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+
+    try appendAndEcho('x', &line_alloc, &output.writer);
+    output.clearRetainingCapacity();
+
+    try backspace(&line_alloc, &output.writer);
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("\x08 \x08", output.written());
+}
+
+test "backspace is a no-op on an empty buffer" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+
+    try backspace(&line_alloc, &output.writer);
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("", output.written());
+}

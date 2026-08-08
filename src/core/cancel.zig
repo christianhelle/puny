@@ -252,3 +252,69 @@ const ENABLE_LINE_INPUT: u32 = 0x0002;
 const ENABLE_ECHO_INPUT: u32 = 0x0004;
 const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
 const ENABLE_WINDOW_INPUT: u32 = 0x0008;
+
+test "reset clears a pending cancellation" {
+    reset();
+    try std.testing.expect(!isCancelled());
+    setCancelled();
+    try std.testing.expect(isCancelled());
+    reset();
+    try std.testing.expect(!isCancelled());
+}
+
+test "setCancelled marks the operation as cancelled" {
+    reset();
+    setCancelled();
+    try std.testing.expect(isCancelled());
+    reset();
+}
+
+test "double escape within the window cancels" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1b, &first_esc_ts);
+    try std.testing.expect(!isCancelled());
+    try std.testing.expect(first_esc_ts != null);
+
+    // Second escape arrives immediately, well inside the 500ms window.
+    handleKeyByte(0x1b, &first_esc_ts);
+    try std.testing.expect(isCancelled());
+    reset();
+}
+
+test "non-escape input resets the pending first escape" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1b, &first_esc_ts);
+    try std.testing.expect(first_esc_ts != null);
+
+    // Any other key discards the pending escape; a later escape starts fresh.
+    handleKeyByte('x', &first_esc_ts);
+    try std.testing.expect(first_esc_ts == null);
+    handleKeyByte(0x1b, &first_esc_ts);
+    try std.testing.expect(first_esc_ts != null);
+    try std.testing.expect(!isCancelled());
+}
+
+test "first escape prints the press-esc-again hint" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1b, &first_esc_ts);
+    try std.testing.expect(std.mem.indexOf(u8, stderr_alloc.written(), "Press Esc again to cancel") != null);
+    reset();
+}

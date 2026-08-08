@@ -530,3 +530,365 @@ fn emitDelay(speed: MockSpeed, io: std.Io) !void {
         },
     }
 }
+
+// ── Test helpers ─────────────────────────────────────────────────────
+
+const Recorder = struct {
+    events: std.ArrayList(openai.StreamEvent),
+    allocator: std.mem.Allocator,
+
+    fn callback(self: *Recorder) openai.StreamCallback {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .event = event,
+                .reset = null,
+            },
+        };
+    }
+
+    fn event(context: *anyopaque, ev: openai.StreamEvent) anyerror!void {
+        const self: *Recorder = @ptrCast(@alignCast(context));
+        try self.events.append(self.allocator, ev);
+    }
+};
+
+fn recorder(allocator: std.mem.Allocator) Recorder {
+    return .{ .events = .empty, .allocator = allocator };
+}
+
+fn joinedContent(arena: std.mem.Allocator, events: []const openai.StreamEvent) ![]const u8 {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(arena);
+    for (events) |ev| {
+        switch (ev) {
+            .content => |content| try out.appendSlice(arena, content),
+            else => {},
+        }
+    }
+    return out.toOwnedSlice(arena);
+}
+
+// ── Helper tests ────────────────────────────────────────────────────
+
+test "containsWord matches case-insensitively at word boundaries" {
+    try std.testing.expect(containsWord("read the file", "read"));
+    try std.testing.expect(containsWord("READ THE FILE", "read"));
+    try std.testing.expect(containsWord("a long text", "long"));
+    try std.testing.expect(containsWord("error", "error"));
+    try std.testing.expect(containsWord("ends with echo", "echo"));
+    try std.testing.expect(containsWord("prefix error suffix", "error"));
+    try std.testing.expect(containsWord("(error)", "error"));
+}
+
+test "containsWord rejects substring matches and words with letters on both sides" {
+    try std.testing.expect(!containsWord("terror", "error"));
+    try std.testing.expect(!containsWord("reader", "read"));
+    try std.testing.expect(!containsWord("longest", "long"));
+    try std.testing.expect(!containsWord("errored", "error"));
+    try std.testing.expect(!containsWord("x", "long"));
+}
+
+test "containsWord handles empty and short text" {
+    try std.testing.expect(!containsWord("", "read"));
+    try std.testing.expect(!containsWord("abc", "abcdef"));
+    try std.testing.expect(containsWord("a", "a"));
+}
+
+test "isKeyword maps each mock keyword" {
+    try std.testing.expect(isKeyword("long response", .long));
+    try std.testing.expect(isKeyword("fast mode", .fast));
+    try std.testing.expect(isKeyword("slow mode", .slow));
+    try std.testing.expect(isKeyword("echo this", .echo));
+    try std.testing.expect(isKeyword("empty output", .empty));
+    try std.testing.expect(isKeyword("partial response", .partial));
+    try std.testing.expect(isKeyword("usage stats", .usage));
+    try std.testing.expect(isKeyword("trigger error", .err));
+    try std.testing.expect(isKeyword("timeout please", .timeout));
+    try std.testing.expect(isKeyword("make it fail", .fail));
+    try std.testing.expect(isKeyword("read that file", .read));
+    try std.testing.expect(isKeyword("search for it", .search));
+    try std.testing.expect(isKeyword("shell command", .shell));
+    try std.testing.expect(isKeyword("table of data", .table));
+    try std.testing.expect(isKeyword("markdown it", .markdown));
+}
+
+test "isKeyword rejects words embedded inside other words" {
+    try std.testing.expect(!isKeyword("reader tool", .read));
+    try std.testing.expect(!isKeyword("fastest mode", .fast));
+    try std.testing.expect(!isKeyword("shellfish", .shell));
+    try std.testing.expect(!isKeyword("searching", .search));
+    try std.testing.expect(!isKeyword("markdowns", .markdown));
+}
+
+test "findLastUserMessage returns the most recent user content" {
+    const messages = [_]openai.Message{
+        .{ .system = "be concise" },
+        .{ .user = "first question" },
+        .{ .assistant = .{ .content = "first answer" } },
+        .{ .user = "second question" },
+    };
+    try std.testing.expectEqualStrings("second question", findLastUserMessage(&messages));
+}
+
+test "findLastUserMessage returns empty string when no user message exists" {
+    const messages = [_]openai.Message{
+        .{ .system = "be concise" },
+        .{ .assistant = .{ .content = "answer" } },
+    };
+    try std.testing.expectEqualStrings("", findLastUserMessage(&messages));
+    try std.testing.expectEqualStrings("", findLastUserMessage(&.{}));
+}
+
+test "isToolResultMessage detects a trailing tool result" {
+    const with_tool = [_]openai.Message{
+        .{ .user = "read the file" },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } },
+    };
+    try std.testing.expect(isToolResultMessage(&with_tool));
+
+    const without_tool = [_]openai.Message{
+        .{ .user = "read the file" },
+        .{ .assistant = .{ .content = "done" } },
+    };
+    try std.testing.expect(!isToolResultMessage(&without_tool));
+    try std.testing.expect(!isToolResultMessage(&.{}));
+}
+
+// ── Model list tests ─────────────────────────────────────────────────
+
+test "listModels returns the four mock models" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var owned = try mock_client.listModels();
+    defer owned.deinit();
+    const models = owned.value().models;
+    try std.testing.expectEqual(@as(usize, 4), models.len);
+    try std.testing.expectEqualStrings("mock-model", models[0].key);
+    try std.testing.expectEqualStrings("Mock Model (GPT-4 level)", models[0].display_name);
+    try std.testing.expectEqualStrings("mock", models[0].publisher);
+    try std.testing.expectEqual(@as(i64, 128000), models[0].max_context_length);
+    try std.testing.expectEqualStrings("mock-model-fast", models[1].key);
+    try std.testing.expectEqualStrings("mock-model-slow", models[3].key);
+}
+
+test "toSharedModels copies mock models into the shared model list" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var owned = try mock_client.listModels();
+    var shared = try MockClient.toSharedModels(&owned);
+    defer shared.deinit();
+    const models = shared.value().models;
+    try std.testing.expectEqual(@as(usize, 4), models.len);
+    try std.testing.expectEqualStrings("mock-model", models[0].id);
+    try std.testing.expectEqualStrings("Mock Model (GPT-4 level)", models[0].display_name);
+    try std.testing.expectEqualStrings("mock", models[0].provider);
+    try std.testing.expectEqual(@as(i64, 128000), models[0].context_length);
+}
+
+// ── Streaming tests ──────────────────────────────────────────────────
+
+fn countTag(events: []const openai.StreamEvent, comptime tag: std.meta.Tag(openai.StreamEvent)) usize {
+    var n: usize = 0;
+    for (events) |ev| {
+        if (std.meta.activeTag(ev) == tag) n += 1;
+    }
+    return n;
+}
+
+fn expectFinish(events: []const openai.StreamEvent, expected: ?[]const u8) !void {
+    var i: usize = events.len;
+    while (i > 0) {
+        i -= 1;
+        switch (events[i]) {
+            .finish => |f| {
+                if (f) |reason| {
+                    try std.testing.expectEqualStrings(expected.?, reason);
+                } else {
+                    try std.testing.expect(expected == null);
+                }
+                return;
+            },
+            else => {},
+        }
+    }
+    return error.NoFinishEvent;
+}
+
+test "chatStreaming echoes the user message in echo mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "echo hello world" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Echo: echo hello world") != null);
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming emits only a finish event in empty mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "empty response" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 1), rec.events.items.len);
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming returns an error in error mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "trigger error please" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, mock_client.chatStreaming(request, rec.callback()));
+}
+
+test "chatStreaming emits tool call events in read mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "read the file" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, toolCallCount), countTag(rec.events.items, .tool_call_start));
+    try std.testing.expectEqual(@as(usize, toolCallCount * 3), countTag(rec.events.items, .tool_call_delta));
+    switch (rec.events.items[0]) {
+        .tool_call_start => |tc| try std.testing.expectEqualStrings("read_file", tc.name),
+        else => return error.ExpectedToolCallStart,
+    }
+    try expectFinish(rec.events.items, "tool_calls");
+}
+
+test "chatStreaming responds with a completion after a tool result" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{
+            .{ .user = "read the file" },
+            .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } },
+        },
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Tool executed successfully") != null);
+    try std.testing.expectEqual(@as(usize, 0), countTag(rec.events.items, .tool_call_start));
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming emits usage events in usage mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "usage stats" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 1), countTag(rec.events.items, .usage));
+    for (rec.events.items) |ev| {
+        switch (ev) {
+            .usage => |u| {
+                try std.testing.expectEqual(@as(i64, 24), u.input_tokens);
+                try std.testing.expectEqual(@as(i64, 156), u.output_tokens);
+            },
+            else => {},
+        }
+    }
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming renders a markdown table in table mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "table please" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "| 101 | Alice Johnson |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "| --- |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "| 108 | Henry Anderson |") != null);
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming produces default content without keywords" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "plain question" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "mock response") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "You said: plain question") != null);
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming emits a null finish reason in partial mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "partial response" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try expectFinish(rec.events.items, null);
+}

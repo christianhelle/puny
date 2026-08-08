@@ -53,3 +53,55 @@ pub const list_directory = tools.defineTool(
     ListDirectoryParams,
     listDirectory,
 );
+
+test "writeFile and readFile round-trip content" {
+    const path = "puny-test-fs-roundtrip.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    const result = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "hello world" });
+    try std.testing.expectEqualStrings("File written successfully.", result);
+
+    const content = try readFile(std.testing.allocator, std.testing.io, .{ .path = path });
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("hello world", content);
+}
+
+test "readFile errors on a missing file" {
+    try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = "puny-test-fs-missing.txt" }));
+}
+
+test "readFile respects the size limit" {
+    const path = "puny-test-fs-big.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "x" ** (1024 * 1024 + 1) });
+    try std.testing.expectError(error.StreamTooLong, readFile(std.testing.allocator, std.testing.io, .{ .path = path }));
+}
+
+test "listDirectory returns directory entries" {
+    const path_a = "puny-test-fs-list-a.txt";
+    const path_b = "puny-test-fs-list-b.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path_a) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path_b) catch {};
+
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path_a, .content = "a" });
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path_b, .content = "b" });
+
+    const listing = try listDirectory(std.testing.allocator, std.testing.io, .{ .path = "." });
+    defer std.testing.allocator.free(listing);
+    try std.testing.expect(std.mem.indexOf(u8, listing, path_a) != null);
+    try std.testing.expect(std.mem.indexOf(u8, listing, path_b) != null);
+}
+
+test "writeFile is blocked in planning mode" {
+    const path = "puny-test-fs-blocked.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    core_session.setWriteBlocked(true);
+    defer core_session.setWriteBlocked(false);
+
+    const result = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "nope" });
+    try std.testing.expect(std.mem.indexOf(u8, result, "Write blocked") != null);
+    // The file must not exist.
+    try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = path }));
+}
