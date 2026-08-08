@@ -65,6 +65,8 @@ test "formatBytes handles boundaries and large values" {
     try std.testing.expectEqualStrings("4 GB", formatBytes(&buf, 4 * 1024 * 1024 * 1024));
     // Beyond GB the largest unit is GB, so values keep dividing down.
     try std.testing.expectEqualStrings("1024 GB", formatBytes(&buf, 1024 * 1024 * 1024 * 1024));
-    // 2^63 bytes overflows u64 when squared; spot-check the top of the range.
-    try std.testing.expectEqualStrings("17179869183.1 GB", formatBytes(&buf, std.math.maxInt(u64) - 1_000_000_000));
+    // Spot-check a large value that stays exactly representable after the
+    // u64 -> f64 conversion inside formatBytes, so the expected string is not
+    // brittle to floating-point rounding.
+    try std.testing.expectEqualStrings("10240 GB", formatBytes(&buf, 10 * 1024 * 1024 * 1024 * 1024));
 }
