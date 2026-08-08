@@ -53,3 +53,11 @@ fn registerWindows() !void {
         return error.SetConsoleCtrlHandlerFailed;
     }
 }
+
+test "trigger sets the triggered flag" {
+    triggered = false;
+    try std.testing.expect(!isTriggered());
+    trigger();
+    try std.testing.expect(isTriggered());
+    triggered = false;
+}
