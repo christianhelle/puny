@@ -77,19 +77,31 @@ pub const command_tokens = [_][]const u8{
 pub fn parse(user_message: []const u8) Command {
     if (std.mem.eql(u8, user_message, "/quit") or std.mem.eql(u8, user_message, "/exit"))
         return .quit;
+    if (std.mem.eql(u8, user_message, ":exit") or std.mem.eql(u8, user_message, ":quit"))
+        return .quit;
+    if (std.mem.eql(u8, user_message, ":q"))
+        return .quit;
 
     if (std.mem.eql(u8, user_message, "/reset") or std.mem.eql(u8, user_message, "/new"))
         return .reset;
+    if (std.mem.eql(u8, user_message, ":reset") or std.mem.eql(u8, user_message, ":new"))
+        return .reset;
 
-    if (std.mem.eql(u8, user_message, "/stats"))
+    if (std.mem.eql(u8, user_message, "/stats") or std.mem.eql(u8, user_message, ":stats"))
         return .stats;
 
-    if (std.mem.eql(u8, user_message, "/config"))
+    if (std.mem.eql(u8, user_message, "/config") or std.mem.eql(u8, user_message, ":config"))
         return .config;
 
     if (std.mem.eql(u8, user_message, "/plan") or std.mem.startsWith(u8, user_message, "/plan ")) {
         if (user_message.len > "/plan ".len) {
             return .{ .plan = user_message["/plan ".len..] };
+        }
+        return .{ .plan = null };
+    }
+    if (std.mem.eql(u8, user_message, ":plan") or std.mem.startsWith(u8, user_message, ":plan ")) {
+        if (user_message.len > ":plan ".len) {
+            return .{ .plan = user_message[":plan ".len..] };
         }
         return .{ .plan = null };
     }
@@ -100,10 +112,22 @@ pub fn parse(user_message: []const u8) Command {
         }
         return .{ .build = null };
     }
+    if (std.mem.eql(u8, user_message, ":build") or std.mem.startsWith(u8, user_message, ":build ")) {
+        if (user_message.len > ":build ".len) {
+            return .{ .build = user_message[":build ".len..] };
+        }
+        return .{ .build = null };
+    }
 
     if (std.mem.eql(u8, user_message, "/model") or std.mem.startsWith(u8, user_message, "/model ")) {
         if (user_message.len > "/model ".len) {
             return .{ .model = user_message["/model ".len..] };
+        }
+        return .{ .model = null };
+    }
+    if (std.mem.eql(u8, user_message, ":model") or std.mem.startsWith(u8, user_message, ":model ")) {
+        if (user_message.len > ":model ".len) {
+            return .{ .model = user_message[":model ".len..] };
         }
         return .{ .model = null };
     }
@@ -114,19 +138,31 @@ pub fn parse(user_message: []const u8) Command {
         }
         return .{ .provider = null };
     }
+    if (std.mem.eql(u8, user_message, ":provider") or std.mem.startsWith(u8, user_message, ":provider ")) {
+        if (user_message.len > ":provider ".len) {
+            return .{ .provider = user_message[":provider ".len..] };
+        }
+        return .{ .provider = null };
+    }
 
-    if (std.mem.eql(u8, user_message, "/sessions"))
+    if (std.mem.eql(u8, user_message, "/sessions") or std.mem.eql(u8, user_message, ":sessions"))
         return .sessions;
 
-    if (std.mem.eql(u8, user_message, "/prune"))
+    if (std.mem.eql(u8, user_message, "/prune") or std.mem.eql(u8, user_message, ":prune"))
         return .prune;
 
-    if (std.mem.eql(u8, user_message, "/skills"))
+    if (std.mem.eql(u8, user_message, "/skills") or std.mem.eql(u8, user_message, ":skills"))
         return .skills;
 
     if (std.mem.eql(u8, user_message, "/resume") or std.mem.startsWith(u8, user_message, "/resume ")) {
         if (user_message.len > "/resume ".len) {
             return .{ .resume_session = user_message["/resume ".len..] };
+        }
+        return .{ .resume_session = null };
+    }
+    if (std.mem.eql(u8, user_message, ":resume") or std.mem.startsWith(u8, user_message, ":resume ")) {
+        if (user_message.len > ":resume ".len) {
+            return .{ .resume_session = user_message[":resume ".len..] };
         }
         return .{ .resume_session = null };
     }
@@ -137,11 +173,17 @@ pub fn parse(user_message: []const u8) Command {
         }
         return .{ .file = null };
     }
+    if (std.mem.eql(u8, user_message, ":file") or std.mem.startsWith(u8, user_message, ":file ")) {
+        if (user_message.len > ":file ".len) {
+            return .{ .file = user_message[":file ".len..] };
+        }
+        return .{ .file = null };
+    }
 
-    if (std.mem.eql(u8, user_message, "/help"))
+    if (std.mem.eql(u8, user_message, "/help") or std.mem.eql(u8, user_message, ":help"))
         return .help;
 
-    if (user_message.len > 0 and user_message[0] == '/')
+    if (user_message.len > 0 and user_message[0] == '/' or user_message.len > 0 and user_message[0] == ':')
         return .{ .skill = user_message[1..] };
 
     return .{ .prompt = user_message };
