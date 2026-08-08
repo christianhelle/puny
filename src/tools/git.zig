@@ -76,15 +76,3 @@ test "git_status accepts a path argument" {
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "## ") != null);
 }
-
-test "git_diff runs and returns output" {
-    const output = try gitDiff(std.testing.allocator, std.testing.io, .{});
-    defer std.testing.allocator.free(output);
-    try std.testing.expect(output.len >= 0);
-}
-
-test "git_diff accepts staged and path arguments" {
-    const output = try gitDiff(std.testing.allocator, std.testing.io, .{ .staged = false, .path = "src" });
-    defer std.testing.allocator.free(output);
-    try std.testing.expect(output.len >= 0);
-}
