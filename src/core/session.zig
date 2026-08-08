@@ -461,3 +461,62 @@ test "removeSessionDir is a no-op for a missing directory" {
 pub fn removeSessionDir(io: std.Io, dir: []const u8) void {
     std.Io.Dir.cwd().deleteTree(io, dir) catch {};
 }
+
+test "messagesPath and sessionMetaPath join session directories" {
+    const msg = try messagesPath(std.testing.allocator, "/sessions", "abc-1");
+    defer std.testing.allocator.free(msg);
+    try std.testing.expectEqualStrings("/sessions/abc-1/messages.json", msg);
+
+    const meta = try sessionMetaPath(std.testing.allocator, "/sessions", "abc-1");
+    defer std.testing.allocator.free(meta);
+    try std.testing.expectEqualStrings("/sessions/abc-1/session.json", meta);
+}
+
+test "readSessionMetaJson returns defaults for a missing file" {
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, "puny-test-meta-missing.json");
+    try std.testing.expect(!meta.planning_mode);
+    try std.testing.expect(meta.first_prompt == null);
+}
+
+test "readSessionMetaJson parses a valid meta file" {
+    const path = "puny-test-meta-valid.json";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    {
+        var f = try cwd.createFile(std.testing.io, path, .{});
+        defer f.close(std.testing.io);
+        try f.writeStreamingAll(std.testing.io, "{\"planning_mode\":true,\"first_prompt\":\"hello\"}");
+    }
+
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
+    defer if (meta.first_prompt) |p| std.testing.allocator.free(p);
+    try std.testing.expect(meta.planning_mode);
+    try std.testing.expectEqualStrings("hello", meta.first_prompt.?);
+}
+
+test "readSessionMetaJson tolerates invalid JSON" {
+    const path = "puny-test-meta-invalid.json";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    {
+        var f = try cwd.createFile(std.testing.io, path, .{});
+        defer f.close(std.testing.io);
+        try f.writeStreamingAll(std.testing.io, "not json");
+    }
+
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
+    try std.testing.expect(!meta.planning_mode);
+    try std.testing.expect(meta.first_prompt == null);
+}
+
+test "hasFile detects file existence" {
+    const path = "puny-test-hasfile.txt";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    try std.testing.expect(!hasFile(std.testing.io, path));
+    {
+        var f = try cwd.createFile(std.testing.io, path, .{});
+        f.close(std.testing.io);
+    }
+    try std.testing.expect(hasFile(std.testing.io, path));
+}
