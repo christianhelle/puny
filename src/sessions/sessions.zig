@@ -1558,7 +1558,17 @@ test "findLatestSession prefers the most recently modified conversation" {
     try createTestSessionDirFull(std.testing.io, test_dir, "new-session", false, true);
     try createTestSessionDir(std.testing.io, test_dir, "no-conversation", false);
 
-    // new-session was created after old-session, so its mtime is larger.
+    // Pin the messages.json mtimes so recency is explicit rather than relying
+    // on both files being created within the same timestamp tick.
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const old_msg = try core_session.messagesPath(std.testing.allocator, sessions_dir, "old-session");
+    defer std.testing.allocator.free(old_msg);
+    const new_msg = try core_session.messagesPath(std.testing.allocator, sessions_dir, "new-session");
+    defer std.testing.allocator.free(new_msg);
+    try setFileMtime(std.testing.io, old_msg, std.Io.Timestamp.fromNanoseconds(1_000_000_000_000));
+    try setFileMtime(std.testing.io, new_msg, std.Io.Timestamp.fromNanoseconds(2_000_000_000_000));
+
     const latest = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
     defer if (latest) |s| {
         if (s.first_prompt) |p| std.testing.allocator.free(p);
