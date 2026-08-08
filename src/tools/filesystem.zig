@@ -81,7 +81,7 @@ test "readFile respects the size limit" {
 
     // Allocate the oversized payload at runtime: a 1 MiB+ compile-time string
     // literal would bloat the test binary and slow down compilation.
-    var big = try std.testing.allocator.alloc(u8, 1024 * 1024 + 1);
+    const big = try std.testing.allocator.alloc(u8, 1024 * 1024 + 1);
     defer std.testing.allocator.free(big);
     @memset(big, 'x');
     _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = big });
