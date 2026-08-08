@@ -155,7 +155,10 @@ pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []con
     };
     defer parsed.deinit();
 
-    const obj = parsed.value.object;
+    const obj = switch (parsed.value) {
+        .object => |o| o,
+        else => return SessionMeta{ .planning_mode = false, .first_prompt = null },
+    };
     const planning_mode = if (obj.get("planning_mode")) |v| switch (v) {
         .bool => |b| b,
         else => false,
