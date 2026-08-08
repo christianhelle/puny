@@ -77,3 +77,100 @@ pub const ThinkingIndicator = struct {
         try writer.flush();
     }
 };
+
+test "show writes a thinking hint" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.show(&output.writer);
+    try std.testing.expectEqualStrings("\n\n\x1b[2mThinking...\x1b[0m", output.written());
+}
+
+test "finish prints done message with provider ttft" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.finish(std.testing.io, &output.writer, 0, false, false, .done, 1.5);
+    try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for 1.50s\x1b[0m\n", output.written());
+}
+
+test "finish with streamed content rewrites the indicator line" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.finish(std.testing.io, &output.writer, 2, true, true, .done, 0.5);
+    try std.testing.expectEqualStrings(
+        "\x1b[2A\x1b[G\x1b[K\x1b[2B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        output.written(),
+    );
+}
+
+test "finish with streamed content and no trailing newline adds a blank line" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.finish(std.testing.io, &output.writer, 1, false, true, .done, 2.0);
+    try std.testing.expectEqualStrings(
+        "\x1b[1A\x1b[G\x1b[K\x1b[1B\x1b[G\n\n\x1b[2mThought for 2.00s\x1b[0m\n",
+        output.written(),
+    );
+}
+
+test "finish suppresses the message when cancelled with streamed content" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.finish(std.testing.io, &output.writer, 0, false, true, .cancelled, null);
+    try std.testing.expectEqualStrings("", output.written());
+}
+
+test "finish reports cancelled, interrupted, and error statuses" {
+    const statuses = [_]Status{ .cancelled, .interrupted, .error_ };
+    const expected = [_][]const u8{ "Cancelled.", "Interrupted.", "Error." };
+    for (statuses, expected) |status, msg| {
+        var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+        var output = std.Io.Writer.Allocating.init(arena);
+        defer output.deinit();
+
+        var indicator = ThinkingIndicator.init(std.testing.io);
+        try indicator.finish(std.testing.io, &output.writer, 0, false, false, status, null);
+        try std.testing.expectEqualStrings(
+            try std.fmt.allocPrint(arena, "\x1b[G\x1b[K\x1b[2m{s}\x1b[0m\n", .{msg}),
+            output.written(),
+        );
+    }
+}
+
+test "finish reports sub-10ms thinking as a rounded message" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.finish(std.testing.io, &output.writer, 0, false, false, .done, 0.001);
+    try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for <0.01s\x1b[0m\n", output.written());
+}
