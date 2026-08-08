@@ -594,3 +594,35 @@ test "retryExtract re-downloads when archive size does not match expected" {
     try std.testing.expectEqualStrings("puny", result);
     try std.testing.expectEqual(@as(usize, 2), test_size_download_attempts);
 }
+
+test "archiveNameForTarget names match the current platform" {
+    const name = archiveNameForTarget();
+    try std.testing.expect(std.mem.startsWith(u8, name, "puny-"));
+
+    const builtin = @import("builtin");
+    const os_tag = switch (builtin.target.os.tag) {
+        .windows => "windows",
+        .linux => "linux",
+        .macos => "macos",
+        else => return, // platform does not support upgrade
+    };
+    const arch_tag = if (builtin.target.cpu.arch == .aarch64) "aarch64" else "x86_64";
+    try std.testing.expect(std.mem.indexOf(u8, name, os_tag) != null);
+    try std.testing.expect(std.mem.indexOf(u8, name, arch_tag) != null);
+    try std.testing.expect(std.mem.endsWith(u8, name, ".zip") or std.mem.endsWith(u8, name, ".tar.gz"));
+}
+
+test "findInDir locates a file by name" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    var f = try tmp.dir.createFile(std.testing.io, "puny", .{});
+    f.close(std.testing.io);
+
+    const found = try findInDir(std.testing.allocator, std.testing.io, tmp.dir, "puny");
+    defer if (found) |p| std.testing.allocator.free(p);
+    try std.testing.expect(found != null);
+
+    const missing = try findInDir(std.testing.allocator, std.testing.io, tmp.dir, "does-not-exist");
+    try std.testing.expect(missing == null);
+}
