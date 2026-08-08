@@ -770,3 +770,42 @@ test "textContainsWord matches whole words" {
     try std.testing.expect(textContainsWord("foo-bar baz", "foo-bar"));
     try std.testing.expect(!textContainsWord("hello", ""));
 }
+
+test "normalizeHyphensToSpaces converts hyphens for trigger matching" {
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("foo bar", normalizeHyphensToSpaces(&buf, "foo-bar"));
+    try std.testing.expectEqualStrings("a b c", normalizeHyphensToSpaces(&buf, "a-b-c"));
+    try std.testing.expectEqualStrings("plain", normalizeHyphensToSpaces(&buf, "plain"));
+}
+
+test "findTriggeredSkill matches a hyphenated directory name in prose" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "write-a-skill", .default_dir);
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    var registry = Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try registry.lightScan(std.testing.io, base_path);
+
+    const matched = registry.findTriggeredSkill("help me write a skill");
+    try std.testing.expect(matched != null);
+    try std.testing.expectEqualStrings("write-a-skill", matched.?);
+}
+
+test "recordMatchesTrigger matches whole words only" {
+    var triggers = [_][]const u8{ "do it", "run now" };
+    const record = SkillRecord{
+        .name = "test-skill",
+        .description = "",
+        .dir_path = "/tmp/skills/test-skill",
+        .triggers = triggers[0..],
+        .disable_model_invocation = false,
+    };
+    try std.testing.expect(recordMatchesTrigger(&record, "please do it please"));
+    try std.testing.expect(recordMatchesTrigger(&record, "run now!"));
+    try std.testing.expect(!recordMatchesTrigger(&record, "undo it now"));
+    try std.testing.expect(!recordMatchesTrigger(&record, "do"));
+}
