@@ -633,7 +633,7 @@ test "runCommandTimed returns output for a command that finishes within the dead
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "hello"));
 }
 
-test "runCommand drains a full stderr pipe without deadlocking stdout" {
+test "runCommandTimed drains a full stderr pipe without deadlocking stdout" {
     // A child that writes more than one pipe buffer's worth to stderr while
     // also keeping stdout active would deadlock a sequential stdout-then-
     // stderr drain: the child blocks on the full stderr pipe and can never
