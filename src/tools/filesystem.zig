@@ -53,3 +53,53 @@ pub const list_directory = tools.defineTool(
     ListDirectoryParams,
     listDirectory,
 );
+
+test "writeFile and readFile round-trip content" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const result = try writeFile(std.testing.allocator, std.testing.io, .{ .path = "test.txt", .content = "hello world" });
+    try std.testing.expectEqualStrings("File written successfully.", result);
+
+    const content = try readFile(std.testing.allocator, std.testing.io, .{ .path = "test.txt" });
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("hello world", content);
+}
+
+test "readFile errors on a missing file" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = "missing.txt" }));
+}
+
+test "readFile respects the size limit" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = "big.txt", .content = "x" ** (1024 * 1024 + 1) });
+    try std.testing.expectError(error.StreamTooLong, readFile(std.testing.allocator, std.testing.io, .{ .path = "big.txt" }));
+}
+
+test "listDirectory returns directory entries" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = "a.txt", .content = "a" });
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = "b.txt", .content = "b" });
+
+    const listing = try listDirectory(std.testing.allocator, std.testing.io, .{ .path = "." });
+    defer std.testing.allocator.free(listing);
+    try std.testing.expect(std.mem.indexOf(u8, listing, "a.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, listing, "b.txt") != null);
+}
+
+test "writeFile is blocked in planning mode" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    core_session.setWriteBlocked(true);
+    defer core_session.setWriteBlocked(false);
+
+    const result = try writeFile(std.testing.allocator, std.testing.io, .{ .path = "blocked.txt", .content = "nope" });
+    try std.testing.expect(std.mem.indexOf(u8, result, "Write blocked") != null);
+    // The file must not exist.
+    try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = "blocked.txt" }));
+}
