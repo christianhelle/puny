@@ -107,3 +107,9 @@ test "getProviderDisplayName maps known providers" {
     try std.testing.expectEqualStrings("GitHub Copilot", getProviderDisplayName(.copilot));
     try std.testing.expectEqualStrings("Mock", getProviderDisplayName(.mock));
 }
+
+test "asCopilot returns null for non-copilot providers" {
+    var mock_provider = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer mock_provider.deinit();
+    try std.testing.expect(mock_provider.asCopilot() == null);
+}
