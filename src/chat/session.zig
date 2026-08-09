@@ -1055,7 +1055,7 @@ fn logHttpRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, he
     log.print("{s} {s}\n", .{ @tagName(method), url });
     log.print("Headers:\n", .{});
     for (headers) |h| {
-        log.print("  {s}: {s}\n", .{ h.name, h.value });
+        log.print("  {s}: {s}\n", .{ h.name, redactHeaderValue(h.name, h.value) });
     }
     if (body) |b| {
         log.print("Body ({d} bytes):\n", .{b.len});
@@ -1072,7 +1072,7 @@ fn logHttpResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, s
     log.print("Duration: {d:.2}ms\n", .{ms});
     log.print("Headers:\n", .{});
     for (headers) |h| {
-        log.print("  {s}: {s}\n", .{ h.name, h.value });
+        log.print("  {s}: {s}\n", .{ h.name, redactHeaderValue(h.name, h.value) });
     }
     if (body.len > 0) {
         log.print("Body ({d} bytes):\n", .{body.len});
@@ -1100,10 +1100,50 @@ const FormattedBody = struct {
 
 /// Pretty-prints `body` when it is valid JSON, otherwise returns it unchanged.
 /// `owned` is true only when `text` was allocated and must be freed.
+/// Returns `"***"` for credential-bearing header names (case-insensitive)
+/// so secrets never reach the debug log; everything else passes through.
+fn redactHeaderValue(name: []const u8, value: []const u8) []const u8 {
+    if (std.ascii.eqlIgnoreCase(name, "authorization") or std.ascii.eqlIgnoreCase(name, "set-cookie")) {
+        return "***";
+    }
+    return value;
+}
+
+fn isSecretMemberName(name: []const u8) bool {
+    const secret_names = [_][]const u8{ "api_key", "apiKey", "token", "access_token", "authorization" };
+    for (secret_names) |n| {
+        if (std.mem.eql(u8, name, n)) return true;
+    }
+    return false;
+}
+
+/// Replaces the values of credential-named JSON members with `"***"`,
+/// recursively, so request/response bodies cannot leak secrets to the log.
+fn redactSecretValues(value: *std.json.Value) void {
+    switch (value.*) {
+        .object => |obj| {
+            const keys = obj.keys();
+            const values = obj.values();
+            for (keys, values) |key, *val| {
+                if (isSecretMemberName(key)) {
+                    val.* = .{ .string = "***" };
+                } else {
+                    redactSecretValues(val);
+                }
+            }
+        },
+        .array => |arr| {
+            for (arr.items) |*item| redactSecretValues(item);
+        },
+        else => {},
+    }
+}
+
 fn formatBody(allocator: std.mem.Allocator, body: []const u8) FormattedBody {
     if (body.len == 0) return .{ .text = body, .owned = false };
-    const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return .{ .text = body, .owned = false };
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return .{ .text = body, .owned = false };
     defer parsed.deinit();
+    redactSecretValues(&parsed.value);
     const formatted = std.json.Stringify.valueAlloc(allocator, parsed.value, .{ .whitespace = .indent_2 }) catch return .{ .text = body, .owned = false };
     return .{ .text = formatted, .owned = true };
 }
@@ -1678,4 +1718,89 @@ fn firstUserPrompt(messages: []const openai.Message) ?[]const u8 {
         if (m == .user) return m.user;
     }
     return null;
+}
+
+test "logHttpRequest redacts the authorization header value" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    const headers = [_]std.http.Header{
+        .{ .name = "authorization", .value = "Bearer sk-super-secret-123" },
+        .{ .name = "content-type", .value = "application/json" },
+    };
+    logHttpRequest(@ptrCast(&log), .POST, "http://example.com", &headers, null);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "sk-super-secret-123") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "authorization: ***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "content-type: application/json") != null);
+}
+
+test "logHttpResponse redacts authorization and set-cookie header values" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    const headers = [_]std.http.Header{
+        .{ .name = "Set-Cookie", .value = "session=abc123; HttpOnly" },
+        .{ .name = "Authorization", .value = "Bearer sekrit" },
+        .{ .name = "date", .value = "Mon, 01 Jan 2024" },
+    };
+    logHttpResponse(@ptrCast(&log), .POST, "http://example.com", .ok, &headers, "{}", 1_000_000);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "sekrit") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "abc123") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Set-Cookie: ***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Authorization: ***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "date: Mon, 01 Jan 2024") != null);
+}
+
+test "formatBody redacts key-named JSON members" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const body = "{\"model\":\"gpt-4o\",\"api_key\":\"sk-leak\",\"nested\":{\"token\":\"t-1\",\"access_token\":\"at-2\",\"ok\":1},\"list\":[{\"apiKey\":\"k-3\"}],\"authorization\":\"Bearer hdr\"}";
+    const formatted = formatBody(allocator, body);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "sk-leak") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "t-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "at-2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "k-3") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "hdr") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "\"model\": \"gpt-4o\"") != null);
+    try std.testing.expect(std.mem.count(u8, formatted.text, "\"***\"") >= 5);
 }
