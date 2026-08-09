@@ -333,6 +333,44 @@ Once saved, Puny uses the stored provider and key on subsequent runs, so you onl
 
 The config file stores per-provider settings (URL, API key, and last-selected model) so you can switch between providers without re-entering credentials.
 
+### API key protection
+
+API keys are never stored in `config.json` as clear text. When Puny saves a
+configuration containing keys, each key is encrypted at rest with
+XChaCha20-Poly1305 and written as an `enc:v1:` blob. The encryption key is a
+random 32-byte file that never leaves your machine:
+
+| OS      | Key file location                                                        |
+| ------- | ----------------------------------------------------------------------- |
+| Linux   | `$XDG_DATA_HOME/puny/encryption.key` → `~/.local/share/puny/encryption.key` |
+| macOS   | `~/.local/share/puny/encryption.key`                                    |
+| Windows | `%LOCALAPPDATA%\puny\encryption.key` → `%USERPROFILE%\puny\encryption.key`  |
+
+The key file is created automatically (permissions `0600` on POSIX) the first
+time a configuration containing an API key is saved, and `config.json` itself
+is written with `0600` permissions on POSIX.
+
+- **Existing plaintext keys** are migrated to encrypted blobs on the next
+  configuration save (`--reconfigure`, `/config`, `/provider`, or the Copilot
+  device-flow login). Re-entering the API key during `--reconfigure` migrates
+  immediately; pressing Enter on every prompt does not save and does not
+  migrate.
+- **Backups**: back up `config.json` **together with** the key file. A config
+  without its key file degrades gracefully — Puny warns and treats the stored
+  keys as unset until you re-enter them with `--reconfigure`.
+- **Docker**: the key file lives in the container's writable layer
+  (`/app/.local/share/puny/encryption.key`). Recreating the container loses it,
+  so mount a volume for `/app/.local/share/puny` (or `/app`) to keep stored
+  keys across container recreation.
+- **No keys at rest**: if you prefer not to persist credentials at all, pass
+  `--api-key`, `--api-key-file`, `PUNY_API_KEY`, or
+  `GITHUB_COPILOT_OAUTH_TOKEN` per session — these are never written to disk.
+
+This protects against accidental exposure — a leaked, synced, or committed
+`config.json` contains no usable credentials. It does not defend against an
+attacker who already has full access to your user account (they can read the
+key file and process memory like any other tool).
+
 ## Skills
 
 Puny can load reusable prompt-engineering skills from markdown files. Skills are
