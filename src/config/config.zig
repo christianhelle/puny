@@ -357,14 +357,28 @@ pub fn save(
     const buffer = try std.json.Stringify.valueAlloc(allocator, to_write, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
 
-    var file = try cwd.createFile(io, path, .{});
-    defer file.close(io);
+    // Write to a temporary file in the same directory and atomically rename it
+    // over the target, so an interrupted save never leaves config.json empty
+    // or truncated (it now holds the only copy of the encrypted credentials).
+    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+    defer allocator.free(tmp_path);
+
+    var file = try cwd.createFile(io, tmp_path, .{});
+    var file_open = true;
+    defer {
+        if (file_open) file.close(io);
+        cwd.deleteFile(io, tmp_path) catch {};
+    }
     try file.writeStreamingAll(io, buffer);
     try file.writeStreamingAll(io, "\n");
+    file.close(io);
+    file_open = false;
 
     if (comptime builtin.os.tag != .windows) {
-        cwd.setFilePermissions(io, path, @enumFromInt(0o600), .{}) catch {};
+        cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{}) catch {};
     }
+
+    try cwd.rename(tmp_path, cwd, path, io);
 }
 
 pub fn configPath(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
