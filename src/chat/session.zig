@@ -1115,7 +1115,7 @@ fn redactHeaderValue(name: []const u8, value: []const u8) []const u8 {
 fn isSecretMemberName(name: []const u8) bool {
     const secret_names = [_][]const u8{ "api_key", "apiKey", "token", "access_token", "authorization" };
     for (secret_names) |n| {
-        if (std.mem.eql(u8, name, n)) return true;
+        if (std.ascii.eqlIgnoreCase(name, n)) return true;
     }
     return false;
 }
@@ -1838,4 +1838,19 @@ test "formatBody redacts key-named JSON members" {
     try std.testing.expect(std.mem.indexOf(u8, formatted.text, "hdr") == null);
     try std.testing.expect(std.mem.indexOf(u8, formatted.text, "\"model\": \"gpt-4o\"") != null);
     try std.testing.expect(std.mem.count(u8, formatted.text, "\"***\"") >= 5);
+}
+
+test "formatBody redacts secret member names case-insensitively" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const body = "{\"API_KEY\":\"sk-upper\",\"Access_Token\":\"tok-x\",\"Nested\":{\"Authorization\":\"Bearer hdr2\"},\"ok\":1}";
+    const formatted = formatBody(allocator, body);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "sk-upper") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "tok-x") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "hdr2") == null);
+    try std.testing.expect(std.mem.count(u8, formatted.text, "\"***\"") >= 3);
 }
