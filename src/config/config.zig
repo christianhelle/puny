@@ -64,6 +64,10 @@ pub const Provider = struct {
     url: []const u8,
     model: []const u8,
     reasoning_effort: ?[]const u8 = null,
+    /// Original `enc:v1:` blob retained when decryption failed, so a later
+    /// save does not discard the user's stored credential. Internal only:
+    /// never serialized; `save` restores it into `apiKey` when unset.
+    stored_blob: ?[]const u8 = null,
 
     pub fn clone(self: Provider, allocator: std.mem.Allocator) std.mem.Allocator.Error!Provider {
         return .{
@@ -72,6 +76,7 @@ pub const Provider = struct {
             .url = try allocator.dupe(u8, self.url),
             .model = try allocator.dupe(u8, self.model),
             .reasoning_effort = if (self.reasoning_effort) |v| try allocator.dupe(u8, v) else null,
+            .stored_blob = if (self.stored_blob) |v| try allocator.dupe(u8, v) else null,
         };
     }
 
@@ -80,6 +85,24 @@ pub const Provider = struct {
         allocator.free(self.url);
         allocator.free(self.model);
         if (self.reasoning_effort) |v| allocator.free(v);
+        if (self.stored_blob) |v| allocator.free(v);
+    }
+
+    pub fn jsonStringify(v: Provider, jws: anytype) !void {
+        // Serialize the persisted fields only; `stored_blob` is an in-memory
+        // retention of the original ciphertext and must not reach config.json.
+        try jws.beginObject();
+        try jws.objectField("name");
+        try jws.write(v.name);
+        try jws.objectField("apiKey");
+        try jws.write(v.apiKey);
+        try jws.objectField("url");
+        try jws.write(v.url);
+        try jws.objectField("model");
+        try jws.write(v.model);
+        try jws.objectField("reasoning_effort");
+        try jws.write(v.reasoning_effort);
+        try jws.endObject();
     }
 };
 
@@ -219,8 +242,25 @@ fn decryptStoredApiKeys(
         const api_key = p.apiKey orelse continue;
         if (api_key.len == 0 or !secrets.isEncrypted(api_key)) continue;
 
+        // Retain the original ciphertext so a later save round-trips it when
+        // the key file is missing or the blob cannot be decrypted.
+        p.stored_blob = api_key;
+
         if (key_material == null) {
-            key_material = secrets.loadKey(allocator, io, environ_map) catch null;
+            key_material = secrets.loadKey(allocator, io, environ_map) catch |err| blk: {
+                if (!warned_missing_key) {
+                    var stderr_buffer: [1024]u8 = undefined;
+                    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+                    const stderr_writer = &stderr_file_writer.interface;
+                    stderr_writer.print(
+                        "Warning: could not decrypt stored API keys: failed to load encryption key file ({s}).\nRun --reconfigure to re-enter your keys.\n",
+                        .{@errorName(err)},
+                    ) catch {};
+                    stderr_writer.flush() catch {};
+                    warned_missing_key = true;
+                }
+                break :blk null;
+            };
         }
 
         const key = key_material orelse {
@@ -252,6 +292,7 @@ fn decryptStoredApiKeys(
                 break :blk null;
             };
         };
+        if (p.apiKey != null) p.stored_blob = null;
     }
 }
 
@@ -269,6 +310,16 @@ pub fn save(
     try cwd.createDirPath(io, dir);
 
     var to_write = config;
+
+    // A provider whose stored key could not be decrypted keeps the original
+    // ciphertext in `stored_blob`; restore it so this save writes the blob back
+    // instead of replacing it with null. Providers with a live apiKey always
+    // win over any retained blob.
+    for (&to_write.providers) |*p| {
+        if (p.apiKey == null) {
+            if (p.stored_blob) |blob| p.apiKey = blob;
+        }
+    }
 
     // Track the encrypted blobs allocated by this save so they can be freed
     // after writing; the caller's apiKey strings are never touched.
@@ -586,6 +637,37 @@ test "load fails soft when the key file is missing" {
     defer loaded.deinit();
     try std.testing.expect(loaded.config.providerEntryConst(.opencode_go).apiKey == null);
     try std.testing.expect(loaded.file_existed);
+}
+
+test "save preserves an undecryptable stored api key blob" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const blob = "enc:v1:AgICAgICAgICAgICAgICAgICAgICAgICqg9Ois5afuAGYNUfoYJVcmZrd+3L";
+    const contents = try testConfigJson(blob);
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.config.providerEntryConst(.opencode_go).apiKey == null);
+
+    // A save after a failed decrypt must round-trip the ciphertext instead of
+    // replacing it with null, and must not leak the internal field.
+    try save(std.testing.allocator, std.testing.io, loaded.config, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, blob) != null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "stored_blob") == null);
 }
 
 test "load fails soft for a single undecryptable provider (G1)" {
