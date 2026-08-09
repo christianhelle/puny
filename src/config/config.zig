@@ -357,10 +357,14 @@ pub fn save(
     const buffer = try std.json.Stringify.valueAlloc(allocator, to_write, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
 
-    // Write to a temporary file in the same directory and atomically rename it
-    // over the target, so an interrupted save never leaves config.json empty
-    // or truncated (it now holds the only copy of the encrypted credentials).
-    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+    // Write to a uniquely-named temporary file in the same directory and
+    // atomically rename it over the target. The unique name keeps concurrent
+    // saves (or a stale .tmp from a crashed run) from colliding on the same
+    // staging file, and an interrupted save never leaves config.json empty or
+    // truncated (it now holds the only copy of the encrypted credentials).
+    var random_source: std.Random.IoSource = .{ .io = io };
+    const random = random_source.interface();
+    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.{x}.tmp", .{ path, random.int(u64) });
     defer allocator.free(tmp_path);
 
     var file = try cwd.createFile(io, tmp_path, .{});
@@ -827,6 +831,38 @@ test "save writes config.json with 0600 permissions" {
     defer std.testing.allocator.free(cfg_path);
     const stat = try std.Io.Dir.cwd().statFile(std.testing.io, cfg_path, .{});
     try std.testing.expectEqual(@as(u32, 0o600), stat.permissions.toMode() & 0o777);
+}
+
+test "save leaves a stale config.json.tmp untouched" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    // A stale staging file left behind by a crashed save must not be
+    // clobbered or renamed over config.json by a later save.
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const stale_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.tmp", .{cfg_path});
+    defer std.testing.allocator.free(stale_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(cfg_path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = stale_path, .data = "STALE-CONTENT" });
+
+    try save(std.testing.allocator, std.testing.io, Config.default(), &env);
+
+    // The stale file is untouched and config.json was written fresh.
+    const stale = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, stale_path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(stale);
+    try std.testing.expectEqualStrings("STALE-CONTENT", stale);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.file_existed);
+    try std.testing.expect(!loaded.had_error);
 }
 
 test "save does not re-encrypt an already encrypted key" {
