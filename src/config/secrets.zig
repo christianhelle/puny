@@ -279,19 +279,21 @@ test "keyFilePath errors without a data dir" {
     try std.testing.expectError(error.NoConfigDir, keyFilePath(std.testing.allocator, &env));
 }
 
-fn tempHomeEnv() !struct { env: std.process.Environ.Map, home: []u8 } {
+fn tempHomeEnv() !struct { tmp: std.testing.TmpDir, env: std.process.Environ.Map, home: []u8 } {
     var tmp = std.testing.tmpDir(.{});
+    errdefer tmp.cleanup();
     var env = std.process.Environ.Map.init(std.testing.allocator);
     errdefer env.deinit();
     const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
     errdefer std.testing.allocator.free(home);
     try env.put("HOME", home);
-    return .{ .env = env, .home = home };
+    return .{ .tmp = tmp, .env = env, .home = home };
 }
 
 test "loadKey returns null when the key file is missing" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
@@ -302,6 +304,7 @@ test "loadKey returns null when the key file is missing" {
 test "loadKey returns null for a malformed key file" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
@@ -317,6 +320,7 @@ test "loadKey returns null for a malformed key file" {
 test "loadKey returns null for an oversized key file" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
@@ -332,6 +336,7 @@ test "loadKey returns null for an oversized key file" {
 test "loadKey reads a 32-byte key file" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
@@ -348,6 +353,7 @@ test "loadKey reads a 32-byte key file" {
 test "ensureKeyFile creates a 32-byte key file with 0600 permissions" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
@@ -367,6 +373,7 @@ test "ensureKeyFile creates a 32-byte key file with 0600 permissions" {
 test "ensureKeyFile returns the existing key without overwriting" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
@@ -384,6 +391,7 @@ test "ensureKeyFile returns the existing key without overwriting" {
 test "ensureKeyFile does not overwrite a malformed existing key file" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
