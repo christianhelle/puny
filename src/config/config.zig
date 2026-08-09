@@ -513,7 +513,6 @@ test "save and load round-trip through a temp HOME" {
     try std.testing.expectEqualStrings("gpt-4o", loaded.config.providerEntryConst(.opencode_zen).model);
 }
 
-
 fn writeTestKeyFile(env: *const std.process.Environ.Map, key: [32]u8) !void {
     const path = try secrets.keyFilePath(std.testing.allocator, env);
     defer std.testing.allocator.free(path);
