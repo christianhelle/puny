@@ -769,7 +769,7 @@ test "save encrypts api keys and creates the key file" {
 
     const key_path = try secrets.keyFilePath(std.testing.allocator, &env);
     defer std.testing.allocator.free(key_path);
-    _ = try std.Io.Dir.cwd().openFile(std.testing.io, key_path, .{});
+    _ = try std.Io.Dir.cwd().statFile(std.testing.io, key_path, .{});
 }
 
 test "save then load round-trips the api key" {
