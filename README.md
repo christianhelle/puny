@@ -335,7 +335,7 @@ The config file stores per-provider settings (URL, API key, and last-selected mo
 
 ### API key protection
 
-API keys are never stored in `config.json` as clear text. When Puny saves a
+Puny does not write API keys to `config.json` as clear text. When Puny saves a
 configuration containing keys, each key is encrypted at rest with
 XChaCha20-Poly1305 and written as an `enc:v1:` blob. The encryption key is a
 random 32-byte file that never leaves your machine:
