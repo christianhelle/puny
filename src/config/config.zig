@@ -268,13 +268,52 @@ pub fn save(
     const cwd = std.Io.Dir.cwd();
     try cwd.createDirPath(io, dir);
 
-    const buffer = try std.json.Stringify.valueAlloc(allocator, config, .{ .whitespace = .indent_2 });
+    var to_write = config;
+
+    // Track the encrypted blobs allocated by this save so they can be freed
+    // after writing; the caller's apiKey strings are never touched.
+    var encrypted_blobs: [4]?[]const u8 = .{ null, null, null, null };
+    defer {
+        for (encrypted_blobs) |blob| {
+            if (blob) |b| allocator.free(b);
+        }
+    }
+
+    var has_plaintext_key = false;
+    for (config.providers) |p| {
+        if (p.apiKey) |k| {
+            if (k.len > 0 and !secrets.isEncrypted(k)) {
+                has_plaintext_key = true;
+                break;
+            }
+        }
+    }
+
+    if (has_plaintext_key) {
+        var random_source: std.Random.IoSource = .{ .io = io };
+        const random = random_source.interface();
+        const key = (try secrets.ensureKeyFile(allocator, io, environ_map, random)) orelse return error.InvalidEncryptionKey;
+        for (&to_write.providers, 0..) |*p, i| {
+            if (p.apiKey) |k| {
+                if (k.len > 0 and !secrets.isEncrypted(k)) {
+                    p.apiKey = try secrets.encrypt(allocator, key, random, k);
+                    encrypted_blobs[i] = p.apiKey;
+                }
+            }
+        }
+    }
+
+    const buffer = try std.json.Stringify.valueAlloc(allocator, to_write, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
 
     var file = try cwd.createFile(io, path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, buffer);
     try file.writeStreamingAll(io, "\n");
+
+    if (comptime builtin.os.tag != .windows) {
+        cwd.setFilePermissions(io, path, @enumFromInt(0o600), .{}) catch {};
+    }
 }
 
 pub fn configPath(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
@@ -610,4 +649,111 @@ test "load leaves legacy plaintext api keys untouched (M2)" {
     var loaded = try load(std.testing.allocator, std.testing.io, &env);
     defer loaded.deinit();
     try std.testing.expectEqualStrings("sk-legacy-plaintext", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+}
+
+test "save encrypts api keys and creates the key file" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    var cfg = Config.default();
+    cfg.providerEntry(.opencode_go).apiKey = "sk-plaintext-to-protect";
+    try save(std.testing.allocator, std.testing.io, cfg, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "sk-plaintext-to-protect") == null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "enc:v1:") != null);
+
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(key_path);
+    _ = try std.Io.Dir.cwd().openFile(std.testing.io, key_path, .{});
+}
+
+test "save then load round-trips the api key" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    var cfg = Config.default();
+    cfg.providerEntry(.opencode_go).apiKey = "sk-roundtrip-key";
+    try save(std.testing.allocator, std.testing.io, cfg, &env);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-roundtrip-key", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+}
+
+test "save does not create a key file when no api keys are set" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const cfg = Config.default();
+    try save(std.testing.allocator, std.testing.io, cfg, &env);
+
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(key_path);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openFile(std.testing.io, key_path, .{}));
+}
+
+test "save writes config.json with 0600 permissions" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    var cfg = Config.default();
+    cfg.providerEntry(.opencode_zen).apiKey = "sk-perms";
+    try save(std.testing.allocator, std.testing.io, cfg, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const stat = try std.Io.Dir.cwd().statFile(std.testing.io, cfg_path, .{});
+    try std.testing.expectEqual(@as(u32, 0o600), stat.permissions.toMode() & 0o777);
+}
+
+test "save does not re-encrypt an already encrypted key" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const key = [_]u8{0x3c} ** 32;
+    try writeTestKeyFile(&env, key);
+
+    var cfg = Config.default();
+    cfg.providerEntry(.opencode_go).apiKey = "enc:v1:AgICAgICAgICAgICAgICAgICAgICAgICqg9Ois5afuAGYNUfoYJVcmZrd+3L";
+    try save(std.testing.allocator, std.testing.io, cfg, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.count(u8, raw, "enc:v1:") == 1);
 }
