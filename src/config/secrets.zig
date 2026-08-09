@@ -222,8 +222,19 @@ pub fn ensureKeyFile(
     const path = try keyFilePath(allocator, environ_map);
     defer allocator.free(path);
 
-    const dir = std.fs.path.dirname(path) orelse return error.BadPath;
     const cwd = std.Io.Dir.cwd();
+
+    // An existing key file that could not be loaded (wrong size, oversized) is
+    // malformed: return null instead of overwriting it, which would make any
+    // previously encrypted config values permanently undecryptable.
+    if (cwd.statFile(io, path, .{})) |_| {
+        return null;
+    } else |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    }
+
+    const dir = std.fs.path.dirname(path) orelse return error.BadPath;
     try cwd.createDirPath(io, dir);
 
     var key: [key_length]u8 = undefined;
@@ -368,4 +379,26 @@ test "ensureKeyFile returns the existing key without overwriting" {
 
     const key = (try ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random)).?;
     try std.testing.expectEqual([_]u8{0x11} ** 32, key);
+}
+
+test "ensureKeyFile does not overwrite a malformed existing key file" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "too-short" });
+
+    const key = try ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random);
+    try std.testing.expect(key == null);
+
+    // The malformed file must be left untouched, not replaced by a new key.
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(64));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("too-short", data);
 }
