@@ -5,6 +5,7 @@ const provider = @import("../providers/provider.zig");
 const opencode_zen = @import("../providers/opencode_zen.zig");
 const opencode_go = @import("../providers/opencode_go.zig");
 const copilot = @import("../providers/copilot.zig");
+const secrets = @import("secrets.zig");
 
 fn isValidUtf8(s: []const u8) bool {
     var i: usize = 0;
@@ -194,9 +195,64 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
     if (!isValidUtf8(model)) {
         cfg.providerEntry(cfg.provider).model = "";
     }
-    const arena = parsed.arena.*;
+    var arena = parsed.arena.*;
+    const arena_alloc = arena.allocator();
+    decryptStoredApiKeys(arena_alloc, io, environ_map, &cfg) catch {};
     allocator.destroy(parsed.arena);
     return .{ .config = cfg, .arena = arena, .file_existed = true };
+}
+
+/// Decrypts `enc:v1:` apiKey blobs in place, allocating the plaintext from
+/// `allocator`. Fails soft per the PRD: a missing/corrupt key file or an
+/// undecryptable blob warns to stderr and leaves that provider's key unset.
+/// Legacy plaintext keys are left untouched (lazy migration on save).
+fn decryptStoredApiKeys(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    cfg: *Config,
+) !void {
+    var warned_missing_key = false;
+    var key_material: ?[secrets.key_length]u8 = null;
+
+    for (&cfg.providers) |*p| {
+        const api_key = p.apiKey orelse continue;
+        if (api_key.len == 0 or !secrets.isEncrypted(api_key)) continue;
+
+        if (key_material == null) {
+            key_material = secrets.loadKey(allocator, io, environ_map) catch null;
+        }
+
+        const key = key_material orelse {
+            if (!warned_missing_key) {
+                var stderr_buffer: [1024]u8 = undefined;
+                var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+                const stderr_writer = &stderr_file_writer.interface;
+                stderr_writer.print(
+                    "Warning: could not decrypt stored API keys: encryption key file is missing.\nRun --reconfigure to re-enter your keys.\n",
+                    .{},
+                ) catch {};
+                stderr_writer.flush() catch {};
+                warned_missing_key = true;
+            }
+            p.apiKey = null;
+            continue;
+        };
+
+        p.apiKey = blk: {
+            break :blk secrets.decrypt(allocator, key, api_key) catch |err| {
+                var stderr_buffer: [1024]u8 = undefined;
+                var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+                const stderr_writer = &stderr_file_writer.interface;
+                stderr_writer.print(
+                    "Warning: could not decrypt the stored API key for provider '{s}' ({s}). Re-enter it with --reconfigure.\n",
+                    .{ @tagName(p.name), @errorName(err) },
+                ) catch {};
+                stderr_writer.flush() catch {};
+                break :blk null;
+            };
+        };
+    }
 }
 
 pub fn save(
@@ -416,4 +472,142 @@ test "save and load round-trip through a temp HOME" {
     try std.testing.expectEqual(.opencode_zen, loaded.config.provider);
     try std.testing.expectEqualStrings("https://example.com", loaded.config.providerEntryConst(.opencode_zen).url);
     try std.testing.expectEqualStrings("gpt-4o", loaded.config.providerEntryConst(.opencode_zen).model);
+}
+
+
+fn writeTestKeyFile(env: *const std.process.Environ.Map, key: [32]u8) !void {
+    const path = try secrets.keyFilePath(std.testing.allocator, env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &key });
+}
+
+fn testConfigJson(api_key: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(std.testing.allocator,
+        \\{{
+        \\  "provider": "opencode_go",
+        \\  "providers": [
+        \\    {{ "name": "lmstudio", "apiKey": null, "url": "http://127.0.0.1:1234", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "opencode_zen", "apiKey": null, "url": "https://opencode.ai/zen", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "opencode_go", "apiKey": "{s}", "url": "https://opencode.ai/zen/go", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "copilot", "apiKey": null, "url": "https://api.githubcopilot.com", "model": "", "reasoning_effort": null }}
+        \\  ]
+        \\}}
+    , .{api_key});
+}
+
+fn writeTestConfig(env: *const std.process.Environ.Map, contents: []const u8) !void {
+    const path = try configPath(std.testing.allocator, env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = contents });
+}
+
+test "load decrypts an enc:v1 api key blob" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const key = [_]u8{0x5a} ** 32;
+    try writeTestKeyFile(&env, key);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-decrypted");
+    defer std.testing.allocator.free(blob);
+
+    const contents = try testConfigJson(blob);
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-decrypted", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+}
+
+test "load fails soft when the key file is missing" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const contents = try testConfigJson("enc:v1:AgICAgICAgICAgICAgICAgICAgICAgICqg9Ois5afuAGYNUfoYJVcmZrd+3L");
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.config.providerEntryConst(.opencode_go).apiKey == null);
+    try std.testing.expect(loaded.file_existed);
+}
+
+test "load fails soft for a single undecryptable provider (G1)" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const key = [_]u8{0x6b} ** 32;
+    try writeTestKeyFile(&env, key);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const good_blob = try secrets.encrypt(std.testing.allocator, key, random, "good-key");
+    defer std.testing.allocator.free(good_blob);
+
+    // A blob that fails with the current key (wrong/stale key material).
+    const stale_key = [_]u8{0x01} ** 32;
+    const stale_blob = try secrets.encrypt(std.testing.allocator, stale_key, random, "stale-key");
+    defer std.testing.allocator.free(stale_blob);
+
+    const contents = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{
+        \\  "provider": "opencode_go",
+        \\  "providers": [
+        \\    {{ "name": "lmstudio", "apiKey": null, "url": "http://127.0.0.1:1234", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "opencode_zen", "apiKey": "{s}", "url": "https://opencode.ai/zen", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "opencode_go", "apiKey": "{s}", "url": "https://opencode.ai/zen/go", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "copilot", "apiKey": null, "url": "https://api.githubcopilot.com", "model": "", "reasoning_effort": null }}
+        \\  ]
+        \\}}
+    , .{ stale_blob, good_blob });
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.config.providerEntryConst(.opencode_zen).apiKey == null);
+    try std.testing.expectEqualStrings("good-key", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+}
+
+test "load leaves legacy plaintext api keys untouched (M2)" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const contents = try testConfigJson("sk-legacy-plaintext");
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-legacy-plaintext", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
 }
