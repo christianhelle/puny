@@ -343,7 +343,7 @@ random 32-byte file that never leaves your machine:
 | OS      | Key file location                                                        |
 | ------- | ----------------------------------------------------------------------- |
 | Linux   | `$XDG_DATA_HOME/puny/encryption.key` → `~/.local/share/puny/encryption.key` |
-| macOS   | `~/.local/share/puny/encryption.key`                                    |
+| macOS   | `$XDG_DATA_HOME/puny/encryption.key` → `~/.local/share/puny/encryption.key` |
 | Windows | `%LOCALAPPDATA%\puny\encryption.key` → `%USERPROFILE%\puny\encryption.key`  |
 
 The key file is created automatically (permissions `0600` on POSIX) the first
