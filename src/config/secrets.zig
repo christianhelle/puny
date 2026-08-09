@@ -164,3 +164,191 @@ test "encryptWithNonce produces a stable deterministic blob" {
         blob,
     );
 }
+
+pub fn keyFilePath(
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) ![]const u8 {
+    if (builtin.os.tag == .windows) {
+        const base = environ_map.get("LOCALAPPDATA") orelse environ_map.get("USERPROFILE") orelse return error.NoConfigDir;
+        return std.fs.path.join(allocator, &.{ base, "puny", "encryption.key" });
+    }
+
+    if (environ_map.get("XDG_DATA_HOME")) |base| {
+        return std.fs.path.join(allocator, &.{ base, "puny", "encryption.key" });
+    }
+
+    const home = environ_map.get("HOME") orelse return error.NoConfigDir;
+    return std.fs.path.join(allocator, &.{ home, ".local", "share", "puny", "encryption.key" });
+}
+
+/// Loads the 32-byte encryption key, or `null` when the key file is missing
+/// or malformed. Never creates the file.
+pub fn loadKey(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+) !?[key_length]u8 {
+    const path = try keyFilePath(allocator, environ_map);
+    defer allocator.free(path);
+
+    const cwd = std.Io.Dir.cwd();
+    const data = cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(64)) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(data);
+
+    if (data.len != key_length) return null;
+
+    var key: [key_length]u8 = undefined;
+    @memcpy(&key, data);
+    return key;
+}
+
+/// Returns the 32-byte encryption key, creating the key file (0600 on POSIX)
+/// when it does not exist. Returns `null` when an existing key file is
+/// malformed and cannot be used.
+pub fn ensureKeyFile(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    random: std.Random,
+) !?[key_length]u8 {
+    if (try loadKey(allocator, io, environ_map)) |key| return key;
+
+    const path = try keyFilePath(allocator, environ_map);
+    defer allocator.free(path);
+
+    const dir = std.fs.path.dirname(path) orelse return error.BadPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, dir);
+
+    var key: [key_length]u8 = undefined;
+    random.bytes(&key);
+
+    var file = try cwd.createFile(io, path, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, &key);
+
+    if (comptime builtin.os.tag != .windows) {
+        cwd.setFilePermissions(io, path, @enumFromInt(0o600), .{}) catch {};
+    }
+    return key;
+}
+
+test "keyFilePath prefers XDG_DATA_HOME on non-windows" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("XDG_DATA_HOME", "/xdg");
+    try env.put("HOME", "/home/user");
+
+    const path = try keyFilePath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/xdg/puny/encryption.key", path);
+}
+
+test "keyFilePath falls back to .local/share" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", "/home/user");
+
+    const path = try keyFilePath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/user/.local/share/puny/encryption.key", path);
+}
+
+test "keyFilePath errors without a data dir" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try std.testing.expectError(error.NoConfigDir, keyFilePath(std.testing.allocator, &env));
+}
+
+fn tempHomeEnv() !struct { env: std.process.Environ.Map, home: []u8 } {
+    var tmp = std.testing.tmpDir(.{});
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    errdefer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    errdefer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+    return .{ .env = env, .home = home };
+}
+
+test "loadKey returns null when the key file is missing" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
+    try std.testing.expect(key == null);
+}
+
+test "loadKey returns null for a malformed key file" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "too-short" });
+
+    const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
+    try std.testing.expect(key == null);
+}
+
+test "loadKey reads a 32-byte key file" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x77} ** 32) });
+
+    const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
+    try std.testing.expect(key != null);
+    try std.testing.expectEqual([_]u8{0x77} ** 32, key.?);
+}
+
+test "ensureKeyFile creates a 32-byte key file with 0600 permissions" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    const key = (try ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random)).?;
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    const stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
+    try std.testing.expectEqual(@as(u32, 0o600), stat.permissions.toMode() & 0o777);
+
+    const reloaded = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
+    try std.testing.expectEqual(key, reloaded.?);
+}
+
+test "ensureKeyFile returns the existing key without overwriting" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x11} ** 32) });
+
+    const key = (try ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random)).?;
+    try std.testing.expectEqual([_]u8{0x11} ** 32, key);
+}
