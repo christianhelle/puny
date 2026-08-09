@@ -657,6 +657,9 @@ test "include cli.args tests" {
 test "include config.config tests" {
     _ = @import("config/config.zig");
 }
+test "include config.secrets tests" {
+    _ = @import("config/secrets.zig");
+}
 test "include core.cancel tests" {
     _ = @import("core/cancel.zig");
 }
