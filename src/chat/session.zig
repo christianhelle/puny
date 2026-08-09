@@ -905,9 +905,11 @@ pub fn promptReconfigure(
 
     if (std.mem.eql(u8, new_key, "-")) {
         entry.apiKey = null;
+        entry.stored_blob = null;
         result.changed = true;
     } else if (new_key.len > 0) {
         entry.apiKey = try arena.dupe(u8, new_key);
+        entry.stored_blob = null;
         result.changed = true;
     }
 
@@ -1023,6 +1025,7 @@ pub fn ensureCopilotAuth(
     client.setGithubToken(token);
 
     cfg.providerEntry(.copilot).apiKey = try arena.dupe(u8, token);
+    cfg.providerEntry(.copilot).stored_blob = null;
     config.save(arena, io, cfg.*, init.environ_map) catch |err| {
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
