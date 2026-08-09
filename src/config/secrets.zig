@@ -28,7 +28,7 @@ pub fn encrypt(
 }
 
 /// Encrypts `plaintext` with an explicit nonce. Test-only deterministic path.
-pub fn encryptWithNonce(
+fn encryptWithNonce(
     allocator: std.mem.Allocator,
     key: [key_length]u8,
     nonce: [nonce_length]u8,
