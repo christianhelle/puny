@@ -240,13 +240,29 @@ pub fn ensureKeyFile(
     var key: [key_length]u8 = undefined;
     random.bytes(&key);
 
-    var file = try cwd.createFile(io, path, .{});
-    defer file.close(io);
-    try file.writeStreamingAll(io, &key);
+    // Stage the key in a sibling temp file, harden it to 0600 before any
+    // secret bytes are written, then atomically rename it over the target.
+    // A partial/interrupted write can never leave a malformed key at the
+    // final path, and the key is never world-readable during the chmod window.
+    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+    defer allocator.free(tmp_path);
+
+    var file = try cwd.createFile(io, tmp_path, .{});
+    var file_open = true;
+    defer {
+        if (file_open) file.close(io);
+        cwd.deleteFile(io, tmp_path) catch {};
+    }
 
     if (comptime builtin.os.tag != .windows) {
-        cwd.setFilePermissions(io, path, @enumFromInt(0o600), .{}) catch {};
+        cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{}) catch {};
     }
+
+    try file.writeStreamingAll(io, &key);
+    file.close(io);
+    file_open = false;
+
+    try cwd.rename(tmp_path, cwd, path, io);
     return key;
 }
 
@@ -368,6 +384,11 @@ test "ensureKeyFile creates a 32-byte key file with 0600 permissions" {
 
     const reloaded = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
     try std.testing.expectEqual(key, reloaded.?);
+
+    // The staging file is consumed by the atomic rename, never left behind.
+    const staging_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.tmp", .{path});
+    defer std.testing.allocator.free(staging_path);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, staging_path, .{}));
 }
 
 test "ensureKeyFile returns the existing key without overwriting" {
@@ -409,4 +430,29 @@ test "ensureKeyFile does not overwrite a malformed existing key file" {
     const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(64));
     defer std.testing.allocator.free(data);
     try std.testing.expectEqualStrings("too-short", data);
+}
+
+test "ensureKeyFile stages the key and never leaves the final path on a staging failure" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+
+    // A directory at the staging path forces the staged create to fail. The
+    // key must then never have been written straight to the final path.
+    const staging_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.tmp", .{path});
+    defer std.testing.allocator.free(staging_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().createDir(std.testing.io, staging_path, .default_dir);
+
+    try std.testing.expectError(error.IsDir, ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random));
+
+    // The final key file must not exist after the failed staged write.
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, path, .{}));
 }
