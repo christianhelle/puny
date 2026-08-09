@@ -195,6 +195,8 @@ pub fn loadKey(
     const cwd = std.Io.Dir.cwd();
     const data = cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(64)) catch |err| switch (err) {
         error.FileNotFound => return null,
+        // A file larger than the 64-byte cap is malformed, not an I/O failure.
+        error.StreamTooLong => return null,
         else => return err,
     };
     defer allocator.free(data);
@@ -296,6 +298,21 @@ test "loadKey returns null for a malformed key file" {
     defer std.testing.allocator.free(path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
     try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "too-short" });
+
+    const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
+    try std.testing.expect(key == null);
+}
+
+test "loadKey returns null for an oversized key file" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x42} ** 65) });
 
     const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
     try std.testing.expect(key == null);
