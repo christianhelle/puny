@@ -255,7 +255,7 @@ pub fn ensureKeyFile(
     }
 
     if (comptime builtin.os.tag != .windows) {
-        cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{}) catch {};
+        try cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{});
     }
 
     try file.writeStreamingAll(io, &key);
