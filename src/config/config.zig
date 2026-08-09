@@ -373,14 +373,17 @@ pub fn save(
         if (file_open) file.close(io);
         cwd.deleteFile(io, tmp_path) catch {};
     }
+
+    // Harden the temp file to 0600 before any encrypted credentials are
+    // written, so a permissive umask cannot leak them while staging.
+    if (comptime builtin.os.tag != .windows) {
+        try cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{});
+    }
+
     try file.writeStreamingAll(io, buffer);
     try file.writeStreamingAll(io, "\n");
     file.close(io);
     file_open = false;
-
-    if (comptime builtin.os.tag != .windows) {
-        cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{}) catch {};
-    }
 
     try cwd.rename(tmp_path, cwd, path, io);
 }
