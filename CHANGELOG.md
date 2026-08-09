@@ -121,8 +121,7 @@
 - Improve --mock mode ([#34](https://github.com/christianhelle/puny/pull/34)) ([@christianhelle](https://github.com/christianhelle/))
 - Add OpenCode Go as a provider ([#37](https://github.com/christianhelle/puny/pull/37)) ([@christianhelle](https://github.com/christianhelle/))
 - Clear app state and free memory usage upon /reset ([#36](https://github.com/christianhelle/puny/pull/36)) ([@christianhelle](https://github.com/christianhelle/))
-- Introduce /provider command for switching provider 
- ([#35](https://github.com/christianhelle/puny/pull/35)) ([@christianhelle](https://github.com/christianhelle/))
+- Introduce /provider command for switching provider ([#35](https://github.com/christianhelle/puny/pull/35)) ([@christianhelle](https://github.com/christianhelle/))
 - Provider Picker widget ([#33](https://github.com/christianhelle/puny/pull/33)) ([@christianhelle](https://github.com/christianhelle/))
 - HTTP Debug Logging to File ([#32](https://github.com/christianhelle/puny/pull/32)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --debug HTTP request/response logging for all providers ([#31](https://github.com/christianhelle/puny/pull/31)) ([@christianhelle](https://github.com/christianhelle/))
