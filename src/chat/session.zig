@@ -1103,7 +1103,10 @@ const FormattedBody = struct {
 /// Returns `"***"` for credential-bearing header names (case-insensitive)
 /// so secrets never reach the debug log; everything else passes through.
 fn redactHeaderValue(name: []const u8, value: []const u8) []const u8 {
-    if (std.ascii.eqlIgnoreCase(name, "authorization") or std.ascii.eqlIgnoreCase(name, "set-cookie")) {
+    if (std.ascii.eqlIgnoreCase(name, "authorization") or
+        std.ascii.eqlIgnoreCase(name, "cookie") or
+        std.ascii.eqlIgnoreCase(name, "set-cookie"))
+    {
         return "***";
     }
     return value;
@@ -1749,6 +1752,38 @@ test "logHttpRequest redacts the authorization header value" {
     defer allocator.free(content);
     try std.testing.expect(std.mem.indexOf(u8, content, "sk-super-secret-123") == null);
     try std.testing.expect(std.mem.indexOf(u8, content, "authorization: ***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "content-type: application/json") != null);
+}
+
+test "logHttpRequest redacts the cookie header value" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    const headers = [_]std.http.Header{
+        .{ .name = "Cookie", .value = "session=sekrit-session-1; Path=/" },
+        .{ .name = "content-type", .value = "application/json" },
+    };
+    logHttpRequest(@ptrCast(&log), .POST, "http://example.com", &headers, null);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "sekrit-session-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Cookie: ***") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "content-type: application/json") != null);
 }
 
