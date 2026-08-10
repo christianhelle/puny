@@ -251,6 +251,12 @@ pub fn ensureKeyFile(
 
     const dir = std.fs.path.dirname(path) orelse return error.BadPath;
     try cwd.createDirPath(io, dir);
+    if (comptime builtin.os.tag != .windows) {
+        // The key file is 0600; hardening the directory to 0700 stops other
+        // local users from even listing the key's presence in a shared data
+        // tree (e.g. ~/.local/share with a default 0755 umask).
+        try cwd.setFilePermissions(io, dir, @enumFromInt(0o700), .{});
+    }
 
     var key: [key_length]u8 = undefined;
     random.bytes(&key);
@@ -404,6 +410,24 @@ test "ensureKeyFile creates a 32-byte key file with 0600 permissions" {
     const staging_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.tmp", .{path});
     defer std.testing.allocator.free(staging_path);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, staging_path, .{}));
+}
+
+test "ensureKeyFile hardens the key directory to 0700" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    _ = (try ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random)).?;
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    const dir = std.fs.path.dirname(path).?;
+    const stat = try std.Io.Dir.cwd().statFile(std.testing.io, dir, .{});
+    try std.testing.expectEqual(@as(u32, 0o700), stat.permissions.toMode() & 0o777);
 }
 
 test "ensureKeyFile returns the existing key without overwriting" {
