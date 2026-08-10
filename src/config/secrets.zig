@@ -197,8 +197,9 @@ pub fn keyFilePath(
     return std.fs.path.join(allocator, &.{ home, ".local", "share", "puny", "encryption.key" });
 }
 
-/// Loads the 32-byte encryption key, or `null` when the key file is missing
-/// or malformed. Never creates the file.
+/// Loads the 32-byte encryption key, or `null` when the key file is missing,
+/// or `error.MalformedKeyFile` when the file exists but is not a usable
+/// 32-byte key. Never creates the file.
 pub fn loadKey(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -211,12 +212,12 @@ pub fn loadKey(
     const data = cwd.readFileAlloc(io, path, allocator, std.Io.Limit.limited(64)) catch |err| switch (err) {
         error.FileNotFound => return null,
         // A file larger than the 64-byte cap is malformed, not an I/O failure.
-        error.StreamTooLong => return null,
+        error.StreamTooLong => return error.MalformedKeyFile,
         else => return err,
     };
     defer allocator.free(data);
 
-    if (data.len != key_length) return null;
+    if (data.len != key_length) return error.MalformedKeyFile;
 
     var key: [key_length]u8 = undefined;
     @memcpy(&key, data);
@@ -232,22 +233,20 @@ pub fn ensureKeyFile(
     environ_map: *const std.process.Environ.Map,
     random: std.Random,
 ) !?[key_length]u8 {
-    if (try loadKey(allocator, io, environ_map)) |key| return key;
+    const loaded = loadKey(allocator, io, environ_map) catch |err| switch (err) {
+        // An existing key file that cannot be loaded (wrong size, oversized)
+        // is malformed: return null instead of overwriting it, which would
+        // make any previously encrypted config values permanently
+        // undecryptable.
+        error.MalformedKeyFile => return null,
+        else => return err,
+    };
+    if (loaded) |key| return key;
 
     const path = try keyFilePath(allocator, environ_map);
     defer allocator.free(path);
 
     const cwd = std.Io.Dir.cwd();
-
-    // An existing key file that could not be loaded (wrong size, oversized) is
-    // malformed: return null instead of overwriting it, which would make any
-    // previously encrypted config values permanently undecryptable.
-    if (cwd.statFile(io, path, .{})) |_| {
-        return null;
-    } else |err| switch (err) {
-        error.FileNotFound => {},
-        else => return err,
-    }
 
     const dir = std.fs.path.dirname(path) orelse return error.BadPath;
     try cwd.createDirPath(io, dir);
