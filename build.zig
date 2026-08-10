@@ -115,6 +115,17 @@ pub fn build(b: *std.Build) !void {
 
     test_regression_step.dependOn(test_step);
 
+    const retry_download_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/retry_download_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_retry_download_tests = b.addRunArtifact(retry_download_tests);
+    test_regression_step.dependOn(&run_retry_download_tests.step);
+
     const regression_checker = b.addExecutable(.{
         .name = "regression_checker",
         .root_module = b.createModule(.{
