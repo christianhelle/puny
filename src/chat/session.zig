@@ -1108,7 +1108,14 @@ const FormattedBody = struct {
 fn redactHeaderValue(name: []const u8, value: []const u8) []const u8 {
     if (std.ascii.eqlIgnoreCase(name, "authorization") or
         std.ascii.eqlIgnoreCase(name, "cookie") or
-        std.ascii.eqlIgnoreCase(name, "set-cookie"))
+        std.ascii.eqlIgnoreCase(name, "set-cookie") or
+        std.ascii.eqlIgnoreCase(name, "proxy-authorization") or
+        std.ascii.eqlIgnoreCase(name, "x-api-key") or
+        std.ascii.eqlIgnoreCase(name, "api-key") or
+        std.ascii.eqlIgnoreCase(name, "x-auth-token") or
+        std.ascii.eqlIgnoreCase(name, "x-api-token") or
+        std.ascii.eqlIgnoreCase(name, "x-access-token") or
+        std.ascii.eqlIgnoreCase(name, "x-copilot-auth"))
     {
         return "***";
     }
@@ -1116,7 +1123,18 @@ fn redactHeaderValue(name: []const u8, value: []const u8) []const u8 {
 }
 
 fn isSecretMemberName(name: []const u8) bool {
-    const secret_names = [_][]const u8{ "api_key", "apiKey", "token", "access_token", "authorization" };
+    const secret_names = [_][]const u8{
+        "api_key",
+        "apiKey",
+        "api-key",
+        "x-api-key",
+        "token",
+        "access_token",
+        "authorization",
+        "proxy-authorization",
+        "secret",
+        "password",
+    };
     for (secret_names) |n| {
         if (std.ascii.eqlIgnoreCase(name, n)) return true;
     }
@@ -1758,6 +1776,41 @@ test "logHttpRequest redacts the authorization header value" {
     try std.testing.expect(std.mem.indexOf(u8, content, "content-type: application/json") != null);
 }
 
+test "logHttpRequest redacts api-key style header values" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    const headers = [_]std.http.Header{
+        .{ .name = "x-api-key", .value = "sk-xyz-987" },
+        .{ .name = "proxy-authorization", .value = "Basic c2VjcmV0" },
+        .{ .name = "content-type", .value = "application/json" },
+    };
+    logHttpRequest(@ptrCast(&log), .POST, "http://example.com", &headers, null);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "sk-xyz-987") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Basic c2VjcmV0") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "x-api-key: ***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "proxy-authorization: ***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "content-type: application/json") != null);
+}
+
 test "logHttpRequest redacts the cookie header value" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -1856,4 +1909,20 @@ test "formatBody redacts secret member names case-insensitively" {
     try std.testing.expect(std.mem.indexOf(u8, formatted.text, "tok-x") == null);
     try std.testing.expect(std.mem.indexOf(u8, formatted.text, "hdr2") == null);
     try std.testing.expect(std.mem.count(u8, formatted.text, "\"***\"") >= 3);
+}
+
+test "formatBody redacts x-api-key and credential members" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const body = "{\"x-api-key\":\"sk-hdr\",\"api-key\":\"k-dash\",\"password\":\"p-1\",\"secret\":\"s-2\",\"ok\":1}";
+    const formatted = formatBody(allocator, body);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "sk-hdr") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "k-dash") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "p-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "s-2") == null);
+    try std.testing.expect(std.mem.count(u8, formatted.text, "\"***\"") >= 4);
 }
