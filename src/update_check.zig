@@ -1,5 +1,7 @@
 const std = @import("std");
 const core_session = @import("core/session.zig");
+const upgrade = @import("upgrade.zig");
+const version = @import("version.zig");
 
 pub const flag_file_name = "update-available";
 
@@ -91,6 +93,50 @@ pub fn printUpdateNotice(writer: *std.Io.Writer, latest_ver: []const u8) !void {
         "A new version of puny is available: v{s}. Run `puny --upgrade` to update.\n",
         .{latest_ver},
     );
+}
+
+/// Writes or clears the flag based on whether `available` is newer than the
+/// installed version.
+pub fn runCheckWithLatest(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    available: []const u8,
+) !void {
+    if (isNewer(version.version, available)) {
+        try writeFlagIfNewer(io, allocator, environ_map, version.version, available);
+    } else {
+        try clearFlag(io, allocator, environ_map);
+    }
+}
+
+/// Best-effort update check for the detached child process. Fetches the latest
+/// release and records it in the flag file when newer. Errors are swallowed.
+pub fn runCheck(io: std.Io, allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) void {
+    const available = upgrade.latestReleaseVersion(allocator, io) catch return;
+    defer allocator.free(available);
+    runCheckWithLatest(io, allocator, environ_map, available) catch {};
+}
+
+/// Arguments used to spawn the detached `--check-update` child process.
+pub fn backgroundCheckArgv(arena: std.mem.Allocator, exe_path: []const u8) []const []const u8 {
+    return arena.dupe([]const u8, &.{ exe_path, "--check-update" }) catch &.{};
+}
+
+/// Spawns a detached `puny --check-update` child process. Returns immediately;
+/// errors are swallowed so startup is never blocked.
+pub fn spawnBackgroundCheck(io: std.Io, allocator: std.mem.Allocator) void {
+    const exe_path = std.process.executablePathAlloc(io, allocator) catch return;
+    defer allocator.free(exe_path);
+    const argv = backgroundCheckArgv(allocator, exe_path);
+    defer allocator.free(argv);
+    _ = std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .create_no_window = true,
+    }) catch {};
 }
 
 test "isNewer is true when the available version is newer" {
@@ -240,4 +286,48 @@ test "printUpdateNotice mentions a new version is available" {
 
     try printUpdateNotice(&output.writer, "1.2.3");
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "new version") != null);
+}
+
+test "runCheckWithLatest writes the flag when the latest is newer" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    try runCheckWithLatest(std.testing.io, allocator, &env, "99.0.0");
+
+    const available = (try availableUpdate(std.testing.io, allocator, &env)).?;
+    defer allocator.free(available);
+    try std.testing.expectEqualStrings("99.0.0", available);
+}
+
+test "runCheckWithLatest clears the flag when the latest is not newer" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    // A stale flag from a previous run.
+    try writeFlagIfNewer(std.testing.io, allocator, &env, "1.0.0", "2.0.0");
+
+    try runCheckWithLatest(std.testing.io, allocator, &env, "0.0.1");
+
+    try std.testing.expect((try availableUpdate(std.testing.io, allocator, &env)) == null);
+}
+
+test "backgroundCheckArgv is the exe with the hidden check-update flag" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const argv = backgroundCheckArgv(arena, "C:\\tools\\puny.exe");
+    try std.testing.expectEqualStrings("C:\\tools\\puny.exe", argv[0]);
+    try std.testing.expectEqualStrings("--check-update", argv[1]);
+    try std.testing.expectEqual(@as(usize, 2), argv.len);
 }
