@@ -236,6 +236,8 @@ fn decryptStoredApiKeys(
     cfg: *Config,
 ) !void {
     var warned_missing_key = false;
+    var key_attempted = false;
+    var key_load_error: ?[]const u8 = null;
     var key_material: ?[secrets.key_length]u8 = null;
 
     for (&cfg.providers) |*p| {
@@ -246,21 +248,16 @@ fn decryptStoredApiKeys(
         // the unmodified key back verbatim instead of re-encrypting it.
         p.stored_blob = api_key;
 
-        if (key_material == null) {
-            key_material = secrets.loadKey(allocator, io, environ_map) catch |err| blk: {
-                if (!warned_missing_key) {
-                    var stderr_buffer: [1024]u8 = undefined;
-                    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-                    const stderr_writer = &stderr_file_writer.interface;
-                    stderr_writer.print(
-                        "Warning: could not decrypt stored API keys: failed to load encryption key file ({s}).\nRun --reconfigure to re-enter your keys.\n",
-                        .{@errorName(err)},
-                    ) catch {};
-                    stderr_writer.flush() catch {};
-                    warned_missing_key = true;
-                }
-                break :blk null;
-            };
+        // Attempt the key file load at most once, regardless of how many
+        // providers carry a blob. A missing file yields a null key (not an
+        // error), so without this guard every provider would re-open the path.
+        if (!key_attempted) {
+            key_attempted = true;
+            if (secrets.loadKey(allocator, io, environ_map)) |key| {
+                key_material = key;
+            } else |err| {
+                key_load_error = @errorName(err);
+            }
         }
 
         const key = key_material orelse {
@@ -268,10 +265,17 @@ fn decryptStoredApiKeys(
                 var stderr_buffer: [1024]u8 = undefined;
                 var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
                 const stderr_writer = &stderr_file_writer.interface;
-                stderr_writer.print(
-                    "Warning: could not decrypt stored API keys: encryption key file is missing.\nRun --reconfigure to re-enter your keys.\n",
-                    .{},
-                ) catch {};
+                if (key_load_error) |err_name| {
+                    stderr_writer.print(
+                        "Warning: could not decrypt stored API keys: failed to load encryption key file ({s}).\nRun --reconfigure to re-enter your keys.\n",
+                        .{err_name},
+                    ) catch {};
+                } else {
+                    stderr_writer.print(
+                        "Warning: could not decrypt stored API keys: encryption key file is missing.\nRun --reconfigure to re-enter your keys.\n",
+                        .{},
+                    ) catch {};
+                }
                 stderr_writer.flush() catch {};
                 warned_missing_key = true;
             }
@@ -658,6 +662,46 @@ test "load fails soft when the key file is missing" {
     defer loaded.deinit();
     try std.testing.expect(loaded.config.providerEntryConst(.opencode_go).apiKey == null);
     try std.testing.expect(loaded.file_existed);
+}
+
+test "load fails soft for every provider when the key file is missing" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const blob = "enc:v1:AgICAgICAgICAgICAgICAgICAgICAgICqg9Ois5afuAGYNUfoYJVcmZrd+3L";
+    const contents = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{
+        \\  "provider": "opencode_go",
+        \\  "providers": [
+        \\    {{ "name": "lmstudio", "apiKey": null, "url": "http://127.0.0.1:1234", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "opencode_zen", "apiKey": "{s}", "url": "https://opencode.ai/zen", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "opencode_go", "apiKey": "{s}", "url": "https://opencode.ai/zen/go", "model": "", "reasoning_effort": null }},
+        \\    {{ "name": "copilot", "apiKey": null, "url": "https://api.githubcopilot.com", "model": "", "reasoning_effort": null }}
+        \\  ]
+        \\}}
+    , .{ blob, blob });
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.config.providerEntryConst(.opencode_zen).apiKey == null);
+    try std.testing.expect(loaded.config.providerEntryConst(.opencode_go).apiKey == null);
+
+    // Both undecryptable blobs must be retained so a later save round-trips
+    // them instead of dropping them.
+    try save(std.testing.allocator, std.testing.io, loaded.config, &env);
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.count(u8, raw, blob) == 2);
 }
 
 test "save preserves an undecryptable stored api key blob" {
