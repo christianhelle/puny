@@ -19,6 +19,13 @@ const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
 const welcome = @import("tui/welcome.zig");
 const ansi = @import("tui/ansi.zig");
+const update_check = @import("update_check.zig");
+
+comptime {
+    // Keep the module analyzed so its tests run under `zig build test` even
+    // before the update check is wired into the startup path.
+    _ = update_check;
+}
 const ModelProvider = provider.ModelProvider;
 const DebugLog = session.DebugLog;
 const ChatLog = session.ChatLog;
