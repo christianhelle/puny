@@ -42,6 +42,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (parsed.upgrade) {
         try upgrade.runUpgrade(arena, init.io, init.environ_map, parsed.force_upgrade);
+        update_check.clearFlag(init.io, arena, init.environ_map) catch {};
         return;
     }
 
@@ -342,8 +343,9 @@ pub fn main(init: std.process.Init) !void {
     try chat_session.run();
 
     // After the interactive session ends, surface a pending update notice
-    // written by the detached `--check-update` child process.
-    if (update_check.availableUpdate(init.io, arena, init.environ_map)) |maybe_latest| {
+    // written by the detached `--check-update` child process. Clear stale flags
+    // that no longer represent a newer version.
+    if (update_check.availableUpdateIfNewer(init.io, arena, init.environ_map)) |maybe_latest| {
         if (maybe_latest) |latest| {
             update_check.printUpdateNotice(stdout_writer, latest) catch {};
             stdout_writer.flush() catch {};
