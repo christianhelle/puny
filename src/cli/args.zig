@@ -20,6 +20,7 @@ pub const Options = struct {
     prune: bool = false,
     upgrade: bool = false,
     force_upgrade: bool = false,
+    check_update: bool = false,
     session: ?[]const u8 = null,
     do_resume: bool = false,
 };
@@ -114,6 +115,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.upgrade = true;
         } else if (std.mem.eql(u8, arg, "--force")) {
             opts.force_upgrade = true;
+        } else if (std.mem.eql(u8, arg, "--check-update")) {
+            opts.check_update = true;
         } else {
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
@@ -479,6 +482,15 @@ test "parseArgs flag overrides PUNY_MOCK env" {
     try env.put("PUNY_MOCK", "false");
     const opts = parseArgs(std.testing.io, &env, &argv);
     try std.testing.expect(!opts.mock);
+}
+
+test "parseArgs sets check_update from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--check-update" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expect(opts.check_update);
 }
 
 test "parseArgs sets reconfigure and force flags" {
