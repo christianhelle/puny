@@ -29,6 +29,13 @@ pub fn pickEffort(
     return std.meta.stringToEnum(openai.ReasoningEffort, selected);
 }
 
+/// Parses a user-supplied reasoning effort level, trimming surrounding
+/// whitespace. Returns null when the text is not a valid level name.
+pub fn parseEffort(text: []const u8) ?openai.ReasoningEffort {
+    const trimmed = std.mem.trim(u8, text, &std.ascii.whitespace);
+    return std.meta.stringToEnum(openai.ReasoningEffort, trimmed);
+}
+
 test "pickEffort returns correct enum for each label" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .default), std.meta.stringToEnum(openai.ReasoningEffort, "default"));
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .none), std.meta.stringToEnum(openai.ReasoningEffort, "none"));
@@ -37,4 +44,21 @@ test "pickEffort returns correct enum for each label" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .medium), std.meta.stringToEnum(openai.ReasoningEffort, "medium"));
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), std.meta.stringToEnum(openai.ReasoningEffort, "high"));
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), std.meta.stringToEnum(openai.ReasoningEffort, "xhigh"));
+}
+
+test "parseEffort parses valid level names" {
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .default), parseEffort("default"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .none), parseEffort("none"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .minimal), parseEffort("minimal"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .low), parseEffort("low"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .medium), parseEffort("medium"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), parseEffort("high"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), parseEffort("xhigh"));
+}
+
+test "parseEffort trims whitespace and rejects invalid levels" {
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), parseEffort("  high  "));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .medium), parseEffort("\tmedium"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), parseEffort("ultra"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), parseEffort(""));
 }
