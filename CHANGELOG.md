@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Merged Pull Requests
+- Add /thinking command to change reasoning effort mid-session ([#117](https://github.com/christianhelle/puny/pull/117)) ([@christianhelle](https://github.com/christianhelle/))
 - Split slow tests into regression suite for fast zig build test ([#118](https://github.com/christianhelle/puny/pull/118)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
