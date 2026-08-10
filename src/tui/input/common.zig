@@ -97,7 +97,7 @@ test "replaceLine updates line_alloc and redraws prompt" {
 
     try std.testing.expectEqualStrings("new", line_alloc.written());
     try std.testing.expectEqualStrings(
-        terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "Prompt: new",
+        terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "> new",
         out.written(),
     );
 }
