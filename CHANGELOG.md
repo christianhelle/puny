@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Merged Pull Requests
+- Add non-blocking update check with exit notice ([#119](https://github.com/christianhelle/puny/pull/119)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.3.1](https://github.com/christianhelle/puny/releases/tag/v0.3.1) (2026-08-10)
 
 ### Features
