@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
-    const test_step = b.step("test", "Run tests");
+    const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_tests.step);
 
     const docker_step = b.step("docker", "Build Docker image");
@@ -128,10 +128,6 @@ pub fn build(b: *std.Build) !void {
     run_regression.addArtifactArg(exe);
     run_regression.addFileArg(b.path("tests/regression.json"));
     test_regression_step.dependOn(&run_regression.step);
-
-    // `zig build test` also runs the full regression suite against
-    // tests/regression.json via the regression_checker executable.
-    test_step.dependOn(&run_regression.step);
 
     const integration_checker = b.addExecutable(.{
         .name = "integration_checker",
