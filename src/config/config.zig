@@ -349,11 +349,28 @@ pub fn save(
     if (needs_encryption) {
         var random_source: std.Random.IoSource = .{ .io = io };
         const random = random_source.interface();
-        const key = (try secrets.ensureKeyFile(allocator, io, environ_map, random)) orelse return error.InvalidEncryptionKey;
-        for (&to_write.providers, 0..) |*p, i| {
-            if (encrypt_index[i]) {
-                p.apiKey = try secrets.encrypt(allocator, key, random, p.apiKey.?);
-                encrypted_blobs[i] = p.apiKey;
+        if (try secrets.ensureKeyFile(allocator, io, environ_map, random)) |key| {
+            for (&to_write.providers, 0..) |*p, i| {
+                if (encrypt_index[i]) {
+                    p.apiKey = try secrets.encrypt(allocator, key, random, p.apiKey.?);
+                    encrypted_blobs[i] = p.apiKey;
+                }
+            }
+        } else {
+            // An existing key file that cannot be used (malformed) must not
+            // brick the save. Warn and drop the fresh plaintext keys from the
+            // write rather than persisting them in clear text; the rest of the
+            // config saves normally.
+            var stderr_buffer: [1024]u8 = undefined;
+            var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+            const stderr_writer = &stderr_file_writer.interface;
+            stderr_writer.print(
+                "Warning: the encryption key file is malformed; the new API key(s) were not saved. Fix or remove it and re-enter your keys.\n",
+                .{},
+            ) catch {};
+            stderr_writer.flush() catch {};
+            for (0..4) |i| {
+                if (encrypt_index[i]) to_write.providers[i].apiKey = null;
             }
         }
     }
@@ -878,6 +895,39 @@ test "save does not re-encrypt an unmodified decrypted key" {
     defer std.testing.allocator.free(raw);
     try std.testing.expect(std.mem.count(u8, raw, blob) == 1);
     try std.testing.expect(std.mem.count(u8, raw, "enc:v1:") == 1);
+}
+
+test "save fails soft when a fresh plaintext key cannot be encrypted" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    // A malformed key file (wrong size) must not brick the save.
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = key_path, .data = "too-short" });
+
+    var cfg = Config.default();
+    cfg.providerEntry(.opencode_go).apiKey = "sk-fresh-plaintext";
+
+    // The save must not fail: the fresh key is dropped from the write rather
+    // than persisted in clear text, and the rest of the config saves normally.
+    try save(std.testing.allocator, std.testing.io, cfg, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "sk-fresh-plaintext") == null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "enc:v1:") == null);
+    // The unencryptable key is persisted as null, never as clear text.
+    try std.testing.expect(std.mem.indexOf(u8, raw, "\"apiKey\": null") != null);
 }
 
 test "save does not create a key file when no api keys are set" {
