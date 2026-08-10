@@ -8,6 +8,8 @@ pub const system =
     \\When you have enough information, produce a concise final text answer.
     \\Be extremely concise. Sacrifice grammar for the sake of concision.
     \\If you are unsure, ask the user for clarification.
+    \\When done with a task, provide a concise summary of what you did and the next steps for the user to take.
+    \\Always provide a summary of what you did, or did not do, so the user is sure that you understood the task and that you are not stuck.
 ;
 
 pub const planning =
