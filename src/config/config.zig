@@ -349,6 +349,7 @@ pub fn save(
     // genuinely fresh plaintext keys need encryption.
     var needs_encryption = false;
     var encrypt_index: [4]bool = .{ false, false, false, false };
+    var verbatim_index: [4]bool = .{ false, false, false, false };
     for (&to_write.providers, 0..) |*p, i| {
         const key = p.apiKey orelse {
             if (p.stored_blob) |blob| {
@@ -357,12 +358,12 @@ pub fn save(
             continue;
         };
         if (key.len == 0 or secrets.isEncrypted(key)) continue;
-        if (p.stored_blob) |blob| {
+        if (p.stored_blob) |_| {
             // Only an unmodified decrypted key persists the original
             // ciphertext; a different plaintext replaces it and re-encrypts.
             if (p.stored_plaintext) |pt| {
                 if (std.mem.eql(u8, key, pt)) {
-                    p.apiKey = blob;
+                    verbatim_index[i] = true;
                     continue;
                 }
             }
@@ -383,9 +384,32 @@ pub fn save(
     if (needs_encryption) {
         var random_source: std.Random.IoSource = .{ .io = io };
         const random = random_source.interface();
-        if (try secrets.ensureKeyFile(allocator, io, environ_map, random)) |key| {
+
+        // Probe the key file before `ensureKeyFile` can create a fresh one. A
+        // stored blob is only written back verbatim while the key that produced
+        // it is still in place; if the file is gone it will be recreated with a
+        // new key, so any decrypted plaintext must be re-encrypted under it.
+        var existing_key: ?[secrets.key_length]u8 = null;
+        const KeyFileState = enum { missing, usable, malformed };
+        const key_file_state: KeyFileState = blk: {
+            const existing = secrets.loadKey(allocator, io, environ_map) catch |err| switch (err) {
+                error.MalformedKeyFile => break :blk .malformed,
+                else => return err,
+            };
+            existing_key = existing;
+            break :blk if (existing != null) .usable else .missing;
+        };
+
+        const encryption_key: ?[secrets.key_length]u8 = switch (key_file_state) {
+            .usable => existing_key,
+            .missing => try secrets.ensureKeyFile(allocator, io, environ_map, random),
+            .malformed => null,
+        };
+
+        if (encryption_key) |key| {
             for (&to_write.providers, 0..) |*p, i| {
-                if (encrypt_index[i]) {
+                const reencrypt = encrypt_index[i] or (verbatim_index[i] and key_file_state == .missing);
+                if (reencrypt) {
                     p.apiKey = try secrets.encrypt(allocator, key, random, p.apiKey.?);
                     encrypted_blobs[i] = p.apiKey;
                 }
@@ -412,6 +436,14 @@ pub fn save(
                     if (!already_on_disk) p.apiKey = null;
                 }
             }
+        }
+    }
+
+    // Unmodified decrypted keys that were not re-encrypted above write the
+    // original ciphertext back verbatim.
+    for (&to_write.providers, 0..) |*p, i| {
+        if (verbatim_index[i] and encrypted_blobs[i] == null) {
+            p.apiKey = p.stored_blob;
         }
     }
 
@@ -1104,6 +1136,57 @@ test "save preserves legacy plaintext keys when the key file is malformed" {
     try std.testing.expect(std.mem.indexOf(u8, raw, "sk-new-go") == null);
     // ...but the unchanged legacy key that was already on disk survives.
     try std.testing.expect(std.mem.indexOf(u8, raw, "sk-legacy-zen") != null);
+}
+
+test "save re-encrypts unmodified decrypted keys when the key file is missing" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    // opencode_go holds an encrypted key decrypted on load under the current
+    // key file.
+    const key = [_]u8{0x5a} ** 32;
+    try writeTestKeyFile(&env, key);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-decrypted");
+    defer std.testing.allocator.free(blob);
+
+    const contents = try testConfigJson(blob);
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-decrypted", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+
+    // The key file is lost between load and save (e.g. container recreation).
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().deleteFile(std.testing.io, key_path);
+
+    // A fresh key on another provider forces the save to mint a new key file.
+    loaded.config.providerEntry(.opencode_zen).apiKey = "sk-fresh-zen";
+    try save(std.testing.allocator, std.testing.io, loaded.config, &env);
+
+    // The unmodified key must have been re-encrypted under the new key file,
+    // not written back as the old ciphertext (which the new key cannot read).
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, blob) == null);
+
+    var reloaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer reloaded.deinit();
+    try std.testing.expectEqualStrings("sk-decrypted", reloaded.config.providerEntryConst(.opencode_go).apiKey.?);
+    try std.testing.expectEqualStrings("sk-fresh-zen", reloaded.config.providerEntryConst(.opencode_zen).apiKey.?);
 }
 
 test "save does not create a key file when no api keys are set" {
