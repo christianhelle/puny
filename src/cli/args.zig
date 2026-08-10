@@ -16,6 +16,7 @@ pub const Options = struct {
     debug: bool = false,
     chat_log: bool = false,
     show_thinking: bool = false,
+    no_skills: bool = false,
     prune: bool = false,
     upgrade: bool = false,
     force_upgrade: bool = false,
@@ -99,6 +100,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.debug = true;
         } else if (std.mem.eql(u8, arg, "--chat-log")) {
             opts.chat_log = true;
+        } else if (std.mem.eql(u8, arg, "--no-skills")) {
+            opts.no_skills = true;
         } else if (std.mem.eql(u8, arg, "--session")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -154,6 +157,12 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         }
     }
 
+    if (!opts.no_skills) {
+        if (environ_map.get("PUNY_NO_SKILLS")) |value| {
+            opts.no_skills = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
+        }
+    }
+
     return opts;
 }
 
@@ -181,6 +190,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --resume                 Resume the most recent session
         \\      --prune                  Delete old sessions (use --session to keep one)
         \\      --chat-log               Log conversation to puny_chat.log
+        \\      --no-skills              Disable skill loading entirely
         \\      --debug                  Log HTTP requests and responses to puny_debug.log
         \\  -U, --upgrade                Upgrade to the latest release
         \\      --force                  Force upgrade even if same version (use with --upgrade)
@@ -478,4 +488,30 @@ test "parseArgs sets reconfigure and force flags" {
     const opts = parseArgs(std.testing.io, &env, &argv);
     try std.testing.expect(opts.reconfigure);
     try std.testing.expect(opts.force_upgrade);
+}
+
+test "parseArgs sets no_skills from flag" {
+    const argv = [_][:0]const u8{ "puny", "--no-skills" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(opts.no_skills);
+}
+
+test "parseArgs falls back to PUNY_NO_SKILLS env" {
+    const argv = [_][:0]const u8{"puny"};
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("PUNY_NO_SKILLS", "true");
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(opts.no_skills);
+}
+
+test "parseArgs flag overrides PUNY_NO_SKILLS env" {
+    const argv = [_][:0]const u8{"puny"};
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("PUNY_NO_SKILLS", "false");
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(!opts.no_skills);
 }
