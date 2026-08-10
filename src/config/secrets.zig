@@ -338,7 +338,7 @@ test "loadKey returns null when the key file is missing" {
     try std.testing.expect(key == null);
 }
 
-test "loadKey returns null for a malformed key file" {
+test "loadKey returns MalformedKeyFile for a malformed key file" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
     defer fixture.tmp.cleanup();
@@ -350,11 +350,10 @@ test "loadKey returns null for a malformed key file" {
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
     try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "too-short" });
 
-    const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
-    try std.testing.expect(key == null);
+    try std.testing.expectError(error.MalformedKeyFile, loadKey(std.testing.allocator, std.testing.io, &fixture.env));
 }
 
-test "loadKey returns null for an oversized key file" {
+test "loadKey returns MalformedKeyFile for an oversized key file" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
     defer fixture.tmp.cleanup();
@@ -366,8 +365,7 @@ test "loadKey returns null for an oversized key file" {
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
     try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x42} ** 65) });
 
-    const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
-    try std.testing.expect(key == null);
+    try std.testing.expectError(error.MalformedKeyFile, loadKey(std.testing.allocator, std.testing.io, &fixture.env));
 }
 
 test "loadKey reads a 32-byte key file" {
