@@ -22,8 +22,7 @@ const ansi = @import("tui/ansi.zig");
 const update_check = @import("update_check.zig");
 
 comptime {
-    // Keep the module analyzed so its tests run under `zig build test` even
-    // before the update check is wired into the startup path.
+    // Keep the module analyzed so its tests run under `zig build test`.
     _ = update_check;
 }
 const ModelProvider = provider.ModelProvider;
