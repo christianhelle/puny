@@ -378,6 +378,10 @@ instructions that get injected into the system prompt so the model knows how to
 behave for a specific task. They can be loaded by slash command, by mentioning
 a trigger phrase in your message, or by the model itself via tool call.
 
+To disable skills entirely, pass `--no-skills` (or set `PUNY_NO_SKILLS=1`). No
+skill directories are scanned, `/skills` reports that skills are disabled, and
+skill commands are treated as ordinary prompts.
+
 ### Skill locations
 
 Puny scans two directories for skills:
@@ -511,6 +515,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
 | `--api-key-file <path>` | Read provider API token from file (session only)                                          |
 | `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
+| `--no-skills`           | Disable skill loading entirely (slash commands, triggers, and model invocation)          |
 | `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
 | `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
 | `--prompt-file <file-or-url>` | Read first prompt from a file or URL (10 MiB limit) |
@@ -536,6 +541,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
 | `PUNY_MODEL`                 | Default model identifier (overrides config)         |
 | `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider        |
+| `PUNY_NO_SKILLS`             | Set to `1` or `true` to disable skill loading       |
 | `PUNY_SHOW_THINKING`         | Set to `1` or `true` to show reasoning output       |
 | `GITHUB_COPILOT_OAUTH_TOKEN` | GitHub OAuth token for Copilot provider             |
 
@@ -555,11 +561,12 @@ While in a chat session:
 - `/sessions` — list all saved sessions, showing their UUID, whether they have a `plan.md` or saved conversation, and a preview of the first user message
 - `/resume [id]` — list saved sessions and pick one to restore, or restore a specific session by UUID prefix
 - `/prune` — delete all session directories except the current one
-- `/skills` — list all available global and repository skills
+- `/skills` — list all available global and repository skills (prints "Skills are disabled." with `--no-skills`)
 - `/file <path|url>` — load a prompt from a local file or URL and send it as the next message
 
 Any unrecognized slash command (e.g. `/nano-commits`, `/grill-me`) is treated as a
-skill name and loads the matching skill if found.
+skill name and loads the matching skill if found. With `--no-skills` these commands
+are treated as ordinary prompts instead.
 
 Skills also load automatically when your message contains the skill's directory name
 or a trigger phrase listed in its frontmatter `triggers` field. The model can also

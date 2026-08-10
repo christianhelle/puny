@@ -13,6 +13,7 @@
 ## [v0.3.0](https://github.com/christianhelle/puny/releases/tag/v0.3.0) (2026-08-10)
 
 ### Features
+- Add `--no-skills` flag to disable skills entirely
 - Protect API keys at rest with XChaCha20-Poly1305 encryption ([#113](https://github.com/christianhelle/puny/pull/113)) ([@christianhelle](https://github.com/christianhelle/))
 - Improve test coverage across the codebase ([#112](https://github.com/christianhelle/puny/pull/112)) ([@christianhelle](https://github.com/christianhelle/))
 - Case insensitive commands ([#111](https://github.com/christianhelle/puny/pull/111)) ([@christianhelle](https://github.com/christianhelle/))
