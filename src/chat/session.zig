@@ -1055,7 +1055,7 @@ fn httpDebugObserver(debug_log: *DebugLog) http_client.HttpObserver {
 fn logHttpRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
     const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
     log.print("=== REQUEST ===\n", .{});
-    log.print("{s} {s}\n", .{ @tagName(method), url });
+    logRequestLine(log, method, url);
     log.print("Headers:\n", .{});
     for (headers) |h| {
         log.print("  {s}: {s}\n", .{ h.name, redactHeaderValue(h.name, h.value) });
@@ -1070,7 +1070,7 @@ fn logHttpResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, s
     const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
     const ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
     log.print("=== RESPONSE ===\n", .{});
-    log.print("{s} {s}\n", .{ @tagName(method), url });
+    logRequestLine(log, method, url);
     log.print("Status: {d} ({s})\n", .{ @intFromEnum(status), @tagName(status) });
     log.print("Duration: {d:.2}ms\n", .{ms});
     log.print("Headers:\n", .{});
@@ -1086,7 +1086,7 @@ fn logHttpResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, s
 fn logHttpError(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, err_name: []const u8) void {
     const log: *DebugLog = @ptrCast(@alignCast(ctx.?));
     log.print("=== ERROR ===\n", .{});
-    log.print("{s} {s}\n", .{ @tagName(method), url });
+    logRequestLine(log, method, url);
     log.print("Error: {s}\n", .{err_name});
 }
 
@@ -1139,6 +1139,75 @@ fn isSecretMemberName(name: []const u8) bool {
         if (std.ascii.eqlIgnoreCase(name, n)) return true;
     }
     return false;
+}
+
+fn isSecretQueryName(name: []const u8) bool {
+    const secret_names = [_][]const u8{
+        "api_key",
+        "apikey",
+        "api-key",
+        "x-api-key",
+        "key",
+        "token",
+        "access_token",
+        "auth",
+        "authorization",
+        "signature",
+        "secret",
+        "password",
+    };
+    for (secret_names) |n| {
+        if (std.ascii.eqlIgnoreCase(name, n)) return true;
+    }
+    return false;
+}
+
+/// Returns an allocated copy of `url` with the values of secret query
+/// parameters replaced by `"***"`, or `null` when there is nothing to redact.
+fn redactUrl(allocator: std.mem.Allocator, url: []const u8) ?[]const u8 {
+    const query_start = std.mem.indexOfScalar(u8, url, '?') orelse return null;
+    const query = url[query_start + 1 ..];
+
+    var has_secret = false;
+    var parts = std.mem.splitScalar(u8, query, '&');
+    while (parts.next()) |pair| {
+        const eq = std.mem.indexOfScalar(u8, pair, '=') orelse continue;
+        if (isSecretQueryName(pair[0..eq])) {
+            has_secret = true;
+            break;
+        }
+    }
+    if (!has_secret) return null;
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    out.appendSlice(allocator, url[0 .. query_start + 1]) catch return null;
+    var first = true;
+    parts = std.mem.splitScalar(u8, query, '&');
+    while (parts.next()) |pair| {
+        if (!first) out.append(allocator, '&') catch return null;
+        first = false;
+        const eq = std.mem.indexOfScalar(u8, pair, '=') orelse {
+            out.appendSlice(allocator, pair) catch return null;
+            continue;
+        };
+        if (isSecretQueryName(pair[0..eq])) {
+            out.appendSlice(allocator, pair[0 .. eq + 1]) catch return null;
+            out.appendSlice(allocator, "***") catch return null;
+        } else {
+            out.appendSlice(allocator, pair) catch return null;
+        }
+    }
+    return out.toOwnedSlice(allocator) catch null;
+}
+
+fn logRequestLine(log: *DebugLog, method: std.http.Method, url: []const u8) void {
+    if (redactUrl(log.allocator, url)) |masked| {
+        log.print("{s} {s}\n", .{ @tagName(method), masked });
+        log.allocator.free(masked);
+    } else {
+        log.print("{s} {s}\n", .{ @tagName(method), url });
+    }
 }
 
 /// Replaces the values of credential-named JSON members with `"***"`,
@@ -1809,6 +1878,34 @@ test "logHttpRequest redacts api-key style header values" {
     try std.testing.expect(std.mem.indexOf(u8, content, "x-api-key: ***") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "proxy-authorization: ***") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "content-type: application/json") != null);
+}
+
+test "logHttpRequest redacts secret query parameters in the URL" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    logHttpRequest(@ptrCast(&log), .GET, "https://example.com/models?api_key=sk-query-1&token=tok-2&model=gpt-4o", &.{}, null);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "sk-query-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "tok-2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "model=gpt-4o") != null);
 }
 
 test "logHttpRequest redacts the cookie header value" {
