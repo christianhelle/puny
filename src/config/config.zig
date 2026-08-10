@@ -332,17 +332,18 @@ pub fn save(
     var to_write = config;
 
     // Decide what to persist for each provider key. `stored_blob` is the
-    // original ciphertext retained by load, so a provider whose key is unset
-    // (undecryptable) or unchanged since decrypt writes that ciphertext back
-    // verbatim — an unrelated save must not depend on key material or churn
-    // the blobs. A provider whose plaintext key no longer matches the retained
-    // plaintext is treated as fresh and encrypted; a fresh plaintext key
-    // (stored_blob == null) needs encryption.
+    // original ciphertext retained by load, so a provider whose key could not
+    // be decrypted (no retained plaintext) writes that ciphertext back verbatim
+    // — an unrelated save must not depend on key material or churn the blobs.
+    // A decrypted key that was later cleared is a removal: write null. Only
+    // genuinely fresh plaintext keys need encryption.
     var needs_encryption = false;
     var encrypt_index: [4]bool = .{ false, false, false, false };
     for (&to_write.providers, 0..) |*p, i| {
         const key = p.apiKey orelse {
-            if (p.stored_blob) |blob| p.apiKey = blob;
+            if (p.stored_blob) |blob| {
+                if (p.stored_plaintext == null) p.apiKey = blob;
+            }
             continue;
         };
         if (key.len == 0 or secrets.isEncrypted(key)) continue;
@@ -959,6 +960,51 @@ test "save re-encrypts a decrypted key that was changed" {
     try std.testing.expect(std.mem.indexOf(u8, raw, blob) == null);
     try std.testing.expect(std.mem.indexOf(u8, raw, "sk-changed") == null);
     try std.testing.expect(std.mem.indexOf(u8, raw, "enc:v1:") != null);
+}
+
+test "save removes the stored ciphertext when a decrypted key is cleared" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const key = [_]u8{0x3d} ** 32;
+    try writeTestKeyFile(&env, key);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-original");
+    defer std.testing.allocator.free(blob);
+
+    const contents = try testConfigJson(blob);
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-original", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+
+    // The key is cleared while the retained ciphertext is left in place. The
+    // save must treat the null as a removal and must not resurrect the stale
+    // ciphertext.
+    loaded.config.providerEntry(.opencode_go).apiKey = null;
+    try save(std.testing.allocator, std.testing.io, loaded.config, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, blob) == null);
+
+    // The cleared key must reload as unset, not be resurrected from the blob.
+    var reloaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer reloaded.deinit();
+    try std.testing.expect(reloaded.config.providerEntryConst(.opencode_go).apiKey == null);
+    try std.testing.expect(reloaded.config.providerEntryConst(.opencode_go).stored_blob == null);
 }
 
 test "save fails soft when a fresh plaintext key cannot be encrypted" {
