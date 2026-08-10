@@ -14,6 +14,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/build [task]", "Switch to build mode");
     try printCommand(writer, "/model [id]", "Switch to another model");
     try printCommand(writer, "/provider [name]", "Switch to another provider");
+    try printCommand(writer, "/thinking [level]", "Change reasoning effort");
     try printCommand(writer, "/sessions", "List saved sessions");
     try printCommand(writer, "/resume [id]", "Resume a saved session");
     try printCommand(writer, "/prune", "Remove old sessions");
@@ -39,9 +40,9 @@ test "showHelp lists all commands" {
     const text = output.written();
 
     const commands = [_][]const u8{
-        "/quit, /exit",  "/new, /reset", "/stats",           "/config",   "/plan [task]",
-        "/build [task]", "/model [id]",  "/provider [name]", "/sessions", "/resume [id]",
-        "/prune",        "/skills",      "/file [path|url]",
+        "/quit, /exit",  "/new, /reset", "/stats",           "/config",           "/plan [task]",
+        "/build [task]", "/model [id]",  "/provider [name]", "/thinking [level]", "/sessions",
+        "/resume [id]",  "/prune",       "/skills",          "/file [path|url]",
     };
     for (commands) |command| {
         try std.testing.expect(std.mem.indexOf(u8, text, command) != null);
