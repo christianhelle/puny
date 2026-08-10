@@ -85,6 +85,14 @@ pub fn availableUpdate(
     };
 }
 
+/// Prints the exit notice pointing at the upgrade command.
+pub fn printUpdateNotice(writer: *std.Io.Writer, latest_ver: []const u8) !void {
+    try writer.print(
+        "A new version of puny is available: v{s}. Run `puny --upgrade` to update.\n",
+        .{latest_ver},
+    );
+}
+
 test "isNewer is true when the available version is newer" {
     try std.testing.expect(isNewer("1.0.0", "1.1.0"));
     try std.testing.expect(isNewer("1.0.0", "2.0.0"));
@@ -209,4 +217,27 @@ test "availableUpdate returns null when the flag file is missing" {
 
     const available = try availableUpdate(std.testing.io, allocator, &env);
     try std.testing.expect(available == null);
+}
+
+test "printUpdateNotice announces the new version and the upgrade command" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var output = std.Io.Writer.Allocating.init(arena_state.allocator());
+    defer output.deinit();
+
+    try printUpdateNotice(&output.writer, "2.1.0");
+    const text = output.written();
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "2.1.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "puny --upgrade") != null);
+}
+
+test "printUpdateNotice mentions a new version is available" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var output = std.Io.Writer.Allocating.init(arena_state.allocator());
+    defer output.deinit();
+
+    try printUpdateNotice(&output.writer, "1.2.3");
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "new version") != null);
 }
