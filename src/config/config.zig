@@ -242,8 +242,8 @@ fn decryptStoredApiKeys(
         const api_key = p.apiKey orelse continue;
         if (api_key.len == 0 or !secrets.isEncrypted(api_key)) continue;
 
-        // Retain the original ciphertext so a later save round-trips it when
-        // the key file is missing or the blob cannot be decrypted.
+        // Retain the original ciphertext even on success: it lets `save` write
+        // the unmodified key back verbatim instead of re-encrypting it.
         p.stored_blob = api_key;
 
         if (key_material == null) {
@@ -292,7 +292,6 @@ fn decryptStoredApiKeys(
                 break :blk null;
             };
         };
-        if (p.apiKey != null) p.stored_blob = null;
     }
 }
 
@@ -311,14 +310,27 @@ pub fn save(
 
     var to_write = config;
 
-    // A provider whose stored key could not be decrypted keeps the original
-    // ciphertext in `stored_blob`; restore it so this save writes the blob back
-    // instead of replacing it with null. Providers with a live apiKey always
-    // win over any retained blob.
-    for (&to_write.providers) |*p| {
-        if (p.apiKey == null) {
+    // Decide what to persist for each provider key. `stored_blob` is the
+    // original ciphertext retained by load, so a provider whose key is unset
+    // (undecryptable) or unchanged since decrypt writes that ciphertext back
+    // verbatim — an unrelated save must not depend on key material or churn
+    // the blobs. Only genuinely fresh plaintext keys (stored_blob == null)
+    // need encryption.
+    var needs_encryption = false;
+    var encrypt_index: [4]bool = .{ false, false, false, false };
+    for (&to_write.providers, 0..) |*p, i| {
+        const key = p.apiKey orelse {
             if (p.stored_blob) |blob| p.apiKey = blob;
+            continue;
+        };
+        if (key.len == 0 or secrets.isEncrypted(key)) continue;
+        if (p.stored_blob) |blob| {
+            // Unmodified decrypted key: persist the original ciphertext.
+            p.apiKey = blob;
+            continue;
         }
+        encrypt_index[i] = true;
+        needs_encryption = true;
     }
 
     // Track the encrypted blobs allocated by this save so they can be freed
@@ -330,26 +342,14 @@ pub fn save(
         }
     }
 
-    var has_plaintext_key = false;
-    for (config.providers) |p| {
-        if (p.apiKey) |k| {
-            if (k.len > 0 and !secrets.isEncrypted(k)) {
-                has_plaintext_key = true;
-                break;
-            }
-        }
-    }
-
-    if (has_plaintext_key) {
+    if (needs_encryption) {
         var random_source: std.Random.IoSource = .{ .io = io };
         const random = random_source.interface();
         const key = (try secrets.ensureKeyFile(allocator, io, environ_map, random)) orelse return error.InvalidEncryptionKey;
         for (&to_write.providers, 0..) |*p, i| {
-            if (p.apiKey) |k| {
-                if (k.len > 0 and !secrets.isEncrypted(k)) {
-                    p.apiKey = try secrets.encrypt(allocator, key, random, k);
-                    encrypted_blobs[i] = p.apiKey;
-                }
+            if (encrypt_index[i]) {
+                p.apiKey = try secrets.encrypt(allocator, key, random, p.apiKey.?);
+                encrypted_blobs[i] = p.apiKey;
             }
         }
     }
@@ -796,6 +796,44 @@ test "save then load round-trips the api key" {
     var loaded = try load(std.testing.allocator, std.testing.io, &env);
     defer loaded.deinit();
     try std.testing.expectEqualStrings("sk-roundtrip-key", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+}
+
+test "save does not re-encrypt an unmodified decrypted key" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const key = [_]u8{0x5a} ** 32;
+    try writeTestKeyFile(&env, key);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-decrypted");
+    defer std.testing.allocator.free(blob);
+
+    const contents = try testConfigJson(blob);
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-decrypted", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+
+    // An unrelated save (nothing about the key changed) must write the original
+    // ciphertext back verbatim, not re-encrypt with a fresh nonce.
+    try save(std.testing.allocator, std.testing.io, loaded.config, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.count(u8, raw, blob) == 1);
+    try std.testing.expect(std.mem.count(u8, raw, "enc:v1:") == 1);
 }
 
 test "save does not create a key file when no api keys are set" {
