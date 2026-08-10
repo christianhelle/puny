@@ -1180,7 +1180,7 @@ fn redactUrl(allocator: std.mem.Allocator, url: []const u8) ?[]const u8 {
     if (!has_secret) return null;
 
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
+    defer out.deinit(allocator);
     out.appendSlice(allocator, url[0 .. query_start + 1]) catch return null;
     var first = true;
     parts = std.mem.splitScalar(u8, query, '&');
