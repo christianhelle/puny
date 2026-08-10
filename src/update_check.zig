@@ -64,6 +64,27 @@ pub fn clearFlag(
     };
 }
 
+/// Reads the available version from the flag file, or null when no flag is
+/// present. The returned slice is owned by `allocator`.
+pub fn availableUpdate(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) !?[]u8 {
+    const path = try flagPath(allocator, environ_map);
+    defer allocator.free(path);
+
+    return std.Io.Dir.cwd().readFileAlloc(
+        io,
+        path,
+        allocator,
+        std.Io.Limit.limited(64),
+    ) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+}
+
 test "isNewer is true when the available version is newer" {
     try std.testing.expect(isNewer("1.0.0", "1.1.0"));
     try std.testing.expect(isNewer("1.0.0", "2.0.0"));
@@ -159,4 +180,33 @@ test "clearFlag removes the flag and tolerates a missing one" {
 
     // Clearing again is a no-op, not an error.
     try clearFlag(std.testing.io, allocator, &env);
+}
+
+test "availableUpdate reads the flag file content" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    try writeFlagIfNewer(std.testing.io, allocator, &env, "1.0.0", "2.0.0");
+
+    const available = try availableUpdate(std.testing.io, allocator, &env);
+    defer allocator.free(available.?);
+    try std.testing.expectEqualStrings("2.0.0", available.?);
+}
+
+test "availableUpdate returns null when the flag file is missing" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    const available = try availableUpdate(std.testing.io, allocator, &env);
+    try std.testing.expect(available == null);
 }
