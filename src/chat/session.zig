@@ -325,6 +325,17 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .list_skills => {
+                    if (ctx.parsed.no_skills) {
+                        try ctx.stdout_writer.print("\n\nSkills are disabled.\n", .{});
+                        try ctx.stdout_writer.flush();
+                        if (ctx.parsed.oneshot) {
+                            try ctx.stdout_writer.print("\n", .{});
+                            try ctx.stdout_writer.flush();
+                            finalizeSession(ctx);
+                            return;
+                        }
+                        continue;
+                    }
                     if (!ctx.skill_registry.fully_scanned) {
                         try ctx.skill_registry.fullScan(ctx.io);
                     }
@@ -444,6 +455,7 @@ fn maybeLoadTriggeredSkills(
     text: []const u8,
     loaded_skills: *std.StringHashMapUnmanaged(void),
 ) !void {
+    if (ctx.parsed.no_skills) return;
     for (ctx.skill_registry.records.items) |*r| {
         if (loaded_skills.contains(r.name)) continue;
         if (!skills.recordMatchesTrigger(r, text)) continue;

@@ -203,5 +203,23 @@
     "args": ["--mock", "--model", "mock-model", "--prompt", "/nosuchskill", "--oneshot"],
     "expect": ["nosuchskill", "mock response"],
     "not_expect": []
+  },
+  {
+    "name": "Bare skill load is disabled by --no-skills",
+    "args": ["--mock", "--model", "mock-model", "--no-skills", "--prompt", "/mock-skill", "--oneshot"],
+    "expect": ["mock response", "You said: mock-skill"],
+    "not_expect": ["mock-skill-body", "Skill: mock-skill"],
+    "skills": [
+      { "name": "mock-skill", "body": "mock-skill-body" }
+    ]
+  },
+  {
+    "name": "/skills reports skills are disabled with --no-skills",
+    "args": ["--mock", "--model", "mock-model", "--no-skills", "--prompt", "/skills", "--oneshot"],
+    "expect": ["Skills are disabled"],
+    "not_expect": ["Available skills", "(none found)"],
+    "skills": [
+      { "name": "mock-skill", "body": "mock-skill-body" }
+    ]
   }
 ]
