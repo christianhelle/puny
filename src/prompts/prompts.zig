@@ -34,3 +34,5 @@ pub const planning =
     \\Show the absolute path to the PRD files to enable the terminal user to open them in their preferred editor by clicking on the path.
     \\When you are done, prompt the user to switch to Build mode to start implementing the PRD, and provide a hint on how to do this (/build implement)
 ;
+
+pub const prompt_text = "Prompt:";

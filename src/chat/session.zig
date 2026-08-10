@@ -545,7 +545,7 @@ pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Messag
     for (messages) |msg| {
         switch (msg) {
             .user => |content| {
-                try writer.print("\n{s}Prompt:{s} ", .{ ansi.bright, ansi.reset });
+                try writer.print("\n{s}{s}{s} ", .{ ansi.bright, prompts.prompt_text, ansi.reset });
                 try writer.print("{s}\n\n", .{content});
             },
             .assistant => |assistant| {
