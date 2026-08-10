@@ -87,6 +87,30 @@ pub fn availableUpdate(
     };
 }
 
+fn availableUpdateIfNewerInstalled(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    installed: []const u8,
+) !?[]u8 {
+    const latest = try availableUpdate(io, allocator, environ_map) orelse return null;
+    if (isNewer(installed, latest)) return latest;
+    allocator.free(latest);
+    try clearFlag(io, allocator, environ_map);
+    return null;
+}
+
+/// Reads the available version from the flag file only when it is newer than
+/// the installed binary. Clears a stale flag and returns null otherwise. The
+/// returned slice is owned by `allocator`.
+pub fn availableUpdateIfNewer(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) !?[]u8 {
+    return availableUpdateIfNewerInstalled(io, allocator, environ_map, version.version);
+}
+
 /// Prints the exit notice pointing at the upgrade command.
 pub fn printUpdateNotice(writer: *std.Io.Writer, latest_ver: []const u8) !void {
     try writer.print(
@@ -286,6 +310,53 @@ test "availableUpdate returns null when the flag file is missing" {
     try setFlagBaseDir(tmp, &env);
 
     const available = try availableUpdate(std.testing.io, allocator, &env);
+    try std.testing.expect(available == null);
+}
+
+test "availableUpdateIfNewer returns the stored version when it is newer" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    try writeFlagIfNewer(std.testing.io, allocator, &env, "1.0.0", "2.0.0");
+
+    const available = try availableUpdateIfNewerInstalled(std.testing.io, allocator, &env, "1.0.0");
+    defer allocator.free(available.?);
+    try std.testing.expectEqualStrings("2.0.0", available.?);
+}
+
+test "availableUpdateIfNewer returns null and clears the flag when equal or older" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    try writeFlagIfNewer(std.testing.io, allocator, &env, "1.0.0", "2.0.0");
+    try std.testing.expect((try availableUpdateIfNewerInstalled(std.testing.io, allocator, &env, "2.0.0")) == null);
+    try std.testing.expect((try availableUpdate(std.testing.io, allocator, &env)) == null);
+
+    try writeFlagIfNewer(std.testing.io, allocator, &env, "1.0.0", "2.0.0");
+    try std.testing.expect((try availableUpdateIfNewerInstalled(std.testing.io, allocator, &env, "3.0.0")) == null);
+    try std.testing.expect((try availableUpdate(std.testing.io, allocator, &env)) == null);
+}
+
+test "availableUpdateIfNewer returns null when no flag exists" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    const available = try availableUpdateIfNewerInstalled(std.testing.io, allocator, &env, "1.0.0");
     try std.testing.expect(available == null);
 }
 
