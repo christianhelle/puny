@@ -10,8 +10,14 @@ pub const blob_prefix = "enc:v1:";
 
 const base64 = std.base64.standard;
 
+/// True only when `value` is structurally a valid `enc:v1:` blob: the prefix
+/// followed by base64 that decodes to at least nonce + tag bytes. A plaintext
+/// key that merely starts with the prefix is treated as plaintext.
 pub fn isEncrypted(value: []const u8) bool {
-    return std.mem.startsWith(u8, value, blob_prefix);
+    if (!std.mem.startsWith(u8, value, blob_prefix)) return false;
+    const b64 = value[blob_prefix.len..];
+    const raw_len = base64.Decoder.calcSizeForSlice(b64) catch return false;
+    return raw_len >= nonce_length + tag_length;
 }
 
 /// Encrypts `plaintext` with a fresh random nonce and returns the
@@ -79,9 +85,18 @@ pub fn decrypt(
 }
 
 test "isEncrypted detects enc:v1 blobs" {
-    try std.testing.expect(isEncrypted("enc:v1:abc123"));
+    // A valid blob: enc:v1:<base64(nonce ‖ ct ‖ tag)>.
+    try std.testing.expect(isEncrypted("enc:v1:AgICAgICAgICAgICAgICAgICAgICAgICqg9Ois5afuAGYNUfoYJVcmZrd+3L"));
     try std.testing.expect(!isEncrypted("sk-12345"));
     try std.testing.expect(!isEncrypted(""));
+}
+
+test "isEncrypted treats enc:v1-prefixed plaintext as plaintext" {
+    // A real key that merely starts with the prefix must not be mistaken for an
+    // encrypted blob: it is neither valid base64 nor long enough to hold a blob.
+    try std.testing.expect(!isEncrypted("enc:v1:sk-abc123"));
+    try std.testing.expect(!isEncrypted("enc:v1:abc123"));
+    try std.testing.expect(!isEncrypted("enc:v1:"));
 }
 
 test "encrypt produces an enc:v1 blob" {
