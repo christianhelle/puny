@@ -15,6 +15,7 @@ pub const Command = union(enum) {
     build: ?[]const u8,
     model: ?[]const u8,
     provider: ?[]const u8,
+    thinking: ?[]const u8,
     sessions,
     prune,
     resume_session: ?[]const u8,
@@ -34,6 +35,7 @@ pub const Action = union(enum) {
     reconfigure,
     switch_model: ?[]const u8,
     switch_provider: ?[]const u8,
+    switch_effort: ?[]const u8,
     list_sessions,
     prune_sessions,
     restore_session: ?[]const u8,
@@ -67,6 +69,7 @@ pub const command_tokens = [_][]const u8{
     "/build",
     "/model",
     "/provider",
+    "/thinking",
     "/sessions",
     "/resume",
     "/prune",
@@ -147,6 +150,19 @@ pub fn parse(user_message: []const u8) Command {
             return .{ .provider = user_message[":provider ".len..] };
         }
         return .{ .provider = null };
+    }
+
+    if (eqlIgnoreCase(user_message, "/thinking") or std.mem.startsWith(u8, user_message, "/thinking ")) {
+        if (user_message.len > "/thinking ".len) {
+            return .{ .thinking = user_message["/thinking ".len..] };
+        }
+        return .{ .thinking = null };
+    }
+    if (eqlIgnoreCase(user_message, ":thinking") or std.mem.startsWith(u8, user_message, ":thinking ")) {
+        if (user_message.len > ":thinking ".len) {
+            return .{ .thinking = user_message[":thinking ".len..] };
+        }
+        return .{ .thinking = null };
     }
 
     if (eqlIgnoreCase(user_message, "/sessions") or eqlIgnoreCase(user_message, ":sessions"))
@@ -260,6 +276,15 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             return .{ .switch_provider = provider_id };
         },
 
+        .thinking => |effort| {
+            if (ctx.oneshot) {
+                try ctx.stdout_writer.print("\n/thinking not available in oneshot mode.\n", .{});
+                try ctx.stdout_writer.flush();
+                return .continue_;
+            }
+            return .{ .switch_effort = effort };
+        },
+
         .sessions => return .list_sessions,
 
         .prune => return .prune_sessions,
@@ -319,6 +344,11 @@ test "parse recognizes all slash commands" {
 
     try std.testing.expectEqualDeep(Command{ .provider = null }, parse("/provider"));
     try std.testing.expectEqualDeep(Command{ .provider = "opencode" }, parse("/provider opencode"));
+
+    try std.testing.expectEqualDeep(Command{ .thinking = null }, parse("/thinking"));
+    try std.testing.expectEqualDeep(Command{ .thinking = "high" }, parse("/thinking high"));
+    try std.testing.expectEqualDeep(Command{ .thinking = null }, parse(":thinking"));
+    try std.testing.expectEqualDeep(Command{ .thinking = "low" }, parse(":thinking low"));
 
     try std.testing.expectEqualDeep(Command{ .skill = "grill-me" }, parse("/grill-me"));
     try std.testing.expectEqualDeep(Command{ .skill = "nano-commits" }, parse("/nano-commits"));
@@ -650,6 +680,75 @@ test "dispatch provider without text returns switch provider with null" {
     });
 
     try std.testing.expectEqualDeep(Action{ .switch_provider = null }, action);
+}
+
+test "dispatch thinking in oneshot mode rejects" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .thinking = "high" }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = true,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+}
+
+test "dispatch thinking returns switch effort" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .thinking = "high" }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .switch_effort = "high" }, action);
+}
+
+test "dispatch thinking without text returns switch effort with null" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .thinking = null }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .switch_effort = null }, action);
 }
 
 test "dispatch sessions returns list_sessions" {
