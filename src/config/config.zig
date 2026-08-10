@@ -68,6 +68,10 @@ pub const Provider = struct {
     /// save does not discard the user's stored credential. Internal only:
     /// never serialized; `save` restores it into `apiKey` when unset.
     stored_blob: ?[]const u8 = null,
+    /// Plaintext that was decrypted from `stored_blob`, retained for comparison
+    /// in `save` to detect if `apiKey` has been modified. Internal only: never
+    /// serialized.
+    decrypted_plain: ?[]const u8 = null,
 
     pub fn clone(self: Provider, allocator: std.mem.Allocator) std.mem.Allocator.Error!Provider {
         return .{
@@ -77,6 +81,7 @@ pub const Provider = struct {
             .model = try allocator.dupe(u8, self.model),
             .reasoning_effort = if (self.reasoning_effort) |v| try allocator.dupe(u8, v) else null,
             .stored_blob = if (self.stored_blob) |v| try allocator.dupe(u8, v) else null,
+            .decrypted_plain = if (self.decrypted_plain) |v| try allocator.dupe(u8, v) else null,
         };
     }
 
@@ -86,6 +91,7 @@ pub const Provider = struct {
         allocator.free(self.model);
         if (self.reasoning_effort) |v| allocator.free(v);
         if (self.stored_blob) |v| allocator.free(v);
+        if (self.decrypted_plain) |v| allocator.free(v);
     }
 
     pub fn jsonStringify(v: Provider, jws: anytype) !void {
@@ -290,19 +296,21 @@ fn decryptStoredApiKeys(
             continue;
         };
 
-        p.apiKey = blk: {
-            break :blk secrets.decrypt(allocator, key, api_key) catch |err| {
-                var stderr_buffer: [1024]u8 = undefined;
-                var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-                const stderr_writer = &stderr_file_writer.interface;
-                stderr_writer.print(
-                    "Warning: could not decrypt the stored API key for provider '{s}' ({s}). Re-enter it with --reconfigure.\n",
-                    .{ @tagName(p.name), @errorName(err) },
-                ) catch {};
-                stderr_writer.flush() catch {};
-                break :blk null;
-            };
+        const decrypted = secrets.decrypt(allocator, key, api_key) catch |err| {
+            var stderr_buffer: [1024]u8 = undefined;
+            var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+            const stderr_writer = &stderr_file_writer.interface;
+            stderr_writer.print(
+                "Warning: could not decrypt the stored API key for provider '{s}' ({s}). Re-enter it with --reconfigure.\n",
+                .{ @tagName(p.name), @errorName(err) },
+            ) catch {};
+            stderr_writer.flush() catch {};
+            p.apiKey = null;
+            continue;
         };
+        p.apiKey = decrypted;
+        // Retain the decrypted plaintext to detect changes later in `save`.
+        p.decrypted_plain = allocator.dupe(u8, decrypted) catch null;
     }
 }
 
@@ -336,9 +344,14 @@ pub fn save(
         };
         if (key.len == 0 or secrets.isEncrypted(key)) continue;
         if (p.stored_blob) |blob| {
-            // Unmodified decrypted key: persist the original ciphertext.
-            p.apiKey = blob;
-            continue;
+            // Only persist the original ciphertext if the key is truly unmodified.
+            if (p.decrypted_plain) |plain| {
+                if (std.mem.eql(u8, key, plain)) {
+                    p.apiKey = blob;
+                    continue;
+                }
+            }
+            // Key was changed since decrypt: fall through to encrypt the new value.
         }
         encrypt_index[i] = true;
         needs_encryption = true;
