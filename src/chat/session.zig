@@ -1258,7 +1258,6 @@ fn redactPlainBody(allocator: std.mem.Allocator, body: []const u8) ?[]const u8 {
     };
 
     const masked = allocator.dupe(u8, body) catch return null;
-    errdefer allocator.free(masked);
 
     var redacted = false;
     var i: usize = 0;
@@ -1312,7 +1311,10 @@ fn redactPlainBody(allocator: std.mem.Allocator, body: []const u8) ?[]const u8 {
         i = j;
     }
 
-    if (!redacted) return null;
+    if (!redacted) {
+        allocator.free(masked);
+        return null;
+    }
     return masked;
 }
 
