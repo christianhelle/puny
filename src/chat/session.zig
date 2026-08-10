@@ -1251,10 +1251,10 @@ fn isPlainValueTerminator(c: u8) bool {
 /// owned copy with the secrets starred out, or `null` when nothing matched.
 fn redactPlainBody(allocator: std.mem.Allocator, body: []const u8) ?[]const u8 {
     const secret_names = [_][]const u8{
-        "api_key",      "apiKey",     "api-key",   "x-api-key",
-        "access_token", "token",      "authorization",
-        "proxy-authorization",        "secret",    "password",
-        "key",          "signature",  "auth",
+        "api_key",      "apiKey",   "api-key",       "x-api-key",
+        "access_token", "token",    "authorization", "proxy-authorization",
+        "secret",       "password", "key",           "signature",
+        "auth",
     };
 
     const masked = allocator.dupe(u8, body) catch return null;
