@@ -1,6 +1,7 @@
 const std = @import("std");
 const prompt_history = @import("../../prompts/history.zig");
 const terminal = @import("../terminal.zig");
+const prompts = @import("../../prompts/prompts.zig");
 
 pub const ReadLineResult = union(enum) {
     submitted: []const u8,
@@ -80,7 +81,7 @@ pub fn replaceLine(
 
     try stdout_writer.writeAll(terminal.move_to_line_start);
     try stdout_writer.writeAll(terminal.clear_to_end_of_line);
-    try stdout_writer.print("Prompt: {s}", .{text});
+    try stdout_writer.print("{s} {s}", .{ prompts.prompt_text, text });
     try stdout_writer.flush();
 }
 

@@ -4,6 +4,7 @@ const cancel = @import("../core/cancel.zig");
 const common = @import("input/common.zig");
 const posix = @import("input/posix.zig");
 const prompt_history = @import("../prompts/history.zig");
+const prompts = @import("../prompts/prompts.zig");
 const windows_impl = @import("input/windows.zig");
 
 pub const ReadLineResult = common.ReadLineResult;
@@ -18,7 +19,7 @@ pub fn readLine(
     line_alloc.clearRetainingCapacity();
     if (history) |h| h.resetNavigation();
 
-    try stdout_writer.print("\n\nPrompt: ", .{});
+    try stdout_writer.print("\n\n{s} ", .{prompts.prompt_text});
     try stdout_writer.flush();
 
     cancel.setRawMode(true) catch {
