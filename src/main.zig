@@ -46,6 +46,12 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    // Detached child process entry: run the update check and exit quietly.
+    if (parsed.check_update) {
+        update_check.runCheck(init.io, arena, init.environ_map);
+        return;
+    }
+
     if (parsed.prune) {
         var buf: [1024]u8 = undefined;
         var out: std.Io.File.Writer = .init(.stdout(), init.io, &buf);
@@ -219,6 +225,13 @@ pub fn main(init: std.process.Init) !void {
 
     try printStartupTime(init.io, stdout_writer, startup_time);
 
+    // Kick off the background update check now that the welcome screen is
+    // shown. It is detached and never blocks startup. Skipped for one-shot
+    // and mock sessions, which are not interactive.
+    if (!parsed.oneshot and !parsed.mock) {
+        update_check.spawnBackgroundCheck(init.io, arena);
+    }
+
     if (restore_target) |s| {
         const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
         const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &planning_mode, &messages, stdout_writer);
@@ -308,6 +321,15 @@ pub fn main(init: std.process.Init) !void {
 
     var chat_session = session.ChatSession.init(ctx);
     try chat_session.run();
+
+    // After the interactive session ends, surface a pending update notice
+    // written by the detached `--check-update` child process.
+    if (update_check.availableUpdate(init.io, arena, init.environ_map)) |maybe_latest| {
+        if (maybe_latest) |latest| {
+            update_check.printUpdateNotice(stdout_writer, latest) catch {};
+            stdout_writer.flush() catch {};
+        }
+    } else |_| {}
 }
 
 /// Prints `Failed to load prompt from <source>: <reason>` to stderr and flushes.
