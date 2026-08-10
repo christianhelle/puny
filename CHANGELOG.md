@@ -2,6 +2,9 @@
 
 ## [Unreleased Changes]
 
+### Merged Pull Requests
+- Split slow tests into regression suite for fast zig build test ([#118](https://github.com/christianhelle/puny/pull/118)) ([@christianhelle](https://github.com/christianhelle/))
+
 ### Features
 - Change prompt text to `>` ([#115](https://github.com/christianhelle/puny/pull/115)) ([@christianhelle](https://github.com/christianhelle/))
 
