@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Merged Pull Requests
+- Add --no-skills flag to disable skills entirely ([#116](https://github.com/christianhelle/puny/pull/116)) ([@christianhelle](https://github.com/christianhelle/))
 - Add /thinking command to change reasoning effort mid-session ([#117](https://github.com/christianhelle/puny/pull/117)) ([@christianhelle](https://github.com/christianhelle/))
 - Split slow tests into regression suite for fast zig build test ([#118](https://github.com/christianhelle/puny/pull/118)) ([@christianhelle](https://github.com/christianhelle/))
 
@@ -13,7 +14,6 @@
 ## [v0.3.0](https://github.com/christianhelle/puny/releases/tag/v0.3.0) (2026-08-10)
 
 ### Features
-- Add `--no-skills` flag to disable skills entirely
 - Protect API keys at rest with XChaCha20-Poly1305 encryption ([#113](https://github.com/christianhelle/puny/pull/113)) ([@christianhelle](https://github.com/christianhelle/))
 - Improve test coverage across the codebase ([#112](https://github.com/christianhelle/puny/pull/112)) ([@christianhelle](https://github.com/christianhelle/))
 - Case insensitive commands ([#111](https://github.com/christianhelle/puny/pull/111)) ([@christianhelle](https://github.com/christianhelle/))
