@@ -1,13 +1,11 @@
 # Changelog
 
-## [Unreleased Changes]
-
-### Merged Pull Requests
-- Add --no-skills flag to disable skills entirely ([#116](https://github.com/christianhelle/puny/pull/116)) ([@christianhelle](https://github.com/christianhelle/))
-- Add /thinking command to change reasoning effort mid-session ([#117](https://github.com/christianhelle/puny/pull/117)) ([@christianhelle](https://github.com/christianhelle/))
-- Split slow tests into regression suite for fast zig build test ([#118](https://github.com/christianhelle/puny/pull/118)) ([@christianhelle](https://github.com/christianhelle/))
+## [v0.3.1](https://github.com/christianhelle/puny/releases/tag/v0.3.1) (2026-08-10)
 
 ### Features
+- Split slow tests into regression suite for fast zig build test ([#118](https://github.com/christianhelle/puny/pull/118)) ([@christianhelle](https://github.com/christianhelle/))
+- Add /thinking command to change reasoning effort mid-session ([#117](https://github.com/christianhelle/puny/pull/117)) ([@christianhelle](https://github.com/christianhelle/))
+- Add --no-skills flag to disable skills entirely ([#116](https://github.com/christianhelle/puny/pull/116)) ([@christianhelle](https://github.com/christianhelle/))
 - Change prompt text to `>` ([#115](https://github.com/christianhelle/puny/pull/115)) ([@christianhelle](https://github.com/christianhelle/))
 
 
