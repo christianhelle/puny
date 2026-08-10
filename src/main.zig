@@ -47,7 +47,24 @@ pub fn main(init: std.process.Init) !void {
 
     // Detached child process entry: run the update check and exit quietly.
     if (parsed.check_update) {
-        update_check.runCheck(init.io, arena, init.environ_map);
+        const outcome = update_check.runCheck(init.io, arena, init.environ_map);
+        if (outcome) |result| {
+            var out_buf: [1024]u8 = undefined;
+            var out: std.Io.File.Writer = .init(.stdout(), init.io, &out_buf);
+            switch (result) {
+                .update_available => {
+                    if (update_check.availableUpdate(init.io, arena, init.environ_map)) |maybe_latest| {
+                        if (maybe_latest) |latest| {
+                            update_check.printUpdateNotice(&out.interface, latest) catch {};
+                        }
+                    } else |_| {}
+                },
+                .up_to_date => {
+                    out.interface.print("puny is up to date.\n", .{}) catch {};
+                },
+            }
+            out.interface.flush() catch {};
+        }
         return;
     }
 
