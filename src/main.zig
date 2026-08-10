@@ -230,10 +230,10 @@ pub fn main(init: std.process.Init) !void {
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
     defer prov.deinit();
 
-    var full_tool_definitions = try buildToolDefinitions(arena);
+    var full_tool_definitions = try buildToolDefinitions(arena, parsed.no_skills);
     defer full_tool_definitions.deinit(arena);
 
-    var planning_tool_definitions = try buildPlanningToolDefinitions(arena);
+    var planning_tool_definitions = try buildPlanningToolDefinitions(arena, parsed.no_skills);
     defer planning_tool_definitions.deinit(arena);
 
     var skill_registry = skills.Registry.init(arena);
@@ -499,20 +499,22 @@ fn initializeProviderAndModel(
     }
 }
 
-fn buildPlanningToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefinition) {
+fn buildPlanningToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.ArrayList(openai.ToolDefinition) {
     var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
     errdefer definitions.deinit(arena);
     for (tools.planning_registry) |tool| {
+        if (no_skills and std.mem.eql(u8, tool.name, "load_skill")) continue;
         const schema = try tool.schema(arena);
         try definitions.append(arena, .{ .function = schema });
     }
     return definitions;
 }
 
-fn buildToolDefinitions(arena: std.mem.Allocator) !std.ArrayList(openai.ToolDefinition) {
+fn buildToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.ArrayList(openai.ToolDefinition) {
     var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
     errdefer definitions.deinit(arena);
     for (tools.registry) |tool| {
+        if (no_skills and std.mem.eql(u8, tool.name, "load_skill")) continue;
         const schema = try tool.schema(arena);
         try definitions.append(arena, .{ .function = schema });
     }
@@ -591,6 +593,57 @@ test "formatRestoreHeader includes load time" {
     var buf: [256]u8 = undefined;
     const result = formatRestoreHeader(&buf, "abc123", 5, 42_000_000);
     try std.testing.expectEqualStrings("Restored session abc123 — 5 messages (42 ms)", result);
+}
+
+fn toolNames(definitions: []const openai.ToolDefinition) [][]const u8 {
+    const names = std.heap.page_allocator.alloc([]const u8, definitions.len) catch unreachable;
+    for (definitions, 0..) |definition, i| {
+        names[i] = definition.function.object.get("name").?.string;
+    }
+    return names;
+}
+
+test "buildToolDefinitions excludes load_skill when skills are disabled" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var definitions = try buildToolDefinitions(arena, true);
+    defer definitions.deinit(arena);
+    const names = toolNames(definitions.items);
+    for (names) |name| {
+        try std.testing.expect(!std.mem.eql(u8, name, "load_skill"));
+    }
+    try std.testing.expect(definitions.items.len > 0);
+}
+
+test "buildToolDefinitions includes load_skill when skills are enabled" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var definitions = try buildToolDefinitions(arena, false);
+    defer definitions.deinit(arena);
+    var found = false;
+    for (definitions.items) |definition| {
+        const name = definition.function.object.get("name").?.string;
+        if (std.mem.eql(u8, name, "load_skill")) found = true;
+    }
+    try std.testing.expect(found);
+}
+
+test "buildPlanningToolDefinitions excludes load_skill when skills are disabled" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var definitions = try buildPlanningToolDefinitions(arena, true);
+    defer definitions.deinit(arena);
+    const names = toolNames(definitions.items);
+    for (names) |name| {
+        try std.testing.expect(!std.mem.eql(u8, name, "load_skill"));
+    }
+    try std.testing.expect(definitions.items.len > 0);
 }
 
 test "requiresApiKey only for opencode and opencode-go" {
