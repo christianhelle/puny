@@ -1232,9 +1232,98 @@ fn redactSecretValues(value: *std.json.Value) void {
     }
 }
 
+fn isPlainBoundary(c: u8) bool {
+    return switch (c) {
+        '&', ';', '{', '[', ',', '"', '\'', '(', '=', '\n', '\r', '\t', ' ', '*', ':' => true,
+        else => false,
+    };
+}
+
+fn isPlainValueTerminator(c: u8) bool {
+    return switch (c) {
+        '&', ';', ' ', '\n', '\r', '\t' => true,
+        else => false,
+    };
+}
+
+/// Masks the values of secret `name=value` and `"name": value` pairs in a body
+/// that failed JSON parsing (e.g. form-encoded or truncated JSON), returning an
+/// owned copy with the secrets starred out, or `null` when nothing matched.
+fn redactPlainBody(allocator: std.mem.Allocator, body: []const u8) ?[]const u8 {
+    const secret_names = [_][]const u8{
+        "api_key",      "apiKey",     "api-key",   "x-api-key",
+        "access_token", "token",      "authorization",
+        "proxy-authorization",        "secret",    "password",
+        "key",          "signature",  "auth",
+    };
+
+    const masked = allocator.dupe(u8, body) catch return null;
+    errdefer allocator.free(masked);
+
+    var redacted = false;
+    var i: usize = 0;
+    while (i < masked.len) {
+        // A name must sit at a token boundary so substrings inside words
+        // (e.g. "key" in "monkey") never match.
+        if (i > 0 and !isPlainBoundary(masked[i - 1])) {
+            i += 1;
+            continue;
+        }
+
+        const name = blk: {
+            for (secret_names) |n| {
+                if (std.mem.startsWith(u8, masked[i..], n)) break :blk n;
+            }
+            break :blk null;
+        } orelse {
+            i += 1;
+            continue;
+        };
+
+        var j = i + name.len;
+        while (j < masked.len and (masked[j] == '"' or masked[j] == ' ' or masked[j] == '\t')) j += 1;
+        if (j >= masked.len or (masked[j] != '=' and masked[j] != ':')) {
+            i += 1;
+            continue;
+        }
+        const delim = masked[j];
+        j += 1;
+        if (delim == '=') {
+            while (j < masked.len and !isPlainValueTerminator(masked[j])) {
+                masked[j] = '*';
+                j += 1;
+            }
+        } else {
+            while (j < masked.len and masked[j] == ' ') j += 1;
+            if (j < masked.len and masked[j] == '"') {
+                j += 1;
+                while (j < masked.len and masked[j] != '"') {
+                    masked[j] = '*';
+                    j += 1;
+                }
+            } else {
+                while (j < masked.len and !isPlainValueTerminator(masked[j]) and masked[j] != ',' and masked[j] != '}') {
+                    masked[j] = '*';
+                    j += 1;
+                }
+            }
+        }
+        redacted = true;
+        i = j;
+    }
+
+    if (!redacted) return null;
+    return masked;
+}
+
 fn formatBody(allocator: std.mem.Allocator, body: []const u8) FormattedBody {
     if (body.len == 0) return .{ .text = body, .owned = false };
-    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return .{ .text = body, .owned = false };
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch {
+        // Not valid JSON (e.g. form-encoded or truncated): best-effort redact
+        // secret name=value / "name": value pairs before logging.
+        if (redactPlainBody(allocator, body)) |masked| return .{ .text = masked, .owned = true };
+        return .{ .text = body, .owned = false };
+    };
     defer parsed.deinit();
     redactSecretValues(&parsed.value);
     const formatted = std.json.Stringify.valueAlloc(allocator, parsed.value, .{ .whitespace = .indent_2 }) catch return .{ .text = body, .owned = false };
@@ -2022,4 +2111,32 @@ test "formatBody redacts x-api-key and credential members" {
     try std.testing.expect(std.mem.indexOf(u8, formatted.text, "p-1") == null);
     try std.testing.expect(std.mem.indexOf(u8, formatted.text, "s-2") == null);
     try std.testing.expect(std.mem.count(u8, formatted.text, "\"***\"") >= 4);
+}
+
+test "formatBody redacts secret pairs in a non-JSON body" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    // Not valid JSON, so it falls through to plain-text redaction.
+    const body = "api_key=sk-form-1&token=tok-9&model=gpt-4o";
+    const formatted = formatBody(allocator, body);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "sk-form-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "tok-9") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "model=gpt-4o") != null);
+}
+
+test "formatBody redacts secret pairs in a truncated JSON body" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    // Truncated JSON: parse fails, but the credential must still be masked.
+    const body = "{\"api_key\":\"sk-truncated\",\"model\":\"gpt-4o\"";
+    const formatted = formatBody(allocator, body);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "sk-truncated") == null);
 }
