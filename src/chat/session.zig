@@ -2128,6 +2128,22 @@ test "formatBody redacts secret pairs in a non-JSON body" {
     try std.testing.expect(std.mem.indexOf(u8, formatted.text, "model=gpt-4o") != null);
 }
 
+test "formatBody redacts secret pairs case-insensitively in a non-JSON body" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    // Not valid JSON, so it falls through to plain-text redaction. Secret
+    // names must match regardless of case, like the JSON and query paths.
+    const body = "API_KEY=sk-form-upper&Token=tok-upper&model=gpt-4o";
+    const formatted = formatBody(allocator, body);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "sk-form-upper") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "tok-upper") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "model=gpt-4o") != null);
+}
+
 test "formatBody redacts secret pairs in a truncated JSON body" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
