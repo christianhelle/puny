@@ -237,7 +237,7 @@ fn decryptStoredApiKeys(
 ) !void {
     var warned_missing_key = false;
     var key_attempted = false;
-    var key_load_error: ?[]const u8 = null;
+    var key_load_error: ?anyerror = null;
     var key_material: ?[secrets.key_length]u8 = null;
 
     for (&cfg.providers) |*p| {
@@ -256,7 +256,7 @@ fn decryptStoredApiKeys(
             if (secrets.loadKey(allocator, io, environ_map)) |key| {
                 key_material = key;
             } else |err| {
-                key_load_error = @errorName(err);
+                key_load_error = err;
             }
         }
 
@@ -265,11 +265,18 @@ fn decryptStoredApiKeys(
                 var stderr_buffer: [1024]u8 = undefined;
                 var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
                 const stderr_writer = &stderr_file_writer.interface;
-                if (key_load_error) |err_name| {
-                    stderr_writer.print(
-                        "Warning: could not decrypt stored API keys: failed to load encryption key file ({s}).\nRun --reconfigure to re-enter your keys.\n",
-                        .{err_name},
-                    ) catch {};
+                if (key_load_error) |err| {
+                    if (err == error.MalformedKeyFile) {
+                        stderr_writer.print(
+                            "Warning: could not decrypt stored API keys: the encryption key file is malformed.\nRun --reconfigure to re-enter your keys.\n",
+                            .{},
+                        ) catch {};
+                    } else {
+                        stderr_writer.print(
+                            "Warning: could not decrypt stored API keys: failed to load encryption key file ({s}).\nRun --reconfigure to re-enter your keys.\n",
+                            .{@errorName(err)},
+                        ) catch {};
+                    }
                 } else {
                     stderr_writer.print(
                         "Warning: could not decrypt stored API keys: encryption key file is missing.\nRun --reconfigure to re-enter your keys.\n",
