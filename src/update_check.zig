@@ -103,6 +103,21 @@ pub const CheckOutcome = enum {
     up_to_date,
 };
 
+fn runCheckWithLatestInstalled(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    installed: []const u8,
+    available: []const u8,
+) !CheckOutcome {
+    if (isNewer(installed, available)) {
+        try writeFlagIfNewer(io, allocator, environ_map, installed, available);
+        return .update_available;
+    }
+    try clearFlag(io, allocator, environ_map);
+    return .up_to_date;
+}
+
 /// Writes or clears the flag based on whether `available` is newer than the
 /// installed version, returning the outcome.
 pub fn runCheckWithLatest(
@@ -111,12 +126,7 @@ pub fn runCheckWithLatest(
     environ_map: *const std.process.Environ.Map,
     available: []const u8,
 ) !CheckOutcome {
-    if (isNewer(version.version, available)) {
-        try writeFlagIfNewer(io, allocator, environ_map, version.version, available);
-        return .update_available;
-    }
-    try clearFlag(io, allocator, environ_map);
-    return .up_to_date;
+    return runCheckWithLatestInstalled(io, allocator, environ_map, version.version, available);
 }
 
 /// Best-effort update check for the detached child process. Fetches the latest
@@ -310,7 +320,7 @@ test "runCheckWithLatest writes the flag when the latest is newer" {
     defer env.deinit();
     try setFlagBaseDir(tmp, &env);
 
-    const outcome = try runCheckWithLatest(std.testing.io, allocator, &env, "99.0.0");
+    const outcome = try runCheckWithLatestInstalled(std.testing.io, allocator, &env, "1.0.0", "99.0.0");
     try std.testing.expectEqual(CheckOutcome.update_available, outcome);
 
     const available = (try availableUpdate(std.testing.io, allocator, &env)).?;
@@ -330,7 +340,25 @@ test "runCheckWithLatest clears the flag when the latest is not newer" {
     // A stale flag from a previous run.
     try writeFlagIfNewer(std.testing.io, allocator, &env, "1.0.0", "2.0.0");
 
-    const outcome = try runCheckWithLatest(std.testing.io, allocator, &env, "0.0.1");
+    const outcome = try runCheckWithLatestInstalled(std.testing.io, allocator, &env, "1.0.0", "0.0.1");
+    try std.testing.expectEqual(CheckOutcome.up_to_date, outcome);
+
+    try std.testing.expect((try availableUpdate(std.testing.io, allocator, &env)) == null);
+}
+
+test "runCheckWithLatest treats an unparseable installed version as up to date" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try setFlagBaseDir(tmp, &env);
+
+    // A stale flag from a previous run.
+    try writeFlagIfNewer(std.testing.io, allocator, &env, "1.0.0", "2.0.0");
+
+    const outcome = try runCheckWithLatestInstalled(std.testing.io, allocator, &env, "unknown", "99.0.0");
     try std.testing.expectEqual(CheckOutcome.up_to_date, outcome);
 
     try std.testing.expect((try availableUpdate(std.testing.io, allocator, &env)) == null);
