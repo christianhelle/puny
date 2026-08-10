@@ -35,4 +35,4 @@ pub const planning =
     \\When you are done, prompt the user to switch to Build mode to start implementing the PRD, and provide a hint on how to do this (/build implement)
 ;
 
-pub const prompt_text = "Prompt:";
+pub const prompt_text = ">";
