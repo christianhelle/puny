@@ -68,9 +68,11 @@ pub const Provider = struct {
     /// unchanged key back verbatim and does not discard an undecryptable
     /// credential. Internal only: never serialized.
     stored_blob: ?[]const u8 = null,
-    /// Plaintext the retained `stored_blob` was decrypted to, so `save` can
-    /// tell an unchanged key from a newly-typed one. Internal only: never
-    /// serialized; null when decryption failed or the key was never loaded.
+    /// Plaintext that was already on disk for this provider: the plaintext the
+    /// retained `stored_blob` was decrypted to, or a legacy clear-text key read
+    /// directly. Lets `save` tell an unchanged key from a newly-typed one and
+    /// preserve keys that were already persisted when encryption is impossible.
+    /// Internal only: never serialized; null for a freshly-entered key.
     stored_plaintext: ?[]const u8 = null,
 
     pub fn clone(self: Provider, allocator: std.mem.Allocator) std.mem.Allocator.Error!Provider {
@@ -249,7 +251,15 @@ fn decryptStoredApiKeys(
 
     for (&cfg.providers) |*p| {
         const api_key = p.apiKey orelse continue;
-        if (api_key.len == 0 or !secrets.isEncrypted(api_key)) continue;
+        if (api_key.len == 0) continue;
+        if (!secrets.isEncrypted(api_key)) {
+            // Legacy plaintext key read straight from disk. It was already
+            // stored in clear text, so remember it: if a later save cannot
+            // encrypt (malformed key file) it must preserve this key rather
+            // than silently drop it.
+            p.stored_plaintext = api_key;
+            continue;
+        }
 
         // Retain the original ciphertext even on success: it lets `save` write
         // the unmodified key back verbatim instead of re-encrypting it.
@@ -382,19 +392,25 @@ pub fn save(
             }
         } else {
             // An existing key file that cannot be used (malformed) must not
-            // brick the save. Warn and drop the fresh plaintext keys from the
-            // write rather than persisting them in clear text; the rest of the
-            // config saves normally.
+            // brick the save. Warn; drop freshly entered keys rather than
+            // persisting them in clear text, but leave plaintext keys that
+            // were already on disk (legacy) untouched so an unrelated save
+            // cannot silently delete them. The rest of the config saves
+            // normally.
             var stderr_buffer: [1024]u8 = undefined;
             var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
             const stderr_writer = &stderr_file_writer.interface;
             stderr_writer.print(
-                "Warning: the encryption key file is malformed; the new API key(s) were not saved. Fix or remove it and re-enter your keys.\n",
+                "Warning: the encryption key file is malformed; new API keys were not saved and stored keys could not be encrypted. Fix or remove it and re-enter your keys.\n",
                 .{},
             ) catch {};
             stderr_writer.flush() catch {};
             for (0..4) |i| {
-                if (encrypt_index[i]) to_write.providers[i].apiKey = null;
+                if (encrypt_index[i]) {
+                    const p = &to_write.providers[i];
+                    const already_on_disk = p.stored_plaintext != null and std.mem.eql(u8, p.stored_plaintext.?, p.apiKey.?);
+                    if (!already_on_disk) p.apiKey = null;
+                }
             }
         }
     }
@@ -1038,6 +1054,56 @@ test "save fails soft when a fresh plaintext key cannot be encrypted" {
     try std.testing.expect(std.mem.indexOf(u8, raw, "enc:v1:") == null);
     // The unencryptable key is persisted as null, never as clear text.
     try std.testing.expect(std.mem.indexOf(u8, raw, "\"apiKey\": null") != null);
+}
+
+test "save preserves legacy plaintext keys when the key file is malformed" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    // Two providers carry legacy plaintext keys that were already on disk.
+    const contents =
+        \\{
+        \\  "provider": "opencode_go",
+        \\  "providers": [
+        \\    { "name": "lmstudio", "apiKey": null, "url": "http://127.0.0.1:1234", "model": "", "reasoning_effort": null },
+        \\    { "name": "opencode_zen", "apiKey": "sk-legacy-zen", "url": "https://opencode.ai/zen", "model": "", "reasoning_effort": null },
+        \\    { "name": "opencode_go", "apiKey": "sk-legacy-go", "url": "https://opencode.ai/zen/go", "model": "", "reasoning_effort": null },
+        \\    { "name": "copilot", "apiKey": null, "url": "https://api.githubcopilot.com", "model": "", "reasoning_effort": null }
+        \\  ]
+        \\}
+    ;
+    try writeTestConfig(&env, contents);
+
+    // A malformed key file means no key can be produced for encryption.
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = key_path, .data = "too-short" });
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-legacy-go", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+
+    // Reconfigure only opencode_go with a fresh key; opencode_zen keeps its
+    // legacy plaintext key untouched.
+    loaded.config.providerEntry(.opencode_go).apiKey = "sk-new-go";
+    loaded.config.providerEntry(.opencode_go).stored_blob = null;
+    try save(std.testing.allocator, std.testing.io, loaded.config, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    // The freshly entered key is dropped rather than persisted in clear text...
+    try std.testing.expect(std.mem.indexOf(u8, raw, "sk-new-go") == null);
+    // ...but the unchanged legacy key that was already on disk survives.
+    try std.testing.expect(std.mem.indexOf(u8, raw, "sk-legacy-zen") != null);
 }
 
 test "save does not create a key file when no api keys are set" {
