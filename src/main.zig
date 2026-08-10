@@ -46,25 +46,28 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // Detached child process entry: run the update check and exit quietly.
+    // Errors are propagated here so an explicit `puny --check-update` surfaces
+    // failures; the detached spawn discards stderr and ignores the exit code.
     if (parsed.check_update) {
-        const outcome = update_check.runCheck(init.io, arena, init.environ_map);
-        if (outcome) |result| {
-            var out_buf: [1024]u8 = undefined;
-            var out: std.Io.File.Writer = .init(.stdout(), init.io, &out_buf);
-            switch (result) {
-                .update_available => {
-                    if (update_check.availableUpdate(init.io, arena, init.environ_map)) |maybe_latest| {
-                        if (maybe_latest) |latest| {
-                            update_check.printUpdateNotice(&out.interface, latest) catch {};
-                        }
-                    } else |_| {}
-                },
-                .up_to_date => {
-                    out.interface.print("puny is up to date.\n", .{}) catch {};
-                },
-            }
-            out.interface.flush() catch {};
+        const result = update_check.runCheck(init.io, arena, init.environ_map) catch |err| {
+            printUpdateCheckError(init.io, err);
+            std.process.exit(1);
+        };
+        var out_buf: [1024]u8 = undefined;
+        var out: std.Io.File.Writer = .init(.stdout(), init.io, &out_buf);
+        switch (result) {
+            .update_available => {
+                if (update_check.availableUpdate(init.io, arena, init.environ_map)) |maybe_latest| {
+                    if (maybe_latest) |latest| {
+                        update_check.printUpdateNotice(&out.interface, latest) catch {};
+                    }
+                } else |_| {}
+            },
+            .up_to_date => {
+                out.interface.print("puny is up to date.\n", .{}) catch {};
+            },
         }
+        out.interface.flush() catch {};
         return;
     }
 
@@ -356,6 +359,15 @@ fn printStartupError(io: std.Io, source: []const u8, reason: []const u8) void {
     var err_writer: std.Io.File.Writer = .init(.stderr(), io, &err_buf);
     const stderr_writer = &err_writer.interface;
     stderr_writer.print("Failed to load prompt from {s}: {s}\n", .{ source, reason }) catch {};
+    stderr_writer.flush() catch {};
+}
+
+/// Prints an update-check failure message to stderr and flushes.
+fn printUpdateCheckError(io: std.Io, err: anyerror) void {
+    var err_buf: [512]u8 = undefined;
+    var err_writer: std.Io.File.Writer = .init(.stderr(), io, &err_buf);
+    const stderr_writer = &err_writer.interface;
+    stderr_writer.print("Update check failed: {s}\n", .{@errorName(err)}) catch {};
     stderr_writer.flush() catch {};
 }
 
