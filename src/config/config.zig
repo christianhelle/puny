@@ -64,10 +64,14 @@ pub const Provider = struct {
     url: []const u8,
     model: []const u8,
     reasoning_effort: ?[]const u8 = null,
-    /// Original `enc:v1:` blob retained when decryption failed, so a later
-    /// save does not discard the user's stored credential. Internal only:
-    /// never serialized; `save` restores it into `apiKey` when unset.
+    /// Original `enc:v1:` blob retained by load, so a later save writes an
+    /// unchanged key back verbatim and does not discard an undecryptable
+    /// credential. Internal only: never serialized.
     stored_blob: ?[]const u8 = null,
+    /// Plaintext the retained `stored_blob` was decrypted to, so `save` can
+    /// tell an unchanged key from a newly-typed one. Internal only: never
+    /// serialized; null when decryption failed or the key was never loaded.
+    stored_plaintext: ?[]const u8 = null,
 
     pub fn clone(self: Provider, allocator: std.mem.Allocator) std.mem.Allocator.Error!Provider {
         return .{
@@ -77,6 +81,7 @@ pub const Provider = struct {
             .model = try allocator.dupe(u8, self.model),
             .reasoning_effort = if (self.reasoning_effort) |v| try allocator.dupe(u8, v) else null,
             .stored_blob = if (self.stored_blob) |v| try allocator.dupe(u8, v) else null,
+            .stored_plaintext = if (self.stored_plaintext) |v| try allocator.dupe(u8, v) else null,
         };
     }
 
@@ -86,11 +91,13 @@ pub const Provider = struct {
         allocator.free(self.model);
         if (self.reasoning_effort) |v| allocator.free(v);
         if (self.stored_blob) |v| allocator.free(v);
+        if (self.stored_plaintext) |v| allocator.free(v);
     }
 
     pub fn jsonStringify(v: Provider, jws: anytype) !void {
-        // Serialize the persisted fields only; `stored_blob` is an in-memory
-        // retention of the original ciphertext and must not reach config.json.
+        // Serialize the persisted fields only; `stored_blob` and
+        // `stored_plaintext` are in-memory retention of the original ciphertext
+        // and decrypted key and must not reach config.json.
         try jws.beginObject();
         try jws.objectField("name");
         try jws.write(v.name);
@@ -290,19 +297,22 @@ fn decryptStoredApiKeys(
             continue;
         };
 
-        p.apiKey = blk: {
-            break :blk secrets.decrypt(allocator, key, api_key) catch |err| {
-                var stderr_buffer: [1024]u8 = undefined;
-                var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
-                const stderr_writer = &stderr_file_writer.interface;
-                stderr_writer.print(
-                    "Warning: could not decrypt the stored API key for provider '{s}' ({s}). Re-enter it with --reconfigure.\n",
-                    .{ @tagName(p.name), @errorName(err) },
-                ) catch {};
-                stderr_writer.flush() catch {};
-                break :blk null;
-            };
+        // Keep the decrypted plaintext alongside the blob so `save` can tell an
+        // unchanged key from a newly-typed one before writing the blob back.
+        const plaintext = secrets.decrypt(allocator, key, api_key) catch |err| {
+            var stderr_buffer: [1024]u8 = undefined;
+            var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+            const stderr_writer = &stderr_file_writer.interface;
+            stderr_writer.print(
+                "Warning: could not decrypt the stored API key for provider '{s}' ({s}). Re-enter it with --reconfigure.\n",
+                .{ @tagName(p.name), @errorName(err) },
+            ) catch {};
+            stderr_writer.flush() catch {};
+            p.apiKey = null;
+            continue;
         };
+        p.apiKey = plaintext;
+        p.stored_plaintext = plaintext;
     }
 }
 
@@ -325,8 +335,9 @@ pub fn save(
     // original ciphertext retained by load, so a provider whose key is unset
     // (undecryptable) or unchanged since decrypt writes that ciphertext back
     // verbatim — an unrelated save must not depend on key material or churn
-    // the blobs. Only genuinely fresh plaintext keys (stored_blob == null)
-    // need encryption.
+    // the blobs. A provider whose plaintext key no longer matches the retained
+    // plaintext is treated as fresh and encrypted; a fresh plaintext key
+    // (stored_blob == null) needs encryption.
     var needs_encryption = false;
     var encrypt_index: [4]bool = .{ false, false, false, false };
     for (&to_write.providers, 0..) |*p, i| {
@@ -336,9 +347,14 @@ pub fn save(
         };
         if (key.len == 0 or secrets.isEncrypted(key)) continue;
         if (p.stored_blob) |blob| {
-            // Unmodified decrypted key: persist the original ciphertext.
-            p.apiKey = blob;
-            continue;
+            // Only an unmodified decrypted key persists the original
+            // ciphertext; a different plaintext replaces it and re-encrypts.
+            if (p.stored_plaintext) |pt| {
+                if (std.mem.eql(u8, key, pt)) {
+                    p.apiKey = blob;
+                    continue;
+                }
+            }
         }
         encrypt_index[i] = true;
         needs_encryption = true;
@@ -902,6 +918,47 @@ test "save does not re-encrypt an unmodified decrypted key" {
     defer std.testing.allocator.free(raw);
     try std.testing.expect(std.mem.count(u8, raw, blob) == 1);
     try std.testing.expect(std.mem.count(u8, raw, "enc:v1:") == 1);
+}
+
+test "save re-encrypts a decrypted key that was changed" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+
+    const key = [_]u8{0x7b} ** 32;
+    try writeTestKeyFile(&env, key);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-original");
+    defer std.testing.allocator.free(blob);
+
+    const contents = try testConfigJson(blob);
+    defer std.testing.allocator.free(contents);
+    try writeTestConfig(&env, contents);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("sk-original", loaded.config.providerEntryConst(.opencode_go).apiKey.?);
+
+    // The key changes to a new plaintext while the original ciphertext is still
+    // retained in memory. The save must not write the stale ciphertext back:
+    // it must encrypt the new key instead.
+    loaded.config.providerEntry(.opencode_go).apiKey = "sk-changed";
+    try save(std.testing.allocator, std.testing.io, loaded.config, &env);
+
+    const cfg_path = try configPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(cfg_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cfg_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, blob) == null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "sk-changed") == null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "enc:v1:") != null);
 }
 
 test "save fails soft when a fresh plaintext key cannot be encrypted" {
