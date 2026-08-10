@@ -1272,7 +1272,7 @@ fn redactPlainBody(allocator: std.mem.Allocator, body: []const u8) ?[]const u8 {
 
         const name = blk: {
             for (secret_names) |n| {
-                if (std.mem.startsWith(u8, masked[i..], n)) break :blk n;
+                if (std.ascii.startsWithIgnoreCase(masked[i..], n)) break :blk n;
             }
             break :blk null;
         } orelse {
