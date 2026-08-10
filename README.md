@@ -551,6 +551,7 @@ While in a chat session:
 - `/build [task]` — switch to build mode (optionally with a task description)
 - `/model [id]` — switch to another model; shows the model picker if no ID is given
 - `/provider [name]` — switch to another provider without reconfiguring everything; shows the provider picker if no name is given, then opens the model picker for the new provider
+- `/thinking [level]` — change the reasoning effort of the current model; shows the effort picker if no level is given (valid levels: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`)
 - `/sessions` — list all saved sessions, showing their UUID, whether they have a `plan.md` or saved conversation, and a preview of the first user message
 - `/resume [id]` — list saved sessions and pick one to restore, or restore a specific session by UUID prefix
 - `/prune` — delete all session directories except the current one
