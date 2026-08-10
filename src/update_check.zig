@@ -129,16 +129,17 @@ pub fn runCheckWithLatest(
     return runCheckWithLatestInstalled(io, allocator, environ_map, version.version, available);
 }
 
-/// Best-effort update check for the detached child process. Fetches the latest
-/// release and records it in the flag file when newer. Errors are swallowed.
+/// Update check that fetches the latest release and records it in the flag file
+/// when newer. Errors are propagated to the caller; the detached child process
+/// spawn ignores stderr and the exit code, so failures stay silent there.
 pub fn runCheck(
     io: std.Io,
     allocator: std.mem.Allocator,
     environ_map: *const std.process.Environ.Map,
-) ?CheckOutcome {
-    const available = upgrade.latestReleaseVersion(allocator, io) catch return null;
+) !CheckOutcome {
+    const available = try upgrade.latestReleaseVersion(allocator, io);
     defer allocator.free(available);
-    return runCheckWithLatest(io, allocator, environ_map, available) catch null;
+    return try runCheckWithLatest(io, allocator, environ_map, available);
 }
 
 /// Arguments used to spawn the detached `--check-update` child process.
