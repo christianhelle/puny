@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Merged Pull Requests
+- Fix release workflow changelog job failing on push ([#124](https://github.com/christianhelle/puny/pull/124)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.3.2](https://github.com/christianhelle/puny/releases/tag/v0.3.2) (2026-08-11)
 
 ### Features
