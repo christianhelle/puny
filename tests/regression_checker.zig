@@ -169,7 +169,9 @@ const IsolatedEnv = struct {
 
     fn deinit(self: *IsolatedEnv, io: std.Io) void {
         self.environ_map.deinit();
-        std.Io.Dir.cwd().deleteTree(io, self.temp_dir_path) catch {};
+        std.Io.Dir.cwd().deleteTree(io, self.temp_dir_path) catch |err| {
+            std.log.warn("failed to remove regression temp dir {s}: {s}", .{ self.temp_dir_path, @errorName(err) });
+        };
         self.allocator.free(self.temp_dir_path);
         self.* = undefined;
     }
