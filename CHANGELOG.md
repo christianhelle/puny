@@ -1,11 +1,9 @@
 # Changelog
 
-## [Unreleased Changes]
-
-### Merged Pull Requests
-- Fix release workflow changelog job failing on push ([#124](https://github.com/christianhelle/puny/pull/124)) ([@christianhelle](https://github.com/christianhelle/))
+## [v0.3.3](https://github.com/christianhelle/puny/releases/tag/v0.3.3) (2026-08-11)
 
 ### Features
+- Fix release workflow changelog job failing on push ([#124](https://github.com/christianhelle/puny/pull/124)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix exit screen rendering on fresh Windows consoles ([#125](https://github.com/christianhelle/puny/pull/125)) ([@christianhelle](https://github.com/christianhelle/))
 
 
