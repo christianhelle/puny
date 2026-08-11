@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.3.2](https://github.com/christianhelle/puny/releases/tag/v0.3.2) (2026-08-11)
 
 ### Features
 - Enable ANSI escape processing on legacy Windows consoles ([#123](https://github.com/christianhelle/puny/pull/123)) ([@christianhelle](https://github.com/christianhelle/))
