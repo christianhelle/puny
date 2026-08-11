@@ -2,7 +2,8 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
+### Features
+- Add install-release-safe, install-release-fast, and install-debug build steps ([#120](https://github.com/christianhelle/puny/pull/120)) ([@christianhelle](https://github.com/christianhelle/))
 - Add non-blocking update check with exit notice ([#119](https://github.com/christianhelle/puny/pull/119)) ([@christianhelle](https://github.com/christianhelle/))
 
 
