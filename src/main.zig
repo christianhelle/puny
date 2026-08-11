@@ -19,6 +19,7 @@ const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
 const welcome = @import("tui/welcome.zig");
 const ansi = @import("tui/ansi.zig");
+const vt = @import("tui/vt.zig");
 const update_check = @import("update_check.zig");
 
 comptime {
@@ -30,6 +31,7 @@ const DebugLog = session.DebugLog;
 const ChatLog = session.ChatLog;
 
 pub fn main(init: std.process.Init) !void {
+    vt.enableAnsi();
     const arena: std.mem.Allocator = init.arena.allocator();
     var messages_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const messages_arena = messages_arena_state.allocator();
@@ -844,6 +846,9 @@ test "include tui.provider_picker tests" {
 }
 test "include tui.terminal tests" {
     _ = @import("tui/terminal.zig");
+}
+test "include tui.vt tests" {
+    _ = @import("tui/vt.zig");
 }
 test "include version tests" {
     _ = @import("version.zig");
