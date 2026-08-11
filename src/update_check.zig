@@ -5,6 +5,9 @@ const version = @import("version.zig");
 
 pub const flag_file_name = "update-available";
 
+/// Environment variable that marks the detached update-check child process.
+pub const check_env_var = "PUNY_UPDATE_CHECK";
+
 /// Absolute path to the update-available flag file, inside the puny config
 /// directory. The returned slice is owned by `allocator`.
 pub fn flagPath(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
@@ -166,20 +169,27 @@ pub fn runCheck(
     return try runCheckWithLatest(io, allocator, environ_map, available);
 }
 
-/// Arguments used to spawn the detached `--check-update` child process.
-pub fn backgroundCheckArgv(arena: std.mem.Allocator, exe_path: []const u8) []const []const u8 {
-    return arena.dupe([]const u8, &.{ exe_path, "--check-update" }) catch &.{};
-}
-
-/// Spawns a detached `puny --check-update` child process. Returns immediately;
-/// errors are swallowed so startup is never blocked.
-pub fn spawnBackgroundCheck(io: std.Io, allocator: std.mem.Allocator) void {
+/// Spawns a detached `puny` child process that runs the update check. The child
+/// is marked with `PUNY_UPDATE_CHECK=1` in its environment so it knows to run
+/// the check and exit quietly. Returns immediately; errors are swallowed so
+/// startup is never blocked.
+pub fn spawnBackgroundCheck(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) void {
     const exe_path = std.process.executablePathAlloc(io, allocator) catch return;
     defer allocator.free(exe_path);
-    const argv = backgroundCheckArgv(allocator, exe_path);
-    defer allocator.free(argv);
+
+    // The spawn replaces the child environment entirely, so clone the parent's
+    // map and add the marker that turns the child into an update check.
+    var child_env = environ_map.clone(allocator) catch return;
+    defer child_env.deinit();
+    child_env.put(check_env_var, "1") catch return;
+
     _ = std.process.spawn(io, .{
-        .argv = argv,
+        .argv = &[_][]const u8{exe_path},
+        .environ_map = &child_env,
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .ignore,
@@ -436,13 +446,11 @@ test "runCheckWithLatest treats an unparseable installed version as up to date" 
     try std.testing.expect((try availableUpdate(std.testing.io, allocator, &env)) == null);
 }
 
-test "backgroundCheckArgv is the exe with the hidden check-update flag" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
+test "spawnBackgroundCheck marks the child with the update check env var" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("PUNY_UPDATE_CHECK", "1");
 
-    const argv = backgroundCheckArgv(arena, "C:\\tools\\puny.exe");
-    try std.testing.expectEqualStrings("C:\\tools\\puny.exe", argv[0]);
-    try std.testing.expectEqualStrings("--check-update", argv[1]);
-    try std.testing.expectEqual(@as(usize, 2), argv.len);
+    const value = env.get(check_env_var);
+    try std.testing.expectEqualStrings("1", value.?);
 }
