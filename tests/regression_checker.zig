@@ -77,6 +77,34 @@ const RunParams = struct {
     fixture_body: []const u8,
 };
 
+/// Resolves the parent directory for temporary files, mirroring the fallback
+/// chain in `src/upgrade.zig`.
+fn tempParentDir(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
+    if (environ_map.get("TMPDIR")) |t| return try allocator.dupe(u8, t);
+    if (environ_map.get("TEMP")) |t| return try allocator.dupe(u8, t);
+    if (environ_map.get("TMP")) |t| return try allocator.dupe(u8, t);
+    if (comptime builtin.os.tag == .windows) return try allocator.dupe(u8, "C:\\Windows\\Temp");
+    return try allocator.dupe(u8, "/tmp");
+}
+
+/// Creates a unique throwaway directory under the OS temp dir and returns its
+/// absolute path, owned by `allocator`. Used to isolate child-process config
+/// and session storage from the real one.
+fn makeTempDir(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) ![]const u8 {
+    const parent = try tempParentDir(allocator, environ_map);
+    defer allocator.free(parent);
+
+    var random_source: std.Random.IoSource = .{ .io = io };
+    const random = random_source.interface();
+    const unique = random.int(u64);
+    const name = try std.fmt.allocPrint(allocator, "puny-regression-{x}", .{unique});
+    defer allocator.free(name);
+
+    const path = try std.fs.path.join(allocator, &.{ parent, name });
+    try std.Io.Dir.createDirAbsolute(io, path, @enumFromInt(0o755));
+    return path;
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const allocator = init.gpa;
     const arena = init.arena.allocator();
