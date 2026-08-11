@@ -85,6 +85,9 @@ pub fn build(b: *std.Build) !void {
     docker_step.dependOn(&docker_build_image.step);
 
     addInstallStep(b, target, build_options, "install-release", "Build ReleaseSmall and install to the docs install directory", .ReleaseSmall);
+    addInstallStep(b, target, build_options, "install-release-safe", "Build ReleaseSafe and install to the docs install directory", .ReleaseSafe);
+    addInstallStep(b, target, build_options, "install-release-fast", "Build ReleaseFast and install to the docs install directory", .ReleaseFast);
+    addInstallStep(b, target, build_options, "install-debug", "Build Debug and install to the docs install directory", .Debug);
 
     const test_regression_step = b.step("test-regression", "Run cross-platform builds, unit tests, and regression tests");
 
