@@ -32,6 +32,7 @@ const ChatLog = session.ChatLog;
 
 pub fn main(init: std.process.Init) !void {
     vt.enableAnsi();
+    vt.enableUtf8();
     const arena: std.mem.Allocator = init.arena.allocator();
     var messages_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const messages_arena = messages_arena_state.allocator();
