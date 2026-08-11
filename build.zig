@@ -84,10 +84,7 @@ pub fn build(b: *std.Build) !void {
     docker_build_image.step.dependOn(dockerfile_step);
     docker_step.dependOn(&docker_build_image.step);
 
-    const release_exe = addPunyExecutable(b, "puny", target, .ReleaseSmall, build_options);
-    const install_release_step = b.step("install-release", "Build ReleaseSmall and install to the docs install directory");
-    const install_release = InstallReleaseStep.create(b, release_exe.getEmittedBin(), getInstallPrefix(b), release_exe.out_filename);
-    install_release_step.dependOn(&install_release.step);
+    addInstallStep(b, target, build_options, "install-release", "Build ReleaseSmall and install to the docs install directory", .ReleaseSmall);
 
     const test_regression_step = b.step("test-regression", "Run cross-platform builds, unit tests, and regression tests");
 
@@ -180,6 +177,20 @@ fn addPunyExecutable(
     return exe;
 }
 
+fn addInstallStep(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    build_options: *std.Build.Step.Options,
+    step_name: []const u8,
+    description: []const u8,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const exe = addPunyExecutable(b, "puny", target, optimize, build_options);
+    const install_step = b.step(step_name, description);
+    const install = InstallReleaseStep.create(b, @tagName(optimize), exe.getEmittedBin(), getInstallPrefix(b), exe.out_filename);
+    install_step.dependOn(&install.step);
+}
+
 fn createBuildInfoOptions(b: *std.Build) *std.Build.Step.Options {
     const options = b.addOptions();
     const io = b.graph.io;
@@ -241,6 +252,7 @@ const InstallReleaseStep = struct {
 
     fn create(
         b: *std.Build,
+        label: []const u8,
         source: std.Build.LazyPath,
         dest_dir: []const u8,
         dest_name: []const u8,
@@ -249,7 +261,7 @@ const InstallReleaseStep = struct {
         self.* = .{
             .step = std.Build.Step.init(.{
                 .id = .custom,
-                .name = b.fmt("install {s} to {s}", .{ dest_name, dest_dir }),
+                .name = b.fmt("install {s} ({s}) to {s}", .{ dest_name, label, dest_dir }),
                 .owner = b,
                 .makeFn = make,
             }),
