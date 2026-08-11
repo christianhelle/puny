@@ -11,6 +11,9 @@ pub const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
 /// `ENABLE_PROCESSED_OUTPUT` in the Windows Console docs.
 pub const ENABLE_PROCESSED_OUTPUT: u32 = 0x0001;
 
+/// Windows code page identifier for UTF-8. See `CP_UTF8` in the Windows docs.
+pub const CP_UTF8: u32 = 65001;
+
 /// Returns the console mode with ANSI escape sequence processing enabled,
 /// preserving any existing mode flags.
 pub fn modeWithAnsi(mode: u32) u32 {
@@ -40,6 +43,19 @@ test "enableAnsi is safe to call on any platform" {
     enableAnsi();
 }
 
+test "CP_UTF8 is the UTF-8 code page identifier" {
+    try std.testing.expectEqual(@as(u32, 65001), CP_UTF8);
+}
+
+test "enableUtf8 is safe to call on any platform" {
+    // Calling enableUtf8() on Windows would mutate the test process console
+    // output code page and is not restored; the Windows code path is still
+    // validated at compile time (the CI regression suite cross-compiles to
+    // x86_64-windows-gnu and aarch64-windows-gnu).
+    if (builtin.os.tag == .windows) return;
+    enableUtf8();
+}
+
 /// Enable ANSI escape sequence processing on the stdout and stderr console
 /// output handles. No-op on non-Windows platforms and when a handle is not a
 /// console (for example, when output is redirected to a file or pipe).
@@ -47,6 +63,21 @@ pub fn enableAnsi() void {
     if (builtin.os.tag != .windows) return;
     enableOnHandle(windows.STD_OUTPUT_HANDLE);
     enableOnHandle(windows.STD_ERROR_HANDLE);
+}
+
+/// Set the console output code page to UTF-8 so that Unicode characters
+/// (such as the box-drawing dashes in the exit screen headers) render
+/// correctly even on a fresh Windows install whose default console code page
+/// is not UTF-8 (for example, CP437 in cmd.exe). No-op on non-Windows
+/// platforms and when stdout is not a console (for example, when output is
+/// redirected to a file or pipe).
+pub fn enableUtf8() void {
+    if (builtin.os.tag != .windows) return;
+    const h = windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
+    if (h == windows.INVALID_HANDLE_VALUE) return;
+    var mode: windows.DWORD = undefined;
+    if (windows.GetConsoleMode(h, &mode) == .FALSE) return;
+    _ = windows.SetConsoleOutputCP(CP_UTF8);
 }
 
 fn enableOnHandle(handle_id: u32) void {
@@ -69,4 +100,5 @@ const windows = if (builtin.os.tag == .windows) struct {
     pub extern "kernel32" fn GetStdHandle(dwStdHandle: u32) callconv(.winapi) HANDLE;
     pub extern "kernel32" fn GetConsoleMode(hConsoleHandle: HANDLE, lpMode: *DWORD) callconv(.winapi) BOOL;
     pub extern "kernel32" fn SetConsoleMode(hConsoleHandle: HANDLE, dwMode: DWORD) callconv(.winapi) BOOL;
+    pub extern "kernel32" fn SetConsoleOutputCP(wCodePageID: DWORD) callconv(.winapi) BOOL;
 } else void{};
