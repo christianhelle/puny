@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Remove the --check-update CLI flag ([#121](https://github.com/christianhelle/puny/pull/121)) ([@christianhelle](https://github.com/christianhelle/))
 - Add install-release-safe, install-release-fast, and install-debug build steps ([#120](https://github.com/christianhelle/puny/pull/120)) ([@christianhelle](https://github.com/christianhelle/))
 - Add non-blocking update check with exit notice ([#119](https://github.com/christianhelle/puny/pull/119)) ([@christianhelle](https://github.com/christianhelle/))
 
