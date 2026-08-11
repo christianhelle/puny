@@ -105,6 +105,43 @@ fn makeTempDir(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std
     return path;
 }
 
+/// A child environment whose config-dir variable is redirected to a unique
+/// temp dir, so mock regression runs never touch the real session history.
+const IsolatedEnv = struct {
+    allocator: std.mem.Allocator,
+    environ_map: std.process.Environ.Map,
+    temp_dir_path: []const u8,
+
+    fn init(allocator: std.mem.Allocator, io: std.Io, parent_env: *const std.process.Environ.Map) !IsolatedEnv {
+        var child_env = try parent_env.clone(allocator);
+        errdefer child_env.deinit();
+
+        const temp_dir_path = try makeTempDir(allocator, io, parent_env);
+        errdefer allocator.free(temp_dir_path);
+
+        // Matches the config-dir resolution in `src/core/session.zig`:
+        // Windows reads APPDATA, POSIX reads XDG_CONFIG_HOME.
+        if (comptime builtin.os.tag == .windows) {
+            try child_env.put("APPDATA", temp_dir_path);
+        } else {
+            try child_env.put("XDG_CONFIG_HOME", temp_dir_path);
+        }
+
+        return .{
+            .allocator = allocator,
+            .environ_map = child_env,
+            .temp_dir_path = temp_dir_path,
+        };
+    }
+
+    fn deinit(self: *IsolatedEnv, io: std.Io) void {
+        self.environ_map.deinit();
+        std.Io.Dir.cwd().deleteTree(io, self.temp_dir_path) catch {};
+        self.allocator.free(self.temp_dir_path);
+        self.* = undefined;
+    }
+};
+
 pub fn main(init: std.process.Init) !u8 {
     const allocator = init.gpa;
     const arena = init.arena.allocator();
