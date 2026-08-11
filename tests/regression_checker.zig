@@ -89,6 +89,23 @@ fn tempParentDir(allocator: std.mem.Allocator, environ_map: *const std.process.E
     return try allocator.dupe(u8, "/tmp");
 }
 
+/// Ensures `dir` exists, creating it and any missing ancestors.
+fn ensureDirExists(io: std.Io, dir: []const u8) !void {
+    std.Io.Dir.createDirAbsolute(io, dir, @enumFromInt(0o755)) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        error.FileNotFound => {
+            if (std.fs.path.dirname(dir)) |parent| {
+                try ensureDirExists(io, parent);
+                std.Io.Dir.createDirAbsolute(io, dir, @enumFromInt(0o755)) catch |e| switch (e) {
+                    error.PathAlreadyExists => {},
+                    else => return e,
+                };
+            } else return err;
+        },
+        else => return err,
+    };
+}
+
 /// Creates a unique throwaway directory under the OS temp dir and returns its
 /// absolute path, owned by `allocator`. Used to isolate child-process config
 /// and session storage from the real one.
@@ -96,15 +113,29 @@ fn makeTempDir(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std
     const parent = try tempParentDir(allocator, environ_map);
     defer allocator.free(parent);
 
+    try ensureDirExists(io, parent);
+
     var random_source: std.Random.IoSource = .{ .io = io };
     const random = random_source.interface();
-    const unique = random.int(u64);
-    const name = try std.fmt.allocPrint(allocator, "puny-regression-{x}", .{unique});
-    defer allocator.free(name);
 
-    const path = try std.fs.path.join(allocator, &.{ parent, name });
-    try std.Io.Dir.createDirAbsolute(io, path, @enumFromInt(0o755));
-    return path;
+    while (true) {
+        const unique = random.int(u64);
+        const name = try std.fmt.allocPrint(allocator, "puny-regression-{x}", .{unique});
+        defer allocator.free(name);
+
+        const path = try std.fs.path.join(allocator, &.{ parent, name });
+        std.Io.Dir.createDirAbsolute(io, path, @enumFromInt(0o755)) catch |err| switch (err) {
+            error.PathAlreadyExists => {
+                allocator.free(path);
+                continue;
+            },
+            else => {
+                allocator.free(path);
+                return err;
+            },
+        };
+        return path;
+    }
 }
 
 /// A child environment whose config-dir variable is redirected to a unique
@@ -484,6 +515,37 @@ test "make temp dir creates a unique directory under the temp parent" {
     const parent = try testTempParentDirPath();
     defer std.testing.allocator.free(parent);
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, parent) catch {};
+    try env.put("TMPDIR", parent);
+
+    const path = try makeTempDir(std.testing.allocator, std.testing.io, &env);
+    defer std.testing.allocator.free(path);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, path) catch {};
+
+    // The directory exists and lives under the configured temp parent.
+    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, path, .{});
+    defer dir.close(std.testing.io);
+    try std.testing.expect(std.mem.startsWith(u8, path, parent));
+}
+
+test "make temp dir creates missing parent directories" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const unique = random.int(u64);
+    const missing_leaf = try std.fmt.allocPrint(std.testing.allocator, "regression-checker-missing-parent-{x}", .{unique});
+    defer std.testing.allocator.free(missing_leaf);
+    const parent = try std.fs.path.join(std.testing.allocator, &.{ cwd, ".zig-cache", "tmp", missing_leaf });
+    defer std.testing.allocator.free(parent);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, parent) catch {};
+
+    // Ensure the path is not present at the start.
+    std.Io.Dir.cwd().deleteTree(std.testing.io, parent) catch {};
+
     try env.put("TMPDIR", parent);
 
     const path = try makeTempDir(std.testing.allocator, std.testing.io, &env);
