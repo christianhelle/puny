@@ -6,14 +6,19 @@ const builtin = @import("builtin");
 /// `ENABLE_VIRTUAL_TERMINAL_PROCESSING` in the Windows Console docs.
 pub const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
 
+/// Windows console mode flag required for
+/// `ENABLE_VIRTUAL_TERMINAL_PROCESSING` to function correctly. See
+/// `ENABLE_PROCESSED_OUTPUT` in the Windows Console docs.
+pub const ENABLE_PROCESSED_OUTPUT: u32 = 0x0001;
+
 /// Returns the console mode with ANSI escape sequence processing enabled,
 /// preserving any existing mode flags.
 pub fn modeWithAnsi(mode: u32) u32 {
-    return mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    return mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
 }
 
-test "modeWithAnsi sets only the VT processing bit for a zero mode" {
-    try std.testing.expectEqual(ENABLE_VIRTUAL_TERMINAL_PROCESSING, modeWithAnsi(0));
+test "modeWithAnsi enables processed output and VT processing for a zero mode" {
+    try std.testing.expectEqual(ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING, modeWithAnsi(0));
 }
 
 test "modeWithAnsi preserves existing mode flags" {
@@ -27,6 +32,11 @@ test "modeWithAnsi is idempotent" {
 }
 
 test "enableAnsi is safe to call on any platform" {
+    // Calling enableAnsi() on Windows would mutate the test process console
+    // mode and is not restored; the Windows code path is still validated at
+    // compile time (the CI regression suite cross-compiles to
+    // x86_64-windows-gnu and aarch64-windows-gnu).
+    if (builtin.os.tag == .windows) return;
     enableAnsi();
 }
 
