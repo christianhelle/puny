@@ -446,7 +446,7 @@ test "runCheckWithLatest treats an unparseable installed version as up to date" 
     try std.testing.expect((try availableUpdate(std.testing.io, allocator, &env)) == null);
 }
 
-test "spawnBackgroundCheck marks the child with the update check env var" {
+test "check_env_var is the environment variable that marks the update check child" {
     var env = std.process.Environ.Map.init(std.testing.allocator);
     defer env.deinit();
     try env.put("PUNY_UPDATE_CHECK", "1");
