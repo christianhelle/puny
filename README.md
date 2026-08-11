@@ -128,6 +128,14 @@ To build a release binary and install it to `$HOME/.local/bin` (the same directo
 zig build install-release
 ```
 
+Other optimization modes are available:
+
+```bash
+zig build install-release-safe   # safe release build (runtime safety checks enabled)
+zig build install-release-fast   # fast release build (maximizes runtime performance)
+zig build install-debug          # debug build
+```
+
 The install directory can be overridden with the `INSTALL_DIR` environment variable or the `--prefix` flag:
 
 ```bash
@@ -647,6 +655,14 @@ To build a release binary and install it to `$HOME/.local/bin` (the same directo
 
 ```bash
 zig build install-release
+```
+
+Other optimization modes are available:
+
+```bash
+zig build install-release-safe   # safe release build (runtime safety checks enabled)
+zig build install-release-fast   # fast release build (maximizes runtime performance)
+zig build install-debug          # debug build
 ```
 
 The install directory can be overridden with the `INSTALL_DIR` environment variable or the `--prefix` flag:
