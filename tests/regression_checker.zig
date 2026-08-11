@@ -446,3 +446,79 @@ test "skill fixtures refuse to overwrite an existing skill directory" {
     defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("real skill content", content);
 }
+
+fn testTempParentDirPath() ![]const u8 {
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+    const parent = try std.fs.path.join(std.testing.allocator, &.{ cwd, ".zig-cache", "tmp", "regression-checker-isolation" });
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, parent);
+    return parent;
+}
+
+test "temp parent dir honors TMPDIR and falls back to the platform default" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    // No temp vars set: falls back to the platform default.
+    const fallback = try tempParentDir(std.testing.allocator, &env);
+    defer std.testing.allocator.free(fallback);
+    if (comptime builtin.os.tag == .windows) {
+        try std.testing.expectEqualStrings("C:\\Windows\\Temp", fallback);
+    } else {
+        try std.testing.expectEqualStrings("/tmp", fallback);
+    }
+
+    const parent = try testTempParentDirPath();
+    defer std.testing.allocator.free(parent);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, parent) catch {};
+    try env.put("TMPDIR", parent);
+    const resolved = try tempParentDir(std.testing.allocator, &env);
+    defer std.testing.allocator.free(resolved);
+    try std.testing.expectEqualStrings(parent, resolved);
+}
+
+test "make temp dir creates a unique directory under the temp parent" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const parent = try testTempParentDirPath();
+    defer std.testing.allocator.free(parent);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, parent) catch {};
+    try env.put("TMPDIR", parent);
+
+    const path = try makeTempDir(std.testing.allocator, std.testing.io, &env);
+    defer std.testing.allocator.free(path);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, path) catch {};
+
+    // The directory exists and lives under the configured temp parent.
+    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, path, .{});
+    defer dir.close(std.testing.io);
+    try std.testing.expect(std.mem.startsWith(u8, path, parent));
+}
+
+test "isolated env redirects the config dir to a temp dir and cleans up" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const parent = try testTempParentDirPath();
+    defer std.testing.allocator.free(parent);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, parent) catch {};
+    try env.put("TMPDIR", parent);
+
+    var isolated = try IsolatedEnv.init(std.testing.allocator, std.testing.io, &env);
+    errdefer isolated.deinit(std.testing.io);
+
+    const config_var = if (comptime builtin.os.tag == .windows) "APPDATA" else "XDG_CONFIG_HOME";
+    const redirected = isolated.environ_map.get(config_var) orelse return error.MissingConfigVar;
+    try std.testing.expectEqualStrings(isolated.temp_dir_path, redirected);
+
+    // The redirected config dir exists while the env is alive.
+    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, isolated.temp_dir_path, .{});
+    dir.close(std.testing.io);
+
+    // Deinit removes the temp dir again.
+    const temp_dir_path = try std.testing.allocator.dupe(u8, isolated.temp_dir_path);
+    defer std.testing.allocator.free(temp_dir_path);
+    isolated.deinit(std.testing.io);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, temp_dir_path, .{}));
+}
