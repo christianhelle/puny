@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const FileContains = struct {
     path: []const u8,
@@ -75,6 +76,7 @@ const RunParams = struct {
     io: std.Io,
     binary_path: []const u8,
     fixture_body: []const u8,
+    environ_map: *const std.process.Environ.Map,
 };
 
 /// Resolves the parent directory for temporary files, mirroring the fallback
@@ -167,11 +169,17 @@ pub fn main(init: std.process.Init) !u8 {
 
     const fixture_body = try std.Io.Dir.cwd().readFileAlloc(init.io, "tests/fixtures/prompt.md", arena, .limited(1024 * 1024));
 
+    // Redirect each mock run's config dir to a throwaway temp dir so the
+    // regression tests never pollute the real session history.
+    var isolated_env = try IsolatedEnv.init(allocator, init.io, init.environ_map);
+    defer isolated_env.deinit(init.io);
+
     const params = RunParams{
         .allocator = allocator,
         .io = init.io,
         .binary_path = binary_path,
         .fixture_body = fixture_body,
+        .environ_map = &isolated_env.environ_map,
     };
 
     var passed: usize = 0;
@@ -304,6 +312,7 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
 
     const result = try std.process.run(allocator, io, .{
         .argv = child_argv,
+        .environ_map = params.environ_map,
         // Generous capture limits. Crossing the limit triggers the
         // StreamTooLong error path in std.process.run, which deadlocks on
         // Windows (the child blocks writing to a full pipe), so the limits
