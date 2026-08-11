@@ -51,7 +51,7 @@ pub fn main(init: std.process.Init) !void {
     // this branch is only ever taken inside the detached process. The parent
     // surfaces the result via the flag file; the detached spawn discards stderr
     // and ignores the exit code, so failures stay silent here.
-    if (init.environ_map.get(update_check.check_env_var) != null) {
+    if (std.mem.eql(u8, init.environ_map.get(update_check.check_env_var) orelse "", "1")) {
         update_check.runCheck(init.io, arena, init.environ_map) catch {};
         return;
     }
