@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Enable ANSI escape processing on legacy Windows consoles ([#123](https://github.com/christianhelle/puny/pull/123)) ([@christianhelle](https://github.com/christianhelle/))
 - Isolate mock sessions from session history in test-regression ([#122](https://github.com/christianhelle/puny/pull/122)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove the --check-update CLI flag ([#121](https://github.com/christianhelle/puny/pull/121)) ([@christianhelle](https://github.com/christianhelle/))
 - Add install-release-safe, install-release-fast, and install-debug build steps ([#120](https://github.com/christianhelle/puny/pull/120)) ([@christianhelle](https://github.com/christianhelle/))
@@ -180,3 +181,5 @@
 - Introduce --mock flag for testing ([#1](https://github.com/christianhelle/puny/pull/1)) ([@christianhelle](https://github.com/christianhelle/))
 
 
+---
+***This changelog was generated with [chlogr](https://github.com/christianhelle/chlogr). Any changes to this file will be overwritten.***
