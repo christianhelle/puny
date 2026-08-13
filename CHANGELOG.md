@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- fix slow startup caused by spawning git twice at launch ([#126](https://github.com/christianhelle/puny/pull/126)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.3.3](https://github.com/christianhelle/puny/releases/tag/v0.3.3) (2026-08-11)
 
 ### Features
