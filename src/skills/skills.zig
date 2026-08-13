@@ -141,29 +141,66 @@ pub fn homeDir(allocator: std.mem.Allocator, environ_map: *const std.process.Env
     return try allocator.dupe(u8, home);
 }
 
-pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
-    const result = std.process.run(allocator, io, .{
-        .argv = &.{ "git", "rev-parse", "--show-toplevel" },
-        .stdout_limit = .limited(4096),
-        .stderr_limit = .limited(16),
-        .timeout = .{ .duration = .{
-            .raw = .{ .nanoseconds = 5_000_000_000 },
-            .clock = .awake,
-        } },
-    }) catch return null;
+/// Maximum number of parent directories to walk upward when looking for a
+/// repository root. Bounds the search so an unusual mount point cannot stall
+/// startup.
+const max_git_repo_depth = 64;
 
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
+/// Returns true when `dir` contains a `.git` entry. The entry is a directory
+/// in a regular clone, a file in a linked worktree, or a symlink to either;
+/// existence alone marks the root, which matches how git locates the top
+/// level of a worktree.
+fn isGitRepoRoot(io: std.Io, dir: []const u8) bool {
+    var marker_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const marker = std.fmt.bufPrint(&marker_buf, "{s}{c}.git", .{ dir, std.fs.path.sep }) catch return false;
+    std.Io.Dir.cwd().access(io, marker, .{}) catch return false;
+    return true;
+}
 
-    switch (result.term) {
-        .exited => |code| {
-            if (code == 0) return try allocator.dupe(u8, std.mem.trim(u8, result.stdout, " \t\n\r"));
-            return null;
-        },
-        else => return null,
+/// Walks upward from `start_dir` and returns the canonical absolute path of
+/// the nearest ancestor that contains a `.git` entry, or null when no
+/// ancestor is a repository root. The result is written into `out_buf` and
+/// stays valid until the next call that reuses the buffer.
+fn findRepoRootUpward(io: std.Io, start_dir: []const u8, out_buf: []u8) ?[]const u8 {
+    var dir = std.mem.trim(u8, start_dir, "/\\");
+    if (dir.len == 0) return null;
+
+    var depth: usize = 0;
+    while (true) {
+        if (depth >= max_git_repo_depth) return null;
+        depth += 1;
+
+        if (isGitRepoRoot(io, dir)) {
+            // Prefer the canonical path, matching `git rev-parse
+            // --show-toplevel`, which resolves symlinks. Fall back to the
+            // literal path when canonicalization fails.
+            if (std.Io.Dir.cwd().realPathFile(io, dir, out_buf)) |n| {
+                return out_buf[0..n];
+            } else |_| {
+                if (dir.len > out_buf.len) return null;
+                @memcpy(out_buf[0..dir.len], dir);
+                return out_buf[0..dir.len];
+            }
+        }
+
+        dir = std.fs.path.dirname(dir) orelse return null;
+        if (dir.len == 0) return null;
     }
 }
 
+pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
+    // Spawning `git rev-parse --show-toplevel` used to cost tens of
+    // milliseconds per process start (and up to its 5 s timeout when git
+    // hung). Detecting the repository by walking up the working directory for
+    // a `.git` entry is microseconds and needs no external process, so
+    // startup stays fast even on huge or slow repositories.
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cwd_n = std.Io.Dir.cwd().realPath(io, &cwd_buf) catch return null;
+    const cwd = cwd_buf[0..cwd_n];
+    var root_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = findRepoRootUpward(io, cwd, &root_buf) orelse return null;
+    return try allocator.dupe(u8, root);
+}
 var global_registry: ?*Registry = null;
 
 pub fn setGlobalRegistry(reg: *Registry) void {
@@ -604,6 +641,106 @@ test "buildListing shows names only before fullScan" {
 test "findGitRepoRoot does not crash" {
     const result = try findGitRepoRoot(std.testing.allocator, std.testing.io);
     if (result) |r| std.testing.allocator.free(r);
+}
+test "findGitRepoRoot finds the repository when run inside one" {
+    // The test runner's working directory is this repository's root, so the
+    // lookup must find a repo root (the same outcome `git rev-parse
+    // --show-toplevel` produced before the walk-based implementation).
+    const result = try findGitRepoRoot(std.testing.allocator, std.testing.io);
+    defer if (result) |r| std.testing.allocator.free(r);
+    try std.testing.expect(result != null);
+}
+
+test "isGitRepoRoot detects a .git directory and rejects other directories" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    try tmp.dir.createDir(std.testing.io, "plain", .default_dir);
+    try std.testing.expect(!isGitRepoRoot(std.testing.io, base_path));
+
+    try tmp.dir.createDirPath(std.testing.io, "repo/.git");
+    const repo_path = try std.fs.path.join(std.testing.allocator, &.{ base_path, "repo" });
+    defer std.testing.allocator.free(repo_path);
+    try std.testing.expect(isGitRepoRoot(std.testing.io, repo_path));
+}
+
+test "isGitRepoRoot treats a .git file (linked worktree) as a repo root" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(std.testing.io, "wt");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "wt/.git", .data = "gitdir: /elsewhere/.git\n" });
+
+    const wt_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path, "wt" });
+    defer std.testing.allocator.free(wt_path);
+    try std.testing.expect(isGitRepoRoot(std.testing.io, wt_path));
+}
+
+test "findRepoRootUpward finds the nearest ancestor with a .git directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "root", .default_dir);
+    try tmp.dir.createDir(std.testing.io, "root/.git", .default_dir);
+    try tmp.dir.createDirPath(std.testing.io, "root/sub/deeper");
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    const start_path = try std.fs.path.join(std.testing.allocator, &.{ base_path, "root", "sub", "deeper" });
+    defer std.testing.allocator.free(start_path);
+
+    var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = findRepoRootUpward(std.testing.io, start_path, &out_buf).?;
+
+    var expected_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const expected_path = try std.fs.path.join(std.testing.allocator, &.{ base_path, "root" });
+    defer std.testing.allocator.free(expected_path);
+    const n = try std.Io.Dir.cwd().realPathFile(std.testing.io, expected_path, &expected_buf);
+
+    try std.testing.expectEqualStrings(expected_buf[0..n], root);
+}
+
+test "findRepoRootUpward treats a .git file (linked worktree) as a repo root" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(std.testing.io, "wt");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "wt/.git", .data = "gitdir: /elsewhere/.git\n" });
+    try tmp.dir.createDirPath(std.testing.io, "wt/sub");
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    const start_path = try std.fs.path.join(std.testing.allocator, &.{ base_path, "wt", "sub" });
+    defer std.testing.allocator.free(start_path);
+
+    var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = findRepoRootUpward(std.testing.io, start_path, &out_buf).?;
+
+    var expected_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const expected_path = try std.fs.path.join(std.testing.allocator, &.{ base_path, "wt" });
+    defer std.testing.allocator.free(expected_path);
+    const n = try std.Io.Dir.cwd().realPathFile(std.testing.io, expected_path, &expected_buf);
+
+    try std.testing.expectEqualStrings(expected_buf[0..n], root);
+}
+
+test "findRepoRootUpward returns null when no ancestor is a repository" {
+    // A synthetic path that cannot exist anywhere in the tree, so the walk
+    // reaches the filesystem root without finding a `.git` marker. The tmp
+    // dirs from other tests live inside this repository, so they cannot be
+    // used for a "no repo" case.
+    const start = if (comptime @import("builtin").os.tag == .windows)
+        "Z:\\puny-no-git-walk-test"
+    else
+        "/puny-no-git-walk-test";
+
+    var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+    try std.testing.expect(findRepoRootUpward(std.testing.io, start, &out_buf) == null);
 }
 
 test "homeDir returns HOME from environ map" {
