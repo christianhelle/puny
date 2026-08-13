@@ -146,15 +146,37 @@ pub fn homeDir(allocator: std.mem.Allocator, environ_map: *const std.process.Env
 /// startup.
 const max_git_repo_depth = 64;
 
+/// Builds the path to the `.git` entry inside `dir`. A separator is only
+/// inserted when `dir` does not already end in one, so a bare root like "/"
+/// probes "/.git" instead of the implementation-defined "//.git". Returns
+/// null when the path does not fit in `buf`.
+fn gitMarkerPath(dir: []const u8, buf: []u8) ?[]const u8 {
+    if (dir.len > 0 and (dir[dir.len - 1] == '/' or dir[dir.len - 1] == '\\')) {
+        return std.fmt.bufPrint(buf, "{s}.git", .{dir}) catch null;
+    }
+    return std.fmt.bufPrint(buf, "{s}{c}.git", .{ dir, std.fs.path.sep }) catch null;
+}
+
 /// Returns true when `dir` contains a `.git` entry. The entry is a directory
 /// in a regular clone, a file in a linked worktree, or a symlink to either;
 /// existence alone marks the root, which matches how git locates the top
 /// level of a worktree.
 fn isGitRepoRoot(io: std.Io, dir: []const u8) bool {
     var marker_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const marker = std.fmt.bufPrint(&marker_buf, "{s}{c}.git", .{ dir, std.fs.path.sep }) catch return false;
+    const marker = gitMarkerPath(dir, &marker_buf) orelse return false;
     std.Io.Dir.cwd().access(io, marker, .{}) catch return false;
     return true;
+}
+
+/// Strips trailing path separators while preserving the root prefix, so a
+/// bare root like "/" or "C:\" is never reduced to a relative path.
+fn trimTrailingSeparators(path: []const u8) []const u8 {
+    const root_len = std.fs.path.parsePath(path).root.len;
+    var end = path.len;
+    while (end > root_len and (path[end - 1] == '/' or path[end - 1] == '\\')) {
+        end -= 1;
+    }
+    return path[0..end];
 }
 
 /// Walks upward from `start_dir` and returns the path of the nearest ancestor
@@ -164,11 +186,10 @@ fn isGitRepoRoot(io: std.Io, dir: []const u8) bool {
 /// result is written into `out_buf` and stays valid until the next call that
 /// reuses the buffer.
 fn findRepoRootUpward(io: std.Io, start_dir: []const u8, out_buf: []u8) ?[]const u8 {
-    var dir = start_dir;
-    // Trim trailing separators while preserving a bare root like "/" or "C:\".
-    while (dir.len > 1 and (dir[dir.len - 1] == '/' or dir[dir.len - 1] == '\\')) {
-        dir = dir[0 .. dir.len - 1];
-    }
+    // Strip trailing separators while preserving a bare root like "/" or
+    // "C:\" (trimming a drive root would turn an absolute path into a
+    // relative one and search the wrong locations).
+    var dir = trimTrailingSeparators(start_dir);
     if (dir.len == 0) return null;
     const is_absolute = std.fs.path.isAbsolute(dir);
 
@@ -797,6 +818,62 @@ test "findRepoRootUpward finds the repository root from a relative start" {
 
     var expected_buf: [std.fs.max_path_bytes]u8 = undefined;
     const n = try std.Io.Dir.cwd().realPathFile(std.testing.io, ".", &expected_buf);
+    try std.testing.expectEqualStrings(expected_buf[0..n], root);
+}
+test "gitMarkerPath does not double the separator at a root path" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const sep = std.fs.path.sep;
+
+    // At the POSIX root, probing must be "/.git", not "//.git".
+    try std.testing.expectEqualStrings("/.git", gitMarkerPath("/", &buf).?);
+
+    // At a Windows drive root, probing must be "C:\.git".
+    try std.testing.expectEqualStrings("C:\\.git", gitMarkerPath("C:\\", &buf).?);
+
+    // Other paths get exactly one native separator inserted.
+    const repo_marker = try std.fmt.bufPrint(&buf, "/repo{c}.git", .{sep});
+    try std.testing.expectEqualStrings(repo_marker, gitMarkerPath("/repo", &buf).?);
+
+    const dot_marker = try std.fmt.bufPrint(&buf, ".{c}.git", .{sep});
+    try std.testing.expectEqualStrings(dot_marker, gitMarkerPath(".", &buf).?);
+}
+
+test "trimTrailingSeparators preserves the root prefix" {
+    if (comptime @import("builtin").os.tag == .windows) {
+        // A drive root must not lose its separator, otherwise the path is
+        // misclassified as drive-relative instead of absolute.
+        try std.testing.expectEqualStrings("C:\\", trimTrailingSeparators("C:\\"));
+        try std.testing.expectEqualStrings("C:\\repo", trimTrailingSeparators("C:\\repo\\"));
+    } else {
+        try std.testing.expectEqualStrings("/", trimTrailingSeparators("/"));
+        try std.testing.expectEqualStrings("/repo", trimTrailingSeparators("/repo/"));
+    }
+    try std.testing.expectEqualStrings(".", trimTrailingSeparators("."));
+    try std.testing.expectEqualStrings("src", trimTrailingSeparators("src/"));
+}
+
+test "findRepoRootUpward finds the repo root from an absolute path with a trailing separator" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(std.testing.io, "root", .default_dir);
+    try tmp.dir.createDir(std.testing.io, "root/.git", .default_dir);
+
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    const start_path = try std.fs.path.join(std.testing.allocator, &.{ base_path, "root" });
+    defer std.testing.allocator.free(start_path);
+    // Append a trailing separator; the walk must still find the root and must
+    // not probe a doubled-separator marker path like "//.git".
+    const start_with_sep = try std.fmt.allocPrint(std.testing.allocator, "{s}{c}", .{ start_path, std.fs.path.sep });
+    defer std.testing.allocator.free(start_with_sep);
+
+    var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = findRepoRootUpward(std.testing.io, start_with_sep, &out_buf).?;
+
+    var expected_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try std.Io.Dir.cwd().realPathFile(std.testing.io, start_path, &expected_buf);
     try std.testing.expectEqualStrings(expected_buf[0..n], root);
 }
 
