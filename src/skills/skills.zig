@@ -157,13 +157,25 @@ fn isGitRepoRoot(io: std.Io, dir: []const u8) bool {
     return true;
 }
 
-/// Walks upward from `start_dir` and returns the canonical absolute path of
-/// the nearest ancestor that contains a `.git` entry, or null when no
-/// ancestor is a repository root. The result is written into `out_buf` and
-/// stays valid until the next call that reuses the buffer.
+/// Walks upward from `start_dir` and returns the path of the nearest ancestor
+/// that contains a `.git` entry, or null when no ancestor is a repository
+/// root. `start_dir` may be absolute or relative; relative paths are resolved
+/// from the process working directory and the walk can climb above it. The
+/// result is written into `out_buf` and stays valid until the next call that
+/// reuses the buffer.
 fn findRepoRootUpward(io: std.Io, start_dir: []const u8, out_buf: []u8) ?[]const u8 {
-    var dir = std.mem.trim(u8, start_dir, "/\\");
+    var dir = start_dir;
+    // Trim trailing separators while preserving a bare root like "/" or "C:\".
+    while (dir.len > 1 and (dir[dir.len - 1] == '/' or dir[dir.len - 1] == '\\')) {
+        dir = dir[0 .. dir.len - 1];
+    }
     if (dir.len == 0) return null;
+    const is_absolute = std.fs.path.isAbsolute(dir);
+
+    // Scratch space for building relative parent chains such as "../..".
+    var scratch: [std.fs.max_path_bytes]u8 = undefined;
+    // Number of levels climbed above the working directory (relative starts).
+    var hops: usize = 0;
 
     var depth: usize = 0;
     while (true) {
@@ -172,8 +184,11 @@ fn findRepoRootUpward(io: std.Io, start_dir: []const u8, out_buf: []u8) ?[]const
 
         if (isGitRepoRoot(io, dir)) {
             // Prefer the canonical path, matching `git rev-parse
-            // --show-toplevel`, which resolves symlinks. Fall back to the
-            // literal path when canonicalization fails.
+            // --show-toplevel`. `realPathFile` opens the directory and
+            // resolves it through a real file descriptor, so unlike
+            // `Dir.cwd().realPath` it works on every platform (the cwd handle
+            // on POSIX is AT.FDCWD, which is not a real descriptor). Fall back
+            // to the literal path when canonicalization fails.
             if (std.Io.Dir.cwd().realPathFile(io, dir, out_buf)) |n| {
                 return out_buf[0..n];
             } else |_| {
@@ -183,8 +198,36 @@ fn findRepoRootUpward(io: std.Io, start_dir: []const u8, out_buf: []u8) ?[]const
             }
         }
 
-        dir = std.fs.path.dirname(dir) orelse return null;
-        if (dir.len == 0) return null;
+        if (is_absolute) {
+            dir = std.fs.path.dirname(dir) orelse return null;
+            if (dir.len == 0) return null;
+        } else if (hops > 0) {
+            // Climb above the working directory: extend the "../.." chain.
+            hops += 1;
+            const chain_len = 2 + (hops - 1) * 3;
+            if (chain_len > scratch.len) return null;
+            var i: usize = 0;
+            for (0..hops) |_| {
+                if (i > 0) {
+                    scratch[i] = std.fs.path.sep;
+                    i += 1;
+                }
+                scratch[i] = '.';
+                scratch[i + 1] = '.';
+                i += 2;
+            }
+            dir = scratch[0..i];
+        } else {
+            // Descend toward the working directory one level at a time.
+            if (std.mem.eql(u8, dir, ".")) {
+                hops = 1;
+                dir = "..";
+            } else {
+                // A relative path with a single component has no dirname; its
+                // parent is the working directory itself.
+                dir = std.fs.path.dirname(dir) orelse ".";
+            }
+        }
     }
 }
 
@@ -194,11 +237,13 @@ pub fn findGitRepoRoot(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
     // hung). Detecting the repository by walking up the working directory for
     // a `.git` entry is microseconds and needs no external process, so
     // startup stays fast even on huge or slow repositories.
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd_n = std.Io.Dir.cwd().realPath(io, &cwd_buf) catch return null;
-    const cwd = cwd_buf[0..cwd_n];
+    //
+    // The walk starts from the relative path "." because the absolute working
+    // directory cannot be resolved portably: on POSIX `Dir.cwd().realPath()`
+    // reads /proc/self/fd/{handle}, but the cwd handle is AT.FDCWD, which is
+    // not a real file descriptor.
     var root_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const root = findRepoRootUpward(io, cwd, &root_buf) orelse return null;
+    const root = findRepoRootUpward(io, ".", &root_buf) orelse return null;
     return try allocator.dupe(u8, root);
 }
 var global_registry: ?*Registry = null;
@@ -741,6 +786,18 @@ test "findRepoRootUpward returns null when no ancestor is a repository" {
 
     var out_buf: [std.fs.max_path_bytes]u8 = undefined;
     try std.testing.expect(findRepoRootUpward(std.testing.io, start, &out_buf) == null);
+}
+test "findRepoRootUpward finds the repository root from a relative start" {
+    // The test runner's working directory is this repository's root, so a
+    // relative start inside the tree must resolve to the repo root. This
+    // covers the startup path, which walks from "." because the absolute
+    // working directory cannot be resolved portably.
+    var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = findRepoRootUpward(std.testing.io, "src", &out_buf).?;
+
+    var expected_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try std.Io.Dir.cwd().realPathFile(std.testing.io, ".", &expected_buf);
+    try std.testing.expectEqualStrings(expected_buf[0..n], root);
 }
 
 test "homeDir returns HOME from environ map" {
