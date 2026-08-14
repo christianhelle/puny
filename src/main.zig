@@ -717,6 +717,9 @@ test "include chat.attachments tests" {
 test "include chat.debug_log tests" {
     _ = @import("chat/debug_log.zig");
 }
+test "include chat.redact tests" {
+    _ = @import("chat/redact.zig");
+}
 
 test "include upgrade module tests" {
     _ = @import("upgrade.zig");
