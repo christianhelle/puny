@@ -243,11 +243,16 @@ const DeltaChoice = struct {
     finish_reason: ?[]const u8 = null,
 };
 
+const CompletionTokensDetails = struct {
+    reasoning_tokens: ?i64 = null,
+};
+
 const UsageJson = struct {
     prompt_tokens: i64,
     completion_tokens: i64,
     reasoning_output_tokens: ?i64 = null,
     reasoning_tokens: ?i64 = null,
+    completion_tokens_details: ?CompletionTokensDetails = null,
     tokens_per_second: ?f64 = null,
     time_to_first_token_seconds: ?f64 = null,
 };
@@ -304,7 +309,7 @@ pub const SseCallback = struct {
             try self.callback.emit(.{ .usage = .{
                 .input_tokens = usage.prompt_tokens,
                 .output_tokens = usage.completion_tokens,
-                .reasoning_output_tokens = usage.reasoning_output_tokens orelse usage.reasoning_tokens,
+                .reasoning_output_tokens = usage.reasoning_output_tokens orelse usage.reasoning_tokens orelse (if (usage.completion_tokens_details) |d| d.reasoning_tokens else null),
                 .tokens_per_second = usage.tokens_per_second,
                 .time_to_first_token_seconds = usage.time_to_first_token_seconds,
             } });
