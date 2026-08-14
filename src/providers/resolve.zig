@@ -48,14 +48,14 @@ pub fn resolveApiKey(
     return cfg.providerEntryConst(effective_provider).apiKey orelse "";
 }
 
-fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
+pub fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
     return selectedProvider == .opencode_zen or
         selectedProvider == .opencode_go or
         selectedProvider == .copilot or
         selectedProvider == .mock;
 }
 
-fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
+pub fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .opencode_zen) return opencode_zen.default_base_url;
     if (selectedProvider == .opencode_go) return opencode_go.default_base_url;
     if (selectedProvider == .copilot) return copilot.default_base_url;
