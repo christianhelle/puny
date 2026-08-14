@@ -858,15 +858,15 @@ test "include tui.list_picker tests" {
     _ = @import("tui/list_picker.zig");
 }
 test "include tui.markdown tests" {
-    _ = @import("tui/markdown.zig");
+    _ = @import("tui/markdown/markdown.zig");
 }
 
 test "include tui.width tests" {
-    _ = @import("tui/width.zig");
+    _ = @import("tui/markdown/width.zig");
 }
 
 test "include tui.table tests" {
-    _ = @import("tui/table.zig");
+    _ = @import("tui/markdown/table.zig");
 }
 test "include tui.model_picker tests" {
     _ = @import("tui/model_picker.zig");

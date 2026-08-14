@@ -1,6 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
-const markdown = @import("markdown.zig");
+const markdown = @import("markdown/markdown.zig");
 const terminal = @import("terminal.zig");
 
 /// Renders markdown to a terminal in real time as content chunks arrive.

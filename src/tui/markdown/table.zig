@@ -1,5 +1,5 @@
 const std = @import("std");
-const ansi = @import("ansi.zig");
+const ansi = @import("../ansi.zig");
 const text_width = @import("width.zig");
 
 pub const Alignment = enum { left, center, right };

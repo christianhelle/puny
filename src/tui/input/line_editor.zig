@@ -1,5 +1,5 @@
 const std = @import("std");
-const markdown = @import("../markdown.zig");
+const markdown = @import("../markdown/markdown.zig");
 const prompt_history = @import("../../prompts/history.zig");
 const terminal = @import("../terminal.zig");
 const prompts = @import("../../prompts/prompts.zig");
