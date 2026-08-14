@@ -34,20 +34,41 @@ pub fn extractRefs(allocator: std.mem.Allocator, text: []const u8) ![][]const u8
     return refs.toOwnedSlice(allocator);
 }
 
+/// Returns a markdown code-fence length that is strictly longer than any run
+/// of backticks in `content`, so a fence inside the content can never close
+/// the enclosing fence early.
+fn fenceLen(content: []const u8) usize {
+    var longest: usize = 0;
+    var run: usize = 0;
+    for (content) |c| {
+        if (c == '`') {
+            run += 1;
+            longest = @max(longest, run);
+        } else {
+            run = 0;
+        }
+    }
+    return @max(3, longest + 1);
+}
+
 fn appendAttachment(
     buf: *std.ArrayList(u8),
     allocator: std.mem.Allocator,
     path: []const u8,
     content: []const u8,
 ) !void {
+    const fence = fenceLen(content);
     try buf.appendSlice(allocator, "\n\n@");
     try buf.appendSlice(allocator, path);
-    try buf.appendSlice(allocator, "\n```\n");
+    try buf.append(allocator, '\n');
+    try buf.appendNTimes(allocator, '`', fence);
+    try buf.append(allocator, '\n');
     try buf.appendSlice(allocator, content);
     if (content.len == 0 or content[content.len - 1] != '\n') {
         try buf.append(allocator, '\n');
     }
-    try buf.appendSlice(allocator, "```\n");
+    try buf.appendNTimes(allocator, '`', fence);
+    try buf.append(allocator, '\n');
 }
 
 /// Resolves `@path` mentions in `text` to the contents of the referenced files
@@ -160,4 +181,16 @@ test "buildAttachedMessage appends the referenced file contents" {
 
     try std.testing.expect(std.mem.startsWith(u8, out, "look at @puny-test-attachments.txt"));
     try std.testing.expect(std.mem.indexOf(u8, out, "\n\n@puny-test-attachments.txt\n```\nfile body\n```\n") != null);
+}
+
+test "buildAttachedMessage uses a fence longer than any backtick run in the content" {
+    const path = "puny-test-fence.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try helpers.writeFile(std.testing.io, path, "x\n```\ny\n");
+
+    const out = try buildAttachedMessage(std.testing.allocator, std.testing.io, "see @puny-test-fence.txt");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "\n````\n") != null);
 }
