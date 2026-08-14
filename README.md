@@ -656,7 +656,7 @@ write the final PRD. When the user confirms readiness, the model calls
 
 ## Development / testing
 
-### Mock mode (no LM Studio, OpenCode Zen, or Github Copilot required)
+### Mock mode (no LM Studio, OpenCode Zen, or GitHub Copilot required)
 
 Start without a running AI backend:
 
