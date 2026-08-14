@@ -12,6 +12,7 @@ const windows_impl = @import("input/windows.zig");
 pub const ReadLineResult = common.ReadLineResult;
 
 pub fn readLine(
+    allocator: std.mem.Allocator,
     io: std.Io,
     stdout_writer: *std.Io.Writer,
     line_alloc: *std.Io.Writer.Allocating,
@@ -33,9 +34,9 @@ pub fn readLine(
 
     var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, history, terminal.terminalWidth());
     if (builtin.os.tag == .windows) {
-        return try windows_impl.readLineWindows(io, &editor);
+        return try windows_impl.readLineWindows(allocator, io, &editor);
     } else {
-        return try posix.readLinePosix(io, &editor);
+        return try posix.readLinePosix(allocator, io, &editor);
     }
 }
 
