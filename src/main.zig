@@ -851,6 +851,10 @@ test "include tui.terminal tests" {
 test "include tui.vt tests" {
     _ = @import("tui/vt.zig");
 }
+
+test "include tui.token_stats tests" {
+    _ = @import("tui/token_stats.zig");
+}
 test "include version tests" {
     _ = @import("version.zig");
 }
