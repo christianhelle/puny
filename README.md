@@ -228,13 +228,13 @@ Puny shows the model picker, connects to LM Studio, and drops you into a chat pr
 Type your request and press Enter:
 
 ```text
-Prompt: Explain what this project does
+> Explain what this project does
 ```
 
 The model replies in the terminal. You can keep sending follow-up messages; Puny remembers the conversation.
 
 ```text
-Prompt: Now list the source files
+> Now list the source files
 
 🔧 Listing directory "src"
 
@@ -437,7 +437,7 @@ Skills can be loaded in three ways:
 1. **Slash command** — type `/<skill-name>` in the prompt:
 
    ```text
-   Prompt: /nano-commits
+   > /nano-commits
    ```
 
 2. **Keyword trigger** — mention a trigger phrase from the skill's `triggers` field in your
@@ -445,7 +445,7 @@ Skills can be loaded in three ways:
    loads automatically when you say:
 
    ```text
-   Prompt: talk like caveman from now on
+   > talk like caveman from now on
    ```
 
    Skills are also triggered by their directory name as a whole word — saying
@@ -461,7 +461,7 @@ Skills can be loaded in three ways:
 Use `/skills` to list all discovered skills from both global and repository locations:
 
 ```text
-Prompt: /skills
+> /skills
 
 Available skills:
 
