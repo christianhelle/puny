@@ -156,6 +156,75 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
     try ctx.stdout_writer.flush();
 }
 
+pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
+    if (ctx.parsed.oneshot) {
+        try ctx.stdout_writer.print("\n/config not available in oneshot mode.\n", .{});
+        try ctx.stdout_writer.flush();
+        return;
+    }
+
+    const old_provider_name = ctx.cfg.provider;
+    const result = try session.promptReconfigure(ctx.arena, ctx.io, ctx.init, ctx.stdout_writer, ctx.cfg);
+    if (result.cancelled) return;
+    if (!result.changed) return;
+
+    try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
+    const new_provider_name = ctx.cfg.provider;
+    const new_provider_url = if (ctx.parsed.mock) "-" else resolver.baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
+
+    if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
+        ctx.prov.deinit();
+        ctx.prov.* = resolver.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+        if (ctx.debug_log) |log| session.attachHttpDebugObserver(ctx.prov, log);
+        if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
+        ctx.model_provider.* = new_provider_name;
+        ctx.provider_url.* = new_provider_url;
+
+        const model_skip_validation =
+            ctx.parsed.mock or
+            ctx.parsed.oneshot or
+            !std.mem.eql(u8, new_provider_url, config.default_lm_studio_url);
+
+        const model_selection_result = try model_selection.select(
+            ctx.prov,
+            null,
+            ctx.arena,
+            ctx.io,
+            ctx.init,
+            model_skip_validation,
+            ctx.cfg,
+            new_provider_name,
+            ctx.init.environ_map,
+            ctx.random,
+        );
+
+        if (model_selection_result) |sel| {
+            ctx.model_key.* = sel.model_key;
+            if (sel.reasoning_effort) |effort| {
+                ctx.reasoning_effort.* = effort;
+            }
+        }
+    } else {
+        ctx.prov.setConfig(.{ .base_url = new_provider_url, .api_key = new_api_key });
+        ctx.provider_url.* = new_provider_url;
+        if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
+    }
+
+    try welcome.printSummary(
+        ctx.stdout_writer,
+        .{
+            .provider_name = if (ctx.parsed.mock) "Mock" else provider.getProviderDisplayName(ctx.model_provider.*),
+            .provider_url = ctx.provider_url.*,
+            .model_key = ctx.model_key.*,
+            .reasoning_effort = ctx.reasoning_effort.*,
+        },
+    );
+
+    try ctx.stdout_writer.print("Configuration saved and provider updated.\n", .{});
+    try ctx.stdout_writer.flush();
+}
+
 fn testChatLoopContext(
     allocator: std.mem.Allocator,
     stdout_writer: *std.Io.Writer,
