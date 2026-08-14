@@ -172,7 +172,8 @@ pub fn pickFile(arena: std.mem.Allocator, io: std.Io) !?[]const u8 {
             .enter => {
                 try cleanup(writer, drawn);
                 if (match_indices.items.len == 0) return null;
-                return arena.dupe(u8, files[match_indices.items[selected]]);
+                const chosen: []const u8 = try arena.dupe(u8, files[match_indices.items[selected]]);
+                return chosen;
             },
             .escape => {
                 try cleanup(writer, drawn);
