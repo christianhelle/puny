@@ -311,7 +311,7 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .switch_provider => |provider_id| {
-                    try handleSwitchProviderCommand(ctx, provider_id);
+                    try session_commands.handleSwitchProviderCommand(ctx, provider_id);
                     continue;
                 },
                 .switch_effort => |effort| {
@@ -737,76 +737,6 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     );
 
     try ctx.stdout_writer.print("Configuration saved and provider updated.\n", .{});
-    try ctx.stdout_writer.flush();
-}
-
-fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) !void {
-    const picked_provider = if (provider_id) |id| {
-        try ctx.stdout_writer.print("\nUnknown provider '{s}'.\n", .{id});
-        try ctx.stdout_writer.flush();
-        return;
-    } else blk: {
-        const picked = try provider_picker.selectProviderInteractive(ctx.arena, ctx.io, ctx.init) orelse {
-            try ctx.stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
-            try ctx.stdout_writer.flush();
-            return;
-        };
-        break :blk picked;
-    };
-
-    const current_provider = ctx.model_provider.*;
-    if (picked_provider == current_provider) {
-        try ctx.stdout_writer.print("\nAlready using provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
-        try ctx.stdout_writer.flush();
-        return;
-    }
-
-    ctx.cfg.provider = picked_provider;
-    const new_provider_url = resolver.defaultProviderUrl(picked_provider);
-    ctx.cfg.providerEntry(picked_provider).url = try ctx.arena.dupe(u8, new_provider_url);
-
-    try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
-
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
-    ctx.prov.deinit();
-    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
-    if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
-    if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
-    ctx.model_provider.* = picked_provider;
-    ctx.provider_url.* = new_provider_url;
-
-    const model_skip_validation = ctx.parsed.mock;
-    const model_selection_result = try model_selection.select(
-        ctx.prov,
-        null,
-        ctx.arena,
-        ctx.io,
-        ctx.init,
-        model_skip_validation,
-        ctx.cfg,
-        picked_provider,
-        ctx.init.environ_map,
-        ctx.random,
-    );
-
-    if (model_selection_result) |sel| {
-        ctx.model_key.* = sel.model_key;
-        if (sel.reasoning_effort) |effort| {
-            ctx.reasoning_effort.* = effort;
-        }
-    }
-
-    try welcome.printSummary(
-        ctx.stdout_writer,
-        .{
-            .provider_name = if (ctx.parsed.mock) "Mock" else provider.getProviderDisplayName(ctx.model_provider.*),
-            .provider_url = ctx.provider_url.*,
-            .model_key = ctx.model_key.*,
-            .reasoning_effort = ctx.reasoning_effort.*,
-        },
-    );
-
-    try ctx.stdout_writer.print("Switched to provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
     try ctx.stdout_writer.flush();
 }
 
