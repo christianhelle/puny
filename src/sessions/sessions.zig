@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const core_session = @import("../core/session.zig");
+const atomic_write = @import("atomic_write.zig");
 
 pub const SessionInfo = struct {
     id: []const u8,
@@ -178,74 +179,23 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
     return entries;
 }
 
-/// Writes `entries` to `base_dir/sessions.json` as a bare JSON array, using a
-/// temp file + atomic rename and owner-only permissions. All transient path
-/// and buffer memory lives in a scratch arena released before returning.
+/// Writes `entries` to `base_dir/sessions.json` as a bare JSON array through
+/// the shared atomic-write helper, which stages a temp file, applies
+/// owner-only permissions, stamps the mtime past the sessions directory, and
+/// renames it into place. All transient path and buffer memory lives in a
+/// scratch arena released before returning.
 fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, entries: []const SessionInfo) !void {
     var scratch_arena = std.heap.ArenaAllocator.init(allocator);
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
 
-    const cwd = std.Io.Dir.cwd();
-    // Use a unique temp name per write so a concurrent or leftover write can
-    // never collide with this one; the suffix is only for uniqueness and is
-    // discarded by the rename below.
-    const ts = std.Io.Timestamp.now(io, .awake);
-    const tmp_name = try std.fmt.allocPrint(scratch, "{s}.{d}.tmp", .{ index_filename, ts.nanoseconds });
-    const tmp_path = try std.fs.path.join(scratch, &.{ base_dir, tmp_name });
-    const final_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename });
-
     const buffer = try std.json.Stringify.valueAlloc(scratch, entries, .{ .whitespace = .indent_2 });
-
-    var file = cwd.createFile(io, tmp_path, .{}) catch |err| {
-        std.log.warn("failed to create sessions index temp file {s}: {s}", .{ tmp_path, @errorName(err) });
-        return err;
-    };
-    var file_open = true;
-    errdefer {
-        if (file_open) file.close(io);
-        cwd.deleteFile(io, tmp_path) catch {};
-    }
-
-    file.writeStreamingAll(io, buffer) catch |err| {
-        std.log.warn("failed to write sessions index {s}: {s}", .{ tmp_path, @errorName(err) });
-        return err;
-    };
-    file.writeStreamingAll(io, "\n") catch |err| {
-        std.log.warn("failed to write sessions index newline {s}: {s}", .{ tmp_path, @errorName(err) });
-        return err;
-    };
-    file.close(io);
-    file_open = false;
-
-    // Stamp the temp file's modify time strictly after the sessions
-    // directory's mtime (1s margin) so a freshly written index is never judged
-    // stale by listSessions' `>=` check on filesystems with coarse timestamp
-    // granularity, where the dir and the fresh index round to the same tick
-    // and trigger a spurious rebuild that discards upserted metadata. The
-    // rename below carries this timestamp to the final path.
     const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
-    if (cwd.statFile(io, sessions_dir_path, .{}) catch null) |dir_stat| {
-        const now_ns = std.Io.Timestamp.now(io, .awake).nanoseconds;
-        const desired = std.Io.Timestamp.fromNanoseconds(@max(now_ns, dir_stat.mtime.nanoseconds) + std.time.ns_per_s);
-        var stamp_file = cwd.openFile(io, tmp_path, .{ .mode = .read_write }) catch null;
-        if (stamp_file) |*f| {
-            defer f.close(io);
-            f.setTimestamps(io, .{ .modify_timestamp = .{ .new = desired } }) catch {};
-        }
-    }
 
-    // Force owner-only on the final file (mirrors prompt_history.json's
-    // tightening behavior). Setting it before the rename avoids a window where
-    // the final path exists with permissive mode.
-    if (comptime builtin.os.tag != .windows) {
-        cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{}) catch {};
-    }
-
-    std.Io.Dir.renameAbsolute(tmp_path, final_path, io) catch |err| {
-        std.log.warn("failed to rename sessions index into place {s}: {s}", .{ final_path, @errorName(err) });
-        return err;
-    };
+    try atomic_write.writeAtomically(io, scratch, base_dir, index_filename, buffer, .{
+        .newer_than = sessions_dir_path,
+        .restrict_permissions = true,
+    });
 }
 
 /// Adds or updates a single session entry in the index and rewrites it.
