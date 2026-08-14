@@ -32,19 +32,31 @@ pub const LineEditor = struct {
         history: ?*prompt_history.History,
         width: ?usize,
     ) LineEditor {
+        // Terminals narrower than the prompt column cannot host a redraw
+        // cursor model; fall back to legacy echo like an unknown width.
+        const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
+        const usable_width = if (width) |w| if (w < start_col) null else w else null;
         return .{
             .line_alloc = line_alloc,
             .stdout_writer = stdout_writer,
             .history = history,
-            .width = width,
+            .width = usable_width,
             .cursor_rows = 1,
         };
     }
 
     pub fn append(self: *LineEditor, byte: u8) !void {
-        try self.line_alloc.writer.writeByte(byte);
+        var single = [1]u8{byte};
+        try self.appendSlice(&single);
+    }
+
+    /// Appends a run of bytes (typically one complete UTF-8 code point) and
+    /// redraws once, so multi-byte input never flashes a redraw containing
+    /// an incomplete sequence.
+    pub fn appendSlice(self: *LineEditor, bytes: []const u8) !void {
+        try self.line_alloc.writer.writeAll(bytes);
         if (self.width == null) {
-            try self.stdout_writer.writeByte(byte);
+            try self.stdout_writer.writeAll(bytes);
             try self.stdout_writer.flush();
             return;
         }
@@ -54,13 +66,36 @@ pub const LineEditor = struct {
     pub fn backspace(self: *LineEditor) !void {
         const written = self.line_alloc.written();
         if (written.len == 0) return;
-        self.line_alloc.shrinkRetainingCapacity(written.len - 1);
+        const n = backspaceLen(written);
+        const deleted = written[written.len - n ..];
+        self.line_alloc.shrinkRetainingCapacity(written.len - n);
         if (self.width == null) {
-            try self.stdout_writer.writeAll(terminal.backspace_echo);
+            // Erase every column the deleted code point occupied.
+            const echo_width = deletedCodePointWidth(deleted);
+            for (0..echo_width) |_| try self.stdout_writer.writeAll(terminal.backspace_echo);
             try self.stdout_writer.flush();
             return;
         }
         try self.redraw();
+    }
+
+    /// Bytes to remove from the end of `text` so that a complete UTF-8 code
+    /// point is deleted: walks back over continuation bytes and removes them
+    /// together with the preceding lead byte. Falls back to a single byte
+    /// when the trailing byte is not a valid lead byte.
+    fn backspaceLen(text: []const u8) usize {
+        var n: usize = 1;
+        while (n < text.len and text[text.len - n] & 0xC0 == 0x80) n += 1;
+        return n;
+    }
+
+    /// Display width of the code point removed by backspace, used by the
+    /// legacy echo path. Invalid UTF-8 renders as a single replacement column.
+    fn deletedCodePointWidth(deleted: []const u8) usize {
+        const seq_len = std.unicode.utf8ByteSequenceLength(deleted[0]) catch return 1;
+        if (seq_len > deleted.len) return 1;
+        const cp = std.unicode.utf8Decode(deleted[0..seq_len]) catch return 1;
+        return markdown.codePointWidth(cp);
     }
 
     pub fn historyPrevious(self: *LineEditor) !void {
@@ -339,6 +374,101 @@ test "editor backspace is a no-op on an empty buffer" {
 
     try std.testing.expectEqualStrings("", line_alloc.written());
     try std.testing.expectEqualStrings("", out.written());
+}
+
+test "editor backspace deletes a complete two-byte code point" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.append(0xC3);
+    try editor.append(0xA9);
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("\x08 \x08", out.written());
+}
+
+test "editor backspace deletes a complete three-byte code point" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    for ([_]u8{ 0xE4, 0xB8, 0xAD }) |byte| try editor.append(byte);
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("\x08 \x08\x08 \x08", out.written());
+}
+
+test "editor backspace removes only the incomplete lead byte" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.append(0xC3);
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("\x08 \x08", out.written());
+}
+
+test "editor backspace redraws after deleting a wide code point" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ab中");
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("ab", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> ab", out.written());
+}
+
+test "editor appendSlice redraws once for multi-byte input" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("é");
+    out.clearRetainingCapacity();
+    try editor.appendSlice("中");
+
+    try std.testing.expectEqualStrings("é中", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> é中", out.written());
+}
+
+test "editor init ignores widths narrower than the prompt column" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 1);
+    try editor.append('a');
+
+    try std.testing.expectEqualStrings("a", line_alloc.written());
+    try std.testing.expectEqualStrings("a", out.written());
 }
 
 test "editor historyPrevious replaces the buffer and clears wrapped rows" {
