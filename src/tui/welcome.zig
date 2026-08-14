@@ -34,7 +34,7 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
         }
     }
 
-    if (!info.oneshot) {
+    if (!info.oneshot and !info.prefilled) {
         try help.showHelp(writer);
     }
 
