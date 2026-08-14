@@ -119,7 +119,7 @@ pub const LineEditor = struct {
 
     /// Clears every row the input currently occupies and reprints the prompt
     /// and buffer, letting the terminal place the cursor after the text.
-    fn redraw(self: *LineEditor) !void {
+    pub fn redraw(self: *LineEditor) !void {
         const width = self.width orelse return;
         try self.stdout_writer.writeByte('\r');
         if (self.cursor_rows > 1) {

@@ -18,7 +18,12 @@ pub fn insertMention(
     io: std.Io,
     editor: *line_editor.LineEditor,
 ) !void {
-    const path = (try file_picker.pickFile(allocator, io)) orelse return;
+    const path = (try file_picker.pickFile(allocator, io)) orelse {
+        // The picker erased its own overlay; restore the prompt line. The
+        // success path redraws via appendSlice, so only cancellation needs it.
+        try editor.redraw();
+        return;
+    };
     const mention = try buildMention(allocator, path);
     defer allocator.free(mention);
     try editor.appendSlice(mention);
