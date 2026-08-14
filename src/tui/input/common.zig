@@ -50,6 +50,18 @@ pub const LineEditor = struct {
         try self.redraw();
     }
 
+    pub fn backspace(self: *LineEditor) !void {
+        const written = self.line_alloc.written();
+        if (written.len == 0) return;
+        self.line_alloc.shrinkRetainingCapacity(written.len - 1);
+        if (self.width == null) {
+            try self.stdout_writer.writeAll(terminal.backspace_echo);
+            try self.stdout_writer.flush();
+            return;
+        }
+        try self.redraw();
+    }
+
     /// Clears every row the input currently occupies and reprints the prompt
     /// and buffer, letting the terminal place the cursor after the text.
     fn redraw(self: *LineEditor) !void {
@@ -250,6 +262,68 @@ test "editor append past the right edge redraws both rows" {
 
     try std.testing.expectEqualStrings("abcdefghi", line_alloc.written());
     try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghi", out.written());
+}
+
+test "editor backspace erases the last char and redraws one row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    for ("abc") |ch| try editor.append(ch);
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("ab", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> ab", out.written());
+}
+
+test "editor backspace from the second row clears both rows" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    for ("abcdefghi") |ch| try editor.append(ch);
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("abcdefgh", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefgh", out.written());
+}
+
+test "editor backspace keeps deleting across the wrap boundary" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    for ("abcdefgh") |ch| try editor.append(ch);
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("abcdefg", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefg", out.written());
+}
+
+test "editor backspace is a no-op on an empty buffer" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("", out.written());
 }
 
 test "replaceLine updates line_alloc and redraws prompt" {
