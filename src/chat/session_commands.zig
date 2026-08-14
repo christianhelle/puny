@@ -1,18 +1,20 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
-const cli = @import("../cli/args.zig");
 const config = @import("../config/config.zig");
+const context = @import("context.zig");
+const debug_log = @import("debug_log.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
+const input = @import("../tui/input.zig");
 const openai = @import("../providers/openai.zig");
 const model_selection = @import("../models/select.zig");
 const provider = @import("../providers/provider.zig");
 const provider_picker = @import("../tui/provider_picker.zig");
 const resolver = @import("../providers/resolver.zig");
-const session = @import("session.zig");
+const sigint = @import("../core/sigint.zig");
 const welcome = @import("../tui/welcome.zig");
 
 const ModelProvider = provider.ModelProvider;
-const ChatLoopContext = session.ChatLoopContext;
+const ChatLoopContext = context.ChatLoopContext;
 
 pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8) !void {
     const effort = if (effort_arg) |text| blk: {
@@ -116,7 +118,7 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
     const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
     ctx.prov.deinit();
     ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
-    if (ctx.debug_log) |log| session.attachHttpDebugObserver(ctx.prov, log);
+    if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
     if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
     ctx.model_provider.* = picked_provider;
     ctx.provider_url.* = new_provider_url;
@@ -164,7 +166,7 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     }
 
     const old_provider_name = ctx.cfg.provider;
-    const result = try session.promptReconfigure(ctx.arena, ctx.io, ctx.init, ctx.stdout_writer, ctx.cfg);
+    const result = try promptReconfigure(ctx.arena, ctx.io, ctx.init, ctx.stdout_writer, ctx.cfg);
     if (result.cancelled) return;
     if (!result.changed) return;
 
@@ -176,7 +178,7 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         ctx.prov.deinit();
         ctx.prov.* = resolver.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
-        if (ctx.debug_log) |log| session.attachHttpDebugObserver(ctx.prov, log);
+        if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
         if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
         ctx.model_provider.* = new_provider_name;
         ctx.provider_url.* = new_provider_url;
@@ -225,6 +227,106 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     try ctx.stdout_writer.flush();
 }
 
+pub const ReconfigurePrompt = struct {
+    changed: bool = false,
+    cancelled: bool = false,
+};
+
+pub fn promptReconfigure(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init,
+    stdout_writer: *std.Io.Writer,
+    cfg: *config.Config,
+) !ReconfigurePrompt {
+    var line_alloc: std.Io.Writer.Allocating = .init(arena);
+    defer line_alloc.deinit();
+    var stdin_buffer: [4096]u8 = undefined;
+
+    var result = ReconfigurePrompt{};
+
+    try stdout_writer.print("Current provider: {s}\n", .{@tagName(cfg.provider)});
+    try stdout_writer.flush();
+
+    const picked_provider = try provider_picker.selectProviderInteractive(arena, io, init) orelse {
+        try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+        try stdout_writer.flush();
+        return .{ .cancelled = true };
+    };
+
+    var provider_name = cfg.provider;
+    var provider_changed = false;
+    if (picked_provider != cfg.provider) {
+        cfg.provider = picked_provider;
+        provider_name = cfg.provider;
+        provider_changed = true;
+        result.changed = true;
+    }
+
+    const entry = cfg.providerEntry(provider_name);
+    const provider_url_is_fixed = resolver.providerHasFixedUrl(provider_name);
+    if (provider_url_is_fixed) {
+        const fixed_url = resolver.defaultProviderUrl(provider_name);
+        entry.url = try arena.dupe(u8, fixed_url);
+        result.changed = true;
+        try stdout_writer.print("Provider URL is fixed at {s}\n", .{fixed_url});
+        try stdout_writer.flush();
+    } else {
+        line_alloc.clearRetainingCapacity();
+        try stdout_writer.print("Current provider URL: {s}\n", .{entry.url});
+        try stdout_writer.print(
+            "Enter new provider URL (default: {s}; press Enter for default): ",
+            .{resolver.defaultProviderUrl(provider_name)},
+        );
+        try stdout_writer.flush();
+
+        const new_url = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+            if (sigint.isTriggered()) return .{ .cancelled = true };
+            return err;
+        } orelse {
+            try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+            try stdout_writer.flush();
+            return .{ .cancelled = true };
+        };
+
+        const default_url = resolver.defaultProviderUrl(provider_name);
+        if (new_url.len > 0) {
+            entry.url = try arena.dupe(u8, new_url);
+            result.changed = true;
+        } else if (provider_changed) {
+            entry.url = try arena.dupe(u8, default_url);
+            result.changed = true;
+        }
+    }
+
+    line_alloc.clearRetainingCapacity();
+    const key_status = if (entry.apiKey) |_| "set" else "none";
+    try stdout_writer.print("Current API key: ({s})\n", .{key_status});
+    try stdout_writer.print("Enter new API key (press Enter to keep, '-' to clear): ", .{});
+    try stdout_writer.flush();
+
+    const new_key = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+        if (sigint.isTriggered()) return .{ .cancelled = true };
+        return err;
+    } orelse {
+        try stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+        try stdout_writer.flush();
+        return .{ .cancelled = true };
+    };
+
+    if (std.mem.eql(u8, new_key, "-")) {
+        entry.apiKey = null;
+        entry.stored_blob = null;
+        result.changed = true;
+    } else if (new_key.len > 0) {
+        entry.apiKey = try arena.dupe(u8, new_key);
+        entry.stored_blob = null;
+        result.changed = true;
+    }
+
+    return result;
+}
+
 fn testChatLoopContext(
     allocator: std.mem.Allocator,
     stdout_writer: *std.Io.Writer,
@@ -232,6 +334,7 @@ fn testChatLoopContext(
     model_provider: *ModelProvider,
     cfg: *config.Config,
 ) ChatLoopContext {
+    const cli = @import("../cli/args.zig");
     return .{
         .arena = allocator,
         .messages_arena = undefined,
