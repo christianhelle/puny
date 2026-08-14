@@ -158,8 +158,9 @@ zig build test-regression
 ## Quick start
 
 On first run, Puny launches a one-time setup wizard that asks you to pick a
-provider, URL, and API key. Your choices are saved to `config.json` and the
-wizard is skipped on later runs.
+provider and API key (and a URL only for LM Studio; OpenCode Zen, OpenCode Go,
+and GitHub Copilot use fixed URLs). Your choices are saved to `config.json` and
+the wizard is skipped on later runs.
 
 ### LM Studio
 
@@ -348,7 +349,7 @@ puny --reconfigure
 You will be prompted for:
 
 1. **Provider** — `lmstudio`, `opencode`, `opencode-go`, or `copilot`.
-2. **Provider URL** — press Enter to use the provider's default. (OpenCode Zen's URL is fixed at `https://opencode.ai/zen`, OpenCode Go's at `https://opencode.ai/zen/go`, and GitHub Copilot's at `https://api.githubcopilot.com`.)
+2. **Provider URL** — only for LM Studio; press Enter to use the default. OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
 Once saved, Puny uses the stored provider and key on subsequent runs, so you only need to pass `--provider` or `--api-key` again if you want to override them for a single session. If an OpenCode Zen or OpenCode Go request fails with an authentication error, Puny prints an auth hint; use `--reconfigure` to update the key.
