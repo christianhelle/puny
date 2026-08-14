@@ -1,16 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("./common.zig");
-const prompt_history = @import("../../prompts/history.zig");
 const sigint = @import("../../core/sigint.zig");
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
 pub fn readLineWindows(
     io: std.Io,
-    stdout_writer: *std.Io.Writer,
-    line_alloc: *std.Io.Writer.Allocating,
-    history: ?*prompt_history.History,
+    editor: *common.LineEditor,
 ) !common.ReadLineResult {
     if (comptime builtin.os.tag != .windows) unreachable;
 
@@ -33,11 +30,11 @@ pub fn readLineWindows(
         switch (vk) {
             windows.VK_RETURN => {
                 first_esc_ts = null;
-                return .{ .submitted = line_alloc.written() };
+                return .{ .submitted = editor.line_alloc.written() };
             },
             windows.VK_BACK => {
                 first_esc_ts = null;
-                try common.backspace(line_alloc, stdout_writer);
+                try editor.backspace();
             },
             windows.VK_ESCAPE => {
                 const now = std.Io.Timestamp.now(io, .awake);
@@ -49,11 +46,11 @@ pub fn readLineWindows(
             },
             windows.VK_UP => {
                 first_esc_ts = null;
-                try common.historyPrevious(line_alloc, stdout_writer, history);
+                try editor.historyPrevious();
             },
             windows.VK_DOWN => {
                 first_esc_ts = null;
-                try common.historyNext(line_alloc, stdout_writer, history);
+                try editor.historyNext();
             },
             else => {
                 first_esc_ts = null;
@@ -63,7 +60,7 @@ pub fn readLineWindows(
                     return .interrupted;
                 }
                 if (ch >= 32 and ch < 127) {
-                    try common.appendAndEcho(@intCast(ch), line_alloc, stdout_writer);
+                    try editor.append(@intCast(ch));
                 }
             },
         }

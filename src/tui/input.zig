@@ -32,7 +32,7 @@ pub fn readLine(
 
     var editor = common.LineEditor.init(line_alloc, stdout_writer, history, terminal.terminalWidth());
     if (builtin.os.tag == .windows) {
-        return try windows_impl.readLineWindows(io, stdout_writer, line_alloc, history);
+        return try windows_impl.readLineWindows(io, &editor);
     } else {
         return try posix.readLinePosix(io, &editor);
     }
