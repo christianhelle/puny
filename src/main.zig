@@ -705,6 +705,7 @@ test "include core.git_root tests" {
 
 test "include sessions module tests" {
     _ = @import("sessions/sessions.zig");
+    _ = @import("sessions/atomic_write.zig");
 }
 
 test "include chat session tests" {
