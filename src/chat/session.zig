@@ -573,7 +573,7 @@ fn readUserInput(
         return .{ .message = p };
     }
 
-    const maybe_input = input.readLine(ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history) catch |err| {
+    const maybe_input = input.readLine(ctx.arena, ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history) catch |err| {
         if (sigint.isTriggered()) {
             finalizeSession(ctx);
             return .exit;

@@ -2,11 +2,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("./common.zig");
 const line_editor = @import("./line_editor.zig");
+const mention = @import("./mention.zig");
 const sigint = @import("../../core/sigint.zig");
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
 pub fn readLineWindows(
+    allocator: std.mem.Allocator,
     io: std.Io,
     editor: *line_editor.LineEditor,
 ) !common.ReadLineResult {
@@ -75,7 +77,11 @@ pub fn readLineWindows(
                     } else {
                         pending_high = null;
                         if (ch < 0x80) {
-                            try editor.append(@intCast(ch));
+                            if (ch == '@') {
+                                try mention.insertMention(allocator, io, editor);
+                            } else {
+                                try editor.append(@intCast(ch));
+                            }
                         } else {
                             try appendScalar(editor, ch);
                         }
