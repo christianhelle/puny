@@ -62,6 +62,32 @@ pub const LineEditor = struct {
         try self.redraw();
     }
 
+    pub fn historyPrevious(self: *LineEditor) !void {
+        const h = self.history orelse return;
+        const current = self.line_alloc.written();
+        const replacement = h.previous(current) orelse h.currentDraft() orelse return;
+        try self.replace(replacement);
+    }
+
+    pub fn historyNext(self: *LineEditor) !void {
+        const h = self.history orelse return;
+        const replacement = h.next() orelse h.currentDraft() orelse return;
+        try self.replace(replacement);
+    }
+
+    fn replace(self: *LineEditor, text: []const u8) !void {
+        self.line_alloc.clearRetainingCapacity();
+        try self.line_alloc.writer.writeAll(text);
+        if (self.width == null) {
+            try self.stdout_writer.writeAll(terminal.move_to_line_start);
+            try self.stdout_writer.writeAll(terminal.clear_to_end_of_line);
+            try self.stdout_writer.print("{s} {s}", .{ prompts.prompt_text, text });
+            try self.stdout_writer.flush();
+            return;
+        }
+        try self.redraw();
+    }
+
     /// Clears every row the input currently occupies and reprints the prompt
     /// and buffer, letting the terminal place the cursor after the text.
     fn redraw(self: *LineEditor) !void {
@@ -324,6 +350,68 @@ test "editor backspace is a no-op on an empty buffer" {
 
     try std.testing.expectEqualStrings("", line_alloc.written());
     try std.testing.expectEqualStrings("", out.written());
+}
+
+test "editor historyPrevious replaces the buffer and clears wrapped rows" {
+    const allocator = std.testing.allocator;
+    var history = prompt_history.History.init(allocator, "");
+    defer history.deinit();
+    try history.add("short");
+
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, &history, 10);
+    for ("abcdefghi") |ch| try editor.append(ch);
+    out.clearRetainingCapacity();
+    try editor.historyPrevious();
+
+    try std.testing.expectEqualStrings("short", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> short", out.written());
+}
+
+test "editor historyNext restores the draft and clears wrapped rows" {
+    const allocator = std.testing.allocator;
+    var history = prompt_history.History.init(allocator, "");
+    defer history.deinit();
+    try history.add("first");
+
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, &history, 10);
+    for ("abcdefgh") |ch| try editor.append(ch);
+    try editor.historyPrevious();
+    out.clearRetainingCapacity();
+    try editor.historyNext();
+
+    try std.testing.expectEqualStrings("abcdefgh", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> abcdefgh", out.written());
+}
+
+test "editor history navigation without width uses single-row redraw" {
+    const allocator = std.testing.allocator;
+    var history = prompt_history.History.init(allocator, "");
+    defer history.deinit();
+    try history.add("first");
+
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, &history, null);
+    try editor.historyPrevious();
+
+    try std.testing.expectEqualStrings("first", line_alloc.written());
+    try std.testing.expectEqualStrings(
+        terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "> first",
+        out.written(),
+    );
 }
 
 test "replaceLine updates line_alloc and redraws prompt" {
