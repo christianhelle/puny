@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add debug_log.zig with the http debug logger and its tests ([#130](https://github.com/christianhelle/puny/pull/130)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor and move LineEditor to its own module ([#129](https://github.com/christianhelle/puny/pull/129)) ([@christianhelle](https://github.com/christianhelle/))
 - Multi-line prompt support with line editor ([#128](https://github.com/christianhelle/puny/pull/128)) ([@christianhelle](https://github.com/christianhelle/))
 - Show token stats footer after each response ([#127](https://github.com/christianhelle/puny/pull/127)) ([@christianhelle](https://github.com/christianhelle/))
