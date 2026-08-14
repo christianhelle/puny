@@ -1,4 +1,5 @@
 const std = @import("std");
+const markdown = @import("../markdown.zig");
 const prompt_history = @import("../../prompts/history.zig");
 const terminal = @import("../terminal.zig");
 const prompts = @import("../../prompts/prompts.zig");
@@ -9,6 +10,39 @@ pub const ReadLineResult = union(enum) {
     interrupted,
     eof,
 };
+
+pub const RowsInfo = struct {
+    /// Physical terminal rows the input area occupies.
+    rows: usize,
+    /// True when the text ends exactly at the right edge of the terminal,
+    /// leaving the cursor in the pending-wrap state.
+    ends_at_edge: bool,
+};
+
+/// Computes how many terminal rows `text` occupies when it starts at
+/// `start_col` (the column after the prompt) on a terminal `width` columns
+/// wide. Wide code points that do not fit on the current row wrap to the
+/// next one, mirroring terminal auto-wrap.
+pub fn rowsNeeded(start_col: usize, width: usize, text: []const u8) RowsInfo {
+    var col = start_col;
+    var rows: usize = 1;
+    var i: usize = 0;
+    while (i < text.len) {
+        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        const cp_width = if (seq_len > 1 and i + seq_len <= text.len)
+            markdown.codePointWidth(std.unicode.utf8Decode(text[i..][0..seq_len]) catch 1)
+        else
+            1;
+        if (col + cp_width > width) {
+            rows += 1;
+            col = cp_width;
+        } else {
+            col += cp_width;
+        }
+        i += seq_len;
+    }
+    return .{ .rows = rows, .ends_at_edge = col == width };
+}
 
 pub fn readLineCanonical(
     io: std.Io,
@@ -83,6 +117,48 @@ pub fn replaceLine(
     try stdout_writer.writeAll(terminal.clear_to_end_of_line);
     try stdout_writer.print("{s} {s}", .{ prompts.prompt_text, text });
     try stdout_writer.flush();
+}
+
+test "rowsNeeded empty text occupies one row" {
+    const info = rowsNeeded(2, 10, "");
+    try std.testing.expectEqual(@as(usize, 1), info.rows);
+    try std.testing.expect(!info.ends_at_edge);
+}
+
+test "rowsNeeded short text fits on one row" {
+    const info = rowsNeeded(2, 10, "hello");
+    try std.testing.expectEqual(@as(usize, 1), info.rows);
+    try std.testing.expect(!info.ends_at_edge);
+}
+
+test "rowsNeeded text ending exactly at the right edge flags pending wrap" {
+    const info = rowsNeeded(2, 10, "abcdefgh");
+    try std.testing.expectEqual(@as(usize, 1), info.rows);
+    try std.testing.expect(info.ends_at_edge);
+}
+
+test "rowsNeeded text wraps to a second row" {
+    const info = rowsNeeded(2, 10, "abcdefghi");
+    try std.testing.expectEqual(@as(usize, 2), info.rows);
+    try std.testing.expect(!info.ends_at_edge);
+}
+
+test "rowsNeeded multi-row text ending exactly at the right edge" {
+    const info = rowsNeeded(2, 10, "abcdefghijklmnopqr");
+    try std.testing.expectEqual(@as(usize, 2), info.rows);
+    try std.testing.expect(info.ends_at_edge);
+}
+
+test "rowsNeeded wide code point straddling the boundary wraps" {
+    const info = rowsNeeded(2, 10, "abcdefg😀");
+    try std.testing.expectEqual(@as(usize, 2), info.rows);
+    try std.testing.expect(!info.ends_at_edge);
+}
+
+test "rowsNeeded wide code point filling the row exactly flags pending wrap" {
+    const info = rowsNeeded(2, 10, "abcdef😀");
+    try std.testing.expectEqual(@as(usize, 1), info.rows);
+    try std.testing.expect(info.ends_at_edge);
 }
 
 test "replaceLine updates line_alloc and redraws prompt" {
