@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Skip welcome commands when a prompt is supplied ([#139](https://github.com/christianhelle/puny/pull/139)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor markdown.zig into width and table modules ([#140](https://github.com/christianhelle/puny/pull/140)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix reasoning token count stuck at 0 in stats ([#135](https://github.com/christianhelle/puny/pull/135)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix and improve the README documentation ([#138](https://github.com/christianhelle/puny/pull/138)) ([@christianhelle](https://github.com/christianhelle/))
