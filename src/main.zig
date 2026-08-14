@@ -738,6 +738,9 @@ test "include agents.instructions tests" {
 test "include chat.chat tests" {
     _ = @import("chat/chat.zig");
 }
+test "include chat.stats tests" {
+    _ = @import("chat/stats.zig");
+}
 test "include chat.display tests" {
     _ = @import("chat/display.zig");
 }
