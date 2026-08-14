@@ -74,7 +74,7 @@ pub fn readLinePosix(
             },
             else => if (terminal.isIgnoredControlByte(byte)) {
                 first_esc_ts = null;
-            } else if (byte == '@') {
+            } else if (byte == '@' and mention.isTrigger(editor.line_alloc.written())) {
                 first_esc_ts = null;
                 try mention.insertMention(allocator, io, editor);
             } else {
