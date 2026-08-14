@@ -1,5 +1,6 @@
 const std = @import("std");
 const common = @import("./common.zig");
+const line_editor = @import("./line_editor.zig");
 const sigint = @import("../../core/sigint.zig");
 const terminal = @import("../terminal.zig");
 
@@ -7,7 +8,7 @@ const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
 pub fn readLinePosix(
     io: std.Io,
-    editor: *common.LineEditor,
+    editor: *line_editor.LineEditor,
 ) !common.ReadLineResult {
     const posix = std.posix;
     var first_esc_ts: ?std.Io.Timestamp = null;

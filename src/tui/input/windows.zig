@@ -1,13 +1,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("./common.zig");
+const line_editor = @import("./line_editor.zig");
 const sigint = @import("../../core/sigint.zig");
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
 pub fn readLineWindows(
     io: std.Io,
-    editor: *common.LineEditor,
+    editor: *line_editor.LineEditor,
 ) !common.ReadLineResult {
     if (comptime builtin.os.tag != .windows) unreachable;
 
@@ -87,7 +88,7 @@ pub fn readLineWindows(
 
 /// Encodes a Unicode scalar as UTF-8 and appends it as one slice so the
 /// editor redraws once instead of per byte.
-fn appendScalar(editor: *common.LineEditor, cp: u21) !void {
+fn appendScalar(editor: *line_editor.LineEditor, cp: u21) !void {
     var buf: [4]u8 = undefined;
     const len = try std.unicode.utf8Encode(cp, &buf);
     try editor.appendSlice(buf[0..len]);
