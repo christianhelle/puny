@@ -527,7 +527,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
 | `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
 | `--prompt-file <file-or-url>` | Read first prompt from a file or URL (10 MiB limit) |
-| `-1`, `--oneshot`       | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                                    |
+| `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                              |
 | `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
 | `--reconfigure`         | Re-run first-run setup and update config                                                  |
 | `--show-thinking`       | Show reasoning/thinking output from the model                                             |
@@ -536,6 +536,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--prune`               | Delete old sessions (use with `--session` to keep one)                                    |
 | `--debug`               | Log HTTP requests and responses to `puny_debug.log`                                       |
 | `-U`, `--upgrade`       | Upgrade to the latest release via install script                                          |
+| `--force`               | Force upgrade even if already on the latest version (use with `--upgrade`)                |
 | `-h`, `--help`          | Show help text                                                                            |
 | `-V`, `--version`       | Print version                                                                             |
 
