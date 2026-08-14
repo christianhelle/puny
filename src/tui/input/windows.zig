@@ -14,6 +14,7 @@ pub fn readLineWindows(
     const STD_INPUT_HANDLE: u32 = @bitCast(@as(i32, -10));
     const hStdin = windows.GetStdHandle(STD_INPUT_HANDLE);
     var first_esc_ts: ?std.Io.Timestamp = null;
+    var pending_high: ?u16 = null;
 
     while (true) {
         var record: windows.INPUT_RECORD = undefined;
@@ -34,6 +35,7 @@ pub fn readLineWindows(
             },
             windows.VK_BACK => {
                 first_esc_ts = null;
+                pending_high = null;
                 try editor.backspace();
             },
             windows.VK_ESCAPE => {
@@ -59,12 +61,36 @@ pub fn readLineWindows(
                     sigint.trigger();
                     return .interrupted;
                 }
-                if (ch >= 32 and ch < 127) {
-                    try editor.append(@intCast(ch));
+                if (ch >= 32 and ch != 127) {
+                    if (std.unicode.utf16IsHighSurrogate(ch)) {
+                        pending_high = ch;
+                    } else if (std.unicode.utf16IsLowSurrogate(ch)) {
+                        if (pending_high) |high| {
+                            pending_high = null;
+                            const pair = [2]u16{ high, ch };
+                            const cp = std.unicode.utf16DecodeSurrogatePair(&pair) catch continue;
+                            try appendScalar(editor, cp);
+                        }
+                    } else {
+                        pending_high = null;
+                        if (ch < 0x80) {
+                            try editor.append(@intCast(ch));
+                        } else {
+                            try appendScalar(editor, ch);
+                        }
+                    }
                 }
             },
         }
     }
+}
+
+/// Encodes a Unicode scalar as UTF-8 and appends it as one slice so the
+/// editor redraws once instead of per byte.
+fn appendScalar(editor: *common.LineEditor, cp: u21) !void {
+    var buf: [4]u8 = undefined;
+    const len = try std.unicode.utf8Encode(cp, &buf);
+    try editor.appendSlice(buf[0..len]);
 }
 
 const windows = if (builtin.os.tag == .windows) struct {
