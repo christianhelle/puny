@@ -140,6 +140,25 @@ test "prefilled prompt mode omits available commands" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Prefilled prompt"));
 }
 
+test "prefilled prompt mode terminates the model line before session id" {
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try print(&out.writer, .{
+        .provider_name = "OpenCode Go",
+        .provider_url = "https://opencode.ai/zen/go",
+        .model_key = "deepseek-v4-pro",
+        .session_id = "5492cc96",
+        .prefilled = true,
+    });
+
+    const text = out.written();
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "5492cc96"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "\n\x1b[2mSession:"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "pro\x1b[2mSession:"));
+}
+
 test "print shows reasoning effort when non-default" {
     const allocator = std.testing.allocator;
 
