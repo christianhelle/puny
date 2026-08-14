@@ -546,7 +546,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | ---------------------------- | --------------------------------------------------- |
 | `PUNY_CHAT_LOG`              | Set to `1` or `true` to save full conversation to `puny_chat.log` |
 | `PUNY_PROVIDER`              | Default provider name (overrides config)            |
-| `PUNY_PROVIDER_URL`          | LM Studio endpoint URL (overrides config/CLI)       |
+| `PUNY_PROVIDER_URL`          | LM Studio endpoint URL (overrides config, unless `--url` is set) |
 | `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
 | `PUNY_MODEL`                 | Default model identifier (overrides config)         |
 | `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider        |
