@@ -845,6 +845,9 @@ test "include tui.ansi tests" {
 test "include tui.effort_picker tests" {
     _ = @import("tui/effort_picker.zig");
 }
+test "include tui.file_picker tests" {
+    _ = @import("tui/file_picker.zig");
+}
 test "include tui.help tests" {
     _ = @import("tui/help.zig");
 }
