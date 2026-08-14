@@ -158,6 +158,16 @@ pub const SessionStats = struct {
         return total;
     }
 
+    /// Total tokens consumed this session across all models, with reasoning
+    /// tokens added back so the sum matches the per-turn `in + out` semantics
+    /// (SessionStats.output_tokens excludes reasoning).
+    pub fn totalTokens(self: *const @This()) i64 {
+        var total: i64 = 0;
+        for (self.models.items) |entry| {
+            total += entry.stats.input_tokens + entry.stats.output_tokens + entry.stats.reasoning_output_tokens;
+        }
+        return total;
+    }
     pub fn print(self: *const @This(), io: std.Io, writer: *std.Io.Writer) !void {
         const now = std.Io.Clock.Timestamp.now(io, .awake);
         const elapsed_ns = self.start_time.raw.durationTo(now.raw).nanoseconds;
@@ -953,4 +963,37 @@ test "countNewlines counts line breaks" {
     try std.testing.expectEqual(@as(usize, 1), countNewlines("a\nb"));
     try std.testing.expectEqual(@as(usize, 3), countNewlines("a\nb\nc\n"));
     try std.testing.expectEqual(@as(usize, 2), countNewlines("\n\n"));
+}
+
+test "SessionStats totalTokens sums input output and reasoning across models" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    stats.beginTurn("model-a", 10);
+    stats.addStreamingOutput(5, null);
+    stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8, .reasoning_output_tokens = 1 }, true);
+
+    stats.beginTurn("model-b", 20);
+    stats.addStreamingOutput(4, null);
+    stats.finalizeTurn(.{ .input_tokens = 22, .output_tokens = 6 }, true);
+
+    // model-a: 12 in + 7 plain out + 1 reasoning = 20; model-b: 22 + 6 = 28.
+    try std.testing.expectEqual(@as(i64, 48), stats.totalTokens());
+}
+
+test "SessionStats totalTokens is zero for an empty session" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    try std.testing.expectEqual(@as(i64, 0), stats.totalTokens());
+}
+
+test "SessionStats totalTokens includes reasoning tokens" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 10);
+    stats.addStreamingOutput(5, 3);
+    stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8, .reasoning_output_tokens = 3 }, true);
+
+    // 12 in + 5 plain out (8 - 3) + 3 reasoning = 20.
+    try std.testing.expectEqual(@as(i64, 20), stats.totalTokens());
 }
