@@ -804,6 +804,9 @@ test "include providers.models tests" {
 test "include providers.openai tests" {
     _ = @import("providers/openai.zig");
 }
+test "include providers.message tests" {
+    _ = @import("providers/message.zig");
+}
 test "include providers.opencode_go tests" {
     _ = @import("providers/opencode_go.zig");
 }
