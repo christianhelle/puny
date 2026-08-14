@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Fix and improve the README documentation ([#138](https://github.com/christianhelle/puny/pull/138)) ([@christianhelle](https://github.com/christianhelle/))
 - Split OpenCode Zen Gemini streaming into its own module ([#134](https://github.com/christianhelle/puny/pull/134)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract git repo root discovery into core/git_root.zig ([#133](https://github.com/christianhelle/puny/pull/133)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract the session stats tracker into stats.zig ([#132](https://github.com/christianhelle/puny/pull/132)) ([@christianhelle](https://github.com/christianhelle/))
