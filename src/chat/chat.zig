@@ -191,7 +191,7 @@ pub const SessionStats = struct {
             }
             try writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
             try writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.output_tokens, stats.reasoning_output_tokens });
-            try writer.print("  Total tokens:        {d}\n", .{stats.input_tokens + stats.output_tokens});
+            try writer.print("  Total tokens:        {d}\n", .{stats.input_tokens + stats.output_tokens + stats.reasoning_output_tokens});
             if (stats.tps_count > 0) {
                 try writer.print("  Avg tokens/sec:      {d:.1}\n", .{stats.tps_sum / @as(f64, @floatFromInt(stats.tps_count))});
             }
@@ -939,6 +939,21 @@ test "SessionStats skips models without finalized turns" {
 
     try std.testing.expectEqual(@as(usize, 2), stats.models.items.len);
     try std.testing.expectEqual(@as(usize, 1), stats.totalTurns());
+}
+
+test "SessionStats.print per-model total includes reasoning tokens" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 10);
+    stats.addStreamingOutput(5, 3);
+    stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8, .reasoning_output_tokens = 3 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    // 12 in + 5 plain out + 3 reasoning = 20.
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Total tokens:        20") != null);
 }
 
 test "SessionStats.print shows model with partial turn" {
