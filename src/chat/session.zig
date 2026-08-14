@@ -126,6 +126,7 @@ pub const ChatSession = struct {
                 .arena = ctx.arena,
                 .messages_alloc = ctx.messages_arena.allocator(),
                 .messages_arena = ctx.messages_arena,
+                .io = ctx.io,
                 .stdout_writer = ctx.stdout_writer,
                 .messages = ctx.messages,
                 .planning_mode = ctx.planning_mode,
