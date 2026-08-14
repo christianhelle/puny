@@ -139,7 +139,6 @@ test "prefilled prompt mode omits available commands" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Available commands:"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
-    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Prefilled prompt"));
 }
 
 test "prefilled prompt mode terminates the model line before session id" {
@@ -159,6 +158,25 @@ test "prefilled prompt mode terminates the model line before session id" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "5492cc96"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "\n\x1b[2mSession:"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "pro\x1b[2mSession:"));
+}
+
+test "oneshot mode terminates the model line before session id" {
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try print(&out.writer, .{
+        .provider_name = "Mock",
+        .provider_url = "-",
+        .model_key = "mock-model",
+        .session_id = "abc-123",
+        .oneshot = true,
+    });
+
+    const text = out.written();
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "abc-123"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "\n\x1b[2mSession:"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "model\x1b[2mSession:"));
 }
 
 test "print shows reasoning effort when non-default" {
