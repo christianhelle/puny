@@ -12,7 +12,7 @@ const prompt_history = @import("prompts/history.zig");
 const prompt_file = @import("prompts/prompt_file.zig");
 const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
-const resolve = @import("providers/resolve.zig");
+const resolver = @import("providers/resolver.zig");
 const session = @import("chat/session.zig");
 const sigint = @import("core/sigint.zig");
 const instructions = @import("agents/instructions.zig");
@@ -463,9 +463,9 @@ fn initializeProviderAndModel(
     model_key: *[]const u8,
     reasoning_effort: *?openai.ReasoningEffort,
 ) !void {
-    selected_provider.* = resolve.effectiveProvider(parsed, cfg.*);
-    provider_url.* = if (parsed.mock) "-" else resolve.baseUrlFor(selected_provider.*, parsed, cfg.*);
-    const api_key = try resolve.resolveApiKey(arena, io, parsed, cfg.*, selected_provider.*, init.environ_map.get("PUNY_API_KEY"));
+    selected_provider.* = resolver.effectiveProvider(parsed, cfg.*);
+    provider_url.* = if (parsed.mock) "-" else resolver.baseUrlFor(selected_provider.*, parsed, cfg.*);
+    const api_key = try resolver.resolveApiKey(arena, io, parsed, cfg.*, selected_provider.*, init.environ_map.get("PUNY_API_KEY"));
 
     if (!parsed.mock and requiresApiKey(selected_provider.*) and api_key.len == 0) {
         var stderr_buffer: [1024]u8 = undefined;
@@ -488,9 +488,9 @@ fn initializeProviderAndModel(
         break :blk null;
     };
 
-    prov.* = resolve.createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io);
+    prov.* = resolver.createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io);
     errdefer prov.deinit();
-    if (!parsed.mock) try resolve.ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
+    if (!parsed.mock) try resolver.ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
     const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
         u8,
@@ -799,8 +799,8 @@ test "include providers.provider tests" {
     _ = @import("providers/provider.zig");
 }
 
-test "include providers.resolve tests" {
-    _ = @import("providers/resolve.zig");
+test "include providers.resolver tests" {
+    _ = @import("providers/resolver.zig");
 }
 test "include skills.skills tests" {
     _ = @import("skills/skills.zig");
