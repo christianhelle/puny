@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const chat = @import("chat.zig");
+const stats = @import("stats.zig");
 const debug_log = @import("debug_log.zig");
 const token_stats = @import("../tui/token_stats.zig");
 const cli = @import("../cli/args.zig");
@@ -76,7 +77,7 @@ pub const ChatLoopContext = struct {
     planning_mode: *bool,
     restore_incomplete: bool = false,
     session: *core_session.Session,
-    session_stats: *chat.SessionStats,
+    session_stats: *stats.SessionStats,
     debug_log: ?*DebugLog,
     chat_log: ?*ChatLog,
     skill_registry: *skills.Registry,
@@ -184,7 +185,7 @@ pub const ChatSession = struct {
                     ctx.session.* = try core_session.Session.init(ctx.arena, ctx.session.base, ctx.random, ctx.io);
 
                     ctx.session_stats.deinit();
-                    ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
+                    ctx.session_stats.* = stats.SessionStats.init(ctx.arena, ctx.io);
                     ctx.session_stats.session_id = ctx.session.id;
 
                     const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
@@ -281,7 +282,7 @@ pub const ChatSession = struct {
                         );
 
                         ctx.session_stats.deinit();
-                        ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
+                        ctx.session_stats.* = stats.SessionStats.init(ctx.arena, ctx.io);
                         ctx.session_stats.session_id = ctx.session.id;
 
                         const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
@@ -879,7 +880,7 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
 }
 
 fn printExit(
-    session_stats: *const chat.SessionStats,
+    session_stats: *const stats.SessionStats,
     io: std.Io,
     stdout_writer: *std.Io.Writer,
 ) !void {
