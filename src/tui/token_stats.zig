@@ -31,9 +31,12 @@ pub fn printTokenFooter(
     var session_buf: [24]u8 = undefined;
     try writer.print("\n{s}⏱ tokens: in {s}{s} | out {s}{s} | total {s}{s} (session {s}){s}\n", .{
         ansi.dim,
-        tilde, formatTokens(&in_buf, turn_in),
-        tilde, formatTokens(&out_buf, turn_out),
-        tilde, formatTokens(&total_buf, turn_in + turn_out),
+        tilde,
+        formatTokens(&in_buf, turn_in),
+        tilde,
+        formatTokens(&out_buf, turn_out),
+        tilde,
+        formatTokens(&total_buf, turn_in + turn_out),
         formatTokens(&session_buf, session_total),
         ansi.reset,
     });
