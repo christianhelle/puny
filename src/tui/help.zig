@@ -44,7 +44,7 @@ test "showHelp lists all commands" {
     const commands = [_][]const u8{
         "/quit, /exit",  "/new, /reset", "/stats",           "/config",           "/plan [task]",
         "/build [task]", "/model [id]",  "/provider [name]", "/thinking [level]", "/sessions",
-        "/resume [id]",  "/prune",       "/skills",          "/file [path|url]", "@path",
+        "/resume [id]",  "/prune",       "/skills",          "/file [path|url]",  "@path",
     };
     for (commands) |command| {
         try std.testing.expect(std.mem.indexOf(u8, text, command) != null);
