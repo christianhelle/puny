@@ -3,7 +3,8 @@
 ## [Unreleased Changes]
 
 ### Features
-- fix slow startup caused by spawning git twice at launch ([#126](https://github.com/christianhelle/puny/pull/126)) ([@christianhelle](https://github.com/christianhelle/))
+- Show token stats footer after each response ([#127](https://github.com/christianhelle/puny/pull/127)) ([@christianhelle](https://github.com/christianhelle/))
+- Fix slow startup caused by spawning git twice at launch ([#126](https://github.com/christianhelle/puny/pull/126)) ([@christianhelle](https://github.com/christianhelle/))
 
 
 ## [v0.3.3](https://github.com/christianhelle/puny/releases/tag/v0.3.3) (2026-08-11)
