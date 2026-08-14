@@ -36,6 +36,8 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
 
     if (!info.oneshot and !info.prefilled) {
         try help.showHelp(writer);
+    } else {
+        try writer.print("\n\n", .{});
     }
 
     if (info.session_id.len > 0) {
