@@ -864,6 +864,10 @@ test "include tui.markdown tests" {
 test "include tui.width tests" {
     _ = @import("tui/width.zig");
 }
+
+test "include tui.table tests" {
+    _ = @import("tui/table.zig");
+}
 test "include tui.model_picker tests" {
     _ = @import("tui/model_picker.zig");
 }
