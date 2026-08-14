@@ -803,6 +803,10 @@ test "include providers.opencode_go tests" {
 test "include providers.opencode_zen tests" {
     _ = @import("providers/opencode_zen.zig");
 }
+
+test "include providers.opencode_zen_google tests" {
+    _ = @import("providers/opencode_zen_google.zig");
+}
 test "include providers.provider tests" {
     _ = @import("providers/provider.zig");
 }
