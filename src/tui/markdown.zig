@@ -358,7 +358,7 @@ fn isZeroWidthCodePoint(cp: u21) bool {
 
 /// Display width of a single code point: 0 for combining/format marks, 2 for
 /// wide (CJK/emoji) code points, otherwise 1.
-fn codePointWidth(cp: u21) usize {
+pub fn codePointWidth(cp: u21) usize {
     if (isZeroWidthCodePoint(cp)) return 0;
     if (isWideCodePoint(cp)) return 2;
     return 1;
