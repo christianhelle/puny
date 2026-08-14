@@ -11,6 +11,65 @@ pub const ReadLineResult = union(enum) {
     eof,
 };
 
+/// Line editor state for the raw-mode prompt. Mutations to the buffer redraw
+/// the entire input area (all wrapped rows) instead of echoing bytes, so
+/// editing works when the prompt spans multiple terminal rows.
+pub const LineEditor = struct {
+    line_alloc: *std.Io.Writer.Allocating,
+    stdout_writer: *std.Io.Writer,
+    history: ?*prompt_history.History,
+    /// Terminal width in columns. When unknown (e.g. piped stdout), the
+    /// editor falls back to legacy single-row echo behavior.
+    width: ?usize,
+    /// Rows the input currently occupies on screen, counting an extra row
+    /// when the text ends exactly at the right edge (pending wrap).
+    cursor_rows: usize,
+
+    pub fn init(
+        line_alloc: *std.Io.Writer.Allocating,
+        stdout_writer: *std.Io.Writer,
+        history: ?*prompt_history.History,
+        width: ?usize,
+    ) LineEditor {
+        return .{
+            .line_alloc = line_alloc,
+            .stdout_writer = stdout_writer,
+            .history = history,
+            .width = width,
+            .cursor_rows = 1,
+        };
+    }
+
+    pub fn append(self: *LineEditor, byte: u8) !void {
+        try self.line_alloc.writer.writeByte(byte);
+        if (self.width == null) {
+            try self.stdout_writer.writeByte(byte);
+            try self.stdout_writer.flush();
+            return;
+        }
+        try self.redraw();
+    }
+
+    /// Clears every row the input currently occupies and reprints the prompt
+    /// and buffer, letting the terminal place the cursor after the text.
+    fn redraw(self: *LineEditor) !void {
+        const width = self.width orelse return;
+        // Carriage return first: if the cursor is in pending-wrap state the
+        // terminal materializes the wrap, keeping the row arithmetic exact.
+        try self.stdout_writer.writeByte('\r');
+        if (self.cursor_rows > 1) {
+            try self.stdout_writer.print(terminal.cursor_up, .{self.cursor_rows - 1});
+        }
+        try self.stdout_writer.writeAll(terminal.erase_display);
+        try self.stdout_writer.print("{s} {s}", .{ prompts.prompt_text, self.line_alloc.written() });
+        try self.stdout_writer.flush();
+
+        const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
+        const info = rowsNeeded(start_col, width, self.line_alloc.written());
+        self.cursor_rows = info.rows + @intFromBool(info.ends_at_edge);
+    }
+};
+
 pub const RowsInfo = struct {
     /// Physical terminal rows the input area occupies.
     rows: usize,
@@ -159,6 +218,38 @@ test "rowsNeeded wide code point filling the row exactly flags pending wrap" {
     const info = rowsNeeded(2, 10, "abcdef😀");
     try std.testing.expectEqual(@as(usize, 1), info.rows);
     try std.testing.expect(info.ends_at_edge);
+}
+
+test "editor append redraws the prompt and buffer on one row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.append('a');
+    out.clearRetainingCapacity();
+    try editor.append('b');
+
+    try std.testing.expectEqualStrings("ab", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> ab", out.written());
+}
+
+test "editor append past the right edge redraws both rows" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    for ("abcdefgh") |ch| try editor.append(ch);
+    out.clearRetainingCapacity();
+    try editor.append('i');
+
+    try std.testing.expectEqualStrings("abcdefghi", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghi", out.written());
 }
 
 test "replaceLine updates line_alloc and redraws prompt" {
