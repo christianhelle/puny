@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Multi-line prompt support with line editor ([#128](https://github.com/christianhelle/puny/pull/128)) ([@christianhelle](https://github.com/christianhelle/))
 - Show token stats footer after each response ([#127](https://github.com/christianhelle/puny/pull/127)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix slow startup caused by spawning git twice at launch ([#126](https://github.com/christianhelle/puny/pull/126)) ([@christianhelle](https://github.com/christianhelle/))
 
