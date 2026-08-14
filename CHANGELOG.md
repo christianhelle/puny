@@ -3,7 +3,8 @@
 ## [Unreleased Changes]
 
 ### Features
-- Refactor large files into focused modules ([#143](https://github.com/christianhelle/puny/pull/143)) ([@christianhelle](https://github.com/christianhelle/))
+- Extract chat command handlers into session_commands.zig ([#144](https://github.com/christianhelle/puny/pull/144)) ([@christianhelle](https://github.com/christianhelle/))
+- Extract smaller modules from debug_log and openai modules ([#143](https://github.com/christianhelle/puny/pull/143)) ([@christianhelle](https://github.com/christianhelle/))
 - Add @ file mentions to attach files to prompts ([#141](https://github.com/christianhelle/puny/pull/141)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract atomic file writes into a shared module ([#142](https://github.com/christianhelle/puny/pull/142)) ([@christianhelle](https://github.com/christianhelle/))
 - Skip welcome commands when a prompt is supplied ([#139](https://github.com/christianhelle/puny/pull/139)) ([@christianhelle](https://github.com/christianhelle/))
