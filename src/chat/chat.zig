@@ -499,6 +499,7 @@ pub const OpenAiAccumulator = struct {
 pub const TurnResult = struct {
     turn_complete: bool,
     usage: ?openai.TurnUsage,
+    usage_estimated: bool = false,
     was_cancelled: bool = false,
     had_error: bool = false,
 };
@@ -548,15 +549,16 @@ pub fn runTurn(
         .cancelled => {
             _ = try accumulator.finishStream();
             if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, false, has_streamed_content, .cancelled, provider_ttft);
-            return .{ .turn_complete = true, .usage = accumulator.usage, .was_cancelled = true };
+            return .{ .turn_complete = true, .usage = accumulator.usage, .usage_estimated = accumulator.usage == null, .was_cancelled = true };
         },
         .failed => {
             _ = try accumulator.finishStream();
             if (indicator_opt) |i| try i.finish(io, stdout_writer, indicator_offset, false, has_streamed_content, .error_, provider_ttft);
-            return .{ .turn_complete = true, .usage = accumulator.usage, .had_error = true };
+            return .{ .turn_complete = true, .usage = accumulator.usage, .usage_estimated = accumulator.usage == null, .had_error = true };
         },
     }
 
+    const turn_usage_estimated = accumulator.usage == null;
     const turn_usage = if (accumulator.usage) |u| u else usage_estimator.estimateUsage(messages.items, accumulator.estimatedOutputChars());
 
     const has_content = accumulator.content.items.len > 0;
@@ -572,7 +574,7 @@ pub fn runTurn(
     }
 
     if (accumulator.hasToolCalls()) {
-        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage };
+        const assistant_content = try accumulator.cloneAssistantContent(arena) orelse return .{ .turn_complete = true, .usage = turn_usage, .usage_estimated = turn_usage_estimated };
         try messages.append(arena, .{ .assistant = assistant_content });
 
         if (chat_log) |log| {
@@ -599,7 +601,7 @@ pub fn runTurn(
 
         const cursor_offset = content_cursor_offset + tool_output_lines;
         if (indicator_opt) |i| try i.finish(io, stdout_writer, cursor_offset, false, has_streamed_content_after, .done, provider_ttft);
-        return .{ .turn_complete = false, .usage = turn_usage };
+        return .{ .turn_complete = false, .usage = turn_usage, .usage_estimated = turn_usage_estimated };
     }
 
     if (indicator_opt) |i| try i.finish(io, stdout_writer, content_cursor_offset, content_ends_with_newline, has_streamed_content_after, .done, provider_ttft);
@@ -617,7 +619,7 @@ pub fn runTurn(
         try messages.append(arena, .{ .assistant = .{ .content = content } });
     }
 
-    return .{ .turn_complete = true, .usage = turn_usage };
+    return .{ .turn_complete = true, .usage = turn_usage, .usage_estimated = turn_usage_estimated };
 }
 
 fn printToolCall(
