@@ -704,6 +704,9 @@ test "include sessions module tests" {
 test "include chat session tests" {
     _ = @import("chat/session.zig");
 }
+test "include chat.debug_log tests" {
+    _ = @import("chat/debug_log.zig");
+}
 
 test "include upgrade module tests" {
     _ = @import("upgrade.zig");
