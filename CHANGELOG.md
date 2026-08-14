@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add @ file mentions to attach files to prompts ([#141](https://github.com/christianhelle/puny/pull/141)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract atomic file writes into a shared module ([#142](https://github.com/christianhelle/puny/pull/142)) ([@christianhelle](https://github.com/christianhelle/))
 - Skip welcome commands when a prompt is supplied ([#139](https://github.com/christianhelle/puny/pull/139)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor markdown.zig into width and table modules ([#140](https://github.com/christianhelle/puny/pull/140)) ([@christianhelle](https://github.com/christianhelle/))
