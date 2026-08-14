@@ -7,6 +7,7 @@ const token_stats = @import("../tui/token_stats.zig");
 const cli = @import("../cli/args.zig");
 const commands = @import("../cli/commands.zig");
 const core_session = @import("../core/session.zig");
+const git_root = @import("../core/git_root.zig");
 const sessions = @import("../sessions/sessions.zig");
 const config = @import("../config/config.zig");
 const indicator = @import("../tui/indicator.zig");
@@ -172,7 +173,7 @@ pub const ChatSession = struct {
                     const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
 
-                    if (try skills.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
+                    if (try git_root.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
                         defer ctx.arena.free(repo_root);
                         if (try instructions.load(ctx.arena, ctx.io, repo_root)) |result| {
                             defer ctx.arena.free(result.filename);
