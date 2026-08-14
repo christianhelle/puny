@@ -120,7 +120,7 @@ test "oneshot mode omits interactive commands" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
 }
 
-test "prefilled prompt mode renders the same banner without prompt hints" {
+test "prefilled prompt mode omits available commands" {
     const allocator = std.testing.allocator;
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
@@ -134,7 +134,8 @@ test "prefilled prompt mode renders the same banner without prompt hints" {
 
     const text = out.written();
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Welcome to Puny"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "/quit, /exit"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Available commands:"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Type a prompt"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "Prefilled prompt"));
 }
