@@ -19,7 +19,7 @@ const prompt_history = @import("../prompts/history.zig");
 const prompts = @import("../prompts/prompts.zig");
 const prompt_file = @import("../prompts/prompt_file.zig");
 const provider = @import("../providers/provider.zig");
-const resolve = @import("../providers/resolve.zig");
+const resolver = @import("../providers/resolver.zig");
 const instructions = @import("../agents/instructions.zig");
 const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
@@ -187,8 +187,8 @@ pub const ChatSession = struct {
                     ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
                     ctx.session_stats.session_id = ctx.session.id;
 
-                    const new_api_key = try resolve.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
-                    ctx.prov.* = resolve.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+                    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+                    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
                     if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                     ctx.history.clear();
@@ -284,8 +284,8 @@ pub const ChatSession = struct {
                         ctx.session_stats.* = chat.SessionStats.init(ctx.arena, ctx.io);
                         ctx.session_stats.session_id = ctx.session.id;
 
-                        const new_api_key = try resolve.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
-                        ctx.prov.* = resolve.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+                        const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+                        ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
                         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                         ctx.history.clear();
@@ -681,14 +681,14 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
     const new_provider_name = ctx.cfg.provider;
-    const new_provider_url = if (ctx.parsed.mock) "-" else resolve.baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
-    const new_api_key = try resolve.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_provider_url = if (ctx.parsed.mock) "-" else resolver.baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
 
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         ctx.prov.deinit();
-        ctx.prov.* = resolve.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+        ctx.prov.* = resolver.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
-        if (!ctx.parsed.mock) try resolve.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
+        if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
         ctx.model_provider.* = new_provider_name;
         ctx.provider_url.* = new_provider_url;
 
@@ -719,7 +719,7 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     } else {
         ctx.prov.setConfig(.{ .base_url = new_provider_url, .api_key = new_api_key });
         ctx.provider_url.* = new_provider_url;
-        if (!ctx.parsed.mock) try resolve.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
+        if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
     }
 
     try welcome.printSummary(
@@ -830,16 +830,16 @@ fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) 
     }
 
     ctx.cfg.provider = picked_provider;
-    const new_provider_url = resolve.defaultProviderUrl(picked_provider);
+    const new_provider_url = resolver.defaultProviderUrl(picked_provider);
     ctx.cfg.providerEntry(picked_provider).url = try ctx.arena.dupe(u8, new_provider_url);
 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
 
-    const new_api_key = try resolve.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
     ctx.prov.deinit();
-    ctx.prov.* = resolve.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
     if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
-    if (!ctx.parsed.mock) try resolve.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
+    if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
     ctx.model_provider.* = picked_provider;
     ctx.provider_url.* = new_provider_url;
 
@@ -920,9 +920,9 @@ pub fn promptReconfigure(
     }
 
     const entry = cfg.providerEntry(provider_name);
-    const provider_url_is_fixed = resolve.providerHasFixedUrl(provider_name);
+    const provider_url_is_fixed = resolver.providerHasFixedUrl(provider_name);
     if (provider_url_is_fixed) {
-        const fixed_url = resolve.defaultProviderUrl(provider_name);
+        const fixed_url = resolver.defaultProviderUrl(provider_name);
         entry.url = try arena.dupe(u8, fixed_url);
         result.changed = true;
         try stdout_writer.print("Provider URL is fixed at {s}\n", .{fixed_url});
@@ -932,7 +932,7 @@ pub fn promptReconfigure(
         try stdout_writer.print("Current provider URL: {s}\n", .{entry.url});
         try stdout_writer.print(
             "Enter new provider URL (default: {s}; press Enter for default): ",
-            .{resolve.defaultProviderUrl(provider_name)},
+            .{resolver.defaultProviderUrl(provider_name)},
         );
         try stdout_writer.flush();
 
@@ -945,7 +945,7 @@ pub fn promptReconfigure(
             return .{ .cancelled = true };
         };
 
-        const default_url = resolve.defaultProviderUrl(provider_name);
+        const default_url = resolver.defaultProviderUrl(provider_name);
         if (new_url.len > 0) {
             entry.url = try arena.dupe(u8, new_url);
             result.changed = true;

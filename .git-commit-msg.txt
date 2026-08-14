@@ -1,0 +1,1 @@
+rename resolve module to resolver
