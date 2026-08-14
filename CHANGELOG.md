@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Extract atomic file writes into a shared module ([#142](https://github.com/christianhelle/puny/pull/142)) ([@christianhelle](https://github.com/christianhelle/))
 - Skip welcome commands when a prompt is supplied ([#139](https://github.com/christianhelle/puny/pull/139)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor markdown.zig into width and table modules ([#140](https://github.com/christianhelle/puny/pull/140)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix reasoning token count stuck at 0 in stats ([#135](https://github.com/christianhelle/puny/pull/135)) ([@christianhelle](https://github.com/christianhelle/))
