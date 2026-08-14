@@ -1,5 +1,6 @@
 const std = @import("std");
 const chat = @import("chat/chat.zig");
+const stats = @import("chat/stats.zig");
 const upgrade = @import("upgrade.zig");
 const cli = @import("cli/args.zig");
 const config = @import("config/config.zig");
@@ -297,7 +298,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    var session_stats = chat.SessionStats.init(arena, init.io);
+    var session_stats = stats.SessionStats.init(arena, init.io);
     session_stats.session_id = current_session.id;
     defer session_stats.deinit();
     sigint.register() catch {};
