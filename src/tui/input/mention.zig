@@ -11,6 +11,13 @@ pub fn buildMention(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
     return out.toOwnedSlice(allocator);
 }
 
+/// Returns true when typing '@' at the current cursor position should open
+/// the file-mention picker. Mentions are recognized at the start of the line
+/// or immediately after whitespace.
+pub fn isTrigger(line: []const u8) bool {
+    return line.len == 0 or std.ascii.isWhitespace(line[line.len - 1]);
+}
+
 /// Opens the searchable file picker and, when the user selects a path,
 /// inserts the resulting "@path" mention into the editor buffer.
 pub fn insertMention(
@@ -24,6 +31,7 @@ pub fn insertMention(
         try editor.redraw();
         return;
     };
+    defer allocator.free(path);
     const mention = try buildMention(allocator, path);
     defer allocator.free(mention);
     try editor.appendSlice(mention);
@@ -39,4 +47,16 @@ test "buildMention preserves an empty path" {
     const out = try buildMention(std.testing.allocator, "");
     defer std.testing.allocator.free(out);
     try std.testing.expectEqualStrings("@", out);
+}
+
+test "isTrigger true at start of line or after whitespace" {
+    try std.testing.expect(isTrigger(""));
+    try std.testing.expect(isTrigger("hello "));
+    try std.testing.expect(isTrigger("hello\t"));
+}
+
+test "isTrigger false after non-whitespace" {
+    try std.testing.expect(!isTrigger("hello"));
+    try std.testing.expect(!isTrigger("a@b"));
+    try std.testing.expect(!isTrigger("user@example.com"));
 }
