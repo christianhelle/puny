@@ -214,9 +214,14 @@ fn render(
     drawn: *usize,
 ) !void {
     if (drawn.* > 0) {
+        // Return to the first picker row and erase the previous list so a
+        // shorter result set never leaves stale rows behind.
         try writer.print(terminal.cursor_up, .{drawn.*});
+        try writer.writeAll(terminal.erase_display);
+    } else {
+        // First draw: move from the input line to the row below it.
+        try writer.writeAll("\r\n");
     }
-    try writer.writeAll("\r\n");
 
     if (query.len == 0) {
         try writer.writeAll(ansi.bright);
@@ -269,10 +274,14 @@ fn render(
     try writer.flush();
 }
 
-/// Moves the cursor back to the input row and erases the picker, leaving the
-/// editor's own redraw to restore the prompt line.
+/// Erases the picker and returns the cursor to the input row (one row above
+/// the picker) so the editor's own redraw can restore the prompt line.
 fn cleanup(writer: *std.Io.Writer, drawn: usize) !void {
-    try writer.print(terminal.cursor_up ++ terminal.erase_display, .{drawn});
+    // Move to the first picker row and erase it and everything below it.
+    try writer.print(terminal.cursor_up, .{drawn});
+    try writer.writeAll(terminal.erase_display);
+    // Step back up to the input row and reset the column.
+    try writer.print(terminal.cursor_up, .{1});
     try writer.writeByte('\r');
     try writer.flush();
 }
@@ -530,4 +539,35 @@ test "collectFiles finds files under the working directory" {
 
     try std.testing.expect(containsPath(files, path_a));
     try std.testing.expect(containsPath(files, path_b));
+}
+
+test "render starts below the input line on the first draw" {
+    const files = [_][]const u8{ "a.zig", "b.zig" };
+    const match_indices = [_]usize{ 0, 1 };
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var drawn: usize = 0;
+    try render(&out.writer, "", &files, &match_indices, 0, 0, &drawn);
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\r\n"));
+    try std.testing.expectEqual(@as(usize, 3), drawn); // header + 2 rows
+}
+
+test "render redraws in place without appending a stray newline" {
+    const files = [_][]const u8{ "a.zig", "b.zig" };
+    const match_indices = [_]usize{ 0, 1 };
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var drawn: usize = 3; // previous picker occupied 3 rows
+    try render(&out.writer, "b", &files, &match_indices, 0, 0, &drawn);
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\x1b[3A\x1b[J"));
+}
+
+test "cleanup erases the picker and returns to the input row" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try cleanup(&out.writer, 3);
+    try std.testing.expectEqualStrings("\x1b[3A\x1b[J\x1b[1A\r", out.written());
 }
