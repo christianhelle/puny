@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Refactor markdown.zig into width and table modules ([#140](https://github.com/christianhelle/puny/pull/140)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix reasoning token count stuck at 0 in stats ([#135](https://github.com/christianhelle/puny/pull/135)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix and improve the README documentation ([#138](https://github.com/christianhelle/puny/pull/138)) ([@christianhelle](https://github.com/christianhelle/))
 - Split OpenCode Zen Gemini streaming into its own module ([#134](https://github.com/christianhelle/puny/pull/134)) ([@christianhelle](https://github.com/christianhelle/))
