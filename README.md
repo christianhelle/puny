@@ -120,7 +120,7 @@ cd puny
 zig build
 ```
 
-The compiled binary is written to `zig-out/bin/puny`.
+The compiled binary is written to `zig-out/bin/puny`. Copy it to a directory on your PATH to run it from anywhere.
 
 To build a release binary and install it to `$HOME/.local/bin` (the same directory used by the install scripts), run:
 
@@ -141,6 +141,18 @@ The install directory can be overridden with the `INSTALL_DIR` environment varia
 ```bash
 INSTALL_DIR=/custom/path zig build install-release
 zig build install-release --prefix /custom/path
+```
+
+Run the test suite:
+
+```bash
+zig build test
+```
+
+Run the regression test suite:
+
+```bash
+zig build test-regression
 ```
 
 ## Quick start
@@ -641,49 +653,6 @@ write the final PRD. When the user confirms readiness, the model calls
 `save_prd` with markdown and HTML content, which writes both `plan.md` and
 `plan.html` to the session folder. Planning mode state is persisted in
 `session.json` and restored when the session is resumed.
-
-## Build from source
-
-Requires [Zig](https://ziglang.org/) 0.16.0 or later.
-
-```bash
-zig build
-```
-
-The compiled binary is written to `zig-out/bin/puny`. Copy it to a directory on your PATH to run it from anywhere.
-
-To build a release binary and install it to `$HOME/.local/bin` (the same directory used by the install scripts), run:
-
-```bash
-zig build install-release
-```
-
-Other optimization modes are available:
-
-```bash
-zig build install-release-safe   # safe release build (runtime safety checks enabled)
-zig build install-release-fast   # fast release build (maximizes runtime performance)
-zig build install-debug          # debug build
-```
-
-The install directory can be overridden with the `INSTALL_DIR` environment variable or the `--prefix` flag:
-
-```bash
-INSTALL_DIR=/custom/path zig build install-release
-zig build install-release --prefix /custom/path
-```
-
-Run the test suite:
-
-```bash
-zig build test
-```
-
-Run the regression test suite:
-
-```bash
-zig build test-regression
-```
 
 ## Development / testing
 
