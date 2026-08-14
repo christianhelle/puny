@@ -22,7 +22,8 @@ pub const LineEditor = struct {
     /// editor falls back to legacy single-row echo behavior.
     width: ?usize,
     /// Rows the input currently occupies on screen, counting an extra row
-    /// when the text ends exactly at the right edge (pending wrap).
+    /// when the text ends exactly at the right edge, where a forced wrap
+    /// leaves the cursor on a fresh continuation row.
     cursor_rows: usize,
 
     pub fn init(
@@ -92,18 +93,24 @@ pub const LineEditor = struct {
     /// and buffer, letting the terminal place the cursor after the text.
     fn redraw(self: *LineEditor) !void {
         const width = self.width orelse return;
-        // Carriage return first: if the cursor is in pending-wrap state the
-        // terminal materializes the wrap, keeping the row arithmetic exact.
         try self.stdout_writer.writeByte('\r');
         if (self.cursor_rows > 1) {
             try self.stdout_writer.print(terminal.cursor_up, .{self.cursor_rows - 1});
         }
         try self.stdout_writer.writeAll(terminal.erase_display);
         try self.stdout_writer.print("{s} {s}", .{ prompts.prompt_text, self.line_alloc.written() });
-        try self.stdout_writer.flush();
 
         const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
         const info = rowsNeeded(start_col, width, self.line_alloc.written());
+        if (info.ends_at_edge) {
+            // Force the auto-wrap with a space so the cursor never rests in
+            // the terminal's pending-wrap state. Some terminals cancel the
+            // pending wrap when they receive a carriage return instead of
+            // materializing it, which would make the next cursor-up move one
+            // row too far and erase the line above the prompt.
+            try self.stdout_writer.writeByte(' ');
+        }
+        try self.stdout_writer.flush();
         self.cursor_rows = info.rows + @intFromBool(info.ends_at_edge);
     }
 };
@@ -301,7 +308,7 @@ test "editor backspace from the second row clears both rows" {
     try editor.backspace();
 
     try std.testing.expectEqualStrings("abcdefgh", line_alloc.written());
-    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefgh", out.written());
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefgh ", out.written());
 }
 
 test "editor backspace keeps deleting across the wrap boundary" {
@@ -372,7 +379,56 @@ test "editor historyNext restores the draft and clears wrapped rows" {
     try editor.historyNext();
 
     try std.testing.expectEqualStrings("abcdefgh", line_alloc.written());
-    try std.testing.expectEqualStrings("\r\x1b[J> abcdefgh", out.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> abcdefgh ", out.written());
+}
+
+test "editor forces the wrap when text ends exactly at the right edge" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    for ("abcdefg") |ch| try editor.append(ch);
+    out.clearRetainingCapacity();
+    try editor.append('h');
+
+    try std.testing.expectEqualStrings("abcdefgh", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> abcdefgh ", out.written());
+}
+
+test "editor growth never moves the cursor above the prompt" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    const text = "abcdefghijklmnopqrstuvwxyz";
+    // Expected cursor-up rows per append and which appends end at the edge.
+    // Derived by hand: width 10, prompt "> " (start col 2) fills row 1 after
+    // 8 chars and row 2 after 18 chars.
+    const up_rows = [_]usize{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2 };
+    for (text, 0..) |ch, i| {
+        out.clearRetainingCapacity();
+        try editor.append(ch);
+
+        var expected: std.Io.Writer.Allocating = .init(allocator);
+        defer expected.deinit();
+        try expected.writer.writeByte('\r');
+        if (up_rows[i] > 0) {
+            try expected.writer.print("\x1b[{d}A", .{up_rows[i]});
+        }
+        try expected.writer.writeAll("\x1b[J> ");
+        try expected.writer.writeAll(text[0 .. i + 1]);
+        const char_count = i + 1;
+        if (char_count == 8 or char_count == 18) {
+            try expected.writer.writeByte(' ');
+        }
+        try std.testing.expectEqualStrings(expected.written(), out.written());
+    }
 }
 
 test "editor history navigation without width uses single-row redraw" {
