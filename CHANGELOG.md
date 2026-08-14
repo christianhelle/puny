@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Extract the session stats tracker into stats.zig ([#132](https://github.com/christianhelle/puny/pull/132)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract provider resolution helpers into resolve.zig ([#131](https://github.com/christianhelle/puny/pull/131)) ([@christianhelle](https://github.com/christianhelle/))
 - Add debug_log.zig with the http debug logger and its tests ([#130](https://github.com/christianhelle/puny/pull/130)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor and move LineEditor to its own module ([#129](https://github.com/christianhelle/puny/pull/129)) ([@christianhelle](https://github.com/christianhelle/))
