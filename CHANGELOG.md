@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Extract git repo root discovery into core/git_root.zig ([#133](https://github.com/christianhelle/puny/pull/133)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract the session stats tracker into stats.zig ([#132](https://github.com/christianhelle/puny/pull/132)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract provider resolution helpers into resolve.zig ([#131](https://github.com/christianhelle/puny/pull/131)) ([@christianhelle](https://github.com/christianhelle/))
 - Add debug_log.zig with the http debug logger and its tests ([#130](https://github.com/christianhelle/puny/pull/130)) ([@christianhelle](https://github.com/christianhelle/))
