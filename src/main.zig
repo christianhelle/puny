@@ -8,6 +8,7 @@ const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const core_sess = @import("core/session.zig");
+const git_root = @import("core/git_root.zig");
 const sessions = @import("sessions/sessions.zig");
 const prompt_history = @import("prompts/history.zig");
 const prompt_file = @import("prompts/prompt_file.zig");
@@ -272,7 +273,7 @@ pub fn main(init: std.process.Init) !void {
             const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
             try skill_registry.lightScan(init.io, global_path);
         }
-        if (try skills.findGitRepoRoot(arena, init.io)) |repo_root| {
+        if (try git_root.findGitRepoRoot(arena, init.io)) |repo_root| {
             const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
             try skill_registry.lightScan(init.io, repo_path);
         }
@@ -287,7 +288,7 @@ pub fn main(init: std.process.Init) !void {
             const skills_block = try skill_registry.buildListing(messages_arena);
             try messages.append(messages_arena, .{ .system = skills_block });
         }
-        if (try skills.findGitRepoRoot(arena, init.io)) |repo_root| {
+        if (try git_root.findGitRepoRoot(arena, init.io)) |repo_root| {
             defer arena.free(repo_root);
             if (try instructions.load(arena, init.io, repo_root)) |result| {
                 defer arena.free(result.filename);
@@ -697,6 +698,9 @@ test "requiresApiKey only for opencode and opencode-go" {
 
 test "include core session tests" {
     _ = @import("core/session.zig");
+}
+test "include core.git_root tests" {
+    _ = @import("core/git_root.zig");
 }
 
 test "include sessions module tests" {
