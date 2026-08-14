@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const chat = @import("chat.zig");
+const token_stats = @import("../tui/token_stats.zig");
 const cli = @import("../cli/args.zig");
 const commands = @import("../cli/commands.zig");
 const core_session = @import("../core/session.zig");
@@ -609,6 +610,11 @@ fn readUserInput(
 
 fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     var turn_complete = false;
+    var turn_cancelled = false;
+    var turn_had_error = false;
+    var turn_estimated = false;
+    var turn_in: i64 = 0;
+    var turn_out: i64 = 0;
     while (!turn_complete) {
         const active_tool_definitions = if (ctx.planning_mode.*) ctx.planning_tool_definitions.items else ctx.full_tool_definitions.items;
 
@@ -636,11 +642,19 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         };
 
         if (result.was_cancelled) {
+            turn_cancelled = true;
             rollBackCancelledTurn(ctx.messages);
             while (skills.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
             ctx.session_stats.finalizeTurn(result.usage, false);
             break;
         }
+
+        turn_had_error = turn_had_error or result.had_error;
+        if (result.usage) |u| {
+            turn_in += u.input_tokens;
+            turn_out += u.output_tokens;
+        }
+        turn_estimated = turn_estimated or result.usage_estimated;
 
         if (skills.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = pending.content });
@@ -650,6 +664,10 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
         turn_complete = result.turn_complete;
+    }
+
+    if (turn_complete and !turn_cancelled and !turn_had_error) {
+        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens());
     }
 
     try saveMessages(ctx);
