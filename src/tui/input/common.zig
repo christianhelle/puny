@@ -167,53 +167,35 @@ pub fn readLineCanonical(
     return .{ .submitted = result };
 }
 
-pub fn appendAndEcho(byte: u8, line_alloc: *std.Io.Writer.Allocating, stdout_writer: *std.Io.Writer) !void {
-    try line_alloc.writer.writeByte(byte);
-    try stdout_writer.writeByte(byte);
-    try stdout_writer.flush();
+test "editor append without width echoes the byte" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &output.writer, null, null);
+    try editor.append('a');
+    try editor.append('b');
+
+    try std.testing.expectEqualStrings("ab", line_alloc.written());
+    try std.testing.expectEqualStrings("ab", output.written());
 }
 
-pub fn backspace(line_alloc: *std.Io.Writer.Allocating, stdout_writer: *std.Io.Writer) !void {
-    const written = line_alloc.written();
-    if (written.len == 0) return;
-    line_alloc.shrinkRetainingCapacity(written.len - 1);
-    try stdout_writer.writeAll(terminal.backspace_echo);
-    try stdout_writer.flush();
-}
+test "editor backspace without width erases with backspace echo" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
 
-pub fn historyPrevious(
-    line_alloc: *std.Io.Writer.Allocating,
-    stdout_writer: *std.Io.Writer,
-    history: ?*prompt_history.History,
-) !void {
-    const h = history orelse return;
-    const current = line_alloc.written();
-    const replacement = h.previous(current) orelse h.currentDraft() orelse return;
-    try replaceLine(replacement, line_alloc, stdout_writer);
-}
+    var editor = LineEditor.init(&line_alloc, &output.writer, null, null);
+    try editor.append('x');
+    output.clearRetainingCapacity();
 
-pub fn historyNext(
-    line_alloc: *std.Io.Writer.Allocating,
-    stdout_writer: *std.Io.Writer,
-    history: ?*prompt_history.History,
-) !void {
-    const h = history orelse return;
-    const replacement = h.next() orelse h.currentDraft() orelse return;
-    try replaceLine(replacement, line_alloc, stdout_writer);
-}
-
-pub fn replaceLine(
-    text: []const u8,
-    line_alloc: *std.Io.Writer.Allocating,
-    stdout_writer: *std.Io.Writer,
-) !void {
-    line_alloc.clearRetainingCapacity();
-    try line_alloc.writer.writeAll(text);
-
-    try stdout_writer.writeAll(terminal.move_to_line_start);
-    try stdout_writer.writeAll(terminal.clear_to_end_of_line);
-    try stdout_writer.print("{s} {s}", .{ prompts.prompt_text, text });
-    try stdout_writer.flush();
+    try editor.backspace();
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("\x08 \x08", output.written());
 }
 
 test "rowsNeeded empty text occupies one row" {
@@ -412,84 +394,4 @@ test "editor history navigation without width uses single-row redraw" {
         terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "> first",
         out.written(),
     );
-}
-
-test "replaceLine updates line_alloc and redraws prompt" {
-    const allocator = std.testing.allocator;
-    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
-    defer line_alloc.deinit();
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-
-    try line_alloc.writer.writeAll("old");
-    try replaceLine("new", &line_alloc, &out.writer);
-
-    try std.testing.expectEqualStrings("new", line_alloc.written());
-    try std.testing.expectEqualStrings(
-        terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "> new",
-        out.written(),
-    );
-}
-
-test "historyPrevious and historyNext navigate entries" {
-    const allocator = std.testing.allocator;
-    var history = prompt_history.History.init(allocator, "");
-    defer history.deinit();
-    try history.add("first");
-    try history.add("second");
-
-    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
-    defer line_alloc.deinit();
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-
-    try historyPrevious(&line_alloc, &out.writer, &history);
-    try std.testing.expectEqualStrings("second", line_alloc.written());
-
-    try historyPrevious(&line_alloc, &out.writer, &history);
-    try std.testing.expectEqualStrings("first", line_alloc.written());
-
-    try historyNext(&line_alloc, &out.writer, &history);
-    try std.testing.expectEqualStrings("second", line_alloc.written());
-}
-
-test "appendAndEcho appends to the buffer and echoes the byte" {
-    const allocator = std.testing.allocator;
-    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
-    defer line_alloc.deinit();
-    var output: std.Io.Writer.Allocating = .init(allocator);
-    defer output.deinit();
-
-    try appendAndEcho('a', &line_alloc, &output.writer);
-    try appendAndEcho('b', &line_alloc, &output.writer);
-
-    try std.testing.expectEqualStrings("ab", line_alloc.written());
-    try std.testing.expectEqualStrings("ab", output.written());
-}
-
-test "backspace removes the last byte and erases it on screen" {
-    const allocator = std.testing.allocator;
-    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
-    defer line_alloc.deinit();
-    var output: std.Io.Writer.Allocating = .init(allocator);
-    defer output.deinit();
-
-    try appendAndEcho('x', &line_alloc, &output.writer);
-    output.clearRetainingCapacity();
-
-    try backspace(&line_alloc, &output.writer);
-    try std.testing.expectEqualStrings("", line_alloc.written());
-    try std.testing.expectEqualStrings("\x08 \x08", output.written());
-}
-
-test "backspace is a no-op on an empty buffer" {
-    const allocator = std.testing.allocator;
-    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
-    defer line_alloc.deinit();
-    var output: std.Io.Writer.Allocating = .init(allocator);
-    defer output.deinit();
-
-    try backspace(&line_alloc, &output.writer);
-    try std.testing.expectEqualStrings("", line_alloc.written());
-    try std.testing.expectEqualStrings("", output.written());
 }
