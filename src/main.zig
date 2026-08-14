@@ -797,6 +797,10 @@ test "include providers.opencode_zen tests" {
 test "include providers.provider tests" {
     _ = @import("providers/provider.zig");
 }
+
+test "include providers.resolve tests" {
+    _ = @import("providers/resolve.zig");
+}
 test "include skills.skills tests" {
     _ = @import("skills/skills.zig");
 }
