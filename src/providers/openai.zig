@@ -633,6 +633,39 @@ test "usage event falls back to reasoning_tokens field" {
     try std.testing.expectEqual(@as(i64, 5), events.items[0].reasoning_output_tokens.?);
 }
 
+test "usage event parses nested completion_tokens_details reasoning_tokens" {
+    var events: std.ArrayList(TurnUsage) = .empty;
+    defer events.deinit(std.testing.allocator);
+
+    const UsageListener = struct {
+        events: *std.ArrayList(TurnUsage),
+
+        pub fn event(self: *@This(), ev: StreamEvent) !void {
+            if (ev == .usage) try self.events.append(std.testing.allocator, ev.usage);
+        }
+    };
+
+    var listener = UsageListener{ .events = &events };
+    const callback = StreamCallback{
+        .context = &listener,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(ctx: *anyopaque, ev: StreamEvent) !void {
+                    const state: *UsageListener = @ptrCast(@alignCast(ctx));
+                    try state.event(ev);
+                }
+            }.event,
+        },
+    };
+
+    var sse = SseCallback{ .allocator = std.testing.allocator, .callback = callback };
+
+    try sse.event("{\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"completion_tokens_details\":{\"reasoning_tokens\":5}}}");
+
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqual(@as(i64, 5), events.items[0].reasoning_output_tokens.?);
+}
+
 test "requestPayload omits reasoning_effort when null" {
     const request = ChatRequest{
         .model = "test-model",
