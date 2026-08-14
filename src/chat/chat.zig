@@ -293,7 +293,7 @@ pub const OpenAiAccumulator = struct {
     /// Output chars for providers that do not report usage: content plus
     /// tool-call arguments, matching what addStreamingOutput counts.
     pub fn estimatedOutputChars(self: *const @This()) usize {
-        var chars: usize = self.content.items.len;
+        var chars: usize = self.content.items.len + self.reasoning.items.len;
         for (self.tool_calls.items) |tc| {
             chars += tc.function.arguments.len;
         }
@@ -774,6 +774,22 @@ test "OpenAiAccumulator estimates output chars including tool call args" {
     try acc.onEvent(.{ .finish = "tool_calls" });
 
     try std.testing.expectEqual(@as(usize, 18), acc.estimatedOutputChars());
+}
+
+test "OpenAiAccumulator estimates output chars including streamed reasoning" {
+    cancel.reset();
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .reasoning = "reasoning steps" });
+    try acc.onEvent(.{ .content = "Hello" });
+    try acc.onEvent(.{ .finish = "stop" });
+
+    // 15 reasoning chars + 5 content chars.
+    try std.testing.expectEqual(@as(usize, 20), acc.estimatedOutputChars());
 }
 
 test "OpenAiAccumulator assembles tool call" {
