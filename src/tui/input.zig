@@ -5,6 +5,7 @@ const common = @import("input/common.zig");
 const posix = @import("input/posix.zig");
 const prompt_history = @import("../prompts/history.zig");
 const prompts = @import("../prompts/prompts.zig");
+const terminal = @import("terminal.zig");
 const windows_impl = @import("input/windows.zig");
 
 pub const ReadLineResult = common.ReadLineResult;
@@ -29,10 +30,11 @@ pub fn readLine(
     };
     defer cancel.setRawMode(false) catch {};
 
+    var editor = common.LineEditor.init(line_alloc, stdout_writer, history, terminal.terminalWidth());
     if (builtin.os.tag == .windows) {
         return try windows_impl.readLineWindows(io, stdout_writer, line_alloc, history);
     } else {
-        return try posix.readLinePosix(io, stdout_writer, line_alloc, history);
+        return try posix.readLinePosix(io, &editor);
     }
 }
 

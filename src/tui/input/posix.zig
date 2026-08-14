@@ -1,6 +1,5 @@
 const std = @import("std");
 const common = @import("./common.zig");
-const prompt_history = @import("../../prompts/history.zig");
 const sigint = @import("../../core/sigint.zig");
 const terminal = @import("../terminal.zig");
 
@@ -8,9 +7,7 @@ const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
 pub fn readLinePosix(
     io: std.Io,
-    stdout_writer: *std.Io.Writer,
-    line_alloc: *std.Io.Writer.Allocating,
-    history: ?*prompt_history.History,
+    editor: *common.LineEditor,
 ) !common.ReadLineResult {
     const posix = std.posix;
     var first_esc_ts: ?std.Io.Timestamp = null;
@@ -24,11 +21,11 @@ pub fn readLinePosix(
         switch (byte) {
             '\r', '\n' => {
                 first_esc_ts = null;
-                return .{ .submitted = line_alloc.written() };
+                return .{ .submitted = editor.line_alloc.written() };
             },
             terminal.control.bs, terminal.control.del => {
                 first_esc_ts = null;
-                try common.backspace(line_alloc, stdout_writer);
+                try editor.backspace();
             },
             terminal.control.etx => {
                 sigint.trigger();
@@ -54,14 +51,14 @@ pub fn readLinePosix(
                             }
                         }
                         switch (final_byte) {
-                            'A' => try common.historyPrevious(line_alloc, stdout_writer, history),
-                            'B' => try common.historyNext(line_alloc, stdout_writer, history),
+                            'A' => try editor.historyPrevious(),
+                            'B' => try editor.historyNext(),
                             else => {},
                         }
                         continue;
                     }
                     // Not a recognized escape sequence; inject the byte as input.
-                    try common.appendAndEcho(next, line_alloc, stdout_writer);
+                    try editor.append(next);
                     continue;
                 }
 
@@ -76,7 +73,7 @@ pub fn readLinePosix(
                 first_esc_ts = null;
             } else {
                 first_esc_ts = null;
-                try common.appendAndEcho(byte, line_alloc, stdout_writer);
+                try editor.append(byte);
             },
         }
     }
