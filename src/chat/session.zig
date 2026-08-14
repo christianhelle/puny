@@ -307,7 +307,7 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .switch_model => |model_id| {
-                    try handleSwitchModelCommand(ctx, model_id);
+                    try session_commands.handleSwitchModelCommand(ctx, model_id);
                     continue;
                 },
                 .switch_provider => |provider_id| {
@@ -738,30 +738,6 @@ fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
 
     try ctx.stdout_writer.print("Configuration saved and provider updated.\n", .{});
     try ctx.stdout_writer.flush();
-}
-
-fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void {
-    const model_skip_validation = ctx.parsed.mock;
-    if (try model_selection.switchModel(
-        ctx.prov,
-        model_id,
-        ctx.model_key.*,
-        ctx.reasoning_effort.*,
-        ctx.arena,
-        ctx.io,
-        ctx.init,
-        model_skip_validation,
-        ctx.stdout_writer,
-        ctx.cfg,
-        ctx.model_provider.*,
-        ctx.init.environ_map,
-        ctx.random,
-    )) |result| {
-        ctx.model_key.* = result.model_key;
-        if (result.reasoning_effort) |effort| {
-            ctx.reasoning_effort.* = effort;
-        }
-    }
 }
 
 fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) !void {

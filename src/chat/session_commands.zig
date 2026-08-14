@@ -4,6 +4,7 @@ const cli = @import("../cli/args.zig");
 const config = @import("../config/config.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const openai = @import("../providers/openai.zig");
+const model_selection = @import("../models/select.zig");
 const provider = @import("../providers/provider.zig");
 const session = @import("session.zig");
 
@@ -56,6 +57,30 @@ pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8)
         try ctx.stdout_writer.print("\nReasoning effort reset to default.\n", .{});
     }
     try ctx.stdout_writer.flush();
+}
+
+pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void {
+    const model_skip_validation = ctx.parsed.mock;
+    if (try model_selection.switchModel(
+        ctx.prov,
+        model_id,
+        ctx.model_key.*,
+        ctx.reasoning_effort.*,
+        ctx.arena,
+        ctx.io,
+        ctx.init,
+        model_skip_validation,
+        ctx.stdout_writer,
+        ctx.cfg,
+        ctx.model_provider.*,
+        ctx.init.environ_map,
+        ctx.random,
+    )) |result| {
+        ctx.model_key.* = result.model_key;
+        if (result.reasoning_effort) |effort| {
+            ctx.reasoning_effort.* = effort;
+        }
+    }
 }
 
 fn testChatLoopContext(
