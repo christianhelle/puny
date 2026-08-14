@@ -157,6 +157,10 @@ zig build test-regression
 
 ## Quick start
 
+On first run, Puny launches a one-time setup wizard that asks you to pick a
+provider, URL, and API key. Your choices are saved to `config.json` and the
+wizard is skipped on later runs.
+
 ### LM Studio
 
 Start LM Studio and load a model with tool-calling support, then:
