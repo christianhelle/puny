@@ -1,6 +1,6 @@
 const std = @import("std");
 const core_session = @import("core/session.zig");
-const upgrade = @import("upgrade.zig");
+const release = @import("upgrade/release.zig");
 const version = @import("version.zig");
 
 pub const flag_file_name = "update-available";
@@ -164,7 +164,7 @@ pub fn runCheck(
     allocator: std.mem.Allocator,
     environ_map: *const std.process.Environ.Map,
 ) !CheckOutcome {
-    const available = try upgrade.latestReleaseVersion(allocator, io);
+    const available = try release.latestReleaseVersion(allocator, io);
     defer allocator.free(available);
     return try runCheckWithLatest(io, allocator, environ_map, available);
 }
