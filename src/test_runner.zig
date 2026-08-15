@@ -145,7 +145,7 @@ test "include providers.resolver tests" {
 test "include skills.skills tests" {
     _ = @import("skills/frontmatter.zig");
     _ = @import("skills/triggers.zig");
-    _ = @import("skills/skills.zig");
+    _ = @import("skills/skills_tests.zig");
 }
 test "include tools.filesystem tests" {
     _ = @import("tools/filesystem.zig");
