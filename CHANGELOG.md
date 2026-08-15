@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Refactor chat, skills, and upgrade into smaller modules ([#146](https://github.com/christianhelle/puny/pull/146)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor config into schema and persistence layers ([#145](https://github.com/christianhelle/puny/pull/145)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor session.zig into display and session persistence modules ([#147](https://github.com/christianhelle/puny/pull/147)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract chat command handlers into session_commands.zig ([#144](https://github.com/christianhelle/puny/pull/144)) ([@christianhelle](https://github.com/christianhelle/))
