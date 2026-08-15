@@ -4,6 +4,7 @@ const chat = @import("chat.zig");
 const stats = @import("stats.zig");
 const debug_log = @import("debug_log.zig");
 const display = @import("display.zig");
+const session_persistence = @import("session_persistence.zig");
 const session_commands = @import("session_commands.zig");
 const context = @import("context.zig");
 const token_stats = @import("../tui/token_stats.zig");
@@ -118,8 +119,8 @@ pub const ChatSession = struct {
                 },
                 .continue_ => continue,
                 .full_reset => {
-                    try saveMessages(ctx);
-                    try saveSessionMeta(ctx);
+                    try session_persistence.saveMessages(ctx);
+                    try session_persistence.saveSessionMeta(ctx);
                     upsertCurrentSession(ctx);
 
                     try ctx.stdout_writer.print(" Performing full memory reset...", .{});
@@ -229,7 +230,7 @@ pub const ChatSession = struct {
 
                         const dir = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ base, "sessions", s.id });
                         defer ctx.messages_arena.allocator().free(dir);
-                        try loadMessagesIntoContext(ctx, dir);
+                        try session_persistence.loadMessagesIntoContext(ctx, dir);
 
                         ctx.planning_mode.* = s.planning_mode;
                         core_session.setWriteBlocked(ctx.planning_mode.*);
@@ -420,92 +421,6 @@ fn maybeLoadTriggeredSkills(
     }
 }
 
-fn saveMessages(ctx: *ChatLoopContext) !void {
-    const dir = ctx.session.dir;
-    const cwd = std.Io.Dir.cwd();
-    cwd.createDirPath(ctx.io, dir) catch {};
-
-    const tmp_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json.tmp" });
-    defer ctx.messages_arena.allocator().free(tmp_path);
-    const msg_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json" });
-    defer ctx.messages_arena.allocator().free(msg_path);
-    const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), ctx.messages.items, .{ .whitespace = .indent_2 });
-    defer ctx.messages_arena.allocator().free(buffer);
-
-    var file = cwd.createFile(ctx.io, tmp_path, .{}) catch |err| {
-        std.log.warn("failed to create temp file: {s}", .{@errorName(err)});
-        return;
-    };
-    errdefer {
-        file.close(ctx.io);
-        cwd.deleteFile(ctx.io, tmp_path) catch {};
-    }
-
-    file.writeStreamingAll(ctx.io, buffer) catch |err| {
-        std.log.warn("failed to write messages: {s}", .{@errorName(err)});
-        return;
-    };
-    file.writeStreamingAll(ctx.io, "\n") catch |err| {
-        std.log.warn("failed to write newline: {s}", .{@errorName(err)});
-        return;
-    };
-    file.close(ctx.io);
-
-    std.Io.Dir.renameAbsolute(tmp_path, msg_path, ctx.io) catch |err| {
-        std.log.warn("failed to rename messages file: {s}", .{@errorName(err)});
-        std.Io.Dir.cwd().deleteFile(ctx.io, tmp_path) catch {};
-    };
-}
-
-fn saveSessionMeta(ctx: *ChatLoopContext) !void {
-    const dir = ctx.session.dir;
-    const meta_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "session.json" });
-    defer ctx.messages_arena.allocator().free(meta_path);
-
-    const first_prompt = firstUserPrompt(ctx.messages.items);
-
-    const MetaStruct = struct {
-        planning_mode: bool,
-        first_prompt: ?[]const u8,
-    };
-    const meta = MetaStruct{ .planning_mode = ctx.planning_mode.*, .first_prompt = first_prompt };
-
-    const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), meta, .{ .whitespace = .indent_2 });
-    defer ctx.messages_arena.allocator().free(buffer);
-    const cwd = std.Io.Dir.cwd();
-    var file = cwd.createFile(ctx.io, meta_path, .{}) catch |err| {
-        std.log.warn("failed to save session meta: {s}", .{@errorName(err)});
-        return;
-    };
-    defer file.close(ctx.io);
-    file.writeStreamingAll(ctx.io, buffer) catch {};
-    file.writeStreamingAll(ctx.io, "\n") catch {};
-}
-
-fn loadMessagesIntoContext(ctx: *ChatLoopContext, dir: []const u8) !void {
-    const cwd = std.Io.Dir.cwd();
-    const msg_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json" });
-    defer ctx.messages_arena.allocator().free(msg_path);
-
-    const data = cwd.readFileAlloc(ctx.io, msg_path, ctx.messages_arena.allocator(), std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| switch (err) {
-        error.FileNotFound => {
-            try ctx.stdout_writer.print("Session has no saved conversation.\n", .{});
-            try ctx.stdout_writer.flush();
-            return;
-        },
-        else => |e| return e,
-    };
-    defer ctx.messages_arena.allocator().free(data);
-
-    const parsed = try std.json.parseFromSlice(std.json.Value, ctx.messages_arena.allocator(), data, .{});
-    defer parsed.deinit();
-
-    for (parsed.value.array.items) |item| {
-        const msg = try openai.Message.fromJsonValue(ctx.messages_arena.allocator(), item);
-        try ctx.messages.append(ctx.messages_arena.allocator(), msg);
-    }
-}
-
 fn readUserInput(
     ctx: *ChatLoopContext,
     pending_prompt: *?[]const u8,
@@ -600,8 +515,8 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens());
     }
 
-    try saveMessages(ctx);
-    try saveSessionMeta(ctx);
+    try session_persistence.saveMessages(ctx);
+    try session_persistence.saveSessionMeta(ctx);
     upsertCurrentSession(ctx);
 
     if (ctx.parsed.oneshot) {
@@ -888,8 +803,8 @@ test "prompt-file prompts persist in history as /file commands end to end" {
 }
 
 fn finalizeSession(ctx: *ChatLoopContext) void {
-    saveMessages(ctx) catch {};
-    saveSessionMeta(ctx) catch {};
+    session_persistence.saveMessages(ctx) catch {};
+    session_persistence.saveSessionMeta(ctx) catch {};
     if (shouldRemoveSessionDir(ctx.restore_incomplete, ctx.messages.items, ctx.io, ctx.session.dir)) {
         core_session.removeSessionDir(ctx.io, ctx.session.dir);
         sessions.removeSessionFromIndex(ctx.arena, ctx.io, ctx.session.base, ctx.session.id) catch {};
@@ -909,17 +824,10 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
         .has_prd = core_session.sessionHasPlan(ctx.io, ctx.session.dir),
         .has_conversation = sessionHasContent(ctx.messages.items),
         .planning_mode = ctx.planning_mode.*,
-        .first_prompt = firstUserPrompt(ctx.messages.items),
+        .first_prompt = session_persistence.firstUserPrompt(ctx.messages.items),
         .last_modified = now_ns,
     }) catch |err| {
         std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
     };
 }
 
-/// The first user message in the conversation, or null when there is none.
-fn firstUserPrompt(messages: []const openai.Message) ?[]const u8 {
-    for (messages) |m| {
-        if (m == .user) return m.user;
-    }
-    return null;
-}
