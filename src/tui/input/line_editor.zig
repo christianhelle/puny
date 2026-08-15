@@ -3,6 +3,7 @@ const markdown = @import("../markdown/markdown.zig");
 const prompt_history = @import("../../prompts/history.zig");
 const terminal = @import("../terminal.zig");
 const prompts = @import("../../prompts/prompts.zig");
+const ansi = @import("../ansi.zig");
 
 /// Line editor state for the raw-mode prompt. Mutations to the buffer redraw
 /// the entire input area (all wrapped rows) instead of echoing bytes, so
@@ -174,6 +175,29 @@ pub fn rowsNeeded(start_col: usize, width: usize, text: []const u8) RowsInfo {
         i += seq_len;
     }
     return .{ .rows = rows, .ends_at_edge = col == width };
+}
+
+/// Writes `text` to `writer`, wrapping attached-file mentions in the
+/// mention color so they stand out in the prompt. A mention is an `@` at the
+/// start of the line or after whitespace, running through the following
+/// non-whitespace bytes.
+pub fn writeMentionHighlighted(writer: *std.Io.Writer, text: []const u8) !void {
+    var i: usize = 0;
+    while (i < text.len) {
+        const at_mention = text[i] == '@' and (i == 0 or std.ascii.isWhitespace(text[i - 1]));
+        if (at_mention) {
+            try writer.writeAll(ansi.green);
+            try writer.writeByte('@');
+            i += 1;
+            while (i < text.len and !std.ascii.isWhitespace(text[i])) : (i += 1) {
+                try writer.writeByte(text[i]);
+            }
+            try writer.writeAll(ansi.reset);
+        } else {
+            try writer.writeByte(text[i]);
+            i += 1;
+        }
+    }
 }
 
 test "editor append without width echoes the byte" {
@@ -547,4 +571,53 @@ test "editor history navigation without width uses single-row redraw" {
         terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "> first",
         out.written(),
     );
+}
+
+test "writeMentionHighlighted leaves plain text unchanged" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeMentionHighlighted(&out.writer, "hello world");
+    try std.testing.expectEqualStrings("hello world", out.written());
+}
+
+test "writeMentionHighlighted wraps an @mention in green" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeMentionHighlighted(&out.writer, "@src/main.zig");
+    try std.testing.expectEqualStrings("\x1b[32m@src/main.zig\x1b[0m", out.written());
+}
+
+test "writeMentionHighlighted highlights mentions after prose" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeMentionHighlighted(&out.writer, "read @src/main.zig now");
+    try std.testing.expectEqualStrings("read \x1b[32m@src/main.zig\x1b[0m now", out.written());
+}
+
+test "writeMentionHighlighted highlights every mention" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeMentionHighlighted(&out.writer, "@a.zig @b.zig");
+    try std.testing.expectEqualStrings("\x1b[32m@a.zig\x1b[0m \x1b[32m@b.zig\x1b[0m", out.written());
+}
+
+test "writeMentionHighlighted ignores mid-word at signs" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeMentionHighlighted(&out.writer, "user@example.com a@b");
+    try std.testing.expectEqualStrings("user@example.com a@b", out.written());
+}
+
+test "writeMentionHighlighted stops the mention at whitespace" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeMentionHighlighted(&out.writer, "@path with space");
+    try std.testing.expectEqualStrings("\x1b[32m@path\x1b[0m with space", out.written());
+}
+
+test "writeMentionHighlighted handles a trailing at sign" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeMentionHighlighted(&out.writer, "@");
+    try std.testing.expectEqualStrings("\x1b[32m@\x1b[0m", out.written());
 }
