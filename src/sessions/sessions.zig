@@ -2,15 +2,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const core_session = @import("../core/session.zig");
 const atomic_write = @import("atomic_write.zig");
+const types = @import("types.zig");
 
-pub const SessionInfo = struct {
-    id: []const u8,
-    has_prd: bool,
-    has_conversation: bool,
-    planning_mode: bool,
-    first_prompt: ?[]const u8,
-    last_modified: u64,
-};
+pub const SessionInfo = types.SessionInfo;
+pub const dupeSessionInfo = types.dupeSessionInfo;
+pub const lessThan = types.lessThan;
 
 const first_prompt_limit = 1024;
 /// Read limit for the sessions index file. A `var` so tests can override it
@@ -356,22 +352,6 @@ fn isValidSessionId(id: []const u8) bool {
     return true;
 }
 
-fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
-    const id = try arena.dupe(u8, s.id);
-    const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
-    return .{
-        .id = id,
-        .has_prd = s.has_prd,
-        .has_conversation = s.has_conversation,
-        .planning_mode = s.planning_mode,
-        .first_prompt = first_prompt,
-        .last_modified = s.last_modified,
-    };
-}
-
-fn lessThan(_: void, a: SessionInfo, b: SessionInfo) bool {
-    return std.mem.lessThan(u8, a.id, b.id);
-}
 
 test "truncateFirstPrompt stays within the limit and on a UTF-8 boundary" {
     const arena = std.testing.allocator;
@@ -1464,14 +1444,6 @@ test "isValidSessionId rejects empty, dot, and path components" {
     try std.testing.expect(!isValidSessionId("a/b"));
     try std.testing.expect(!isValidSessionId("a\\b"));
     try std.testing.expect(!isValidSessionId("../etc"));
-}
-
-test "lessThan orders session ids" {
-    const a = SessionInfo{ .id = "aaa", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
-    const b = SessionInfo{ .id = "bbb", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
-    try std.testing.expect(lessThan({}, a, b));
-    try std.testing.expect(!lessThan({}, b, a));
-    try std.testing.expect(!lessThan({}, a, a));
 }
 
 test "findSessionByPrefix returns the unique match" {
