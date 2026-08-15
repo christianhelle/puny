@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const schema = @import("schema.zig");
 const persistence = @import("persistence.zig");
 
@@ -20,6 +19,25 @@ test "providerSlot keeps registry aligned with provider enum" {
     try std.testing.expectEqual(@as(usize, 1), providerSlot(.opencode_zen));
     try std.testing.expectEqual(@as(usize, 2), providerSlot(.opencode_go));
     try std.testing.expectEqual(@as(usize, 3), providerSlot(.copilot));
+}
+
+test "provider JSON parsing ignores internal retention fields" {
+    const allocator = std.testing.allocator;
+    const json = "{ \"name\": \"lmstudio\", \"apiKey\": \"api-key\", \"url\": \"http://example.com\", \"model\": \"qwen3\", \"stored_blob\": \"enc:v1:old\", \"stored_plaintext\": \"api-key\" }";
+
+    const parsed = try std.json.parseFromSlice(
+        Provider,
+        allocator,
+        json,
+        .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
+    );
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings("api-key", parsed.value.apiKey.?);
+    try std.testing.expectEqualStrings("http://example.com", parsed.value.url);
+    try std.testing.expectEqualStrings("qwen3", parsed.value.model);
+    try std.testing.expect(parsed.value.stored_blob == null);
+    try std.testing.expect(parsed.value.stored_plaintext == null);
 }
 
 test "round-trip default config via JSON" {

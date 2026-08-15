@@ -94,10 +94,63 @@ pub const Provider = struct {
         if (self.stored_plaintext) |v| allocator.free(v);
     }
 
+    fn validateString(value: []const u8) !void {
+        if (!isValidUtf8(value)) return error.InvalidUtf8;
+    }
+
+    fn validateOptionalString(value: ?[]const u8) !void {
+        if (value) |inner| try validateString(inner);
+    }
+
+    pub fn validatePersistedStrings(v: Provider) !void {
+        try validateString(v.url);
+        try validateString(v.model);
+        try validateOptionalString(v.apiKey);
+        try validateOptionalString(v.reasoning_effort);
+    }
+
+    pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
+        const value = try std.json.innerParse(std.json.Value, allocator, source, options);
+        return jsonParseFromValue(allocator, value, options);
+    }
+
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (source != .object) return error.UnexpectedToken;
+
+        var result: @This() = .{
+            .name = .lmstudio,
+            .apiKey = null,
+            .url = default_lm_studio_url,
+            .model = "",
+        };
+
+        var it = source.object.iterator();
+        while (it.next()) |entry| {
+            const key = entry.key_ptr.*;
+            if (std.mem.eql(u8, key, "stored_blob") or std.mem.eql(u8, key, "stored_plaintext")) {
+                continue;
+            }
+            if (std.mem.eql(u8, key, "name")) {
+                result.name = try std.json.parseFromValueLeaky(provider.ModelProvider, allocator, entry.value_ptr.*, options);
+            } else if (std.mem.eql(u8, key, "apiKey")) {
+                result.apiKey = try std.json.parseFromValueLeaky(?[]const u8, allocator, entry.value_ptr.*, options);
+            } else if (std.mem.eql(u8, key, "url")) {
+                result.url = try std.json.parseFromValueLeaky([]const u8, allocator, entry.value_ptr.*, options);
+            } else if (std.mem.eql(u8, key, "model")) {
+                result.model = try std.json.parseFromValueLeaky([]const u8, allocator, entry.value_ptr.*, options);
+            } else if (std.mem.eql(u8, key, "reasoning_effort")) {
+                result.reasoning_effort = try std.json.parseFromValueLeaky(?[]const u8, allocator, entry.value_ptr.*, options);
+            }
+        }
+
+        return result;
+    }
+
     pub fn jsonStringify(v: Provider, jws: anytype) !void {
         // Serialize the persisted fields only; `stored_blob` and
         // `stored_plaintext` are in-memory retention of the original ciphertext
         // and decrypted key and must not reach config.json.
+        validatePersistedStrings(v) catch return error.WriteFailed;
         try jws.beginObject();
         try jws.objectField("name");
         try jws.write(v.name);
