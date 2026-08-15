@@ -830,4 +830,3 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
         std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
     };
 }
-
