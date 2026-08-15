@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) !void {
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .server },
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
@@ -121,6 +122,7 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         }),
+        .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .server },
     });
 
     const run_slow_tests = b.addRunArtifact(slow_tests);
