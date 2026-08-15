@@ -291,6 +291,14 @@ test "decryptStoredApiKeys decrypts encrypted provider keys" {
 
     var cfg = schema.Config.default();
     cfg.providerEntry(.lmstudio).apiKey = blob;
+    defer {
+        const provider = cfg.providerEntry(.lmstudio);
+        if (provider.apiKey) |api_key| {
+            std.testing.allocator.free(api_key);
+            provider.apiKey = null;
+            provider.stored_plaintext = null;
+        }
+    }
 
     try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
 
