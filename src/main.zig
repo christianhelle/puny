@@ -833,6 +833,8 @@ test "include providers.resolver tests" {
     _ = @import("providers/resolver.zig");
 }
 test "include skills.skills tests" {
+    _ = @import("skills/frontmatter.zig");
+    _ = @import("skills/triggers.zig");
     _ = @import("skills/skills.zig");
 }
 test "include tools.filesystem tests" {
