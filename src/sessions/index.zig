@@ -90,6 +90,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     for (parsed.value, 0..) |s, i| {
         entries[i] = try dupeSessionInfo(arena, s);
     }
+    std.mem.sort(SessionInfo, entries, {}, lessThan);
     return entries;
 }
 
@@ -733,6 +734,42 @@ test "listSessions rebuilds when the sessions dir is newer than the index" {
         if (std.mem.eql(u8, s.id, "c-3")) break true;
     } else false;
     try std.testing.expect(has_c);
+}
+
+test "listSessions sorts entries from an unsorted index by id" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try f.createTestSessionDir(std.testing.io, test_dir, "zzz", false);
+    try f.createTestSessionDir(std.testing.io, test_dir, "aaa", false);
+
+    // Write an index with entries in reverse order. Both ids map to real
+    // session directories, so the index is parseable and considered valid.
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{
+        .sub_path = index_path,
+        .data =
+        \\[{"id":"zzz","has_prd":false,"has_conversation":false,"planning_mode":false,"first_prompt":null,"last_modified":2},{"id":"aaa","has_prd":false,"has_conversation":false,"planning_mode":false,"first_prompt":null,"last_modified":1}]
+        ,
+    });
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+    try std.testing.expectEqualStrings("aaa", sessions[0].id);
+    try std.testing.expectEqualStrings("zzz", sessions[1].id);
 }
 
 test "upsertSessionInfo adds a new entry and reads it back" {
