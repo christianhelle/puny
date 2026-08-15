@@ -729,6 +729,7 @@ test "include chat.redact tests" {
 }
 
 test "include upgrade module tests" {
+    _ = @import("upgrade/release.zig");
     _ = @import("upgrade.zig");
 }
 
