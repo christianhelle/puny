@@ -2,10 +2,9 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
-- Extract test runner into its own module and register dead dispatch tests ([#149](https://github.com/christianhelle/puny/pull/149)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Fix regression test warning output ([#152](https://github.com/christianhelle/puny/pull/152)) ([@christianhelle](https://github.com/christianhelle/))
+- Extract test runner into its own module and register dead dispatch tests ([#149](https://github.com/christianhelle/puny/pull/149)) ([@christianhelle](https://github.com/christianhelle/))
 - Highlight attached @file mentions in the prompt ([#151](https://github.com/christianhelle/puny/pull/151)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor sessions and CLI command modules into smaller files ([#148](https://github.com/christianhelle/puny/pull/148)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor chat, skills, and upgrade into smaller modules ([#146](https://github.com/christianhelle/puny/pull/146)) ([@christianhelle](https://github.com/christianhelle/))
