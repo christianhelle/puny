@@ -214,6 +214,10 @@ pub fn save(
         }
     }
 
+    for (to_write.providers) |p| {
+        try schema.Provider.validatePersistedStrings(p);
+    }
+
     const buffer = try std.json.Stringify.valueAlloc(allocator, to_write, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
 
@@ -253,4 +257,132 @@ pub fn configPath(allocator: std.mem.Allocator, environ_map: *const std.process.
 
     const home = environ_map.get("HOME") orelse return error.NoConfigDir;
     return std.fs.path.join(allocator, &.{ home, ".config", "puny", "config.json" });
+}
+
+fn tempHomeEnv() !struct { tmp: std.testing.TmpDir, env: std.process.Environ.Map, home: []u8 } {
+    var tmp = std.testing.tmpDir(.{});
+    errdefer tmp.cleanup();
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    errdefer env.deinit();
+    const home = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    errdefer std.testing.allocator.free(home);
+    try env.put("HOME", home);
+    return .{ .tmp = tmp, .env = env, .home = home };
+}
+
+test "decryptStoredApiKeys decrypts encrypted provider keys" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const key = [_]u8{0x42} ** secrets.key_length;
+    const path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &key });
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const plaintext = "sk-live-0123456789";
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, plaintext);
+    defer std.testing.allocator.free(blob);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = blob;
+
+    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+
+    try std.testing.expectEqualStrings(plaintext, cfg.providerEntryConst(.lmstudio).apiKey.?);
+    try std.testing.expectEqualStrings(blob, cfg.providerEntryConst(.lmstudio).stored_blob.?);
+    try std.testing.expectEqualStrings(plaintext, cfg.providerEntryConst(.lmstudio).stored_plaintext.?);
+}
+
+test "decryptStoredApiKeys preserves undecryptable blobs when no key exists" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x11} ** secrets.key_length;
+    const plaintext = "sk-live-undecryptable";
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, plaintext);
+    defer std.testing.allocator.free(blob);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = blob;
+
+    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+
+    try std.testing.expect(cfg.providerEntryConst(.lmstudio).apiKey == null);
+    try std.testing.expectEqualStrings(blob, cfg.providerEntryConst(.lmstudio).stored_blob.?);
+    try std.testing.expect(cfg.providerEntryConst(.lmstudio).stored_plaintext == null);
+}
+
+test "save preserves a stored blob when the key is unchanged" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x77} ** secrets.key_length;
+    const plaintext = "sk-live-unchanged";
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, plaintext);
+    defer std.testing.allocator.free(blob);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = plaintext;
+    cfg.providerEntry(.lmstudio).stored_blob = blob;
+    cfg.providerEntry(.lmstudio).stored_plaintext = plaintext;
+
+    try save(std.testing.allocator, std.testing.io, cfg, &fixture.env);
+
+    const path = try configPath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(data);
+
+    const parsed = try std.json.parseFromSlice(schema.Config, std.testing.allocator, data, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings(blob, parsed.value.providerEntryConst(.lmstudio).apiKey.?);
+}
+
+test "save re-encrypts keys when the typed value changes" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const key = [_]u8{0x88} ** secrets.key_length;
+    const path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &key });
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = "sk-live-new-secret";
+    cfg.providerEntry(.lmstudio).stored_blob = "enc:v1:old-blob";
+    cfg.providerEntry(.lmstudio).stored_plaintext = "sk-live-old-secret";
+
+    try save(std.testing.allocator, std.testing.io, cfg, &fixture.env);
+
+    const config_path = try configPath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(config_path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, config_path, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(data);
+
+    const parsed = try std.json.parseFromSlice(schema.Config, std.testing.allocator, data, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+    defer parsed.deinit();
+
+    try std.testing.expect(secrets.isEncrypted(parsed.value.providerEntryConst(.lmstudio).apiKey.?));
+    try std.testing.expect(!std.mem.eql(u8, parsed.value.providerEntryConst(.lmstudio).apiKey.?, "sk-live-new-secret"));
 }
