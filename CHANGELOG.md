@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Refactor session.zig into display and session persistence modules ([#147](https://github.com/christianhelle/puny/pull/147)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract chat command handlers into session_commands.zig ([#144](https://github.com/christianhelle/puny/pull/144)) ([@christianhelle](https://github.com/christianhelle/))
 - Extract smaller modules from debug_log and openai modules ([#143](https://github.com/christianhelle/puny/pull/143)) ([@christianhelle](https://github.com/christianhelle/))
 - Add @ file mentions to attach files to prompts ([#141](https://github.com/christianhelle/puny/pull/141)) ([@christianhelle](https://github.com/christianhelle/))
