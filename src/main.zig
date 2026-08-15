@@ -698,6 +698,7 @@ test "requiresApiKey only for opencode and opencode-go" {
 }
 
 test "test runner suppresses warning logs" {
+    std.log.warn("expected warning from regression test", .{});
     try std.testing.expectEqual(std.log.Level.err, std.testing.log_level);
 }
 

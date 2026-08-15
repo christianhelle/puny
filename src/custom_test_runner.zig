@@ -9,7 +9,6 @@
 
 const std = @import("std");
 const Io = std.Io;
-const fatal = std.process.fatal;
 const testing = std.testing;
 const panic = std.debug.panic;
 
@@ -107,6 +106,7 @@ fn mainServer(init: std.process.Init.Minimal) !void {
                     .environ = init.environ,
                 });
                 log_err_count = 0;
+                testing.log_level = .err;
                 const index = try server.receiveBody_u32();
                 const test_fn = @import("builtin").test_functions[index];
 
