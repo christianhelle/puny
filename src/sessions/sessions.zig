@@ -2,28 +2,16 @@ const std = @import("std");
 const builtin = @import("builtin");
 const core_session = @import("../core/session.zig");
 const atomic_write = @import("atomic_write.zig");
+const session = @import("session.zig");
 
-pub const SessionInfo = struct {
-    id: []const u8,
-    has_prd: bool,
-    has_conversation: bool,
-    planning_mode: bool,
-    first_prompt: ?[]const u8,
-    last_modified: u64,
-};
-
-const first_prompt_limit = 1024;
-/// Read limit for the sessions index file. A `var` so tests can override it
-/// and exercise the StreamTooLong path without writing tens of megabytes.
-var index_read_limit: usize = 64 * 1024 * 1024;
-const index_filename = "sessions.json";
+pub const SessionInfo = session.SessionInfo;
 
 /// Resolves `<puny_dir>/sessions.json` from the environment, reusing the
 /// puny-dir resolution owned by `src/core/session.zig`.
 pub fn sessionsPath(arena: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
     const base = try core_session.configPunyDir(arena, environ_map);
     defer arena.free(base);
-    return std.fs.path.join(arena, &.{ base, index_filename });
+    return std.fs.path.join(arena, &.{ base, session.index_filename });
 }
 
 /// Returns the session index (`sessions.json`) contents as `[]SessionInfo`
@@ -38,7 +26,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     const scratch = scratch_arena.allocator();
 
     const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
-    const index_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename });
+    const index_path = try std.fs.path.join(scratch, &.{ base_dir, session.index_filename });
 
     // A missing sessions dir means there are no sessions; same as today's
     // directory scan, and no index is written.
@@ -58,7 +46,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
         return try rebuildSessionsIndex(arena, io, base_dir);
     }
 
-    const data = std.Io.Dir.cwd().readFileAlloc(io, index_path, scratch, std.Io.Limit.limited(index_read_limit)) catch |err| switch (err) {
+    const data = std.Io.Dir.cwd().readFileAlloc(io, index_path, scratch, std.Io.Limit.limited(session.index_read_limit)) catch |err| switch (err) {
         error.StreamTooLong => {
             std.log.warn("sessions index at {s} exceeds the read limit; rebuilding", .{index_path});
             return try rebuildSessionsIndex(arena, io, base_dir);
@@ -79,7 +67,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     // directory (empty, path-like, or "." / ".."); refuse it and rebuild from
     // the directory scan rather than surfacing such entries to callers.
     for (parsed.value) |s| {
-        if (!isValidSessionId(s.id)) {
+        if (!session.isValidSessionId(s.id)) {
             std.log.warn("sessions index at {s} contains an invalid session id; rebuilding", .{index_path});
             return try rebuildSessionsIndex(arena, io, base_dir);
         }
@@ -90,7 +78,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     // caller's arena before the scratch arena is released.
     const entries = try arena.alloc(SessionInfo, parsed.value.len);
     for (parsed.value, 0..) |s, i| {
-        entries[i] = try dupeSessionInfo(arena, s);
+        entries[i] = try session.dupeSessionInfo(arena, s);
     }
     return entries;
 }
@@ -143,22 +131,22 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
             break :blk core_session.SessionMeta{ .planning_mode = false, .first_prompt = null };
         };
 
-        const first_prompt = if (meta.first_prompt) |p| try truncateFirstPrompt(arena, p) else null;
+        const first_prompt = if (meta.first_prompt) |p| try session.truncateFirstPrompt(arena, p) else null;
 
         // last_modified: messages.json mtime when present, else the plan
         // file mtime when present, else 0.
         var last_modified: u64 = 0;
         if (msg_stat) |st| {
-            last_modified = timestampToNs(st.mtime) orelse 0;
+            last_modified = session.timestampToNs(st.mtime) orelse 0;
         }
         if (last_modified == 0 and has_prd) {
             const md_path = try std.fs.path.join(entry_tmp, &.{ dir_path, "plan.md" });
             if (std.Io.Dir.cwd().statFile(io, md_path, .{})) |st| {
-                last_modified = timestampToNs(st.mtime) orelse 0;
+                last_modified = session.timestampToNs(st.mtime) orelse 0;
             } else |_| {
                 const html_path = try std.fs.path.join(entry_tmp, &.{ dir_path, "plan.html" });
                 if (std.Io.Dir.cwd().statFile(io, html_path, .{})) |st| {
-                    last_modified = timestampToNs(st.mtime) orelse 0;
+                    last_modified = session.timestampToNs(st.mtime) orelse 0;
                 } else |_| {}
             }
         }
@@ -173,7 +161,7 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
         });
     }
 
-    std.mem.sort(SessionInfo, list.items, {}, lessThan);
+    std.mem.sort(SessionInfo, list.items, {}, session.lessThan);
     const entries = try list.toOwnedSlice(arena);
     try writeIndex(io, arena, base_dir, entries);
     return entries;
@@ -192,7 +180,7 @@ fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, en
     const buffer = try std.json.Stringify.valueAlloc(scratch, entries, .{ .whitespace = .indent_2 });
     const sessions_dir_path = try std.fs.path.join(scratch, &.{ base_dir, "sessions" });
 
-    try atomic_write.writeAtomically(io, scratch, base_dir, index_filename, buffer, .{
+    try atomic_write.writeAtomically(io, scratch, base_dir, session.index_filename, buffer, .{
         .newer_than = sessions_dir_path,
         .restrict_permissions = true,
     });
@@ -209,7 +197,7 @@ pub fn upsertSessionInfo(arena: std.mem.Allocator, io: std.Io, base_dir: []const
     const current = try listSessions(scratch, io, base_dir);
 
     const id = try scratch.dupe(u8, info.id);
-    const first_prompt = if (info.first_prompt) |p| try truncateFirstPrompt(scratch, p) else null;
+    const first_prompt = if (info.first_prompt) |p| try session.truncateFirstPrompt(scratch, p) else null;
     const updated = SessionInfo{
         .id = id,
         .has_prd = info.has_prd,
@@ -232,7 +220,7 @@ pub fn upsertSessionInfo(arena: std.mem.Allocator, io: std.Io, base_dir: []const
     }
     if (!found) try entries.append(scratch, updated);
 
-    std.mem.sort(SessionInfo, entries.items, {}, lessThan);
+    std.mem.sort(SessionInfo, entries.items, {}, session.lessThan);
     try writeIndex(io, scratch, base_dir, entries.items);
 }
 
@@ -274,7 +262,7 @@ pub fn findSessionByPrefix(arena: std.mem.Allocator, io: std.Io, base_dir: []con
 
     for (sessions) |s| {
         if (std.mem.startsWith(u8, s.id, prefix)) {
-            return try dupeSessionInfo(arena, s);
+            return try session.dupeSessionInfo(arena, s);
         }
     }
     return null;
@@ -294,7 +282,7 @@ pub fn findLatestSession(arena: std.mem.Allocator, io: std.Io, base_dir: []const
         if (!s.has_conversation) continue;
         if (best == null or s.last_modified > best.?.last_modified) best = s;
     }
-    if (best) |s| return try dupeSessionInfo(arena, s);
+    if (best) |s| return try session.dupeSessionInfo(arena, s);
     return null;
 }
 
@@ -331,77 +319,6 @@ pub fn pruneSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8,
         std.Io.Dir.cwd().deleteTree(io, dir_path) catch {};
     }
     _ = try rebuildSessionsIndex(scratch, io, base_dir);
-}
-
-fn truncateFirstPrompt(arena: std.mem.Allocator, prompt: []const u8) ![]const u8 {
-    var end = @min(prompt.len, first_prompt_limit);
-    // Never cut a UTF-8 code point in half: if the limit lands on a
-    // continuation byte, back up to the nearest leading byte so the truncated
-    // slice stays valid. Prompts already within the limit are untouched.
-    while (end < prompt.len and end > 0 and (prompt[end] & 0xC0) == 0x80) {
-        end -= 1;
-    }
-    return arena.dupe(u8, prompt[0..end]);
-}
-
-/// A session id must be a non-empty path-safe component that is neither "."
-/// nor "..", so a corrupted index can never direct file access outside the
-/// sessions directory.
-fn isValidSessionId(id: []const u8) bool {
-    if (id.len == 0) return false;
-    if (std.mem.eql(u8, id, ".") or std.mem.eql(u8, id, "..")) return false;
-    for (id) |c| {
-        if (c == '/' or c == '\\') return false;
-    }
-    return true;
-}
-
-fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
-    const id = try arena.dupe(u8, s.id);
-    const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
-    return .{
-        .id = id,
-        .has_prd = s.has_prd,
-        .has_conversation = s.has_conversation,
-        .planning_mode = s.planning_mode,
-        .first_prompt = first_prompt,
-        .last_modified = s.last_modified,
-    };
-}
-
-fn lessThan(_: void, a: SessionInfo, b: SessionInfo) bool {
-    return std.mem.lessThan(u8, a.id, b.id);
-}
-
-test "truncateFirstPrompt stays within the limit and on a UTF-8 boundary" {
-    const arena = std.testing.allocator;
-
-    // Prompt within the limit is returned unchanged.
-    const short = "hello";
-    const short_out = try truncateFirstPrompt(arena, short);
-    defer arena.free(short_out);
-    try std.testing.expectEqualStrings(short, short_out);
-
-    // A plain truncation keeps exactly first_prompt_limit bytes.
-    const ascii = try std.fmt.allocPrint(arena, "{s}", .{"a" ** (first_prompt_limit + 10)});
-    defer arena.free(ascii);
-    const ascii_out = try truncateFirstPrompt(arena, ascii);
-    defer arena.free(ascii_out);
-    try std.testing.expectEqual(@as(usize, first_prompt_limit), ascii_out.len);
-
-    // When the limit lands inside a multi-byte code point, back up to the
-    // preceding boundary. The euro sign is 3 bytes (E2 82 AC).
-    const long = try std.fmt.allocPrint(arena, "{s}\xE2\x82\xAC{s}", .{ "b" ** (first_prompt_limit - 1), "ccc" });
-    defer arena.free(long);
-    const long_out = try truncateFirstPrompt(arena, long);
-    defer arena.free(long_out);
-    try std.testing.expectEqual(@as(usize, first_prompt_limit - 1), long_out.len);
-    try std.testing.expect(std.unicode.utf8ValidateSlice(long_out));
-}
-
-fn timestampToNs(ts: std.Io.Timestamp) ?u64 {
-    if (ts.nanoseconds < 0) return null;
-    return @intCast(ts.nanoseconds);
 }
 
 // ---- tests ----
@@ -895,9 +812,9 @@ test "listSessions tolerates an unreadable session meta file" {
 test "listSessions rebuilds from scan on an oversized index" {
     // Override the shared read limit so the oversized index only needs a few
     // kilobytes on disk; restore the default before the test ends.
-    const default_index_read_limit = index_read_limit;
-    index_read_limit = 4 * 1024;
-    defer index_read_limit = default_index_read_limit;
+    const default_index_read_limit = session.index_read_limit;
+    session.index_read_limit = 4 * 1024;
+    defer session.index_read_limit = default_index_read_limit;
 
     const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
     defer {
@@ -915,7 +832,7 @@ test "listSessions rebuilds from scan on an oversized index" {
     defer big.close(std.testing.io);
     const chunk = [_]u8{'x'} ** 1024;
     var written: usize = 0;
-    while (written < index_read_limit + 64) : (written += chunk.len) {
+    while (written < session.index_read_limit + 64) : (written += chunk.len) {
         try big.writeStreamingAll(std.testing.io, &chunk);
     }
 
@@ -1233,7 +1150,7 @@ test "upsert leaves no temp file behind" {
     defer dir.close(std.testing.io);
     var it = dir.iterate();
     while (try it.next(std.testing.io)) |entry| {
-        try std.testing.expect(!std.mem.startsWith(u8, entry.name, index_filename ++ "."));
+        try std.testing.expect(!std.mem.startsWith(u8, entry.name, session.index_filename ++ "."));
         try std.testing.expect(!std.mem.endsWith(u8, entry.name, ".tmp"));
     }
 }
@@ -1451,27 +1368,27 @@ test "pruneSessions removes orphaned directories absent from the index" {
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, orphan_dir, .{}));
 }
 
-test "isValidSessionId accepts path-safe ids" {
-    try std.testing.expect(isValidSessionId("abc"));
-    try std.testing.expect(isValidSessionId("a-b_c.d"));
-    try std.testing.expect(isValidSessionId("9f8e7d6c"));
+test "session.isValidSessionId accepts path-safe ids" {
+    try std.testing.expect(session.isValidSessionId("abc"));
+    try std.testing.expect(session.isValidSessionId("a-b_c.d"));
+    try std.testing.expect(session.isValidSessionId("9f8e7d6c"));
 }
 
-test "isValidSessionId rejects empty, dot, and path components" {
-    try std.testing.expect(!isValidSessionId(""));
-    try std.testing.expect(!isValidSessionId("."));
-    try std.testing.expect(!isValidSessionId(".."));
-    try std.testing.expect(!isValidSessionId("a/b"));
-    try std.testing.expect(!isValidSessionId("a\\b"));
-    try std.testing.expect(!isValidSessionId("../etc"));
+test "session.isValidSessionId rejects empty, dot, and path components" {
+    try std.testing.expect(!session.isValidSessionId(""));
+    try std.testing.expect(!session.isValidSessionId("."));
+    try std.testing.expect(!session.isValidSessionId(".."));
+    try std.testing.expect(!session.isValidSessionId("a/b"));
+    try std.testing.expect(!session.isValidSessionId("a\\b"));
+    try std.testing.expect(!session.isValidSessionId("../etc"));
 }
 
-test "lessThan orders session ids" {
+test "session.lessThan orders session ids" {
     const a = SessionInfo{ .id = "aaa", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
     const b = SessionInfo{ .id = "bbb", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
-    try std.testing.expect(lessThan({}, a, b));
-    try std.testing.expect(!lessThan({}, b, a));
-    try std.testing.expect(!lessThan({}, a, a));
+    try std.testing.expect(session.lessThan({}, a, b));
+    try std.testing.expect(!session.lessThan({}, b, a));
+    try std.testing.expect(!session.lessThan({}, a, a));
 }
 
 test "findSessionByPrefix returns the unique match" {
