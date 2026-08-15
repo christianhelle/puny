@@ -758,6 +758,8 @@ test "listSessions sorts entries from an unsorted index by id" {
         ,
     });
 
+    try f.setFileMtime(std.testing.io, index_path, std.Io.Timestamp.fromNanoseconds(std.time.ns_per_hour * 24 * 365 * 100));
+
     const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
     defer {
         for (sessions) |s| {
