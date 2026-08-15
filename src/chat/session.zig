@@ -3,6 +3,7 @@ const ansi = @import("../tui/ansi.zig");
 const chat = @import("chat.zig");
 const stats = @import("stats.zig");
 const debug_log = @import("debug_log.zig");
+const display = @import("display.zig");
 const session_commands = @import("session_commands.zig");
 const context = @import("context.zig");
 const token_stats = @import("../tui/token_stats.zig");
@@ -252,7 +253,7 @@ pub const ChatSession = struct {
 
                         ctx.history.clear();
                         try ctx.stdout_writer.print("Session restored — {d} messages:\n", .{ctx.messages.items.len});
-                        try printConversation(ctx.stdout_writer, ctx.messages.items);
+                        try display.printConversation(ctx.stdout_writer, ctx.messages.items);
                         try ctx.stdout_writer.flush();
                     } else {
                         try ctx.stdout_writer.print("\n{s}No matching session found.{s}\n", .{ ansi.dim, ansi.reset });
@@ -502,23 +503,6 @@ fn loadMessagesIntoContext(ctx: *ChatLoopContext, dir: []const u8) !void {
     for (parsed.value.array.items) |item| {
         const msg = try openai.Message.fromJsonValue(ctx.messages_arena.allocator(), item);
         try ctx.messages.append(ctx.messages_arena.allocator(), msg);
-    }
-}
-
-pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Message) !void {
-    for (messages) |msg| {
-        switch (msg) {
-            .user => |content| {
-                try writer.print("\n{s}{s}{s} ", .{ ansi.bright, prompts.prompt_text, ansi.reset });
-                try writer.print("{s}\n\n", .{content});
-            },
-            .assistant => |assistant| {
-                if (assistant.content) |content| {
-                    try writer.print("{s}\n", .{content});
-                }
-            },
-            else => {},
-        }
     }
 }
 

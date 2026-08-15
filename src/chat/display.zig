@@ -1,5 +1,7 @@
 const std = @import("std");
+const ansi = @import("../tui/ansi.zig");
 const openai = @import("../providers/openai.zig");
+const prompts = @import("../prompts/prompts.zig");
 
 const max_value_length = 120;
 
@@ -21,6 +23,26 @@ pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) 
         try appendGeneric(&output, allocator, tool_call.function.name, parsed.value);
     }
     return output.toOwnedSlice(allocator);
+}
+
+/// Prints the conversation history, prefixing user messages with the prompt
+/// marker and skipping system/tool messages. Shared by the restore flow and
+/// the one-shot startup path.
+pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Message) !void {
+    for (messages) |msg| {
+        switch (msg) {
+            .user => |content| {
+                try writer.print("\n{s}{s}{s} ", .{ ansi.bright, prompts.prompt_text, ansi.reset });
+                try writer.print("{s}\n\n", .{content});
+            },
+            .assistant => |assistant| {
+                if (assistant.content) |content| {
+                    try writer.print("{s}\n", .{content});
+                }
+            },
+            else => {},
+        }
+    }
 }
 
 fn renderKnown(
@@ -377,4 +399,37 @@ test "getString and getBool extract typed fields" {
     try std.testing.expect(getBool(parsed, "staged").?);
     try std.testing.expect(getBool(parsed, "missing") == null);
     try std.testing.expect(getBool(parsed, "path") == null);
+}
+
+test "printConversation renders user and assistant messages and skips the rest" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = "hello" },
+        .{ .assistant = .{ .content = "hi there" } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "tool output" } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(&out.writer, &messages);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), prompts.prompt_text) != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "hello") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "hi there") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "system prompt") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "tool output") == null);
+}
+
+test "printConversation skips assistant messages without content" {
+    const messages = [_]openai.Message{
+        .{ .user = "hello" },
+        .{ .assistant = .{ .content = null, .tool_calls = &.{} } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(&out.writer, &messages);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "hello") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "null") == null);
 }

@@ -16,6 +16,7 @@ const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
 const resolver = @import("providers/resolver.zig");
 const session = @import("chat/session.zig");
+const display = @import("chat/display.zig");
 const sigint = @import("core/sigint.zig");
 const instructions = @import("agents/instructions.zig");
 const skills = @import("skills/skills.zig");
@@ -252,7 +253,7 @@ pub fn main(init: std.process.Init) !void {
         if (restore_result.restored) {
             var header_buf: [256]u8 = undefined;
             try stdout_writer.print("\n\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
-            try session.printConversation(stdout_writer, messages.items);
+            try display.printConversation(stdout_writer, messages.items);
             try stdout_writer.flush();
         }
     }
