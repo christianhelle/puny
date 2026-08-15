@@ -20,7 +20,8 @@ pub const Command = union(enum) {
     help,
 };
 
-/// The interactive slash commands recognized by `parse`, in display order.
+/// Primary slash command tokens advertised in the welcome banner, in display order.
+/// `parse` also accepts ':' variants and aliases such as `/exit`, `/new`, and `:help`.
 pub const command_tokens = [_][]const u8{
     "/quit",
     "/exit",
@@ -38,6 +39,7 @@ pub const command_tokens = [_][]const u8{
     "/prune",
     "/skills",
     "/file",
+    "/help",
 };
 
 fn eqlIgnoreCase(a: []const u8, b: []const u8) bool {
