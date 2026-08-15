@@ -715,8 +715,8 @@ test "include chat session tests" {
 test "include chat.session_commands tests" {
     _ = @import("chat/session_commands.zig");
 }
-test "include chat.session_persistence tests" {
-    _ = @import("chat/session_persistence.zig");
+test "include chat.persistence tests" {
+    _ = @import("chat/persistence.zig");
 }
 test "include chat.attachments tests" {
     _ = @import("chat/attachments.zig");

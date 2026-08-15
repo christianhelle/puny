@@ -4,7 +4,7 @@ const chat = @import("chat.zig");
 const stats = @import("stats.zig");
 const debug_log = @import("debug_log.zig");
 const display = @import("display.zig");
-const session_persistence = @import("session_persistence.zig");
+const persistence = @import("persistence.zig");
 const session_commands = @import("session_commands.zig");
 const context = @import("context.zig");
 const token_stats = @import("../tui/token_stats.zig");
@@ -119,8 +119,8 @@ pub const ChatSession = struct {
                 },
                 .continue_ => continue,
                 .full_reset => {
-                    try session_persistence.saveMessages(ctx);
-                    try session_persistence.saveSessionMeta(ctx);
+                    try persistence.saveMessages(ctx);
+                    try persistence.saveSessionMeta(ctx);
                     upsertCurrentSession(ctx);
 
                     try ctx.stdout_writer.print(" Performing full memory reset...", .{});
@@ -230,7 +230,7 @@ pub const ChatSession = struct {
 
                         const dir = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ base, "sessions", s.id });
                         defer ctx.messages_arena.allocator().free(dir);
-                        try session_persistence.loadMessagesIntoContext(ctx, dir);
+                        try persistence.loadMessagesIntoContext(ctx, dir);
 
                         ctx.planning_mode.* = s.planning_mode;
                         core_session.setWriteBlocked(ctx.planning_mode.*);
@@ -515,8 +515,8 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens());
     }
 
-    try session_persistence.saveMessages(ctx);
-    try session_persistence.saveSessionMeta(ctx);
+    try persistence.saveMessages(ctx);
+    try persistence.saveSessionMeta(ctx);
     upsertCurrentSession(ctx);
 
     if (ctx.parsed.oneshot) {
@@ -803,8 +803,8 @@ test "prompt-file prompts persist in history as /file commands end to end" {
 }
 
 fn finalizeSession(ctx: *ChatLoopContext) void {
-    session_persistence.saveMessages(ctx) catch {};
-    session_persistence.saveSessionMeta(ctx) catch {};
+    persistence.saveMessages(ctx) catch {};
+    persistence.saveSessionMeta(ctx) catch {};
     if (shouldRemoveSessionDir(ctx.restore_incomplete, ctx.messages.items, ctx.io, ctx.session.dir)) {
         core_session.removeSessionDir(ctx.io, ctx.session.dir);
         sessions.removeSessionFromIndex(ctx.arena, ctx.io, ctx.session.base, ctx.session.id) catch {};
@@ -824,7 +824,7 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
         .has_prd = core_session.sessionHasPlan(ctx.io, ctx.session.dir),
         .has_conversation = sessionHasContent(ctx.messages.items),
         .planning_mode = ctx.planning_mode.*,
-        .first_prompt = session_persistence.firstUserPrompt(ctx.messages.items),
+        .first_prompt = persistence.firstUserPrompt(ctx.messages.items),
         .last_modified = now_ns,
     }) catch |err| {
         std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
