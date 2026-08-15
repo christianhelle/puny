@@ -10,7 +10,7 @@ test "include core.git_root tests" {
 
 test "include sessions module tests" {
     _ = @import("sessions/sessions.zig");
-    _ = @import("sessions/index.zig");
+    _ = @import("sessions/index_tests.zig");
     _ = @import("sessions/atomic_write.zig");
     _ = @import("sessions/query.zig");
     _ = @import("sessions/types.zig");
