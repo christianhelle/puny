@@ -1,4 +1,6 @@
 const std = @import("std");
+const frontmatter = @import("frontmatter.zig");
+const triggers = @import("triggers.zig");
 
 pub const SkillRecord = struct {
     name: []const u8,
@@ -120,7 +122,7 @@ pub const Registry = struct {
             };
             defer self.allocator.free(content);
 
-            const fm = parseFrontmatter(content, self.allocator);
+            const fm = frontmatter.parseFrontmatter(content, self.allocator);
             r.description = fm.description;
             r.triggers = fm.triggers;
             r.disable_model_invocation = fm.disable_model_invocation;
@@ -174,148 +176,15 @@ pub fn setPendingSkill(name: []const u8, content: []const u8, allocator: std.mem
     };
 }
 
-fn trimCr(maybe_cr: []const u8) []const u8 {
-    if (maybe_cr.len > 0 and maybe_cr[maybe_cr.len - 1] == '\r') return maybe_cr[0 .. maybe_cr.len - 1];
-    return maybe_cr;
-}
-
-const Frontmatter = struct {
-    description: ?[]const u8 = null,
-    triggers: ?[][]const u8 = null,
-    disable_model_invocation: bool = false,
-};
-
-fn parseFrontmatter(content: []const u8, allocator: std.mem.Allocator) Frontmatter {
-    var result = Frontmatter{};
-    var lines = std.mem.splitScalar(u8, content, '\n');
-    const first = trimCr(lines.next() orelse return result);
-    if (!std.mem.eql(u8, first, "---")) return result;
-
-    var desc_buf: std.ArrayList(u8) = .empty;
-    defer desc_buf.deinit(allocator);
-
-    var in_folded = false;
-    var folded_key: ?[]const u8 = null;
-
-    const flush_folded = struct {
-        fn flush(r: *Frontmatter, buf: *std.ArrayList(u8), key: ?[]const u8, alloc: std.mem.Allocator) void {
-            if (key == null or buf.items.len == 0) return;
-            if (std.mem.eql(u8, key.?, "description")) {
-                if (r.description == null) {
-                    r.description = alloc.dupe(u8, buf.items) catch null;
-                }
-            }
-        }
-    }.flush;
-
-    while (lines.next()) |raw_line| {
-        const line = trimCr(raw_line);
-
-        if (in_folded) {
-            if (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) {
-                const trimmed = std.mem.trimStart(u8, line, " \t");
-                if (desc_buf.items.len > 0) {
-                    desc_buf.append(allocator, ' ') catch {};
-                }
-                desc_buf.appendSlice(allocator, trimmed) catch {};
-                continue;
-            }
-            in_folded = false;
-            flush_folded(&result, &desc_buf, folded_key, allocator);
-            folded_key = null;
-        }
-
-        if (std.mem.eql(u8, line, "---")) break;
-
-        if (std.mem.startsWith(u8, line, "description: >")) {
-            in_folded = true;
-            folded_key = "description";
-            desc_buf.clearRetainingCapacity();
-        } else if (std.mem.startsWith(u8, line, "description: ")) {
-            result.description = allocator.dupe(u8, line["description: ".len..]) catch null;
-        } else if (std.mem.startsWith(u8, line, "triggers: ")) {
-            result.triggers = parseTriggerList(line["triggers: ".len..], allocator);
-        } else if (std.mem.startsWith(u8, line, "disable-model-invocation: true")) {
-            result.disable_model_invocation = true;
-        } else if (std.mem.startsWith(u8, line, "disable-model-invocation: false")) {
-            result.disable_model_invocation = false;
-        }
-    }
-
-    if (in_folded) {
-        flush_folded(&result, &desc_buf, folded_key, allocator);
-    }
-
-    return result;
-}
-
-fn parseTriggerList(value: []const u8, allocator: std.mem.Allocator) ?[][]const u8 {
-    const trimmed = std.mem.trim(u8, value, " \t\r\n");
-    if (trimmed.len == 0) return null;
-
-    var list = std.ArrayList([]const u8).empty;
-    defer list.deinit(allocator);
-
-    var it = std.mem.splitScalar(u8, trimmed, ',');
-    while (it.next()) |item| {
-        const t = std.mem.trim(u8, item, " \t");
-        if (t.len > 0) {
-            const duped = allocator.dupe(u8, t) catch return null;
-            list.append(allocator, duped) catch {
-                allocator.free(duped);
-                return null;
-            };
-        }
-    }
-
-    if (list.items.len == 0) return null;
-    return list.toOwnedSlice(allocator) catch null;
-}
-
 pub fn recordMatchesTrigger(record: *const SkillRecord, text: []const u8) bool {
     if (record.disable_model_invocation) return false;
-    if (textContainsWord(text, record.name)) return true;
-    if (record.triggers) |triggers| {
-        for (triggers) |trigger| {
-            if (textContainsWord(text, trigger)) return true;
+    if (triggers.textContainsWord(text, record.name)) return true;
+    if (record.triggers) |trigger_list| {
+        for (trigger_list) |trigger| {
+            if (triggers.textContainsWord(text, trigger)) return true;
         }
     }
     return false;
-}
-
-pub fn textContainsWord(text: []const u8, word: []const u8) bool {
-    if (word.len == 0) return false;
-    if (wordAtBoundary(text, word)) return true;
-    if (std.mem.indexOfScalar(u8, word, '-') != null and word.len <= 128) {
-        var normalized_buf: [128]u8 = undefined;
-        const normalized = normalizeHyphensToSpaces(&normalized_buf, word);
-        if (wordAtBoundary(text, normalized)) return true;
-    }
-    return false;
-}
-
-fn wordAtBoundary(text: []const u8, word: []const u8) bool {
-    var search_from: usize = 0;
-    while (std.mem.indexOfPos(u8, text, search_from, word)) |match_pos| {
-        if (match_pos > 0 and std.ascii.isAlphanumeric(text[match_pos - 1])) {
-            search_from = match_pos + 1;
-            continue;
-        }
-        const end = match_pos + word.len;
-        if (end < text.len and std.ascii.isAlphanumeric(text[end])) {
-            search_from = match_pos + 1;
-            continue;
-        }
-        return true;
-    }
-    return false;
-}
-
-fn normalizeHyphensToSpaces(buf: *[128]u8, word: []const u8) []const u8 {
-    for (word, 0..) |byte, i| {
-        buf[i] = if (byte == '-') ' ' else byte;
-    }
-    return buf[0..word.len];
 }
 
 test "init creates empty registry" {
@@ -743,30 +612,6 @@ test "findTriggeredSkill returns null when no match" {
     try std.testing.expect(matched == null);
 }
 
-test "textContainsWord matches whole words" {
-    try std.testing.expect(textContainsWord("hello world", "hello"));
-    try std.testing.expect(textContainsWord("hello world", "world"));
-    try std.testing.expect(!textContainsWord("hello world", "worl"));
-    try std.testing.expect(!textContainsWord("hello world", "ello"));
-    try std.testing.expect(textContainsWord("foo-bar baz", "foo-bar"));
-    try std.testing.expect(!textContainsWord("hello", ""));
-}
-
-test "textContainsWord finds a later valid occurrence after a rejected one" {
-    // The first "do it" sits inside "undo" (alphanumeric on its left); the
-    // later standalone "do it" must still match.
-    try std.testing.expect(textContainsWord("undo it, then do it", "do it"));
-    try std.testing.expect(textContainsWord("do itty, do it", "do it"));
-    try std.testing.expect(!textContainsWord("undo it", "do it"));
-}
-
-test "normalizeHyphensToSpaces converts hyphens for trigger matching" {
-    var buf: [128]u8 = undefined;
-    try std.testing.expectEqualStrings("foo bar", normalizeHyphensToSpaces(&buf, "foo-bar"));
-    try std.testing.expectEqualStrings("a b c", normalizeHyphensToSpaces(&buf, "a-b-c"));
-    try std.testing.expectEqualStrings("plain", normalizeHyphensToSpaces(&buf, "plain"));
-}
-
 test "findTriggeredSkill matches a hyphenated directory name in prose" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -785,12 +630,12 @@ test "findTriggeredSkill matches a hyphenated directory name in prose" {
 }
 
 test "recordMatchesTrigger matches whole words only" {
-    var triggers = [_][]const u8{ "do it", "run now" };
+    var trigger_list = [_][]const u8{ "do it", "run now" };
     const record = SkillRecord{
         .name = "test-skill",
         .description = "",
         .dir_path = "/tmp/skills/test-skill",
-        .triggers = triggers[0..],
+        .triggers = trigger_list[0..],
         .disable_model_invocation = false,
     };
     try std.testing.expect(recordMatchesTrigger(&record, "please do it please"));
