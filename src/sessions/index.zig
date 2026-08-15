@@ -11,10 +11,11 @@ const lessThan = types.lessThan;
 const isValidSessionId = validate.isValidSessionId;
 const truncateFirstPrompt = validate.truncateFirstPrompt;
 
-/// Read limit for the sessions index file. A `var` so tests can override it
-/// and exercise the StreamTooLong path without writing tens of megabytes.
-var index_read_limit: usize = 64 * 1024 * 1024;
-const index_filename = "sessions.json";
+/// Read limit for the sessions index file. `pub` and `var` so tests can
+/// override it and exercise the StreamTooLong path without writing tens of
+/// megabytes.
+pub var index_read_limit: usize = 64 * 1024 * 1024;
+pub const index_filename = "sessions.json";
 
 /// Resolves `<puny_dir>/sessions.json` from the environment, reusing the
 /// puny-dir resolution owned by `src/core/session.zig`.
