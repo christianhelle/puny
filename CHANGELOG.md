@@ -6,6 +6,7 @@
 - Extract test runner into its own module and register dead dispatch tests ([#149](https://github.com/christianhelle/puny/pull/149)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Highlight attached @file mentions in the prompt ([#151](https://github.com/christianhelle/puny/pull/151)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor sessions and CLI command modules into smaller files ([#148](https://github.com/christianhelle/puny/pull/148)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor chat, skills, and upgrade into smaller modules ([#146](https://github.com/christianhelle/puny/pull/146)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor config into schema and persistence layers ([#145](https://github.com/christianhelle/puny/pull/145)) ([@christianhelle](https://github.com/christianhelle/))
