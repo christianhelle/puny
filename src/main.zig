@@ -697,6 +697,10 @@ test "requiresApiKey only for opencode and opencode-go" {
     try std.testing.expect(!requiresApiKey(.mock));
 }
 
+test "test runner suppresses warning logs" {
+    try std.testing.expectEqual(std.log.Level.err, std.testing.log_level);
+}
+
 test "include all module tests" {
     _ = @import("test_runner.zig");
 }
