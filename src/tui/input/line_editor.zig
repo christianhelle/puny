@@ -127,7 +127,8 @@ pub const LineEditor = struct {
             try self.stdout_writer.print(terminal.cursor_up, .{self.cursor_rows - 1});
         }
         try self.stdout_writer.writeAll(terminal.erase_display);
-        try self.stdout_writer.print("{s} {s}", .{ prompts.prompt_text, self.line_alloc.written() });
+        try self.stdout_writer.print("{s} ", .{prompts.prompt_text});
+        try writeMentionHighlighted(self.stdout_writer, self.line_alloc.written());
 
         const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
         const info = rowsNeeded(start_col, width, self.line_alloc.written());
