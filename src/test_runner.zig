@@ -51,6 +51,7 @@ test "include welcome tests" {
 
 test "include commands tests" {
     _ = @import("cli/commands.zig");
+    _ = @import("cli/dispatch.zig");
 }
 
 test "include prompt file tests" {
