@@ -11,6 +11,7 @@ pub const SessionInfo = struct {
 
 pub fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
     const id = try arena.dupe(u8, s.id);
+    errdefer arena.free(id);
     const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
     return .{
         .id = id,
