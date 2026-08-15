@@ -182,7 +182,7 @@ pub fn rowsNeeded(start_col: usize, width: usize, text: []const u8) RowsInfo {
 /// mention color so they stand out in the prompt. A mention is an `@` at the
 /// start of the line or after whitespace, running through the following
 /// non-whitespace bytes.
-pub fn writeMentionHighlighted(writer: *std.Io.Writer, text: []const u8) !void {
+fn writeMentionHighlighted(writer: *std.Io.Writer, text: []const u8) !void {
     var i: usize = 0;
     while (i < text.len) {
         const at_mention = text[i] == '@' and (i == 0 or std.ascii.isWhitespace(text[i - 1]));
