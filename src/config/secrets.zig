@@ -557,3 +557,13 @@ test "loadKey rejects a 64-byte key file at the read limit" {
 
     try std.testing.expectError(error.MalformedKeyFile, loadKey(std.testing.allocator, std.testing.io, &fixture.env));
 }
+
+test "decrypt fails when the base64 payload is invalid after the length check" {
+    // The blob passes isEncrypted (its length decodes to at least nonce + tag
+    // bytes) but contains a character outside the base64 alphabet, so the
+    // decode step itself must fail with DecryptFailed.
+    const key = [_]u8{0x6a} ** key_length;
+    const bad = "enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!";
+    try std.testing.expect(isEncrypted(bad));
+    try std.testing.expectError(error.DecryptFailed, decrypt(std.testing.allocator, key, bad));
+}
