@@ -719,3 +719,127 @@ test "dispatch file with only whitespace prints usage and continues" {
     try std.testing.expectEqual(Action.continue_, action);
     try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, "Usage: /file"));
 }
+
+test "dispatch resume_session in oneshot mode rejects" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .resume_session = "abc-1" }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = true,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+}
+
+test "dispatch resume_session returns restore_session" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .resume_session = "abc-1" }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .restore_session = "abc-1" }, action);
+}
+
+test "dispatch skills returns list_skills" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.skills, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.list_skills, action);
+}
+
+test "dispatch help returns help" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.help, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.help, action);
+}
+
+test "dispatch plan appends the PRD hint when a session PRD path is set" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(Command{ .plan = null }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+        .session_prd_path = "plan.md",
+    });
+
+    try std.testing.expectEqual(Action.continue_, action);
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expect(messages.items[1] == .system);
+    try std.testing.expect(std.mem.indexOf(u8, messages.items[1].system, "Session PRD path: plan.md") != null);
+}
