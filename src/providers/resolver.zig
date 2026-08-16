@@ -250,3 +250,101 @@ test "providerHasFixedUrl for opencode, opencode-go, copilot and mock" {
     try std.testing.expect(providerHasFixedUrl(.mock));
     try std.testing.expect(!providerHasFixedUrl(.lmstudio));
 }
+
+test "effectiveProvider ignores an invalid provider flag" {
+    const parsed = cli.Options{ .provider = "not_a_provider" };
+    try std.testing.expectEqual(.opencode_go, effectiveProvider(parsed, config.Config{ .provider = .opencode_go }));
+    try std.testing.expectEqual(.copilot, effectiveProvider(parsed, config.Config{ .provider = .copilot }));
+}
+
+test "resolveApiKey returns empty for the mock provider" {
+    var cfg = config.Config{};
+    cfg.providerEntry(.lmstudio).apiKey = "config-key";
+    const parsed = cli.Options{};
+    const key = try resolveApiKey(std.testing.allocator, undefined, parsed, cfg, .mock, null);
+    try std.testing.expectEqualStrings("", key);
+}
+
+test "resolveApiKey errors when the api key file is missing" {
+    const parsed = cli.Options{ .api_key_file = ".zig-cache/tmp/missing-key-file.txt" };
+    try std.testing.expectError(error.FileNotFound, resolveApiKey(std.testing.allocator, std.testing.io, parsed, config.Config{}, .lmstudio, null));
+}
+
+test "resolveApiKey prefers the api key file over env and config" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "key.txt", .data = "  file-key  \n" });
+
+    const path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path, "key.txt" });
+
+    var cfg = config.Config{};
+    cfg.providerEntry(.lmstudio).apiKey = "config-key";
+    const parsed = cli.Options{ .api_key_file = path };
+    const key = try resolveApiKey(allocator, std.testing.io, parsed, cfg, .lmstudio, "env-key");
+    try std.testing.expectEqualStrings("file-key", key);
+}
+
+test "createProvider builds each provider type" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        var prov = createProvider(false, .lmstudio, "http://lm", "key-1", allocator, std.testing.io);
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).lmstudio);
+        try std.testing.expectEqualStrings("http://lm", prov.lmstudio.base_url);
+        try std.testing.expectEqualStrings("key-1", prov.lmstudio.api_key);
+    }
+
+    {
+        var prov = createProvider(false, .opencode_zen, "http://zen", "key-2", allocator, std.testing.io);
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).opencode);
+        try std.testing.expectEqualStrings("http://zen", prov.opencode.base_url);
+        try std.testing.expectEqualStrings("key-2", prov.opencode.api_key);
+    }
+
+    {
+        var prov = createProvider(false, .opencode_go, "http://go", "key-3", allocator, std.testing.io);
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).opencode_go);
+        try std.testing.expectEqualStrings("http://go", prov.opencode_go.base_url);
+        try std.testing.expectEqualStrings("key-3", prov.opencode_go.api_key);
+    }
+
+    {
+        var prov = createProvider(false, .copilot, "http://copilot", "key-4", allocator, std.testing.io);
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).copilot);
+        try std.testing.expectEqualStrings("http://copilot", prov.copilot.inner.base_url);
+        try std.testing.expectEqualStrings("key-4", prov.copilot.github_token);
+    }
+}
+
+test "ensureCopilotAuth no-ops for non-copilot providers" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var prov = provider.Provider{ .mock = mock.MockClient.init(allocator, std.testing.io) };
+    defer prov.deinit();
+
+    try ensureCopilotAuth(allocator, std.testing.io, undefined, undefined, undefined, &prov);
+}
+
+test "ensureCopilotAuth skips when the github token is already set" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var prov = provider.Provider{ .copilot = copilot.Client.init(allocator, std.testing.io, "gho_present") };
+    defer prov.deinit();
+
+    try ensureCopilotAuth(allocator, std.testing.io, undefined, undefined, undefined, &prov);
+    try std.testing.expectEqualStrings("gho_present", prov.copilot.github_token);
+}
