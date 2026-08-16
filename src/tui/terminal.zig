@@ -138,6 +138,68 @@ test "writeWithCRLF preserves existing CRLF" {
     try std.testing.expectEqualStrings("a\r\nb", output.written());
 }
 
+test "writeWithCRLF converts a leading newline" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "\nabc");
+    try std.testing.expectEqualStrings("\r\nabc", output.written());
+}
+
+test "writeWithCRLF converts a lone newline" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "\n");
+    try std.testing.expectEqualStrings("\r\n", output.written());
+}
+
+test "writeWithCRLF converts consecutive newlines" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "a\n\nb");
+    try std.testing.expectEqualStrings("a\r\n\r\nb", output.written());
+}
+
+test "writeWithCRLF leaves lone carriage returns untouched" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeWithCRLF(&output.writer, "a\rb\nc");
+    try std.testing.expectEqualStrings("a\rb\r\nc", output.written());
+}
+
+test "isIgnoredControlByte accepts ignored C0 ranges" {
+    const ignored = [_]u8{
+        control.nul, control.soh, control.stx, control.enq, control.ack,
+        control.bel, control.ht,  control.vt,  control.ff,  control.so,
+        control.dle, control.sub, control.fs,  control.us,
+    };
+    for (ignored) |b| {
+        try std.testing.expect(isIgnoredControlByte(b));
+    }
+}
+
+test "isIgnoredControlByte rejects meaningful control bytes" {
+    const not_ignored = [_]u8{
+        control.etx, control.eot, control.bs, control.lf, control.cr,
+        control.esc, control.del, ' ',        'a',        '~',
+        0xff,
+    };
+    for (not_ignored) |b| {
+        try std.testing.expect(!isIgnoredControlByte(b));
+    }
+}
+
+test "control byte constants match the ASCII table" {
+    try std.testing.expectEqual(@as(u8, 0x1b), control.esc);
+    try std.testing.expectEqual(@as(u8, 0x0d), control.cr);
+    try std.testing.expectEqual(@as(u8, 0x0a), control.lf);
+    try std.testing.expectEqual(@as(u8, 0x09), control.ht);
+    try std.testing.expectEqual(@as(u8, 0x7f), control.del);
+    try std.testing.expectEqual(@as(u8, 0x03), control.etx);
+    try std.testing.expectEqual(@as(u8, 0x04), control.eot);
+    try std.testing.expectEqual(@as(u8, '['), csi_leader);
+    try std.testing.expectEqualStrings("\x08 \x08", backspace_echo);
+}
+
 /// Terminal window width in columns, when it can be determined.
 pub fn terminalWidth() ?usize {
     if (comptime builtin.os.tag == .windows) {
