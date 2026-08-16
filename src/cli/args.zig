@@ -515,3 +515,15 @@ test "parseArgs flag overrides PUNY_NO_SKILLS env" {
     const opts = parseArgs(std.testing.io, &env, &argv);
     try std.testing.expect(!opts.no_skills);
 }
+
+test "writeErr prints the formatted message" {
+    writeErr(std.testing.io, "custom message: {d}\n", .{7});
+}
+
+test "printHelp prints the version and usage" {
+    printHelp(std.testing.io);
+}
+
+test "printVersion prints the puny version line" {
+    printVersion(std.testing.io);
+}
