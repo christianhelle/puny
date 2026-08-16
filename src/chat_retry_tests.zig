@@ -144,7 +144,7 @@ test "runChatWithRetry returns cancelled without retrying" {
 }
 
 test "runChatWithRetry reports non-transient failures immediately" {
-    var prov = TestChatProvider{ .err = error.OutOfMemory };
+    var prov = TestChatProvider{ .fail_count = 1, .err = error.OutOfMemory };
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
