@@ -1147,3 +1147,562 @@ pub const resources = struct {
 };
 
 pub const api = resources.api;
+
+// ── Generated type tests ─────────────────────────────────────────────
+
+fn parseValue(allocator: std.mem.Allocator, json: []const u8) !std.json.Value {
+    return try std.json.parseFromSliceLeaky(std.json.Value, allocator, json, .{});
+}
+
+test "ChatOutputItem parses typed variants and raw fallback" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        const item = try ChatOutputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"message\",\"content\":\"hi\"}"), .{});
+        try std.testing.expect(item == .message);
+        try std.testing.expectEqualStrings("hi", item.message.content);
+    }
+
+    {
+        const item = try ChatOutputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"tool_call\",\"arguments\":{},\"tool\":\"t\",\"output\":\"\",\"provider_info\":{\"type\":\"p\"}}"), .{});
+        try std.testing.expect(item == .tool_call);
+        try std.testing.expectEqualStrings("t", item.tool_call.tool);
+    }
+
+    {
+        const item = try ChatOutputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"reasoning\",\"content\":\"think\"}"), .{});
+        try std.testing.expect(item == .reasoning);
+        try std.testing.expectEqualStrings("think", item.reasoning.content);
+    }
+
+    {
+        const item = try ChatOutputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"invalid_tool_call\",\"reason\":\"r\",\"metadata\":{\"tool_name\":\"n\",\"type\":\"t\"}}"), .{});
+        try std.testing.expect(item == .invalid_tool_call);
+        try std.testing.expectEqualStrings("r", item.invalid_tool_call.reason);
+    }
+
+    {
+        const item = try ChatOutputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"custom\",\"x\":1}"), .{});
+        try std.testing.expect(item == .raw);
+    }
+
+    {
+        const item = try ChatOutputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"x\":1}"), .{});
+        try std.testing.expect(item == .raw);
+    }
+
+    {
+        const item = try ChatOutputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":42}"), .{});
+        try std.testing.expect(item == .raw);
+    }
+
+    {
+        const value = try parseValue(allocator, "42");
+        try std.testing.expectError(error.UnexpectedToken, ChatOutputItem.jsonParseFromValue(allocator, value, .{}));
+    }
+}
+
+test "ChatOutputItem jsonStringify round-trips every variant" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const items = [_]ChatOutputItem{
+        .{ .message = .{ .type = "message", .content = "hi" } },
+        .{ .reasoning = .{ .type = "reasoning", .content = "think" } },
+        .{ .raw = try parseValue(allocator, "{\"type\":\"custom\",\"x\":1}") },
+    };
+
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    try std.json.Stringify.value(&items, .{}, &buf.writer);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, buf.written(), .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 3), parsed.value.array.items.len);
+    try std.testing.expectEqualStrings("message", parsed.value.array.items[0].object.get("type").?.string);
+    try std.testing.expectEqualStrings("custom", parsed.value.array.items[2].object.get("type").?.string);
+}
+
+test "ChatRequestInput parses string array and raw variants" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        const input = try ChatRequestInput.jsonParseFromValue(allocator, try parseValue(allocator, "\"plain string\""), .{});
+        try std.testing.expect(input == .string);
+        try std.testing.expectEqualStrings("plain string", input.string);
+    }
+
+    {
+        const input = try ChatRequestInput.jsonParseFromValue(allocator, try parseValue(allocator, "[{\"type\":\"message\",\"content\":\"hi\"}]"), .{});
+        try std.testing.expect(input == .chat_input_item_items);
+        try std.testing.expectEqual(@as(usize, 1), input.chat_input_item_items.len);
+        try std.testing.expectEqualStrings("hi", input.chat_input_item_items[0].message.content);
+    }
+
+    {
+        const input = try ChatRequestInput.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"unknown\",\"x\":1}"), .{});
+        try std.testing.expect(input == .raw);
+    }
+
+    {
+        const input = try ChatRequestInput.jsonParseFromValue(allocator, try parseValue(allocator, "42"), .{});
+        try std.testing.expect(input == .raw);
+    }
+}
+
+test "ChatRequestIntegrationsItem parses string plugin and ephemeral variants" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        const item = try ChatRequestIntegrationsItem.jsonParseFromValue(allocator, try parseValue(allocator, "\"mcp\""), .{});
+        try std.testing.expect(item == .string);
+        try std.testing.expectEqualStrings("mcp", item.string);
+    }
+
+    {
+        const item = try ChatRequestIntegrationsItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"id\":\"i1\",\"type\":\"plugin\"}"), .{});
+        try std.testing.expect(item == .plugin_integration);
+        try std.testing.expectEqualStrings("i1", item.plugin_integration.id);
+    }
+
+    {
+        const item = try ChatRequestIntegrationsItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"server_url\":\"u\",\"type\":\"mcp\",\"server_label\":\"l\"}"), .{});
+        try std.testing.expect(item == .ephemeral_mcp_integration);
+        try std.testing.expectEqualStrings("u", item.ephemeral_mcp_integration.server_url);
+    }
+
+    {
+        const item = try ChatRequestIntegrationsItem.jsonParseFromValue(allocator, try parseValue(allocator, "42"), .{});
+        try std.testing.expect(item == .raw);
+    }
+}
+
+test "LoadModelResponseLoadConfig prefers llm config and falls back to raw" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        const config = try LoadModelResponseLoadConfig.jsonParseFromValue(allocator, try parseValue(allocator, "{\"context_length\":100}"), .{});
+        try std.testing.expect(config == .llm_load_config);
+        try std.testing.expectEqual(@as(i64, 100), config.llm_load_config.context_length);
+    }
+
+    {
+        const config = try LoadModelResponseLoadConfig.jsonParseFromValue(allocator, try parseValue(allocator, "{\"context_length\":\"not an int\"}"), .{});
+        try std.testing.expect(config == .raw);
+    }
+}
+
+test "ChatInputItem parses message image and raw variants" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        const item = try ChatInputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"message\",\"content\":\"hi\"}"), .{});
+        try std.testing.expect(item == .message);
+        try std.testing.expectEqualStrings("hi", item.message.content);
+    }
+
+    {
+        const item = try ChatInputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"image\",\"data_url\":\"data:image/png;base64,AA\"}"), .{});
+        try std.testing.expect(item == .image);
+        try std.testing.expectEqualStrings("data:image/png;base64,AA", item.image.data_url);
+    }
+
+    {
+        const item = try ChatInputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":\"unknown\"}"), .{});
+        try std.testing.expect(item == .raw);
+    }
+
+    {
+        const item = try ChatInputItem.jsonParseFromValue(allocator, try parseValue(allocator, "{\"type\":42}"), .{});
+        try std.testing.expect(item == .raw);
+    }
+
+    {
+        const value = try parseValue(allocator, "42");
+        try std.testing.expectError(error.UnexpectedToken, ChatInputItem.jsonParseFromValue(allocator, value, .{}));
+    }
+}
+
+test "CancellationToken cancels and reports cancellation" {
+    var token = CancellationToken.init();
+    try std.testing.expect(!token.isCancelled());
+    token.cancel();
+    try std.testing.expect(token.isCancelled());
+}
+
+test "stringifyStreamRequest leaves non-object payloads unchanged" {
+    const payload = try stringifyStreamRequest(std.testing.allocator, &[_]i64{ 1, 2, 3 });
+    defer std.testing.allocator.free(payload);
+    try std.testing.expectEqualStrings("[1,2,3]", payload);
+}
+
+test "parseRawResponse maps ok api_error and parse_error states" {
+    const allocator = std.testing.allocator;
+
+    {
+        var result = try parseRawResponse(ListModelsResponse, RawResponse{
+            .allocator = allocator,
+            .status = .ok,
+            .body = try allocator.dupe(u8, "{\"models\":[]}"),
+        });
+        try std.testing.expect(result == .ok);
+        try std.testing.expectEqual(@as(usize, 0), result.ok.value().models.len);
+        result.deinit();
+    }
+
+    {
+        var result = try parseRawResponse(ListModelsResponse, RawResponse{
+            .allocator = allocator,
+            .status = .internal_server_error,
+            .body = try allocator.dupe(u8, "oops"),
+        });
+        try std.testing.expect(result == .api_error);
+        try std.testing.expectEqual(.internal_server_error, result.api_error.status);
+        result.deinit();
+    }
+
+    {
+        var result = try parseRawResponse(ListModelsResponse, RawResponse{
+            .allocator = allocator,
+            .status = .ok,
+            .body = try allocator.dupe(u8, "not json"),
+        });
+        try std.testing.expect(result == .parse_error);
+        result.deinit();
+    }
+}
+
+test "ApiResult deinit frees every state" {
+    const allocator = std.testing.allocator;
+
+    {
+        const parsed = try std.json.parseFromSlice(ListModelsResponse, allocator, "{\"models\":[]}", .{ .ignore_unknown_fields = true });
+        var result = ApiResult(ListModelsResponse){ .ok = .{
+            .allocator = allocator,
+            .body = try allocator.dupe(u8, "{\"models\":[]}"),
+            .parsed = parsed,
+        } };
+        result.deinit();
+    }
+
+    {
+        var result = ApiResult(ListModelsResponse){ .api_error = .{
+            .allocator = allocator,
+            .status = .internal_server_error,
+            .body = try allocator.dupe(u8, "boom"),
+        } };
+        result.deinit();
+    }
+
+    {
+        var result = ApiResult(ListModelsResponse){ .parse_error = .{
+            .raw = .{
+                .allocator = allocator,
+                .status = .ok,
+                .body = try allocator.dupe(u8, "boom"),
+            },
+            .error_name = "SyntaxError",
+        } };
+        result.deinit();
+    }
+}
+
+test "writeQueryComponent percent-encodes query values" {
+    var buf: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer buf.deinit();
+    try writeQueryComponent(&buf.writer, "a b/c?d=e&f");
+    try std.testing.expectEqualStrings("a%20b%2Fc%3Fd%3De%26f", buf.written());
+}
+
+test "appendQueryParam builds the separator and encodes name and value" {
+    var buf: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer buf.deinit();
+    var first = true;
+    const job_id: []const u8 = "42";
+    try appendQueryParam(&buf.writer, &first, "job id", job_id);
+    try appendQueryParam(&buf.writer, &first, "flag", true);
+    try std.testing.expectEqualStrings("?job%20id=42&flag=true", buf.written());
+}
+
+// ── SSE parsing tests ────────────────────────────────────────────────
+
+const SseRecorder = struct {
+    allocator: std.mem.Allocator,
+    events: *std.ArrayList([]u8),
+
+    pub fn event(self: *@This(), data: []const u8) !void {
+        try self.events.append(self.allocator, try self.allocator.dupe(u8, data));
+    }
+};
+
+test "parseSseBytes dispatches multiline data events and stops at DONE" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events };
+
+    const bytes =
+        ":keep-alive\n" ++
+        "event: chat\n" ++
+        "data: first\n" ++
+        "data: second line\n" ++
+        "\n" ++
+        "data: {\"a\":1}\n" ++
+        "\n" ++
+        "data: [DONE]\n" ++
+        "\n" ++
+        "data: after done\n" ++
+        "\n";
+    try parseSseBytes(allocator, bytes, &recorder, null);
+
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expectEqualStrings("first\nsecond line", events.items[0]);
+    try std.testing.expectEqualStrings("{\"a\":1}", events.items[1]);
+}
+
+test "parseSseBytes handles an event without a trailing blank line" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events };
+
+    try parseSseBytes(allocator, "data: solo", &recorder, null);
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqualStrings("solo", events.items[0]);
+}
+
+test "parseSseBytes rejects oversized lines and events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events };
+
+    {
+        const line = try allocator.alloc(u8, 300 * 1024);
+        @memset(line, 'a');
+
+        var bytes: std.Io.Writer.Allocating = .init(allocator);
+        defer bytes.deinit();
+        try bytes.writer.writeAll("data: ");
+        try bytes.writer.writeAll(line);
+        try bytes.writer.writeByte('\n');
+
+        try std.testing.expectError(error.SseLineTooLong, parseSseBytes(allocator, bytes.written(), &recorder, null));
+    }
+
+    {
+        const chunk = try allocator.alloc(u8, 250 * 1024);
+        @memset(chunk, 'a');
+
+        var bytes: std.Io.Writer.Allocating = .init(allocator);
+        defer bytes.deinit();
+        for (0..5) |_| {
+            try bytes.writer.writeAll("data: ");
+            try bytes.writer.writeAll(chunk);
+            try bytes.writer.writeByte('\n');
+        }
+        try bytes.writer.writeByte('\n');
+
+        try std.testing.expectError(error.SseEventTooLong, parseSseBytes(allocator, bytes.written(), &recorder, null));
+    }
+}
+
+test "parseSseBytes respects the cancellation token" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events };
+
+    var token = CancellationToken.init();
+    token.cancel();
+    try std.testing.expectError(error.Cancelled, parseSseBytes(allocator, "data: x\n\n", &recorder, &token));
+}
+
+// ── Server tests ─────────────────────────────────────────────────────
+
+const LmServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    status: std.http.Status,
+    body: []const u8,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+};
+
+fn startLmServer(status: std.http.Status, body: []const u8) !*LmServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(LmServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    ctx.thread = try std.Thread.spawn(.{}, LmServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopLmServer(ctx: *LmServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+fn lmClientForServer(ctx: *LmServer, arena: std.mem.Allocator, api_key: []const u8) !Client {
+    const url = try std.fmt.allocPrint(arena, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    var c = Client.init(std.testing.allocator, std.testing.io, api_key);
+    c.withBaseUrl(url);
+    return c;
+}
+
+test "listModels fetches models from a local server" {
+    const body =
+        \\{"models":[{"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"Qwen2.5 7B","size_bytes":123,"max_context_length":32768,"loaded_instances":[],"format":"gguf"}]}
+    ;
+    const ctx = try startLmServer(.ok, body);
+    defer stopLmServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try lmClientForServer(ctx, arena, "");
+    defer c.deinit();
+
+    var owned = try listModels(&c);
+    defer owned.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), owned.value().models.len);
+    try std.testing.expectEqualStrings("qwen2.5-7b", owned.value().models[0].key);
+    try std.testing.expectEqualStrings("Qwen2.5 7B", owned.value().models[0].display_name);
+}
+
+test "listModels returns ResponseError on a non-success status" {
+    const ctx = try startLmServer(.internal_server_error, "nope");
+    defer stopLmServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try lmClientForServer(ctx, arena, "");
+    defer c.deinit();
+
+    try std.testing.expectError(error.ResponseError, listModels(&c));
+}
+
+test "chat parses a chat response from a local server" {
+    const body =
+        \\{"stats":{"input_tokens":10,"reasoning_output_tokens":0,"tokens_per_second":5.5,"time_to_first_token_seconds":0.2,"total_output_tokens":2},"model_instance_id":"inst-1","output":[{"type":"message","content":"hi"},{"type":"reasoning","content":"think"}],"response_id":"resp-1"}
+    ;
+    const ctx = try startLmServer(.ok, body);
+    defer stopLmServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try lmClientForServer(ctx, arena, "");
+    defer c.deinit();
+
+    var owned = try chat(&c, .{
+        .model = "qwen2.5-7b",
+        .input = .{ .chat_input_item_items = &.{.{ .message = .{ .type = "message", .content = "hello" } }} },
+    });
+    defer owned.deinit();
+
+    try std.testing.expectEqualStrings("resp-1", owned.value().response_id.?);
+    try std.testing.expectEqual(@as(usize, 2), owned.value().output.len);
+    try std.testing.expectEqualStrings("hi", owned.value().output[0].message.content);
+    try std.testing.expectEqualStrings("think", owned.value().output[1].reasoning.content);
+    try std.testing.expectEqual(@as(i64, 10), owned.value().stats.input_tokens);
+}
+
+const StreamRecorder = struct {
+    allocator: std.mem.Allocator,
+    events: *std.ArrayList([]u8),
+
+    pub fn event(self: *@This(), data: []const u8) !void {
+        try self.events.append(self.allocator, try self.allocator.dupe(u8, data));
+    }
+};
+
+test "chatStreaming delivers SSE data from a local server" {
+    const body =
+        "data: {\"type\":\"message\",\"content\":\"hello\"}\n\n" ++
+        "data: {\"type\":\"message\",\"content\":\" world\"}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startLmServer(.ok, body);
+    defer stopLmServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try lmClientForServer(ctx, arena, "");
+    defer c.deinit();
+    const allocator = arena;
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = StreamRecorder{ .allocator = allocator, .events = &events };
+
+    try chatStreaming(&c, .{
+        .model = "qwen2.5-7b",
+        .input = .{ .chat_input_item_items = &.{.{ .message = .{ .type = "message", .content = "hi" } }} },
+    }, &recorder, null);
+
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expectEqualStrings("{\"type\":\"message\",\"content\":\"hello\"}", events.items[0]);
+    try std.testing.expectEqualStrings("{\"type\":\"message\",\"content\":\" world\"}", events.items[1]);
+}
+
+test "chatStreaming returns ResponseError on a non-success status" {
+    const ctx = try startLmServer(.internal_server_error, "nope");
+    defer stopLmServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try lmClientForServer(ctx, arena, "");
+    defer c.deinit();
+    const allocator = arena;
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = StreamRecorder{ .allocator = allocator, .events = &events };
+
+    try std.testing.expectError(error.ResponseError, chatStreaming(&c, .{
+        .model = "qwen2.5-7b",
+        .input = .{ .chat_input_item_items = &.{.{ .message = .{ .type = "message", .content = "hi" } }} },
+    }, &recorder, null));
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
