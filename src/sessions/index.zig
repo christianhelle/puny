@@ -1141,3 +1141,190 @@ test "pruneSessions removes orphaned directories absent from the index" {
     defer std.testing.allocator.free(orphan_dir);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, orphan_dir, .{}));
 }
+
+test "sessionsPath errors without a config dir" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try std.testing.expectError(error.NoConfigDir, sessionsPath(std.testing.allocator, &env));
+}
+
+test "timestampToNs returns null for negative timestamps" {
+    try std.testing.expectEqual(@as(?u64, null), timestampToNs(std.Io.Timestamp.fromNanoseconds(-1)));
+    try std.testing.expectEqual(@as(?u64, 1_000_000), timestampToNs(std.Io.Timestamp.fromNanoseconds(1_000_000)));
+}
+
+test "listSessions uses the plan.md mtime when there is no conversation" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try f.createTestSessionDir(std.testing.io, test_dir, "plan-only-1", true);
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const plan_path = try std.fs.path.join(std.testing.allocator, &.{ sessions_dir, "plan-only-1", "plan.md" });
+    defer std.testing.allocator.free(plan_path);
+    try f.setFileMtime(std.testing.io, plan_path, std.Io.Timestamp.fromNanoseconds(1_500_000_000_000));
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expect(sessions[0].has_prd);
+    try std.testing.expect(!sessions[0].has_conversation);
+    try std.testing.expectEqual(@as(u64, 1_500_000_000_000), sessions[0].last_modified);
+}
+
+test "listSessions falls back to plan.html when plan.md is missing" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try f.createTestSessionDir(std.testing.io, test_dir, "html-only-1", false);
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    const html_path = try std.fs.path.join(std.testing.allocator, &.{ sessions_dir, "html-only-1", "plan.html" });
+    defer std.testing.allocator.free(html_path);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = html_path, .data = "<html/>" });
+    try f.setFileMtime(std.testing.io, html_path, std.Io.Timestamp.fromNanoseconds(1_600_000_000_000));
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(sessions);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expect(sessions[0].has_prd);
+    try std.testing.expectEqual(@as(u64, 1_600_000_000_000), sessions[0].last_modified);
+}
+
+test "upsertSessionInfo writes the index even when the sessions directory is missing" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try f.createSessionDir(std.testing.io, test_dir);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "no-dir-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions.json" });
+    defer std.testing.allocator.free(index_path);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, index_path, std.testing.allocator, std.Io.Limit.limited(1024 * 1024));
+    defer std.testing.allocator.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "no-dir-1") != null);
+}
+
+test "removeSessionFromIndex leaves the index untouched for an unknown id" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try f.createTestSessionDir(std.testing.io, test_dir, "keep-1", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "keep-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .planning_mode = false,
+        .first_prompt = null,
+        .last_modified = 1,
+    });
+
+    try removeSessionFromIndex(std.testing.allocator, std.testing.io, test_dir, "unknown-id");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+    try std.testing.expectEqual(@as(usize, 1), sessions.len);
+    try std.testing.expectEqualStrings("keep-1", sessions[0].id);
+}
+
+test "pruneSessions with an empty current id removes every session" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try f.createTestSessionDir(std.testing.io, test_dir, "drop-a", false);
+    try f.createTestSessionDir(std.testing.io, test_dir, "drop-b", true);
+
+    try pruneSessions(std.testing.allocator, std.testing.io, test_dir, "");
+
+    const sessions = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (sessions) |s| {
+            std.testing.allocator.free(s.id);
+            if (s.first_prompt) |p| std.testing.allocator.free(p);
+        }
+        std.testing.allocator.free(sessions);
+    }
+    try std.testing.expectEqual(@as(usize, 0), sessions.len);
+
+    const drop_a = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "drop-a" });
+    defer std.testing.allocator.free(drop_a);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, drop_a, .{}));
+}
+
+test "pruneSessions is a no-op when the sessions directory is missing" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try f.createSessionDir(std.testing.io, test_dir);
+
+    try pruneSessions(std.testing.allocator, std.testing.io, test_dir, "whatever");
+}
+
+test "pruneSessions leaves non-directory entries in the sessions directory" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, sessions_dir);
+    const scratch = try std.fs.path.join(std.testing.allocator, &.{ sessions_dir, "scratch.txt" });
+    defer std.testing.allocator.free(scratch);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = scratch, .data = "keep me" });
+    try f.createTestSessionDir(std.testing.io, test_dir, "drop-1", false);
+
+    try pruneSessions(std.testing.allocator, std.testing.io, test_dir, "");
+
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, scratch, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("keep me", data);
+}
