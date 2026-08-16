@@ -94,3 +94,23 @@ test "runCommand captures stderr" {
     try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "oops") != null);
 }
+
+test "runCommandTimed kills a grandchild that keeps the pipes open" {
+    // A timed-out child that spawned a grandchild writing to the inherited
+    // stdout pipe would keep the drain blocked unless the process-group kill
+    // reaches the whole tree. The call must still return within the grace
+    // period and must not abandon the worker.
+    const before = run_command.test_run_command_worker_detached;
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "powershell", "-NoProfile", "-Command", "Start-Process powershell -ArgumentList '-NoProfile','-Command','while ($true) { Write-Output x; Start-Sleep -Milliseconds 10 }'; while ($true) { Start-Sleep -Milliseconds 10 }" }
+    else
+        &.{ "sh", "-c", "sh -c 'while true; do echo x; sleep 0.01; done' & while true; do sleep 0.01; done" };
+
+    const started = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    const result = run_command.runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 200 * std.time.ns_per_ms);
+    const elapsed = started.durationTo(std.Io.Clock.Timestamp.now(std.testing.io, .awake)).raw.nanoseconds;
+
+    try std.testing.expectError(error.TimedOut, result);
+    try std.testing.expectEqual(before, run_command.test_run_command_worker_detached);
+    try std.testing.expect(elapsed < 10 * std.time.ns_per_s);
+}
