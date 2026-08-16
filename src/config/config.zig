@@ -115,6 +115,22 @@ test "configPath errors without a config dir" {
     try std.testing.expectError(error.NoConfigDir, configPath(std.testing.allocator, &env));
 }
 
+test "default config names each provider slot consistently" {
+    const cfg = Config.default();
+    inline for (.{ .lmstudio, .opencode_zen, .opencode_go, .copilot }) |kind| {
+        try std.testing.expectEqual(kind, cfg.providerEntryConst(kind).name);
+        try std.testing.expect(cfg.providerEntryConst(kind).url.len > 0);
+        try std.testing.expect(cfg.providerEntryConst(kind).apiKey == null);
+    }
+}
+
+test "providerEntry mutates the matching slot" {
+    var cfg = Config.default();
+    try std.testing.expect(cfg.providerEntryConst(.lmstudio).apiKey == null);
+    cfg.providerEntry(.lmstudio).apiKey = "sk-set";
+    try std.testing.expectEqualStrings("sk-set", cfg.providerEntryConst(.lmstudio).apiKey.?);
+}
+
 test "save and load round-trip through a temp HOME" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
