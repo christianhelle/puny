@@ -184,3 +184,321 @@ test "prints human-friendly tool call output" {
         output.written(),
     );
 }
+
+test "executeTool reports unknown tools" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const result = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "definitely_not_a_tool", .arguments = "{}" } },
+    );
+    try std.testing.expectEqualStrings("Unknown tool: definitely_not_a_tool", result);
+}
+
+test "executeTool reports failures for a missing file" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const result = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"puny-test-chat-missing.txt\"}" } },
+    );
+    try std.testing.expectEqualStrings("Tool read_file failed: error.FileNotFound", result);
+}
+
+test "executeTool runs read_file on a real file" {
+    const helpers = @import("../tools/helpers.zig");
+    const path = "puny-test-chat-read.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try helpers.writeFile(std.testing.io, path, "hello chat");
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const result = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"puny-test-chat-read.txt\"}" } },
+    );
+    try std.testing.expectEqualStrings("hello chat", result);
+}
+
+test "executeTool runs write_file on a real file" {
+    const path = "puny-test-chat-write.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const result = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-write.txt\",\"content\":\"written\"}" } },
+    );
+    try std.testing.expectEqualStrings("File written successfully.", result);
+}
+
+test "runTurn completes a content turn against the mock provider" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "say fast" });
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, null);
+
+    try std.testing.expect(result.turn_complete);
+    try std.testing.expect(result.usage_estimated);
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    switch (messages.items[1]) {
+        .assistant => |a| try std.testing.expect(a.content != null),
+        else => return error.ExpectedAssistant,
+    }
+}
+
+test "runTurn reports provider usage without estimating" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "usage stats" });
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, null);
+
+    try std.testing.expect(result.turn_complete);
+    try std.testing.expect(!result.usage_estimated);
+    try std.testing.expectEqual(@as(i64, 156), result.usage.?.output_tokens);
+    try std.testing.expectEqual(@as(i64, 24), result.usage.?.input_tokens);
+}
+
+test "runTurn executes tool calls and appends tool results" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "read the file" });
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, null);
+
+    try std.testing.expect(!result.turn_complete);
+    try std.testing.expectEqual(@as(usize, 12), messages.items.len);
+    switch (messages.items[1]) {
+        .assistant => |a| try std.testing.expectEqual(@as(usize, 10), a.tool_calls.?.len),
+        else => return error.ExpectedAssistant,
+    }
+    switch (messages.items[2]) {
+        .tool => |t| try std.testing.expect(std.mem.indexOf(u8, t.content, "read_file failed") != null),
+        else => return error.ExpectedToolResult,
+    }
+}
+
+test "runTurn reports a failed turn for a non-transient error" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "trigger error please" });
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, null);
+
+    try std.testing.expect(result.turn_complete);
+    try std.testing.expect(result.had_error);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Chat failed:") != null);
+}
+
+test "runTurn reports a cancelled turn" {
+    const cancel = @import("../core/cancel.zig");
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "slow" });
+
+    const cancel_thread = try std.Thread.spawn(.{}, struct {
+        fn run() void {
+            std.Io.sleep(std.testing.io, .{ .nanoseconds = 25 * std.time.ns_per_ms }, .awake) catch {};
+            cancel.setCancelled();
+        }
+    }.run, .{});
+    defer cancel_thread.join();
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, null);
+
+    try std.testing.expect(result.turn_complete);
+    try std.testing.expect(result.was_cancelled);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+}
+
+test "runTurn records assistant output in the chat log" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var chat_log = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer chat_log.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "say fast" });
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, &chat_log.writer);
+
+    try std.testing.expect(result.turn_complete);
+    const logged = chat_log.written();
+    try std.testing.expect(std.mem.indexOf(u8, logged, "[ASSISTANT]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, logged, "mock response") != null);
+}
+
+test "runTurn records tool calls and results in the chat log" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var chat_log = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer chat_log.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "read the file" });
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, &chat_log.writer);
+
+    try std.testing.expect(!result.turn_complete);
+    const logged = chat_log.written();
+    try std.testing.expect(std.mem.indexOf(u8, logged, "[TOOL_CALL]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, logged, "read_file") != null);
+    try std.testing.expect(std.mem.indexOf(u8, logged, "[TOOL_RESULT]") != null);
+}
+
+test "runTurn completes an empty turn without appending a message" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "empty response" });
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, null, null);
+
+    try std.testing.expect(result.turn_complete);
+    try std.testing.expect(result.usage_estimated);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+}
