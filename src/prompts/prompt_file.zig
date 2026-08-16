@@ -728,3 +728,66 @@ test "isHttpUrl rejects bare scheme URLs" {
     try std.testing.expect(isHttpUrl("https://example.com"));
     try std.testing.expect(isHttpUrl("https://example.com/"));
 }
+
+test "loadRemote reports an invalid URL" {
+    const outcome = loadRemote(std.testing.allocator, std.testing.io, "not a url", max_prompt_bytes, remote_timeout_ns);
+    switch (outcome) {
+        .ok => |content| {
+            defer std.testing.allocator.free(content);
+            return error.UnexpectedSuccess;
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "Invalid URL"));
+        },
+    }
+}
+
+test "loadRemote reports a connection reset by a server that closes immediately" {
+    const Ctx = struct {
+        io: std.Io,
+        server: std.Io.net.Server,
+        done: std.atomic.Value(bool) = .init(false),
+
+        fn serve(self: *@This()) void {
+            defer self.done.store(true, .release);
+            var stream = self.server.accept(self.io) catch return;
+            // Close without reading or responding so the client's request and
+            // response-head reads fail with a connection error.
+            stream.close(self.io);
+        }
+    };
+
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch |err| {
+        std.debug.print("listen failed: {s}\n", .{@errorName(err)});
+        return error.ListenFailed;
+    };
+    const port = server.socket.address.getPort();
+
+    var ctx = Ctx{ .io = std.testing.io, .server = server };
+    const thread = try std.Thread.spawn(.{}, Ctx.serve, .{&ctx});
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/reset", .{port});
+    defer std.testing.allocator.free(url);
+
+    const outcome = loadRemote(std.testing.allocator, std.testing.io, url, max_prompt_bytes, remote_timeout_ns);
+
+    var guard: usize = 0;
+    while (!ctx.done.load(.acquire) and guard < 10_000_000) : (guard += 1) {
+        std.Thread.yield() catch {};
+    }
+    thread.join();
+    ctx.server.deinit(std.testing.io);
+
+    switch (outcome) {
+        .ok => |content| {
+            defer std.testing.allocator.free(content);
+            return error.UnexpectedSuccess;
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "Request failed"));
+        },
+    }
+}
