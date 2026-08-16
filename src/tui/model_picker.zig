@@ -35,3 +35,10 @@ test "setModels stores and retrieves models" {
     try std.testing.expectEqualStrings("model-a", model_pick_list[0].id);
     try std.testing.expectEqualStrings("Model B", model_pick_list[1].display_name);
 }
+
+test "pickModel returns null when no models are set" {
+    setModels(&.{});
+
+    const result = try pickModel(std.testing.allocator, std.testing.io);
+    try std.testing.expect(result == null);
+}
