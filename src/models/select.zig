@@ -227,3 +227,90 @@ test "listModelsWithRetry gives up when retries exhausted" {
     try std.testing.expectError(error.ConnectionRefused, result);
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
 }
+
+test "select skips validation when requested" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = try select(&prov, "any-model", arena.allocator(), std.testing.io, undefined, true, null, .mock, undefined, testRandom());
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("any-model", result.?.model_key);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), result.?.reasoning_effort);
+}
+
+test "select returns the validated model id when it exists" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = try select(&prov, "mock-model", arena.allocator(), std.testing.io, undefined, false, null, .mock, undefined, testRandom());
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("mock-model", result.?.model_key);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), result.?.reasoning_effort);
+}
+
+test "select returns null when the model id is unknown" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = try select(&prov, "no-such-model", arena.allocator(), std.testing.io, undefined, false, null, .mock, undefined, testRandom());
+    try std.testing.expect(result == null);
+}
+
+test "switchModel reports when the requested model is not found" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    const result = try switchModel(&prov, "no-such-model", "mock-model", null, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    try std.testing.expect(result == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Model not found.") != null);
+}
+
+test "switchModel returns the new selection when the model changes" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    const result = try switchModel(&prov, "mock-model-fast", "mock-model", null, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("mock-model-fast", result.?.model_key);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Switched to model mock-model-fast") != null);
+}
+
+test "switchModel rejects switching to the current model and effort" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    const result = try switchModel(&prov, "mock-model", "mock-model", null, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
+    try std.testing.expect(result == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Already using model mock-model") != null);
+}
+
+test "switchModel switches when only the effort matches" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    const result = try switchModel(&prov, "mock-model", "mock-model", .medium, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("mock-model", result.?.model_key);
+}
