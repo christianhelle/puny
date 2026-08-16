@@ -269,6 +269,55 @@ test "setCancelled marks the operation as cancelled" {
     reset();
 }
 
+test "start returns immediately when the monitor is already running" {
+    reset();
+    running.store(true, .monotonic);
+    defer running.store(false, .monotonic);
+
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+
+    try start(std.testing.io, &stderr_alloc.writer);
+    try std.testing.expect(running.load(.monotonic));
+}
+
+test "stop without a monitor thread clears the cancelled flag" {
+    reset();
+    cancelled.store(true, .monotonic);
+    running.store(true, .monotonic);
+    defer running.store(false, .monotonic);
+    monitor_thread = null;
+    // When fd 0 is a TTY, restoring the saved termios must not corrupt the
+    // caller's terminal, so save the current state before stopping.
+    if (!is_windows) {
+        saved_termios = std.posix.tcgetattr(0) catch std.mem.zeroes(std.posix.termios);
+    }
+
+    stop();
+
+    try std.testing.expect(!running.load(.monotonic));
+    try std.testing.expect(!isCancelled());
+}
+
+test "start and stop round-trip when a terminal is available" {
+    reset();
+    running.store(false, .monotonic);
+
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+
+    // On a machine with a TTY on fd 0 raw mode succeeds and the monitor
+    // thread is spawned; stop() must restore the terminal. Without a TTY
+    // start() fails and the running flag is rolled back by the errdefer.
+    if (start(std.testing.io, &stderr_alloc.writer)) |_| {
+        stop();
+        try std.testing.expect(!running.load(.monotonic));
+    } else |_| {
+        try std.testing.expect(!running.load(.monotonic));
+    }
+    try std.testing.expect(!isCancelled());
+}
+
 test "double escape within the window cancels" {
     reset();
     var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
