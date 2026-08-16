@@ -409,3 +409,44 @@ test "runCommandTimed runs the command in the given working directory" {
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "cwd-marker") != null);
 }
+
+test "runCommand formats the exit code, stdout, and stderr of a completed child" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "echo out line & echo err line 1>&2 & exit 7" }
+    else
+        &.{ "sh", "-c", "echo out line; echo err line >&2; exit 7" };
+    const output = try runCommand(std.testing.allocator, std.testing.io, argv, null);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDOUT:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "out line") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "err line") != null);
+}
+
+test "runCommandTimed formats the exit code and stdout of a fast child" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "echo timed ok" }
+    else
+        &.{ "sh", "-c", "echo timed ok" };
+    const output = try runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "timed ok") != null);
+}
+
+test "runCommand propagates a spawn failure for a missing executable" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "C:\\nonexistent-puny-binary-xyz.exe" }
+    else
+        &.{"/nonexistent-puny-binary-xyz"};
+    try std.testing.expectError(error.FileNotFound, runCommand(std.testing.allocator, std.testing.io, argv, null));
+}
+
+test "runCommandTimed propagates a spawn failure for a missing executable" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "C:\\nonexistent-puny-binary-xyz.exe" }
+    else
+        &.{"/nonexistent-puny-binary-xyz"};
+    try std.testing.expectError(error.FileNotFound, runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s));
+}

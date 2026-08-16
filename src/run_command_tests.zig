@@ -114,3 +114,23 @@ test "runCommandTimed kills a grandchild that keeps the pipes open" {
     try std.testing.expectEqual(before, run_command.test_run_command_worker_detached);
     try std.testing.expect(elapsed < 10 * std.time.ns_per_s);
 }
+
+test "runCommandTimed times out on a lingering grandchild after the parent exits" {
+    // The parent exits 0 immediately, but a backgrounded grandchild holds the
+    // inherited stdout pipe open. The drain cannot see EOF, so the call must
+    // time out, kill the whole process group (including the grandchild), and
+    // return without abandoning the worker.
+    const before = run_command.test_run_command_worker_detached;
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "powershell", "-NoProfile", "-Command", "Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep 60'; exit 0" }
+    else
+        &.{ "sh", "-c", "(sleep 60 &); exit 0" };
+
+    const started = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    const result = run_command.runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 200 * std.time.ns_per_ms);
+    const elapsed = started.durationTo(std.Io.Clock.Timestamp.now(std.testing.io, .awake)).raw.nanoseconds;
+
+    try std.testing.expectError(error.TimedOut, result);
+    try std.testing.expectEqual(before, run_command.test_run_command_worker_detached);
+    try std.testing.expect(elapsed < 10 * std.time.ns_per_s);
+}
