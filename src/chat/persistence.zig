@@ -298,6 +298,91 @@ test "loadMessagesIntoContext reports a missing conversation" {
     try std.testing.expectEqual(@as(usize, 0), messages.items.len);
 }
 
+test "saveMessages tolerates an unwritable session directory" {
+    const file_path = "puny-test-save-fail.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, file_path) catch {};
+
+    // A plain file where the session directory should be: createDirPath and
+    // createFile both fail, so saveMessages warns and returns without error.
+    var f = try std.Io.Dir.cwd().createFile(std.testing.io, file_path, .{});
+    f.close(std.testing.io);
+
+    var messages_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena.allocator());
+    try messages.append(messages_arena.allocator(), .{ .user = "hello" });
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+    var session = core_session.Session{
+        .id = "save-fail",
+        .base = "",
+        .dir = file_path,
+        .prd_path = "",
+        .html_path = "",
+    };
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    try saveMessages(&ctx);
+}
+
+test "saveSessionMeta tolerates an unwritable session directory" {
+    const file_path = "puny-test-save-meta-fail.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, file_path) catch {};
+
+    var f = try std.Io.Dir.cwd().createFile(std.testing.io, file_path, .{});
+    f.close(std.testing.io);
+
+    var messages_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena.allocator());
+    try messages.append(messages_arena.allocator(), .{ .user = "hello" });
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = true;
+    var session = core_session.Session{
+        .id = "save-meta-fail",
+        .base = "",
+        .dir = file_path,
+        .prd_path = "",
+        .html_path = "",
+    };
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    try saveSessionMeta(&ctx);
+}
+
+test "loadMessagesIntoContext propagates non-missing-file read errors" {
+    const file_path = "puny-test-load-fail.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, file_path) catch {};
+
+    // A plain file where the session directory should be, so reading
+    // "<file>/messages.json" fails with NotDir instead of FileNotFound.
+    var f = try std.Io.Dir.cwd().createFile(std.testing.io, file_path, .{});
+    f.close(std.testing.io);
+
+    var messages_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena.allocator());
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+    var session = core_session.Session{
+        .id = "load-fail",
+        .base = "",
+        .dir = file_path,
+        .prd_path = "",
+        .html_path = "",
+    };
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    try std.testing.expectError(error.NotDir, loadMessagesIntoContext(&ctx, file_path));
+    try std.testing.expectEqual(@as(usize, 0), messages.items.len);
+}
+
 test "saveMessages round-trips an empty conversation and cleans up the temp file" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
