@@ -436,3 +436,118 @@ test "history size is capped" {
     try std.testing.expectEqualStrings("c", history.entries.items[1]);
     try std.testing.expectEqualStrings("d", history.entries.items[2]);
 }
+
+test "historyPath prefers XDG_CONFIG_HOME" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("XDG_CONFIG_HOME", "/xdg");
+    try env.put("HOME", "/home/user");
+
+    const path = try historyPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/xdg/puny/prompt_history.json", path);
+}
+
+test "historyPath falls back to HOME/.config" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", "/home/user");
+
+    const path = try historyPath(std.testing.allocator, &env);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/user/.config/puny/prompt_history.json", path);
+}
+
+test "historyPath fails without HOME or XDG_CONFIG_HOME" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    try std.testing.expectError(error.NoConfigDir, historyPath(std.testing.allocator, &env));
+}
+
+test "load tolerates a missing history file" {
+    var history = History.init(std.testing.allocator, "puny-test-missing-history.json");
+    defer history.deinit();
+
+    try history.load(std.testing.io);
+    try std.testing.expectEqual(@as(usize, 0), history.entries.items.len);
+}
+
+test "load ignores corrupt history files" {
+    const path = "puny-test-corrupt-history.json";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "not json at all" });
+
+    var history = History.init(std.testing.allocator, path);
+    defer history.deinit();
+
+    const prev_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = prev_log_level;
+
+    try history.load(std.testing.io);
+    try std.testing.expectEqual(@as(usize, 0), history.entries.items.len);
+}
+
+test "add trims surrounding whitespace" {
+    var history = History.init(std.testing.allocator, "");
+    defer history.deinit();
+
+    try history.add("  hello world  ");
+    try std.testing.expectEqual(@as(usize, 1), history.entries.items.len);
+    try std.testing.expectEqualStrings("hello world", history.entries.items[0]);
+}
+
+test "previous returns null for an empty history" {
+    var history = History.init(std.testing.allocator, "");
+    defer history.deinit();
+
+    try std.testing.expectEqual(@as(?[]const u8, null), history.previous("draft"));
+}
+
+test "next returns null without active navigation" {
+    var history = History.init(std.testing.allocator, "");
+    defer history.deinit();
+    try history.add("entry");
+
+    try std.testing.expectEqual(@as(?[]const u8, null), history.next());
+    try std.testing.expectEqual(@as(?usize, null), history.browsing_index);
+}
+
+test "save and load round trip an empty history" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
+
+    const path = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-empty-prompt-history.json" });
+    defer allocator.free(path);
+
+    std.Io.Dir.cwd().deleteFile(io, path) catch {};
+
+    {
+        var history = History.init(allocator, path);
+        try history.save(io);
+        history.deinit();
+    }
+
+    {
+        var history = History.init(allocator, path);
+        defer history.deinit();
+        try history.load(io);
+        try std.testing.expectEqual(@as(usize, 0), history.entries.items.len);
+    }
+
+    try std.Io.Dir.cwd().deleteFile(io, path);
+}
+
+test "fileSourceHasCredentials detects userinfo credentials" {
+    try std.testing.expect(History.fileSourceHasCredentials("https://user:secret@example.com/prompt.md"));
+    try std.testing.expect(History.fileSourceHasCredentials("http://token@example.com/prompt.md"));
+    try std.testing.expect(!History.fileSourceHasCredentials("https://example.com/prompt.md"));
+    try std.testing.expect(!History.fileSourceHasCredentials("https://example.com/repos/@user/prompt.md"));
+    try std.testing.expect(!History.fileSourceHasCredentials("https://example.com/x?redirect=a@b"));
+    try std.testing.expect(!History.fileSourceHasCredentials("not-a-url"));
+    try std.testing.expect(!History.fileSourceHasCredentials("local/path.md"));
+}
