@@ -432,3 +432,59 @@ test "handleSwitchEffortCommand rejects unknown effort levels" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), reasoning_effort);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Unknown reasoning effort") != null);
 }
+
+test "handleSwitchEffortCommand rejects whitespace-only arguments" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    try handleSwitchEffortCommand(&ctx, "   ");
+
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), reasoning_effort);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Unknown reasoning effort ''") != null);
+}
+
+test "handleSwitchEffortCommand reports already using the default effort" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = .default;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    try handleSwitchEffortCommand(&ctx, "default");
+
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .default), reasoning_effort);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Already using default reasoning effort") != null);
+}
+
+test "handleSwitchProviderCommand rejects unknown provider ids" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    try handleSwitchProviderCommand(&ctx, "does-not-exist");
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Unknown provider 'does-not-exist'") != null);
+    try std.testing.expectEqual(ModelProvider.mock, model_provider);
+}
+
+test "handleReconfigureCommand refuses oneshot mode" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.oneshot = true;
+
+    try handleReconfigureCommand(&ctx);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "/config not available in oneshot mode.") != null);
+}
