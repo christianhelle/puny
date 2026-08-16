@@ -136,3 +136,30 @@ test "estimateUsage counts tool call names and arguments" {
     try std.testing.expectEqual(@as(i64, 5), usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 25), usage.output_tokens);
 }
+
+test "assistant with no content and no tool calls contributes zero" {
+    const msg = openai.Message{ .assistant = .{} };
+    const result = estimateUsage(&.{msg}, 0);
+    try std.testing.expectEqual(@as(i64, 0), result.input_tokens);
+}
+
+test "assistant with empty tool calls contributes zero" {
+    const msg = openai.Message{ .assistant = .{ .tool_calls = &.{} } };
+    const result = estimateUsage(&.{msg}, 0);
+    try std.testing.expectEqual(@as(i64, 0), result.input_tokens);
+}
+
+test "tool result with empty content contributes zero" {
+    const msg = openai.Message{ .tool = .{ .tool_call_id = "call_1", .content = "" } };
+    const result = estimateUsage(&.{msg}, 0);
+    try std.testing.expectEqual(@as(i64, 0), result.input_tokens);
+}
+
+test "empty system and user messages contribute zero" {
+    const msgs = [_]openai.Message{
+        .{ .system = "" },
+        .{ .user = "" },
+    };
+    const result = estimateUsage(&msgs, 0);
+    try std.testing.expectEqual(@as(i64, 0), result.input_tokens);
+}
