@@ -573,6 +573,38 @@ test "load clears an API key it cannot decrypt" {
     try std.testing.expectEqualStrings(blob, entry.stored_blob.?);
 }
 
+test "load keeps an encrypted blob when the key file is malformed" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = key_path, .data = "not-a-32-byte-key" });
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x26} ** secrets.key_length;
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-malformed-key-file");
+    defer std.testing.allocator.free(blob);
+
+    const lmstudio_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"name\":\"lmstudio\",\"apiKey\":\"{s}\",\"url\":\"http://127.0.0.1:1234\",\"model\":\"\"}}", .{blob});
+    defer std.testing.allocator.free(lmstudio_json);
+    const json = try configJsonWithLmstudio(std.testing.allocator, lmstudio_json);
+    defer std.testing.allocator.free(json);
+    try writeConfigFile(&fixture, json);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    const entry = loaded.config.providerEntryConst(.lmstudio);
+    try std.testing.expect(entry.apiKey == null);
+    try std.testing.expectEqualStrings(blob, entry.stored_blob.?);
+    try std.testing.expect(entry.stored_plaintext == null);
+}
+
 test "save writes an already-encrypted API key verbatim" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();

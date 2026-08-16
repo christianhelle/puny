@@ -434,3 +434,54 @@ test "LoadResult deinit is a no-op without an arena" {
     var with_error = LoadResult{ .config = Config.default(), .had_error = true, .file_existed = true };
     with_error.deinit();
 }
+
+test "resolvePrompt returns the override when set" {
+    const allocator = std.testing.allocator;
+    var cfg = Config.default();
+    cfg.prompts.system.override = "custom system prompt";
+    cfg.prompts.planning.override = "custom planning prompt";
+
+    const system_result = try cfg.resolvePrompt(allocator, "system", "default-system");
+    defer allocator.free(system_result);
+    try std.testing.expectEqualStrings("custom system prompt", system_result);
+
+    const planning_result = try cfg.resolvePrompt(allocator, "planning", "default-planning");
+    defer allocator.free(planning_result);
+    try std.testing.expectEqualStrings("custom planning prompt", planning_result);
+}
+
+test "resolvePrompt concatenates prefix and suffix around the default" {
+    const allocator = std.testing.allocator;
+    var cfg = Config.default();
+    cfg.prompts.planning.prefix = "[pre] ";
+    cfg.prompts.planning.suffix = " [/suf]";
+
+    const result = try cfg.resolvePrompt(allocator, "planning", "default-prompt");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("[pre] default-prompt [/suf]", result);
+}
+
+test "resolvePrompt returns the plain default when only a prefix is set" {
+    const allocator = std.testing.allocator;
+    var cfg = Config.default();
+    cfg.prompts.system.prefix = "[pre] ";
+
+    const result = try cfg.resolvePrompt(allocator, "system", "default-prompt");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("[pre] default-prompt", result);
+}
+
+test "Provider jsonParseFromValue ignores internal stored fields" {
+    const allocator = std.testing.allocator;
+    const json = "{\"name\":\"lmstudio\",\"apiKey\":null,\"stored_blob\":\"enc:v1:secret\",\"stored_plaintext\":\"secret\"}";
+
+    const parsed = try std.json.parseFromSlice(Provider, allocator, json, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(.lmstudio, parsed.value.name);
+    try std.testing.expect(parsed.value.stored_blob == null);
+    try std.testing.expect(parsed.value.stored_plaintext == null);
+}
