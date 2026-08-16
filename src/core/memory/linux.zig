@@ -55,3 +55,49 @@ test "getMemoryStats returns positive values on Linux" {
     try std.testing.expect(result.resident > 0);
     try std.testing.expect(result.private > 0);
 }
+
+test "parseKbField parses values padded with tabs and spaces" {
+    try std.testing.expectEqual(@as(u64, 12345), try parseKbField("VmRSS:\t  12345 kB\n", "VmRSS:"));
+    try std.testing.expectEqual(@as(u64, 6789), try parseKbField("VmData:\t6789 kB", "VmData:"));
+    try std.testing.expectEqual(@as(u64, 42), try parseKbField("VmData:42", "VmData:"));
+}
+
+test "parseKbField returns MissingProcField when the marker is absent" {
+    try std.testing.expectError(error.MissingProcField, parseKbField("VmData: 1 kB\n", "VmRSS:"));
+    try std.testing.expectError(error.MissingProcField, parseKbField("", "VmRSS:"));
+}
+
+test "parseKbField rejects non-numeric values" {
+    try std.testing.expectError(error.InvalidCharacter, parseKbField("VmRSS: abc kB\n", "VmRSS:"));
+    try std.testing.expectError(error.InvalidCharacter, parseKbField("VmRSS: \n", "VmRSS:"));
+    try std.testing.expectError(error.InvalidCharacter, parseKbField("VmRSS: 12x kB\n", "VmRSS:"));
+}
+
+test "readFileToBuffer reads a file completely" {
+    const path = "puny-test-proc-status.txt";
+    const cwd = std.Io.Dir.cwd();
+    {
+        const file = try cwd.createFile(std.testing.io, path, .{});
+        defer file.close(std.testing.io);
+        try file.writeStreamingAll(std.testing.io, "VmRSS: 100 kB\nVmData: 50 kB\n");
+    }
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+
+    var buf: [16 * 1024]u8 = undefined;
+    const data = try readFileToBuffer(std.testing.io, path, &buf);
+    try std.testing.expectEqualStrings("VmRSS: 100 kB\nVmData: 50 kB\n", data);
+}
+
+test "readFileToBuffer returns empty for an empty file" {
+    const path = "puny-test-proc-status-empty.txt";
+    const cwd = std.Io.Dir.cwd();
+    {
+        const file = try cwd.createFile(std.testing.io, path, .{});
+        file.close(std.testing.io);
+    }
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+
+    var buf: [16 * 1024]u8 = undefined;
+    const data = try readFileToBuffer(std.testing.io, path, &buf);
+    try std.testing.expectEqual(@as(usize, 0), data.len);
+}
