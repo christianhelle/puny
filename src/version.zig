@@ -29,3 +29,23 @@ test "format includes commit or unknown marker" {
         try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, ")"));
     }
 }
+
+test "format falls back to the bare version when the buffer is too small" {
+    var small: [4]u8 = undefined;
+    const output = format(&small);
+    try std.testing.expectEqualStrings(version, output);
+}
+
+test "format includes the git commit when known" {
+    if (std.mem.eql(u8, git_commit, "unknown")) return error.SkipZigTest;
+    var buf: [256]u8 = undefined;
+    const output = format(&buf);
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, git_commit));
+}
+
+test "format appends the dirty marker when the worktree is dirty" {
+    if (std.mem.eql(u8, git_commit, "unknown") or !dirty) return error.SkipZigTest;
+    var buf: [256]u8 = undefined;
+    const output = format(&buf);
+    try std.testing.expect(std.mem.endsWith(u8, output, "-dirty)"));
+}
