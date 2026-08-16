@@ -475,6 +475,40 @@ test "handleSwitchProviderCommand rejects unknown provider ids" {
     try std.testing.expectEqual(ModelProvider.mock, model_provider);
 }
 
+test "handleSwitchEffortCommand warns on stderr when the config cannot be saved" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    // A non-mock provider is required to reach the config.save call.
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    // The switch path dupes the effort level into the config, so back the
+    // context with an arena instead of the leaking debug allocator.
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    // Without HOME or XDG_CONFIG_HOME the config path cannot be resolved, so
+    // config.save fails and the warning path runs. A real io handle is
+    // required: the warning path builds a stderr writer from ctx.io.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try handleSwitchEffortCommand(&ctx, "high");
+
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), reasoning_effort);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Switched to reasoning effort") != null);
+}
+
 test "handleReconfigureCommand refuses oneshot mode" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
