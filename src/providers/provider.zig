@@ -114,3 +114,106 @@ test "asCopilot returns null for non-copilot providers" {
     defer mock_provider.deinit();
     try std.testing.expect(mock_provider.asCopilot() == null);
 }
+
+test "asCopilot returns the copilot client" {
+    var prov = Provider{ .copilot = copilot.Client.init(std.testing.allocator, std.testing.io, "gho_test_token") };
+    defer prov.deinit();
+
+    const as_copilot = prov.asCopilot();
+    try std.testing.expect(as_copilot != null);
+    try std.testing.expectEqualStrings("gho_test_token", as_copilot.?.github_token);
+}
+
+test "Provider.listModels dispatches to the mock provider" {
+    var prov = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var owned = try prov.listModels();
+    defer owned.deinit();
+    const model_list = owned.value().models;
+    try std.testing.expectEqual(@as(usize, 4), model_list.len);
+    try std.testing.expectEqualStrings("mock-model", model_list[0].id);
+    try std.testing.expectEqualStrings("mock-model-fast", model_list[1].id);
+    try std.testing.expectEqualStrings("mock", model_list[0].provider);
+    try std.testing.expectEqual(@as(i64, 128000), model_list[0].context_length);
+}
+
+test "Provider.setConfig applies config to the copilot client" {
+    var prov = Provider{ .copilot = copilot.Client.init(std.testing.allocator, std.testing.io, "old-token") };
+    defer prov.deinit();
+
+    prov.setConfig(.{ .base_url = "https://test.example.com", .api_key = "new-token" });
+
+    const c = prov.asCopilot().?;
+    try std.testing.expectEqualStrings("new-token", c.github_token);
+    try std.testing.expectEqualStrings("https://test.example.com", c.inner.base_url);
+}
+
+test "Provider.setConfig applies config to the mock client" {
+    var prov = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    prov.setConfig(.{ .base_url = "https://ignored.example.com", .api_key = "ignored" });
+}
+
+test "Provider.setConfig applies config to the lmstudio client" {
+    var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+
+    prov.setConfig(.{ .base_url = "http://localhost:1234", .api_key = "lm-key" });
+
+    switch (prov) {
+        .lmstudio => |c| {
+            try std.testing.expectEqualStrings("http://localhost:1234", c.base_url);
+            try std.testing.expectEqualStrings("lm-key", c.api_key);
+        },
+        else => unreachable,
+    }
+}
+
+const TestRecorder = struct {
+    events: std.ArrayList(openai.StreamEvent),
+    allocator: std.mem.Allocator,
+
+    fn callback(self: *TestRecorder) openai.StreamCallback {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .event = event,
+                .reset = null,
+            },
+        };
+    }
+
+    fn event(context: *anyopaque, ev: openai.StreamEvent) anyerror!void {
+        const self: *TestRecorder = @ptrCast(@alignCast(context));
+        try self.events.append(self.allocator, ev);
+    }
+};
+
+test "Provider.chatStreaming dispatches to the mock provider" {
+    var prov = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = std.testing.allocator };
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "echo dispatch" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expect(rec.events.items.len > 0);
+    var found_finish = false;
+    for (rec.events.items) |ev| {
+        switch (ev) {
+            .finish => |finish| {
+                try std.testing.expectEqualStrings("stop", finish.?);
+                found_finish = true;
+            },
+            else => {},
+        }
+    }
+    try std.testing.expect(found_finish);
+}
