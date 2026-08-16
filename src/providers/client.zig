@@ -1092,3 +1092,11 @@ test "isValidUtf8 accepts multibyte sequences and rejects truncation" {
     try std.testing.expect(!isValidUtf8(&.{ 0xf0, 0x9f, 0x8e }));
     try std.testing.expect(!isValidUtf8(&.{ 'a', 0xe2, 0x82 }));
 }
+
+test "FailingSseReader discard and readVec report read failures" {
+    var failing = FailingSseReader.init();
+    try std.testing.expectError(error.ReadFailed, failing.reader.discard(.limited(16)));
+    var buf: [1]u8 = undefined;
+    const vec = [_][]u8{&buf};
+    try std.testing.expectError(error.ReadFailed, failing.reader.readVec(vec[0..]));
+}

@@ -1415,3 +1415,153 @@ test "listModels reports connection errors to the http observer" {
     } else |_| {}
     try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
 }
+
+const CopilotGarbageServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        _ = http_server.receiveHead() catch return;
+        writer.interface.writeAll("definitely-not-an-http-response\r\n\r\n") catch return;
+    }
+};
+
+fn startCopilotGarbageServer() !*CopilotGarbageServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(CopilotGarbageServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server };
+    ctx.thread = try std.Thread.spawn(.{}, CopilotGarbageServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopCopilotGarbageServer(ctx: *CopilotGarbageServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+test "chatStreaming reports response head failures to the http observer" {
+    const ctx = try startCopilotGarbageServer();
+    defer stopCopilotGarbageServer(ctx);
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+
+    const ObserverCtx = struct {
+        errors: usize = 0,
+        fn onError(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = client.HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_test");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.inner.http_observer = observer;
+    try seedCopilotToken(&c);
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    if (chatStreaming(&c, request, undefined)) |_| {
+        return error.ExpectedHeadFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
+
+test "chatStreaming reports request creation failures to the http observer" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+    server.deinit(std.testing.io);
+
+    const ObserverCtx = struct {
+        errors: usize = 0,
+        fn onError(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = client.HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_test");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.inner.http_observer = observer;
+    try seedCopilotToken(&c);
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    if (chatStreaming(&c, request, undefined)) |_| {
+        return error.ExpectedConnectionFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
+
+test "chatStreaming propagates SSE parse errors from a local server" {
+    const ctx = try startCopilotServer(.ok, "data: not-json\n\n");
+    defer stopCopilotServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try copilotClientForServer(ctx, arena);
+    defer c.deinit();
+    try seedCopilotToken(&c);
+    const allocator = arena;
+
+    var events = std.ArrayList(CopilotSseEvent).empty;
+    var recorder = CopilotSseRecorder{ .allocator = allocator, .events = &events };
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    if (chatStreaming(&c, request, recorder.callback())) |_| {
+        return error.ExpectedSseParseFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}

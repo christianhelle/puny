@@ -933,3 +933,77 @@ test "chatStreaming returns Canceled when the stream is cancelled" {
     defer cancel.reset();
     try std.testing.expectError(error.Canceled, chatStreaming(&c, request, undefined));
 }
+
+test "chatStreaming reports request creation failures to the http observer" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+    server.deinit(std.testing.io);
+
+    const ObserverCtx = struct {
+        errors: usize = 0,
+        fn onError(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = client.HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.http_observer = observer;
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    if (chatStreaming(&c, request, undefined)) |_| {
+        return error.ExpectedConnectionFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
+
+test "chatStreaming propagates SSE parse errors from a local server" {
+    const ctx = try startChatServer(.ok, "data: not-json\n\n");
+    defer stopChatServer(ctx);
+
+    const url = try chatServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    if (chatStreaming(&c, request, recorder.callback())) |_| {
+        return error.ExpectedSseParseFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}

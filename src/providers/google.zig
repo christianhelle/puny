@@ -1066,3 +1066,80 @@ test "chatStreamingGoogle returns Canceled when the stream is cancelled" {
     defer cancel.reset();
     try std.testing.expectError(error.Canceled, chatStreamingGoogle(&c, request, undefined));
 }
+
+test "chatStreamingGoogle reports request creation failures to the http observer" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+    server.deinit(std.testing.io);
+
+    const ObserverCtx = struct {
+        errors: usize = 0,
+        fn onError(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = http_client.HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = http_client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.http_observer = observer;
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    if (chatStreamingGoogle(&c, request, undefined)) |_| {
+        return error.ExpectedConnectionFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
+
+test "chatStreamingGoogle propagates SSE parse errors from a local server" {
+    const ctx = try startGoogleServer(.ok, "data: not-json\n\n");
+    defer stopGoogleServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try googleClientForServer(ctx, arena);
+    defer c.deinit();
+    const allocator = arena;
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    if (chatStreamingGoogle(&c, request, callback)) |_| {
+        return error.ExpectedSseParseFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
