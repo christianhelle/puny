@@ -347,3 +347,85 @@ test "logHttpResponse redacts authorization and set-cookie header values" {
     try std.testing.expect(std.mem.indexOf(u8, content, "Authorization: ***") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "date: Mon, 01 Jan 2024") != null);
 }
+
+test "logHttpResponse skips the body when it is empty" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    logHttpResponse(@ptrCast(&log), .GET, "http://example.com", .no_content, &.{}, "", 500_000);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Body (") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Status: 204") != null);
+}
+
+test "logHttpError writes the error name" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    logHttpError(@ptrCast(&log), .POST, "http://example.com", "ConnectionRefused");
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "=== ERROR ===") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "POST http://example.com") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Error: ConnectionRefused") != null);
+}
+
+test "attachHttpDebugObserver installs callbacks on the provider" {
+    var prov = provider.Provider{ .lmstudio = http_client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var log = DebugLog{
+        .file = undefined,
+        .writer = &output.writer,
+        .allocator = std.testing.allocator,
+    };
+
+    attachHttpDebugObserver(&prov, &log);
+
+    switch (prov) {
+        .lmstudio => |c| {
+            const observer = c.http_observer orelse return error.MissingObserver;
+            try std.testing.expect(observer.onRequest != null);
+            try std.testing.expect(observer.onResponse != null);
+            try std.testing.expect(observer.onError != null);
+            try std.testing.expect(observer.on_chunk != null);
+            try std.testing.expect(observer.ctx == @as(?*anyopaque, @ptrCast(&log)));
+        },
+        else => unreachable,
+    }
+}
