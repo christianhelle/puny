@@ -382,6 +382,156 @@ test "redactHeaderValue masks credential-bearing headers" {
     try std.testing.expectEqualStrings("application/json", redactHeaderValue("content-type", "application/json"));
 }
 
+test "redactHeaderValue masks every credential header name case-insensitively" {
+    const names = [_][]const u8{
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "proxy-authorization",
+        "x-api-key",
+        "api-key",
+        "x-auth-token",
+        "x-api-token",
+        "x-access-token",
+        "x-copilot-auth",
+        "AUTHORIZATION",
+        "X-Copilot-Auth",
+        "API-KEY",
+    };
+    for (names) |name| {
+        try std.testing.expectEqualStrings("***", redactHeaderValue(name, "sekrit"));
+    }
+}
+
+test "redactHeaderValue passes non-credential headers through" {
+    try std.testing.expectEqualStrings("application/json", redactHeaderValue("content-type", "application/json"));
+    try std.testing.expectEqualStrings("Mon, 01 Jan 2024", redactHeaderValue("date", "Mon, 01 Jan 2024"));
+    try std.testing.expectEqualStrings("gzip", redactHeaderValue("content-encoding", "gzip"));
+}
+
+test "redactUrl masks only secret query values" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactUrl(allocator, "https://x/y?a=b&key=sk-1&flag&token=t&z=1").?;
+    defer allocator.free(masked);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "sk-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "key=***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "token=***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "a=b") != null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "flag") != null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "z=1") != null);
+}
+
+test "redactUrl masks secret names case-insensitively and keeps valueless pairs" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactUrl(allocator, "https://x/y?API_KEY=sek&key").?;
+    defer allocator.free(masked);
+    try std.testing.expectEqualStrings("https://x/y?API_KEY=***&key", masked);
+}
+
+test "redactUrl masks the whole value even when it contains equals signs" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactUrl(allocator, "https://x/y?signature=a=b=c&ok=1").?;
+    defer allocator.free(masked);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "a=b") == null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "signature=***") != null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "ok=1") != null);
+}
+
+test "redactUrl returns null for queries without secrets" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    try std.testing.expectEqual(@as(?[]const u8, null), redactUrl(allocator, "https://example.com/models?"));
+    try std.testing.expectEqual(@as(?[]const u8, null), redactUrl(allocator, "https://example.com/models?flag&a=b"));
+    try std.testing.expectEqual(@as(?[]const u8, null), redactUrl(allocator, "https://example.com/models?key"));
+}
+
+test "redactPlainBody masks name=value pairs" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactPlainBody(allocator, "password=hunter2&user=alice").?;
+    defer allocator.free(masked);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "hunter2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "password=*******") != null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "user=alice") != null);
+}
+
+test "redactPlainBody masks name=value pairs across value separators" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactPlainBody(allocator, "api_key=sk=xyz;a=b;token=tt").?;
+    defer allocator.free(masked);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "sk=xyz") == null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "tt") == null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "a=b") != null);
+}
+
+test "redactPlainBody masks quoted name: value pairs" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactPlainBody(allocator, "{\"token\": \"abc\", \"ok\": 1}").?;
+    defer allocator.free(masked);
+    try std.testing.expectEqualStrings("{\"token\": \"***\", \"ok\": 1}", masked);
+}
+
+test "redactPlainBody masks unquoted name: value pairs" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactPlainBody(allocator, "{\"key\": 123, \"ok\": 1}").?;
+    defer allocator.free(masked);
+    try std.testing.expectEqualStrings("{\"key\": ***, \"ok\": 1}", masked);
+}
+
+test "redactPlainBody respects token boundaries" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const masked = redactPlainBody(allocator, "monkey=secret&token=x").?;
+    defer allocator.free(masked);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "monkey=secret") != null);
+    try std.testing.expect(std.mem.indexOf(u8, masked, "token=*") != null);
+}
+
+test "redactPlainBody returns null when nothing matches" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    try std.testing.expectEqual(@as(?[]const u8, null), redactPlainBody(allocator, "model=gpt-4o&user=alice"));
+}
+
+test "formatBody masks unquoted colon values in truncated JSON" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const body = "{\"token\": abc}";
+    const formatted = formatBody(allocator, body);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "abc") == null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted.text, "{\"token\": ***}") != null);
+}
+
 test "redactUrl masks secret query values" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
