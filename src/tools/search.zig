@@ -42,3 +42,60 @@ pub const grep_search = tools.defineTool(
     GrepSearchParams,
     grepSearch,
 );
+
+fn ripgrepAvailable(io: std.Io) bool {
+    const result = std.process.run(std.heap.page_allocator, io, .{
+        .argv = &[_][]const u8{"rg"},
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+    }) catch return false;
+    defer std.heap.page_allocator.free(result.stderr);
+    return switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+}
+
+test "grepSearch propagates the failure when ripgrep is unavailable" {
+    if (ripgrepAvailable(std.testing.io)) return error.SkipZigTest;
+
+    // Spawning a missing executable fails with FileNotFound (ENOENT).
+    try std.testing.expectError(
+        error.FileNotFound,
+        grepSearch(std.testing.allocator, std.testing.io, .{ .query = "needle", .path = "/tmp" }),
+    );
+}
+
+test "grepSearch runs ripgrep and returns matching lines" {
+    if (!ripgrepAvailable(std.testing.io)) return error.SkipZigTest;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "needle.txt", .data = "line one\nneedle here\nline three" });
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    const output = try grepSearch(std.testing.allocator, std.testing.io, .{ .query = "needle", .path = base_path });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "needle.txt:2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "needle here") != null);
+}
+
+test "grepSearch passes --ignore-case when case_sensitive is false" {
+    if (!ripgrepAvailable(std.testing.io)) return error.SkipZigTest;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "case.txt", .data = "MixedCase token" });
+    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base_path);
+
+    const output = try grepSearch(std.testing.allocator, std.testing.io, .{ .query = "mixedcase", .path = base_path, .case_sensitive = false });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "case.txt:1") != null);
+
+    // The same query without --ignore-case must not match.
+    const strict = try grepSearch(std.testing.allocator, std.testing.io, .{ .query = "mixedcase", .path = base_path, .case_sensitive = true });
+    defer std.testing.allocator.free(strict);
+    try std.testing.expect(std.mem.indexOf(u8, strict, "case.txt") == null);
+}
