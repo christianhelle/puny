@@ -422,6 +422,28 @@ test "save writes history with owner-only permissions" {
     try std.Io.Dir.cwd().deleteFile(io, path);
 }
 
+test "save tolerates a directory at the history path" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
+
+    const history_dir = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-history-dir-target" });
+    defer allocator.free(history_dir);
+    defer std.Io.Dir.cwd().deleteTree(io, history_dir) catch {};
+
+    var history = History.init(allocator, history_dir);
+    defer history.deinit();
+    try history.add("alpha");
+
+    const prev_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = prev_log_level;
+
+    try history.save(io);
+}
+
 test "history size is capped" {
     var history = History.init(std.testing.allocator, "");
     defer history.deinit();

@@ -687,6 +687,29 @@ test "transferErr copies the worker error message" {
     try std.testing.expectEqualStrings("boom", err.message);
 }
 
+test "transferErr falls back to a static message under allocation failure" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    const err = transferErr(failing.allocator(), .{ .message = "boom", .owned = true });
+    try std.testing.expectEqualStrings("Failed to load prompt", err.message);
+    try std.testing.expect(!err.owned);
+}
+
+test "finalize frees the input and reports a static error under allocation failure" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    const allocator = failing.allocator();
+    const data = try allocator.alloc(u8, 3);
+    @memcpy(data, "abc");
+
+    const outcome = finalize(allocator, data);
+    switch (outcome) {
+        .ok => return error.UnexpectedSuccess,
+        .err => |e| {
+            try std.testing.expectEqualStrings("Out of memory", e.message);
+            try std.testing.expect(!e.owned);
+        },
+    }
+}
+
 test "dupeOr duplicates text or falls back to a static string" {
     const owned = dupeOr(std.testing.allocator, "text");
     defer std.testing.allocator.free(owned.message);
