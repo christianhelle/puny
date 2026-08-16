@@ -908,3 +908,485 @@ test "parseAccessToken maps pending and slow_down errors" {
         \\{"error":"expired_token"}
     )) == .failed);
 }
+
+test "parseAccessToken maps access_denied and unknown errors" {
+    const allocator = std.testing.allocator;
+    switch (try parseAccessToken(allocator, "{\"error\":\"access_denied\"}")) {
+        .failed => |reason| try std.testing.expectEqualStrings("access was denied", reason),
+        else => try std.testing.expect(false),
+    }
+    try std.testing.expect((try parseAccessToken(allocator, "{\"error\":\"something_else\"}")) == .pending);
+    try std.testing.expect((try parseAccessToken(allocator, "not json at all")) == .pending);
+    try std.testing.expect((try parseAccessToken(allocator, "{\"access_token\":\"\"}")) == .pending);
+}
+
+fn findHeader(headers: []const std.http.Header, name: []const u8) ?std.http.Header {
+    for (headers) |header| {
+        if (std.mem.eql(u8, header.name, name)) return header;
+    }
+    return null;
+}
+
+test "writeRequestId produces a valid v4 UUID" {
+    var id: [36]u8 = undefined;
+    writeRequestId(std.testing.io, &id);
+
+    try std.testing.expectEqual(@as(u8, '-'), id[8]);
+    try std.testing.expectEqual(@as(u8, '-'), id[13]);
+    try std.testing.expectEqual(@as(u8, '-'), id[18]);
+    try std.testing.expectEqual(@as(u8, '-'), id[23]);
+    try std.testing.expectEqual(@as(u8, '4'), id[14]);
+    try std.testing.expect(id[19] == '8' or id[19] == '9' or id[19] == 'a' or id[19] == 'b');
+    for (id) |c| {
+        if (c == '-') continue;
+        try std.testing.expect((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f'));
+    }
+}
+
+test "appendCopilotHeaders sets the standard Copilot headers" {
+    const allocator = std.testing.allocator;
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "text/event-stream", "req-id-1", "agent");
+    defer allocator.free(auth);
+
+    try std.testing.expectEqualStrings("Bearer tok-123", auth);
+    try std.testing.expectEqualStrings("Bearer tok-123", findHeader(headers.items, "authorization").?.value);
+    try std.testing.expectEqualStrings("application/json", findHeader(headers.items, "content-type").?.value);
+    try std.testing.expectEqualStrings("text/event-stream", findHeader(headers.items, "accept").?.value);
+    try std.testing.expectEqualStrings("vscode-chat", findHeader(headers.items, "copilot-integration-id").?.value);
+    try std.testing.expectEqualStrings("req-id-1", findHeader(headers.items, "x-request-id").?.value);
+    try std.testing.expectEqualStrings("agent", findHeader(headers.items, "X-Initiator").?.value);
+    try std.testing.expectEqualStrings("2025-04-01", findHeader(headers.items, "x-github-api-version").?.value);
+}
+
+test "appendCopilotHeaders omits X-Initiator when null" {
+    const allocator = std.testing.allocator;
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "application/json", "req-id-1", null);
+    defer allocator.free(auth);
+
+    try std.testing.expect(findHeader(headers.items, "X-Initiator") == null);
+}
+
+test "setGithubToken invalidates the cached copilot token" {
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_old");
+    defer c.deinit();
+
+    const seeded = try std.testing.allocator.dupe(u8, "tid=seeded");
+    c.copilot_token = seeded;
+    c.copilot_token_expires_at = 12345;
+
+    c.setGithubToken("gho_new");
+    try std.testing.expectEqualStrings("gho_new", c.github_token);
+    try std.testing.expect(c.copilot_token == null);
+    try std.testing.expectEqual(@as(i64, 0), c.copilot_token_expires_at);
+}
+
+test "setConfig applies base url key and observer" {
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_old");
+    defer c.deinit();
+
+    const observer = client.HttpObserver{
+        .ctx = null,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = null,
+    };
+    c.setConfig(.{ .base_url = "http://copilot.example", .api_key = "gho_new", .http_observer = observer });
+
+    try std.testing.expectEqualStrings("http://copilot.example", c.inner.base_url);
+    try std.testing.expectEqualStrings("gho_new", c.github_token);
+    try std.testing.expect(c.inner.http_observer != null);
+}
+
+test "parseModels returns MissingData without a data field" {
+    try std.testing.expectError(error.MissingData, parseModels(std.testing.allocator, "{\"object\":\"list\"}"));
+}
+
+test "parseModels skips malformed entries and defaults display fields" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"data":[
+        \\42,
+        \\{"id":"plain","model_picker_enabled":true,"capabilities":{"type":"chat"}},
+        \\{"id":"no-caps","model_picker_enabled":true},
+        \\{"id":"non-bool-picker","model_picker_enabled":"yes","capabilities":{"type":"chat"}},
+        \\{"id":"non-chat","model_picker_enabled":true,"capabilities":{"type":"embeddings"}},
+        \\{"id":"bad-caps","model_picker_enabled":true,"capabilities":"chat"},
+        \\{"id":"non-array-endpoints","model_picker_enabled":true,"capabilities":{"type":"chat"},"supported_endpoints":"x"}
+        \\],"object":"list"}
+    ;
+    var owned = try parseModels(allocator, body);
+    defer owned.deinit();
+
+    const models = owned.value().data;
+    try std.testing.expectEqual(@as(usize, 2), models.len);
+    try std.testing.expectEqualStrings("plain", models[0].id);
+    try std.testing.expectEqualStrings("plain", models[0].name);
+    try std.testing.expectEqualStrings("github-copilot", models[0].vendor);
+    try std.testing.expectEqual(@as(i64, 0), models[0].context_length);
+    try std.testing.expectEqualStrings("non-array-endpoints", models[1].id);
+}
+
+test "toSharedModels copies copilot models into the shared model list" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"data":[
+        \\{"id":"claude-sonnet-4.5","name":"Claude Sonnet 4.5","vendor":"Anthropic","context_length":200000}
+        \\]}
+    ;
+
+    const parsed = try std.json.parseFromSlice(ModelsList, allocator, json, .{ .ignore_unknown_fields = true });
+    var owned = client.Owned(ModelsList){
+        .allocator = allocator,
+        .body = try allocator.dupe(u8, json),
+        .parsed = parsed,
+    };
+
+    var shared = try toSharedModels(&owned);
+    defer shared.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), shared.value().models.len);
+    try std.testing.expectEqualStrings("claude-sonnet-4.5", shared.value().models[0].id);
+    try std.testing.expectEqualStrings("Claude Sonnet 4.5", shared.value().models[0].display_name);
+    try std.testing.expectEqualStrings("Anthropic", shared.value().models[0].provider);
+    try std.testing.expectEqual(@as(i64, 200000), shared.value().models[0].context_length);
+}
+
+fn seedCopilotToken(c: *Client) !void {
+    const token = try c.inner.allocator.dupe(u8, "tid=test-token");
+    c.copilot_token = token;
+    c.copilot_token_expires_at = nowUnixSeconds(c.inner.io) + 3600;
+}
+
+test "ensureCopilotToken returns the cached token while it is still valid" {
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+    try seedCopilotToken(&c);
+
+    const token = try ensureCopilotToken(&c);
+    try std.testing.expectEqualStrings("tid=test-token", token);
+    try std.testing.expect(c.copilot_token != null);
+}
+
+test "ensureCopilotToken requires a github token after expiry" {
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+
+    const seeded = try std.testing.allocator.dupe(u8, "tid=expired");
+    c.copilot_token = seeded;
+    c.copilot_token_expires_at = 1;
+
+    try std.testing.expectError(error.MissingGithubToken, ensureCopilotToken(&c));
+
+    var fresh = Client.init(std.testing.allocator, std.testing.io, "");
+    defer fresh.deinit();
+    try std.testing.expectError(error.MissingGithubToken, ensureCopilotToken(&fresh));
+}
+
+test "discoverGithubToken reads the environment variable" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put(oauth_token_env, "gho_env");
+
+    const token = (try discoverGithubToken(std.testing.allocator, std.testing.io, &env)).?;
+    defer std.testing.allocator.free(token);
+    try std.testing.expectEqualStrings("gho_env", token);
+}
+
+test "discoverGithubToken returns null with an empty environment" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put(oauth_token_env, "");
+
+    try std.testing.expect((try discoverGithubToken(std.testing.allocator, std.testing.io, &env)) == null);
+}
+
+test "discoverGithubToken reads apps.json from XDG_CONFIG_HOME" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "github-copilot");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "github-copilot/apps.json",
+        .data = "{\"github.com:Iv1.b507a08c87ecfe98\":{\"oauth_token\":\"gho_file\"}}",
+    });
+
+    const base = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("XDG_CONFIG_HOME", base);
+
+    const token = (try discoverGithubToken(std.testing.allocator, std.testing.io, &env)).?;
+    defer std.testing.allocator.free(token);
+    try std.testing.expectEqualStrings("gho_file", token);
+}
+
+test "discoverGithubToken reads opencode auth.json from XDG_DATA_HOME" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "opencode");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "opencode/auth.json",
+        .data = "{\"github-copilot\":{\"type\":\"oauth\",\"refresh\":\"gho_opencode\"}}",
+    });
+
+    const base = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("XDG_DATA_HOME", base);
+
+    const token = (try discoverGithubToken(std.testing.allocator, std.testing.io, &env)).?;
+    defer std.testing.allocator.free(token);
+    try std.testing.expectEqualStrings("gho_opencode", token);
+}
+
+test "oauthTokenFromApps skips entries without a usable token" {
+    const allocator = std.testing.allocator;
+
+    try std.testing.expect((try oauthTokenFromApps(allocator,
+        \\{"github.com":{"user":"octocat","oauth_token":""}}
+    )) == null);
+    try std.testing.expect((try oauthTokenFromApps(allocator,
+        \\{"github.com":{"user":"octocat"}}
+    )) == null);
+    try std.testing.expect((try oauthTokenFromApps(allocator,
+        \\{"github.com":"not an object"}
+    )) == null);
+    try std.testing.expect((try oauthTokenFromApps(allocator, "not json")) == null);
+}
+
+test "oauthTokenFromOpencode rejects missing or empty refresh tokens" {
+    const allocator = std.testing.allocator;
+
+    try std.testing.expect((try oauthTokenFromOpencode(allocator,
+        \\{"github-copilot":{"type":"oauth","refresh":""}}
+    )) == null);
+    try std.testing.expect((try oauthTokenFromOpencode(allocator,
+        \\{"github-copilot":{"type":"oauth"}}
+    )) == null);
+    try std.testing.expect((try oauthTokenFromOpencode(allocator, "not json")) == null);
+}
+
+test "sleepSeconds skips non-positive durations" {
+    sleepSeconds(std.testing.io, 0);
+    sleepSeconds(std.testing.io, -1);
+}
+
+// ── Copilot server tests ─────────────────────────────────────────────
+
+const CopilotServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    status: std.http.Status,
+    body: []const u8,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+};
+
+fn startCopilotServer(status: std.http.Status, body: []const u8) !*CopilotServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(CopilotServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    ctx.thread = try std.Thread.spawn(.{}, CopilotServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopCopilotServer(ctx: *CopilotServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+fn copilotClientForServer(ctx: *CopilotServer, arena: std.mem.Allocator) !Client {
+    const url = try std.fmt.allocPrint(arena, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_test");
+    c.withBaseUrl(url);
+    return c;
+}
+
+test "listModels fetches models from a local server with a cached token" {
+    const body =
+        \\{"data":[{"id":"claude-sonnet-4.5","name":"Claude Sonnet 4.5","vendor":"Anthropic","model_picker_enabled":true,"capabilities":{"type":"chat","limits":{"max_context_window_tokens":200000}}}]}
+    ;
+    const ctx = try startCopilotServer(.ok, body);
+    defer stopCopilotServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try copilotClientForServer(ctx, arena);
+    defer c.deinit();
+    try seedCopilotToken(&c);
+
+    var owned = try listModels(&c);
+    defer owned.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), owned.value().data.len);
+    try std.testing.expectEqualStrings("claude-sonnet-4.5", owned.value().data[0].id);
+    try std.testing.expectEqualStrings("Anthropic", owned.value().data[0].vendor);
+}
+
+test "listModels returns ResponseError on a non-success status" {
+    const ctx = try startCopilotServer(.internal_server_error, "nope");
+    defer stopCopilotServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try copilotClientForServer(ctx, arena);
+    defer c.deinit();
+    try seedCopilotToken(&c);
+
+    try std.testing.expectError(error.ResponseError, listModels(&c));
+}
+
+const CopilotSseEvent = union(enum) {
+    content: []const u8,
+    finish: ?[]const u8,
+};
+
+const CopilotSseRecorder = struct {
+    allocator: std.mem.Allocator,
+    events: *std.ArrayList(CopilotSseEvent),
+
+    fn callback(self: *CopilotSseRecorder) openai.StreamCallback {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .event = event,
+                .reset = null,
+            },
+        };
+    }
+
+    fn event(ctx: *anyopaque, ev: openai.StreamEvent) !void {
+        const self: *CopilotSseRecorder = @ptrCast(@alignCast(ctx));
+        switch (ev) {
+            .content => |v| try self.events.append(self.allocator, .{ .content = try self.allocator.dupe(u8, v) }),
+            .finish => |v| try self.events.append(self.allocator, .{ .finish = if (v) |s| try self.allocator.dupe(u8, s) else null }),
+            else => {},
+        }
+    }
+};
+
+test "chatStreaming streams SSE from a local server with a cached token" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{\"content\":\" copilot\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startCopilotServer(.ok, body);
+    defer stopCopilotServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try copilotClientForServer(ctx, arena);
+    defer c.deinit();
+    try seedCopilotToken(&c);
+    const allocator = arena;
+
+    var events = std.ArrayList(CopilotSseEvent).empty;
+    var recorder = CopilotSseRecorder{ .allocator = allocator, .events = &events };
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreaming(&c, request, recorder.callback());
+
+    try std.testing.expectEqual(@as(usize, 3), events.items.len);
+    try std.testing.expectEqualStrings("Hello", events.items[0].content);
+    try std.testing.expectEqualStrings(" copilot", events.items[1].content);
+    try std.testing.expectEqualStrings("stop", events.items[2].finish.?);
+}
+
+test "chatStreaming returns ResponseError on a non-success status" {
+    const ctx = try startCopilotServer(.internal_server_error, "nope");
+    defer stopCopilotServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try copilotClientForServer(ctx, arena);
+    defer c.deinit();
+    try seedCopilotToken(&c);
+    const allocator = arena;
+
+    var events = std.ArrayList(CopilotSseEvent).empty;
+    var recorder = CopilotSseRecorder{ .allocator = allocator, .events = &events };
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, chatStreaming(&c, request, recorder.callback()));
+}
+
+test "listModels reports connection errors to the http observer" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+    server.deinit(std.testing.io);
+
+    const ObserverCtx = struct {
+        errors: usize = 0,
+        fn onError(ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = client.HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_test");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.inner.http_observer = observer;
+    try seedCopilotToken(&c);
+
+    if (listModels(&c)) |_| {
+        return error.ExpectedConnectionFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
