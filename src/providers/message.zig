@@ -213,3 +213,80 @@ test "message JSON conversion" {
         try std.testing.expectEqualStrings("call_1", parsed.value.object.get("tool_call_id").?.string);
     }
 }
+
+const InvalidMessageCase = struct {
+    json: []const u8,
+    err: anyerror,
+};
+
+test "fromJsonValue rejects malformed messages" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const invalid = [_]InvalidMessageCase{
+        .{ .json = "[1,2,3]", .err = error.InvalidMessage },
+        .{ .json = "42", .err = error.InvalidMessage },
+        .{ .json = "{}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":123}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"unknown\"}", .err = error.UnknownRole },
+        .{ .json = "{\"role\":\"system\"}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"system\",\"content\":5}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"user\"}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"user\",\"content\":5}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"content\":5}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":\"x\"}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":[{}]}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":1}]}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"x\"}]}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"x\",\"function\":\"y\"}]}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"x\",\"function\":{}}]}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"x\",\"function\":{\"name\":\"n\"}}]}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"x\",\"function\":{\"name\":\"n\",\"arguments\":1}}]}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"tool\"}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"tool\",\"tool_call_id\":1,\"content\":\"c\"}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"tool\",\"tool_call_id\":\"x\"}", .err = error.InvalidMessage },
+        .{ .json = "{\"role\":\"tool\",\"tool_call_id\":\"x\",\"content\":1}", .err = error.InvalidMessage },
+    };
+
+    for (invalid) |case| {
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, case.json, .{});
+        defer parsed.deinit();
+        const result = Message.fromJsonValue(allocator, parsed.value);
+        try std.testing.expectError(case.err, result);
+    }
+}
+
+test "fromJsonValue handles optional fields and defaults" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, "{\"role\":\"assistant\",\"content\":null}", .{});
+        defer parsed.deinit();
+        const msg = try Message.fromJsonValue(allocator, parsed.value);
+        try std.testing.expect(msg.assistant.content == null);
+        try std.testing.expect(msg.assistant.tool_calls == null);
+    }
+
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[]}", .{});
+        defer parsed.deinit();
+        const msg = try Message.fromJsonValue(allocator, parsed.value);
+        try std.testing.expect(msg.assistant.tool_calls != null);
+        try std.testing.expectEqual(@as(usize, 0), msg.assistant.tool_calls.?.len);
+    }
+
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"custom\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]}", .{});
+        defer parsed.deinit();
+        const msg = try Message.fromJsonValue(allocator, parsed.value);
+        try std.testing.expect(msg.assistant.content == null);
+        const tc = msg.assistant.tool_calls.?[0];
+        try std.testing.expectEqualStrings("call_1", tc.id);
+        try std.testing.expectEqualStrings("function", tc.type);
+        try std.testing.expectEqualStrings("read_file", tc.function.name);
+        try std.testing.expectEqualStrings("{}", tc.function.arguments);
+    }
+}
