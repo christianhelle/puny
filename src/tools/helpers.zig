@@ -310,3 +310,74 @@ test "readFileAlloc rejects content larger than the limit" {
     try writeFile(std.testing.io, path, "123456789");
     try std.testing.expectError(error.StreamTooLong, readFileAlloc(std.testing.allocator, std.testing.io, path, 4));
 }
+
+const HttpGetTestCtx = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    body: []const u8,
+    done: std.atomic.Value(bool) = .init(false),
+
+    fn serve(self: *@This()) void {
+        defer self.done.store(true, .release);
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{}) catch return;
+    }
+};
+
+fn listenForHttpGetTest(io: std.Io) !std.Io.net.Server {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    return std.Io.net.IpAddress.listen(&address, io, .{}) catch |err| {
+        std.debug.print("listen failed: {s}\n", .{@errorName(err)});
+        return error.ListenFailed;
+    };
+}
+
+fn waitForHttpGetTestServer(ctx: *HttpGetTestCtx, thread: std.Thread, server: *std.Io.net.Server) void {
+    var guard: usize = 0;
+    while (!ctx.done.load(.acquire) and guard < 100_000_000) : (guard += 1) {
+        std.Thread.yield() catch {};
+    }
+    thread.join();
+    server.deinit(std.testing.io);
+}
+
+test "httpGet returns the response body from a local server" {
+    var server = try listenForHttpGetTest(std.testing.io);
+    var ctx = HttpGetTestCtx{ .io = std.testing.io, .server = server, .body = "get body" };
+    const thread = try std.Thread.spawn(.{}, HttpGetTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/get", .{port});
+    defer std.testing.allocator.free(url);
+
+    const body = try httpGet(std.testing.allocator, std.testing.io, url);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualStrings("get body", body);
+
+    waitForHttpGetTestServer(&ctx, thread, &server);
+}
+
+test "httpGet returns an empty string for an empty response body" {
+    var server = try listenForHttpGetTest(std.testing.io);
+    var ctx = HttpGetTestCtx{ .io = std.testing.io, .server = server, .body = "" };
+    const thread = try std.Thread.spawn(.{}, HttpGetTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/empty", .{port});
+    defer std.testing.allocator.free(url);
+
+    const body = try httpGet(std.testing.allocator, std.testing.io, url);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualStrings("", body);
+
+    waitForHttpGetTestServer(&ctx, thread, &server);
+}
