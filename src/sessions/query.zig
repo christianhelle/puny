@@ -219,3 +219,65 @@ test "findLatestSession returns null when no session has a conversation" {
     const found = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
     try std.testing.expect(found == null);
 }
+
+test "findSessionByPrefix returns null when there are no sessions" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try f.createSessionDir(std.testing.io, test_dir);
+
+    const found = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "abc");
+    try std.testing.expect(found == null);
+}
+
+test "findSessionByPrefix matches a complete session id" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try f.createTestSessionDir(std.testing.io, test_dir, "abc-111-aaa", false);
+    try f.createTestSessionDir(std.testing.io, test_dir, "abc-222-bbb", false);
+
+    const found = try findSessionByPrefix(std.testing.allocator, std.testing.io, test_dir, "abc-111-aaa");
+    defer if (found) |s| {
+        if (s.first_prompt) |p| std.testing.allocator.free(p);
+        std.testing.allocator.free(s.id);
+    };
+    try std.testing.expect(found != null);
+    try std.testing.expectEqualStrings("abc-111-aaa", found.?.id);
+}
+
+test "findLatestSession returns null when there are no sessions" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try f.createSessionDir(std.testing.io, test_dir);
+
+    const latest = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
+    try std.testing.expect(latest == null);
+}
+
+test "findLatestSession returns null for an empty sessions directory" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, sessions_dir);
+
+    const latest = try findLatestSession(std.testing.allocator, std.testing.io, test_dir);
+    try std.testing.expect(latest == null);
+}
