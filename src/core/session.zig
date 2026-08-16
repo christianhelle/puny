@@ -484,6 +484,77 @@ test "messagesPath and sessionMetaPath join session directories" {
     try std.testing.expectEqualStrings(expected_meta, meta);
 }
 
+test "save_prd_tool writes the plan files and reports their paths" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base);
+    const prd = try std.fs.path.join(std.testing.allocator, &.{ base, "plan.md" });
+    defer std.testing.allocator.free(prd);
+    const html = try std.fs.path.join(std.testing.allocator, &.{ base, "plan.html" });
+    defer std.testing.allocator.free(html);
+    setSessionPaths(prd, html);
+    defer setSessionPaths("", "");
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const args = try std.json.parseFromSliceLeaky(std.json.Value, arena_state.allocator(), "{\"markdown\":\"# Plan\\n\",\"html\":\"<h1>Plan</h1>\"}", .{});
+
+    const result = try save_prd_tool.execute(arena_state.allocator(), std.testing.io, args);
+    try std.testing.expect(std.mem.indexOf(u8, result, prd) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, html) != null);
+
+    const md_content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, prd, std.testing.allocator, std.Io.Limit.limited(1 << 20));
+    defer std.testing.allocator.free(md_content);
+    try std.testing.expectEqualStrings("# Plan\n", md_content);
+
+    const html_content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, html, std.testing.allocator, std.Io.Limit.limited(1 << 20));
+    defer std.testing.allocator.free(html_content);
+    try std.testing.expectEqualStrings("<h1>Plan</h1>", html_content);
+}
+
+test "save_prd_tool resolves relative plan paths against the working directory" {
+    const prd = "puny-test-relative-plan.md";
+    const html = "puny-test-relative-plan.html";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, prd) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, html) catch {};
+    setSessionPaths(prd, html);
+    defer setSessionPaths("", "");
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const args = try std.json.parseFromSliceLeaky(std.json.Value, arena_state.allocator(), "{\"markdown\":\"md\",\"html\":\"html\"}", .{});
+
+    const result = try save_prd_tool.execute(arena_state.allocator(), std.testing.io, args);
+
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+    const abs_prd = try std.fs.path.join(std.testing.allocator, &.{ cwd, prd });
+    defer std.testing.allocator.free(abs_prd);
+    const abs_html = try std.fs.path.join(std.testing.allocator, &.{ cwd, html });
+    defer std.testing.allocator.free(abs_html);
+    try std.testing.expect(std.mem.indexOf(u8, result, abs_prd) != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, abs_html) != null);
+}
+
+test "save_prd_tool reports missing markdown and html arguments" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const no_md = try std.json.parseFromSliceLeaky(std.json.Value, arena_state.allocator(), "{\"html\":\"<h1>Plan</h1>\"}", .{});
+    try std.testing.expectError(error.MissingMarkdown, save_prd_tool.execute(arena_state.allocator(), std.testing.io, no_md));
+
+    // The markdown file is written before the html argument is validated, so
+    // point the global paths at disposable files.
+    const prd = "puny-test-missing-html.md";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, prd) catch {};
+    setSessionPaths(prd, "puny-test-missing-html.html");
+    defer setSessionPaths("", "");
+
+    const no_html = try std.json.parseFromSliceLeaky(std.json.Value, arena_state.allocator(), "{\"markdown\":\"md\"}", .{});
+    try std.testing.expectError(error.MissingHtml, save_prd_tool.execute(arena_state.allocator(), std.testing.io, no_html));
+}
+
 test "readSessionMetaJson returns defaults for a missing file" {
     const path = "puny-test-meta-missing.json";
     const cwd = std.Io.Dir.cwd();
