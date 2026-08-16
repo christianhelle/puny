@@ -1328,3 +1328,29 @@ test "pruneSessions leaves non-directory entries in the sessions directory" {
     defer std.testing.allocator.free(data);
     try std.testing.expectEqualStrings("keep me", data);
 }
+
+test "listSessions propagates a stat failure for an overlong base dir" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
+    const long = [_]u8{'a'} ** 5000;
+    try std.testing.expectError(error.NameTooLong, listSessions(std.testing.allocator, std.testing.io, long[0..]));
+}
+
+test "listSessions propagates when the sessions path is a file" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try f.createSessionDir(std.testing.io, test_dir);
+
+    // Replace the sessions directory with a regular file: the initial stat
+    // succeeds, the missing index triggers a rebuild, and openDir must fail
+    // with NotDir rather than scanning the file.
+    const sessions_dir = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions" });
+    defer std.testing.allocator.free(sessions_dir);
+    try std.Io.Dir.cwd().deleteTree(std.testing.io, sessions_dir);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = sessions_dir, .data = "not a dir" });
+
+    try std.testing.expectError(error.NotDir, listSessions(std.testing.allocator, std.testing.io, test_dir));
+}
