@@ -245,6 +245,20 @@ test "writeAtomically ignores a missing newer_than reference" {
     try std.testing.expectEqualStrings("payload\n", data);
 }
 
+test "writeAtomically fails when a directory blocks the target path" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-dir-target");
+    defer std.testing.allocator.free(dir);
+
+    const target = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(target);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, target);
+
+    try std.testing.expectError(error.IsDir, writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "payload", .{}));
+}
+
 test "writeAtomically stamps the target newer than a file reference" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
