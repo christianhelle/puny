@@ -180,3 +180,90 @@ test "writeAtomically stamps the target newer than the reference" {
     const out_stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
     try std.testing.expect(out_stat.mtime.nanoseconds >= ref_stat.mtime.nanoseconds);
 }
+
+test "writeAtomically overwrites an existing file" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-overwrite");
+    defer std.testing.allocator.free(dir);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "old", .{});
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "new", .{});
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("new\n", data);
+}
+
+test "writeAtomically appends a newline to empty contents" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-empty");
+    defer std.testing.allocator.free(dir);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "", .{});
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("\n", data);
+}
+
+test "writeAtomically fails when the target directory is missing" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const base = try testDir(std.testing.allocator, &tmp, "atomic-missing-parent");
+    defer std.testing.allocator.free(base);
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ base, "no-such-subdir" });
+    defer std.testing.allocator.free(dir);
+
+    try std.testing.expectError(error.FileNotFound, writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "payload", .{}));
+}
+
+test "writeAtomically ignores a missing newer_than reference" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-missing-ref");
+    defer std.testing.allocator.free(dir);
+
+    const reference = try std.fs.path.join(std.testing.allocator, &.{ dir, "no-such-reference" });
+    defer std.testing.allocator.free(reference);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "payload", .{ .newer_than = reference });
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("payload\n", data);
+}
+
+test "writeAtomically stamps the target newer than a file reference" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-stamp-file");
+    defer std.testing.allocator.free(dir);
+
+    const reference = try std.fs.path.join(std.testing.allocator, &.{ dir, "reference.txt" });
+    defer std.testing.allocator.free(reference);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = reference, .data = "ref" });
+    var ref_file = try std.Io.Dir.cwd().openFile(std.testing.io, reference, .{ .mode = .read_write });
+    defer ref_file.close(std.testing.io);
+    try ref_file.setTimestamps(std.testing.io, .{ .modify_timestamp = .{ .new = std.Io.Timestamp.fromNanoseconds(1_000_000_000_000) } });
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "payload", .{ .newer_than = reference });
+
+    const ref_stat = try std.Io.Dir.cwd().statFile(std.testing.io, reference, .{});
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const out_stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
+    try std.testing.expect(out_stat.mtime.nanoseconds >= ref_stat.mtime.nanoseconds);
+}
