@@ -240,3 +240,102 @@ test "saveSessionMeta persists planning mode and the first prompt" {
     try std.testing.expect(meta.planning_mode);
     try std.testing.expectEqualStrings("hello", meta.first_prompt.?);
 }
+
+test "saveSessionMeta writes a null first prompt when there are no user messages" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try testSessionDir(tmp, "persist-meta-null");
+    defer std.testing.allocator.free(dir);
+
+    var messages_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena.allocator());
+    try messages.append(messages_arena.allocator(), .{ .system = "system" });
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+    var session = core_session.Session{
+        .id = "persist-meta-null",
+        .base = "",
+        .dir = dir,
+        .prd_path = "",
+        .html_path = "",
+    };
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    try saveSessionMeta(&ctx);
+
+    const meta_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "session.json" });
+    defer std.testing.allocator.free(meta_path);
+    const meta = try core_session.readSessionMetaJson(std.testing.io, std.testing.allocator, meta_path);
+    defer if (meta.first_prompt) |p| std.testing.allocator.free(p);
+
+    try std.testing.expect(!meta.planning_mode);
+    try std.testing.expect(meta.first_prompt == null);
+}
+
+test "loadMessagesIntoContext reports a missing conversation" {
+    var messages_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena.allocator());
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+    var session = core_session.Session{
+        .id = "missing",
+        .base = "",
+        .dir = "puny-test-missing-session-dir",
+        .prd_path = "",
+        .html_path = "",
+    };
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    try loadMessagesIntoContext(&ctx, "puny-test-missing-session-dir");
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Session has no saved conversation.") != null);
+    try std.testing.expectEqual(@as(usize, 0), messages.items.len);
+}
+
+test "saveMessages round-trips an empty conversation and cleans up the temp file" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try testSessionDir(tmp, "persist-empty");
+    defer std.testing.allocator.free(dir);
+
+    var messages_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena.allocator());
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+    var session = core_session.Session{
+        .id = "persist-empty",
+        .base = "",
+        .dir = dir,
+        .prd_path = "",
+        .html_path = "",
+    };
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    try saveMessages(&ctx);
+
+    const msg_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "messages.json" });
+    defer std.testing.allocator.free(msg_path);
+    _ = try std.Io.Dir.cwd().statFile(std.testing.io, msg_path, .{});
+
+    const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "messages.json.tmp" });
+    defer std.testing.allocator.free(tmp_path);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, tmp_path, .{}));
+
+    var loaded_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer loaded_arena.deinit();
+    var loaded = std.ArrayList(openai.Message).empty;
+    defer loaded.deinit(loaded_arena.allocator());
+    var load_ctx = testContext(std.testing.io, &session, &loaded_arena, &loaded, &planning_mode, &out.writer);
+    try loadMessagesIntoContext(&load_ctx, dir);
+
+    try std.testing.expectEqual(@as(usize, 0), loaded.items.len);
+}
