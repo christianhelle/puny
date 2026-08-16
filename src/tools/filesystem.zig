@@ -115,3 +115,81 @@ test "writeFile is blocked in planning mode" {
     // The file must not exist.
     try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = path }));
 }
+
+test "listDirectory errors on a missing directory" {
+    const path = "puny-test-fs-no-such-dir";
+    std.Io.Dir.cwd().deleteDir(std.testing.io, path) catch {};
+
+    try std.testing.expectError(error.FileNotFound, listDirectory(std.testing.allocator, std.testing.io, .{ .path = path }));
+}
+
+test "writeFile errors when the parent directory does not exist" {
+    try std.testing.expectError(error.FileNotFound, writeFile(std.testing.allocator, std.testing.io, .{ .path = "puny-test-fs-no-such-dir/child.txt", .content = "x" }));
+}
+
+test "filesystem tool definitions expose their metadata" {
+    try std.testing.expectEqualStrings("read_file", read_file.name);
+    try std.testing.expectEqualStrings("write_file", write_file.name);
+    try std.testing.expectEqualStrings("list_directory", list_directory.name);
+    try std.testing.expect(std.mem.indexOf(u8, read_file.description, "Read") != null);
+    try std.testing.expect(std.mem.indexOf(u8, write_file.description, "Write") != null);
+    try std.testing.expect(std.mem.indexOf(u8, list_directory.description, "List") != null);
+}
+
+test "read_file executes through the tool wrapper" {
+    const path = "puny-test-fs-tool-read.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "tool content" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const args_json = try std.fmt.allocPrint(arena.allocator(), "{{\"path\":\"{s}\"}}", .{path});
+    const parsed = try std.json.parseFromSlice(std.json.Value, arena.allocator(), args_json, .{});
+    defer parsed.deinit();
+
+    const result = try read_file.execute(std.testing.allocator, std.testing.io, parsed.value);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("tool content", result);
+}
+
+test "write_file executes through the tool wrapper" {
+    const path = "puny-test-fs-tool-write.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const args_json = try std.fmt.allocPrint(arena.allocator(), "{{\"path\":\"{s}\",\"content\":\"from tool\"}}", .{path});
+    const parsed = try std.json.parseFromSlice(std.json.Value, arena.allocator(), args_json, .{});
+    defer parsed.deinit();
+
+    const result = try write_file.execute(std.testing.allocator, std.testing.io, parsed.value);
+    try std.testing.expectEqualStrings("File written successfully.", result);
+
+    const content = try readFile(std.testing.allocator, std.testing.io, .{ .path = path });
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("from tool", content);
+}
+
+test "list_directory executes through the tool wrapper" {
+    const path = "puny-test-fs-tool-list.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "x" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSlice(std.json.Value, arena.allocator(), "{\"path\":\".\"}", .{});
+    defer parsed.deinit();
+
+    const result = try list_directory.execute(std.testing.allocator, std.testing.io, parsed.value);
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, path) != null);
+}
+
+test "read_file wrapper rejects params without a path" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSlice(std.json.Value, arena.allocator(), "{}", .{});
+    defer parsed.deinit();
+
+    try std.testing.expectError(error.MissingField, read_file.execute(std.testing.allocator, std.testing.io, parsed.value));
+}
