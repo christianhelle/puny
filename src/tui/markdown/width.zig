@@ -235,3 +235,8 @@ test "ansiVisibleWidth ignores dangling and truncated escapes" {
     try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("\x1b[31m中\x1b[0m"));
     try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("a\x1bb"));
 }
+
+test "ansiVisibleWidth counts invalid UTF-8 bytes as one column each" {
+    try std.testing.expectEqual(@as(usize, 1), ansiVisibleWidth(&.{0xff}));
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth(&.{ 0x80, 0x80 }));
+}

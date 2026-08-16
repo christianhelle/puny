@@ -237,3 +237,38 @@ test "printSummary shows reasoning effort when non-default" {
 
     try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, " - \x1b[1mhigh\x1b[22m"));
 }
+
+test "printSummary omits a default reasoning effort and prints a blank line" {
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try @call(.never_inline, printSummary, .{&out.writer, @as(Info, .{
+        .provider_name = "Test",
+        .provider_url = "http://localhost",
+        .model_key = "m",
+    })});
+
+    const text = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, " - \x1b[1m") == null);
+    try std.testing.expect(std.mem.endsWith(u8, text, "\n\n"));
+}
+
+test "print renders a full banner out of line for coverage" {
+    const allocator = std.testing.allocator;
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    try @call(.never_inline, print, .{&out.writer, @as(Info, .{
+        .provider_name = "Test",
+        .provider_url = "http://localhost",
+        .model_key = "m",
+        .reasoning_effort = .low,
+        .session_id = "sess-1",
+    })});
+
+    const text = out.written();
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Welcome to Puny"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "sess-1"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, " - \x1b[1mlow\x1b[22m"));
+}

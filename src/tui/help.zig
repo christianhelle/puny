@@ -91,3 +91,20 @@ test "printCommand does not pad long command names" {
     try printCommand(&output.writer, "/provider [name] is long", "Desc");
     try std.testing.expectEqualStrings("  \x1b[32m/provider [name] is long\x1b[0m Desc\n", output.written());
 }
+
+test "showHelp renders the full command table when called out of line" {
+    // Forces an out-of-line call so the function body cannot be attributed to
+    // an inlined test instance.
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    try @call(.never_inline, showHelp, .{&output.writer});
+    const text = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, "/quit, /exit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "/plan [task]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "@path") != null);
+    try std.testing.expect(std.mem.endsWith(u8, text, "\n"));
+}

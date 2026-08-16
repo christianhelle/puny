@@ -330,3 +330,63 @@ test "isSeparatorRow detects pipe delimiter rows" {
     try std.testing.expect(!isSeparatorRow("just text"));
     try std.testing.expect(isSeparatorRow("| --- |"));
 }
+
+test "renderTable shrinks column widths to fit a narrow terminal" {
+    const lines = [_][]const u8{
+        "| alpha | beta |",
+        "|-------|------|",
+        "| 1 | 2 |",
+    };
+    const rendered = try renderTable(std.testing.allocator, &lines, 12);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "┌") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "│") != null);
+}
+
+test "renderTable keeps shrinking when proportional shares do not cover the excess" {
+    const wide = "a" ** 100;
+    const lines = [_][]const u8{
+        "| " ++ wide ++ " | bbbb |",
+        "|------|------|",
+        "| 1 | 2 |",
+    };
+    const rendered = try renderTable(std.testing.allocator, &lines, 20);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "┌") != null);
+}
+
+test "renderTable hard-wraps long cells without spaces" {
+    const lines = [_][]const u8{
+        "| abcdefghijk | x |",
+        "|-------------|---|",
+        "| 1 | 2 |",
+    };
+    const rendered = try renderTable(std.testing.allocator, &lines, 12);
+    defer std.testing.allocator.free(rendered);
+    // Top border, four wrapped header rows, separator, one data row, bottom border.
+    try std.testing.expectEqual(@as(usize, 8), std.mem.count(u8, rendered, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "abcdefghij") == null);
+}
+
+test "renderTable breaks long cells at word boundaries" {
+    const lines = [_][]const u8{
+        "| ab cd efgh | x |",
+        "|-------------|---|",
+        "| 1 | 2 |",
+    };
+    const rendered = try renderTable(std.testing.allocator, &lines, 12);
+    defer std.testing.allocator.free(rendered);
+    // Width 3 columns break "ab cd efgh" at spaces into "ab", "cd", then hard
+    // wrap the remainder into "efg" and "h".
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "ab cd") == null);
+    try std.testing.expect(std.mem.count(u8, rendered, "cd") == 1);
+    try std.testing.expect(std.mem.count(u8, rendered, "efg") == 1);
+}
+
+test "renderTable right-aligns cells marked with a right colon" {
+    const lines = [_][]const u8{ "| a | b |", "|---:|---:|", "| 1 | 2 |" };
+    const rendered = try renderTable(std.testing.allocator, &lines, 40);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "  1 │") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "  2 │") != null);
+}

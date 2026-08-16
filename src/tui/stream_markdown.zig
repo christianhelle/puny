@@ -585,3 +585,61 @@ test "stream renderer matches batch render for lone pipe line" {
 test "stream renderer matches batch render for empty content" {
     try expectStreamedEqualsBatch("");
 }
+
+test "stream renderer ignores pushes after finish" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var streamer = StreamRenderer.init(std.testing.allocator, &output.writer, 80);
+    defer streamer.deinit();
+
+    try streamer.push("hello");
+    try streamer.finish();
+    const len_after_finish = output.written().len;
+    try streamer.push("world");
+    try std.testing.expectEqual(len_after_finish, output.written().len);
+}
+
+test "stream renderer matches batch render for a one-column table that cannot open" {
+    try expectStreamedEqualsBatch("| a |\n|---|\nrest\n");
+}
+
+test "stream renderer matches batch render for CRLF line endings" {
+    try expectStreamedEqualsBatch("| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n");
+}
+
+test "stream renderer matches batch render for blank lines" {
+    try expectStreamedEqualsBatch("\n\n\n");
+}
+
+test "stream renderer matches batch render for a table followed by a blank line and text" {
+    try expectStreamedEqualsBatch("| A | B |\n|---|---|\n| 1 | 2 |\n\nplain\n");
+}
+
+test "FakeScreen handles dangling escapes, cursor moves, and erases" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var screen = FakeScreen{};
+    defer screen.deinit(arena);
+
+    try screen.feed(arena, "a\nbc\x1b[1A");
+    try screen.feed(arena, "X");
+    try screen.feed(arena, "\x1b[1B");
+    try screen.feed(arena, "Y\x1b");
+    try screen.feed(arena, "\x1b[");
+    try screen.feed(arena, "\x1b[2K");
+    try screen.feed(arena, "\x1b[1B");
+    try screen.feed(arena, "\x1b[0J");
+    try screen.feed(arena, "\x1b[3;5A");
+
+    const text = try screen.toText(arena);
+    defer arena.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "a") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "bc") != null);
+}

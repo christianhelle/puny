@@ -90,3 +90,21 @@ test "printTokenFooter renders session total in k notation" {
     try printTokenFooter(&out.writer, 140, 120, false, 12400);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "session 12.4k") != null);
 }
+
+test "printTokenFooter renders large turns in k notation" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try @call(.never_inline, printTokenFooter, .{&out.writer, 10000, 23000, false, 90000});
+    const text = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, "in 10.0k") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "out 23.0k") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "total 33.0k") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "session 90.0k") != null);
+}
+
+test "formatTokens handles single digit and negative inputs" {
+    var buf: [24]u8 = undefined;
+    try std.testing.expectEqualStrings("1", formatTokens(&buf, 1));
+    try std.testing.expectEqualStrings("1", formatTokens(&buf, -1));
+    try std.testing.expectEqualStrings("9999", formatTokens(&buf, -9999));
+}

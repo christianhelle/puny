@@ -49,6 +49,12 @@ test "buildMention preserves an empty path" {
     try std.testing.expectEqualStrings("@", out);
 }
 
+test "buildMention prefixes a path when called out of line" {
+    const out = try @call(.never_inline, buildMention, .{std.testing.allocator, "docs/api.md"});
+    defer std.testing.allocator.free(out);
+    try std.testing.expectEqualStrings("@docs/api.md", out);
+}
+
 test "isTrigger true at start of line or after whitespace" {
     try std.testing.expect(isTrigger(""));
     try std.testing.expect(isTrigger("hello "));

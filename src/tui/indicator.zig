@@ -174,3 +174,18 @@ test "finish reports sub-10ms thinking as a rounded message" {
     try indicator.finish(std.testing.io, &output.writer, 0, false, false, .done, 0.001);
     try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for <0.01s\x1b[0m\n", output.written());
 }
+
+test "finish rewrites the indicator line when called out of line" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try @call(.never_inline, ThinkingIndicator.finish, .{&indicator, std.testing.io, &output.writer, 2, true, true, .done, 0.5});
+    try std.testing.expectEqualStrings(
+        "\x1b[2A\x1b[G\x1b[K\x1b[2B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        output.written(),
+    );
+}

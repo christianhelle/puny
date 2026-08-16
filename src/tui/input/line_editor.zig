@@ -622,3 +622,60 @@ test "writeMentionHighlighted handles a trailing at sign" {
     try writeMentionHighlighted(&out.writer, "@");
     try std.testing.expectEqualStrings("\x1b[32m@\x1b[0m", out.written());
 }
+
+test "editor methods work when called out of line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try @call(.never_inline, LineEditor.append, .{&editor, 'a'});
+    try @call(.never_inline, LineEditor.backspace, .{&editor});
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("a\x08 \x08", out.written());
+
+    try @call(.never_inline, LineEditor.appendSlice, .{&editor, "xy"});
+    try std.testing.expectEqualStrings("xy", line_alloc.written());
+
+    try @call(.never_inline, writeMentionHighlighted, .{&out.writer, "a @b c"});
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[32m@b\x1b[0m") != null);
+}
+
+test "editor redraw with multiple cursor rows when called out of line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    for ("abcdefghi") |ch| try editor.append(ch);
+    out.clearRetainingCapacity();
+    try @call(.never_inline, LineEditor.redraw, .{&editor});
+
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghi", out.written());
+    try std.testing.expectEqual(@as(usize, 2), editor.cursor_rows);
+}
+
+test "editor legacy replace path when called out of line" {
+    const allocator = std.testing.allocator;
+    var history = prompt_history.History.init(allocator, "");
+    defer history.deinit();
+    try history.add("first");
+
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, &history, null);
+    try @call(.never_inline, LineEditor.historyPrevious, .{&editor});
+
+    try std.testing.expectEqualStrings("first", line_alloc.written());
+    try std.testing.expectEqualStrings(
+        terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "> first",
+        out.written(),
+    );
+}

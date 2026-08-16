@@ -62,3 +62,12 @@ test "parseEffort trims whitespace and rejects invalid levels" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), parseEffort("ultra"));
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), parseEffort(""));
 }
+
+test "pickEffort maps every pickable label back to its enum value" {
+    // Mirrors the item list built by pickEffort without touching stdin.
+    const labels = [_]openai.ReasoningEffort{ .default, .none, .minimal, .low, .medium, .high, .xhigh };
+    for (labels) |effort| {
+        const tag = @tagName(effort);
+        try std.testing.expectEqual(effort, std.meta.stringToEnum(openai.ReasoningEffort, tag).?);
+    }
+}

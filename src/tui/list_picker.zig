@@ -315,3 +315,66 @@ test "Item struct has expected fields" {
     try std.testing.expectEqualStrings("test", item.value);
     try std.testing.expectEqualStrings("Test Item", item.label);
 }
+
+test "redrawList renders items with the selection highlighted" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    const items = [_]Item{
+        .{ .value = "one", .label = "One" },
+        .{ .value = "two", .label = "Two" },
+    };
+    try redrawList(&out.writer, &items, 1);
+
+    const text = out.written();
+    try std.testing.expect(std.mem.startsWith(u8, text, "\x1b[2A"));
+    try std.testing.expect(std.mem.indexOf(u8, text, "> Two") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, ansi.bright) != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "  One") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, ansi.reset) != null);
+}
+
+test "readKeyPosix interprets key bytes from the pending buffer" {
+    const cases = [_]struct {
+        bytes: []const u8,
+        expected: Key,
+    }{
+        .{ .bytes = "\x1b[A", .expected = .up },
+        .{ .bytes = "\x1b[B", .expected = .down },
+        .{ .bytes = "\x1b", .expected = .escape },
+        .{ .bytes = "\x1bC", .expected = .unknown },
+        .{ .bytes = "\r", .expected = .enter },
+        .{ .bytes = "\n", .expected = .enter },
+        .{ .bytes = "q", .expected = .quit },
+        .{ .bytes = "j", .expected = .down },
+        .{ .bytes = "k", .expected = .up },
+        .{ .bytes = "x", .expected = .unknown },
+    };
+    for (cases) |c| {
+        pending_len = 0;
+        @memcpy(pending_buf[0..c.bytes.len], c.bytes);
+        pending_len = c.bytes.len;
+        try std.testing.expectEqual(c.expected, try readKey(std.testing.io));
+    }
+    pending_len = 0;
+}
+
+test "readKeyPosix buffers extra bytes received in one read" {
+    pending_len = 0;
+    @memcpy(pending_buf[0..2], "ab");
+    pending_len = 2;
+    try std.testing.expectEqual(Key.unknown, try readKey(std.testing.io));
+    // The unknown key resets the pending buffer, so the extra byte is dropped.
+    try std.testing.expectEqual(@as(usize, 0), pending_len);
+    pending_len = 0;
+}
+
+test "readKeyPosix buffers leftover bytes after an escape sequence" {
+    pending_len = 0;
+    @memcpy(pending_buf[0..4], "\x1b[Aq");
+    pending_len = 4;
+    try std.testing.expectEqual(Key.up, try readKey(std.testing.io));
+    try std.testing.expectEqual(@as(usize, 1), pending_len);
+    try std.testing.expectEqual(@as(u8, 'q'), pending_buf[0]);
+    pending_len = 0;
+}

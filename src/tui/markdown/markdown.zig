@@ -475,3 +475,50 @@ test "render handles mixed text and table content" {
     try std.testing.expect(std.mem.indexOf(u8, result, "Here is some text") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "More text here") != null);
 }
+
+test "Markdown renders a pipe pair without a separator row as paragraphs" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "| a | b |\n| c | d |");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "┌") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "| a | b |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "| c | d |") != null);
+}
+
+test "Markdown handles heading edge cases" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "#\n####### seven\n###### six");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "six") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "seven") != null);
+}
+
+test "Markdown render with CRLF line endings" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "- item\r\nplain\r\n");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "\u{2022}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "item") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "plain") != null);
+}
+
+test "Markdown render of empty input yields a newline" {
+    var md = Markdown.init();
+    const result = try md.render(std.testing.allocator, "");
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("\n", result);
+}
+
+test "renderLine treats unmatched inline markers as plain text" {
+    const rl = try renderLine(std.testing.allocator, "**unclosed", false);
+    defer if (rl.output) |o| std.testing.allocator.free(o);
+    try std.testing.expectEqual(RenderKind.text, rl.kind);
+    try std.testing.expectEqualStrings("**unclosed\n", rl.output.?);
+}
+
+test "renderLine opens a code fence without a language label" {
+    const rl = try renderLine(std.testing.allocator, "```", false);
+    defer if (rl.output) |o| std.testing.allocator.free(o);
+    try std.testing.expectEqual(RenderKind.code_fence_open, rl.kind);
+    try std.testing.expect(std.mem.indexOf(u8, rl.output.?, "code block:") != null);
+}

@@ -571,3 +571,145 @@ test "cleanup erases the picker and returns to the input row" {
     try cleanup(&out.writer, 3);
     try std.testing.expectEqualStrings("\x1b[3A\x1b[J\x1b[1A\r", out.written());
 }
+
+test "render shows the type-to-filter hint for an empty query" {
+    const files = [_][]const u8{ "a.zig", "b.zig" };
+    const match_indices = [_]usize{ 0, 1 };
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var drawn: usize = 0;
+    try render(&out.writer, "", &files, &match_indices, 0, 0, &drawn);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "type to filter files") != null);
+    try std.testing.expectEqual(@as(usize, 3), drawn);
+}
+
+test "render shows the match count for a non-empty query" {
+    const files = [_][]const u8{ "a.zig", "b.zig" };
+    const match_indices = [_]usize{ 1 };
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var drawn: usize = 0;
+    try render(&out.writer, "b", &files, &match_indices, 0, 0, &drawn);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "1 match(es)") != null);
+    try std.testing.expectEqual(@as(usize, 2), drawn);
+}
+
+test "render reports two rows when nothing matches" {
+    const files = [_][]const u8{ "a.zig", "b.zig" };
+    const match_indices = [_]usize{};
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var drawn: usize = 0;
+    try render(&out.writer, "zzz", &files, &match_indices, 0, 0, &drawn);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "no matches") != null);
+    try std.testing.expectEqual(@as(usize, 2), drawn);
+}
+
+test "render highlights the selected row" {
+    const files = [_][]const u8{ "a.zig", "b.zig" };
+    const match_indices = [_]usize{ 0, 1 };
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var drawn: usize = 0;
+    try render(&out.writer, "", &files, &match_indices, 1, 0, &drawn);
+    const text = out.written();
+    const highlight = std.mem.indexOf(u8, text, ansi.bright) orelse return error.TestFailed;
+    const row_start = std.mem.indexOf(u8, text, "> b.zig") orelse return error.TestFailed;
+    try std.testing.expect(highlight < row_start);
+    try std.testing.expect(std.mem.indexOf(u8, text, "  a.zig") != null);
+}
+
+test "render with an offset scrolls the visible window" {
+    var files = std.ArrayList([]const u8).empty;
+    defer files.deinit(std.testing.allocator);
+    var indices = std.ArrayList(usize).empty;
+    defer indices.deinit(std.testing.allocator);
+    var names = std.ArrayList([]const u8).empty;
+    defer {
+        for (names.items) |n| std.testing.allocator.free(n);
+        names.deinit(std.testing.allocator);
+    }
+    for (0..25) |i| {
+        const name = try std.fmt.allocPrint(std.testing.allocator, "file{d:0>2}.zig", .{i});
+        try names.append(std.testing.allocator, name);
+        try files.append(std.testing.allocator, name);
+        try indices.append(std.testing.allocator, i);
+    }
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var drawn: usize = 3;
+    try render(&out.writer, "", files.items, indices.items, 5, 5, &drawn);
+    const text = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, "file05.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "file24.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "file00.zig") == null);
+    try std.testing.expectEqual(@as(usize, 21), drawn);
+}
+
+test "scrollOffset keeps the selection inside the visible window" {
+    try std.testing.expectEqual(@as(usize, 5), scrollOffset(5, 5));
+    try std.testing.expectEqual(@as(usize, 3), scrollOffset(3, 5));
+    try std.testing.expectEqual(@as(usize, 6), scrollOffset(25, 5));
+}
+
+test "KeyReader interprets plain keys from the pending buffer" {
+    var reader = KeyReader{};
+    const cases = [_]struct { byte: u8, expected: std.meta.Tag(Key) }{
+        .{ .byte = 'x', .expected = .char },
+        .{ .byte = 0x08, .expected = .backspace },
+        .{ .byte = 0x7f, .expected = .backspace },
+        .{ .byte = 0x03, .expected = .escape },
+        .{ .byte = 0x04, .expected = .escape },
+        .{ .byte = '\r', .expected = .enter },
+        .{ .byte = '\n', .expected = .enter },
+        .{ .byte = 0x01, .expected = .unknown },
+    };
+    for (cases) |c| {
+        reader.pending_len = 0;
+        reader.pending[0] = c.byte;
+        reader.pending_len = 1;
+        const key = try reader.read(std.testing.io);
+        try std.testing.expectEqual(c.expected, std.meta.activeTag(key));
+        if (c.expected == .char) {
+            try std.testing.expectEqual(c.byte, key.char);
+        }
+    }
+}
+
+test "KeyReader interprets escape sequences from the pending buffer" {
+    var reader = KeyReader{};
+    const cases = [_]struct { bytes: []const u8, expected: Key }{
+        .{ .bytes = "\x1b[A", .expected = .up },
+        .{ .bytes = "\x1b[B", .expected = .down },
+        .{ .bytes = "\x1b", .expected = .escape },
+        .{ .bytes = "\x1b[", .expected = .unknown },
+        .{ .bytes = "\x1bX", .expected = .escape },
+        .{ .bytes = "\x1b[C", .expected = .unknown },
+    };
+    for (cases) |c| {
+        reader.pending_len = 0;
+        @memcpy(reader.pending[0..c.bytes.len], c.bytes);
+        reader.pending_len = c.bytes.len;
+        try std.testing.expectEqual(c.expected, try reader.read(std.testing.io));
+    }
+    reader.pending_len = 0;
+}
+
+test "KeyReader buffers extra bytes received in one read" {
+    var reader = KeyReader{};
+    reader.pending[0] = 'a';
+    reader.pending[1] = 'b';
+    reader.pending_len = 2;
+
+    const key = try reader.read(std.testing.io);
+    try std.testing.expectEqual(.char, std.meta.activeTag(key));
+    try std.testing.expectEqual(@as(u8, 'a'), key.char);
+    try std.testing.expectEqual(@as(usize, 1), reader.pending_len);
+    try std.testing.expectEqual(@as(u8, 'b'), reader.pending[0]);
+}
