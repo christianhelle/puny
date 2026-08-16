@@ -348,3 +348,29 @@ test "ensureCopilotAuth skips when the github token is already set" {
     try ensureCopilotAuth(allocator, std.testing.io, undefined, undefined, undefined, &prov);
     try std.testing.expectEqualStrings("gho_present", prov.copilot.github_token);
 }
+
+test "ensureCopilotAuth discovers a github token from the environment" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("GITHUB_COPILOT_OAUTH_TOKEN", "gho_discovered");
+
+    const init = std.process.Init{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    var prov = provider.Provider{ .copilot = copilot.Client.init(allocator, std.testing.io, "") };
+    defer prov.deinit();
+
+    var cfg = config.Config{};
+    try ensureCopilotAuth(allocator, std.testing.io, init, &cfg, undefined, &prov);
+    try std.testing.expectEqualStrings("gho_discovered", prov.copilot.github_token);
+}

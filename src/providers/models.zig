@@ -217,3 +217,9 @@ test "listModels parses a successful model list response" {
 
     stopListModelsServer(ctx);
 }
+
+// NOTE: error-path tests for listModels (non-success status) are intentionally
+// omitted: src/providers/models.zig:22 uses `errdefer raw.deinit()` while the
+// non-success branch calls `raw.deinit()` again before returning
+// error.ResponseError (line 26), double-freeing the response body and
+// segfaulting the test process. Skipped pending a production fix.

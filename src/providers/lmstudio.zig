@@ -1284,6 +1284,87 @@ test "ChatRequestIntegrationsItem parses string plugin and ephemeral variants" {
     }
 }
 
+test "ChatRequestIntegrationsItem jsonStringify round-trips every variant" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const items = [_]ChatRequestIntegrationsItem{
+        .{ .string = "mcp" },
+        .{ .plugin_integration = .{ .id = "i1", .type = "plugin" } },
+        .{ .ephemeral_mcp_integration = .{ .server_url = "u", .type = "mcp", .server_label = "l" } },
+        .{ .raw = try parseValue(allocator, "{\"custom\":true}") },
+    };
+
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    try std.json.Stringify.value(&items, .{}, &buf.writer);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, buf.written(), .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 4), parsed.value.array.items.len);
+    try std.testing.expectEqualStrings("mcp", parsed.value.array.items[0].string);
+    try std.testing.expectEqualStrings("i1", parsed.value.array.items[1].object.get("id").?.string);
+    try std.testing.expectEqualStrings("u", parsed.value.array.items[2].object.get("server_url").?.string);
+    try std.testing.expectEqual(true, parsed.value.array.items[3].object.get("custom").?.bool);
+}
+
+const FailingReader = struct {
+    reader: std.Io.Reader,
+
+    fn init() FailingReader {
+        return .{
+            .reader = .{
+                .buffer = &.{},
+                .seek = 0,
+                .end = 0,
+                .vtable = &.{
+                    .stream = stream,
+                    .discard = discard,
+                    .readVec = readVec,
+                    .rebase = rebase,
+                },
+            },
+        };
+    }
+
+    fn rebase(ctx: *std.Io.Reader, capacity: usize) std.Io.Reader.Error!void {
+        _ = ctx;
+        _ = capacity;
+    }
+
+    fn stream(ctx: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+        _ = ctx;
+        _ = w;
+        _ = limit;
+        return error.ReadFailed;
+    }
+
+    fn discard(ctx: *std.Io.Reader, limit: std.Io.Limit) std.Io.Reader.Error!usize {
+        _ = ctx;
+        _ = limit;
+        return error.ReadFailed;
+    }
+
+    fn readVec(ctx: *std.Io.Reader, data: [][]u8) std.Io.Reader.Error!usize {
+        _ = ctx;
+        _ = data;
+        return error.ReadFailed;
+    }
+};
+
+test "parseSseReader propagates read failures" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events };
+
+    var failing = FailingReader.init();
+    try std.testing.expectError(error.ReadFailed, parseSseReader(allocator, &failing.reader, &recorder, null));
+}
+
 test "LoadModelResponseLoadConfig prefers llm config and falls back to raw" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();

@@ -1199,3 +1199,105 @@ test "AnthropicSseCallback maps an empty stop reason and missing usage" {
     try std.testing.expectEqual(@as(i64, 0), events.items[1].usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 0), events.items[1].usage.output_tokens);
 }
+
+const AnthropicGarbageServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        _ = http_server.receiveHead() catch return;
+        writer.interface.writeAll("definitely-not-an-http-response\r\n\r\n") catch return;
+    }
+};
+
+fn startAnthropicGarbageServer() !*AnthropicGarbageServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(AnthropicGarbageServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server };
+    ctx.thread = try std.Thread.spawn(.{}, AnthropicGarbageServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopAnthropicGarbageServer(ctx: *AnthropicGarbageServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+test "chatStreamingAnthropic reports response head failures to the http observer" {
+    const ctx = try startAnthropicGarbageServer();
+    defer stopAnthropicGarbageServer(ctx);
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+
+    const ObserverCtx = struct {
+        errors: usize = 0,
+        fn onError(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = http_client.HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = http_client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.http_observer = observer;
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    if (chatStreamingAnthropic(&c, request, undefined)) |_| {
+        return error.ExpectedHeadFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
+
+test "chatStreamingAnthropic returns Canceled when the stream is cancelled" {
+    const body =
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startModelsServer(.ok, body);
+    defer stopModelsServer(ctx);
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+
+    var c = http_client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.setCancelled();
+    defer cancel.reset();
+    try std.testing.expectError(error.Canceled, chatStreamingAnthropic(&c, request, undefined));
+}

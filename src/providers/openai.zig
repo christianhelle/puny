@@ -830,3 +830,106 @@ test "chatStreaming returns ResponseError on a non-success status" {
     try std.testing.expectError(error.ResponseError, chatStreaming(&c, request, recorder.callback()));
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
 }
+
+const GarbageResponseServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        _ = http_server.receiveHead() catch return;
+        writer.interface.writeAll("definitely-not-an-http-response\r\n\r\n") catch return;
+    }
+};
+
+fn startGarbageResponseServer() !*GarbageResponseServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(GarbageResponseServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server };
+    ctx.thread = try std.Thread.spawn(.{}, GarbageResponseServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopGarbageResponseServer(ctx: *GarbageResponseServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+test "chatStreaming reports response head failures to the http observer" {
+    const ctx = try startGarbageResponseServer();
+    defer stopGarbageResponseServer(ctx);
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+
+    const ObserverCtx = struct {
+        errors: usize = 0,
+        fn onError(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = client.HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.http_observer = observer;
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    if (chatStreaming(&c, request, undefined)) |_| {
+        return error.ExpectedHeadFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
+
+test "chatStreaming returns Canceled when the stream is cancelled" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startChatServer(.ok, body);
+    defer stopChatServer(ctx);
+
+    const url = try chatServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.setCancelled();
+    defer cancel.reset();
+    try std.testing.expectError(error.Canceled, chatStreaming(&c, request, undefined));
+}
