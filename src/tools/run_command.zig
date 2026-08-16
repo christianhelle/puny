@@ -363,3 +363,49 @@ pub fn runCommandTimed(
     thread.join();
     return transferred;
 }
+
+fn selfKillArgv() []const []const u8 {
+    return if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "exit 1" }
+    else
+        &.{ "sh", "-c", "kill -9 $$" };
+}
+
+test "runCommand reports Terminated for a signal-killed child" {
+    const argv = selfKillArgv();
+    const output = try runCommand(std.testing.allocator, std.testing.io, argv, null);
+    defer std.testing.allocator.free(output);
+    if (@import("builtin").os.tag == .windows) {
+        try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 1") != null);
+    } else {
+        try std.testing.expect(std.mem.indexOf(u8, output, "Terminated") != null);
+    }
+}
+
+test "runCommandTimed reports Terminated for a signal-killed child" {
+    const argv = selfKillArgv();
+    const output = try runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s);
+    defer std.testing.allocator.free(output);
+    if (@import("builtin").os.tag == .windows) {
+        try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 1") != null);
+    } else {
+        try std.testing.expect(std.mem.indexOf(u8, output, "Terminated") != null);
+    }
+}
+
+test "runCommandTimed runs the command in the given working directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "marker.txt", .data = "cwd-marker" });
+
+    const cwd = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(cwd);
+
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "type marker.txt" }
+    else
+        &.{ "cat", "marker.txt" };
+    const output = try runCommandTimed(std.testing.allocator, std.testing.io, argv, cwd, 30 * std.time.ns_per_s);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "cwd-marker") != null);
+}
