@@ -61,3 +61,21 @@ test "trigger sets the triggered flag" {
     try std.testing.expect(isTriggered());
     triggered = false;
 }
+
+test "register installs a SIGINT handler that sets the flag" {
+    if (comptime builtin.os.tag == .linux) {
+        triggered = false;
+        defer triggered = false;
+
+        var previous: std.posix.Sigaction = undefined;
+        std.posix.sigaction(.INT, null, &previous);
+        defer std.posix.sigaction(.INT, &previous, null);
+
+        try register();
+        try std.testing.expect(!isTriggered());
+        try std.posix.raise(.INT);
+        try std.testing.expect(isTriggered());
+    } else {
+        return error.SkipZigTest;
+    }
+}
