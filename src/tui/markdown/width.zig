@@ -205,3 +205,33 @@ test "ansiVisibleWidth counts table borders and styling separately" {
     const styled = "┌───┐\x1b[0m";
     try std.testing.expectEqual(@as(usize, 5), ansiVisibleWidth(styled));
 }
+
+test "codePointWidth classifies zero-width and wide code points" {
+    try std.testing.expectEqual(@as(usize, 0), codePointWidth(0x0301)); // combining acute
+    try std.testing.expectEqual(@as(usize, 0), codePointWidth(0x200D)); // ZWJ
+    try std.testing.expectEqual(@as(usize, 0), codePointWidth(0xFEFF)); // BOM
+    try std.testing.expectEqual(@as(usize, 2), codePointWidth(0x4E2D)); // CJK
+    try std.testing.expectEqual(@as(usize, 2), codePointWidth(0x1F600)); // emoji
+    try std.testing.expectEqual(@as(usize, 2), codePointWidth(0xFF01)); // fullwidth
+    try std.testing.expectEqual(@as(usize, 1), codePointWidth('a'));
+    try std.testing.expectEqual(@as(usize, 1), codePointWidth(0x00E9)); // é
+}
+
+test "displayWidth treats combining marks as zero-width" {
+    try std.testing.expectEqual(@as(usize, 1), displayWidth("e\u{301}"));
+    try std.testing.expectEqual(@as(usize, 2), displayWidth("a\u{200D}b"));
+}
+
+test "displayWidth counts invalid UTF-8 bytes as one column each" {
+    try std.testing.expectEqual(@as(usize, 1), displayWidth(&.{0xff}));
+    try std.testing.expectEqual(@as(usize, 2), displayWidth(&.{ 0x80, 0x80 }));
+}
+
+test "ansiVisibleWidth ignores dangling and truncated escapes" {
+    try std.testing.expectEqual(@as(usize, 0), ansiVisibleWidth("\x1b"));
+    try std.testing.expectEqual(@as(usize, 0), ansiVisibleWidth("\x1b["));
+    try std.testing.expectEqual(@as(usize, 0), ansiVisibleWidth("\x1b[31"));
+    try std.testing.expectEqual(@as(usize, 1), ansiVisibleWidth("\x1bX"));
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("\x1b[31m中\x1b[0m"));
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("a\x1bb"));
+}
