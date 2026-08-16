@@ -13,3 +13,11 @@ test "include run_command slow tests" {
 test "include chat_retry slow tests" {
     _ = @import("chat_retry_tests.zig");
 }
+
+test "include shell_timeout slow tests" {
+    _ = @import("shell_timeout_tests.zig");
+}
+
+test "include models/select slow tests" {
+    _ = @import("models/select_tests.zig");
+}
