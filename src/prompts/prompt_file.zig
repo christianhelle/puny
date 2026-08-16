@@ -495,3 +495,213 @@ test "load times out on a server that never responds" {
         },
     }
 }
+
+test "load reports an error for a directory path" {
+    const outcome = load(std.testing.allocator, std.testing.io, ".");
+    switch (outcome) {
+        .ok => |content| {
+            defer std.testing.allocator.free(content);
+            return error.UnexpectedSuccess;
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "Failed to read prompt file"));
+        },
+    }
+}
+
+test "loadRemote reports an HTTP error status" {
+    const Ctx = struct {
+        io: std.Io,
+        server: std.Io.net.Server,
+        body: []const u8,
+        status: std.http.Status = .ok,
+        done: std.atomic.Value(bool) = .init(false),
+
+        fn serve(self: *@This()) void {
+            defer self.done.store(true, .release);
+            var stream = self.server.accept(self.io) catch return;
+            defer stream.close(self.io);
+
+            var in_buf: [4096]u8 = undefined;
+            var out_buf: [4096]u8 = undefined;
+            var reader = stream.reader(self.io, &in_buf);
+            var writer = stream.writer(self.io, &out_buf);
+
+            var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+            var req = http_server.receiveHead() catch return;
+            req.respond(self.body, .{ .status = self.status }) catch return;
+        }
+    };
+
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch |err| {
+        std.debug.print("listen failed: {s}\n", .{@errorName(err)});
+        return error.ListenFailed;
+    };
+    const port = server.socket.address.getPort();
+
+    var ctx = Ctx{ .io = std.testing.io, .server = server, .body = "not found", .status = .not_found };
+    const thread = try std.Thread.spawn(.{}, Ctx.serve, .{&ctx});
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/missing.md", .{port});
+    defer std.testing.allocator.free(url);
+
+    const outcome = load(std.testing.allocator, std.testing.io, url);
+
+    var guard: usize = 0;
+    while (!ctx.done.load(.acquire) and guard < 10_000_000) : (guard += 1) {
+        std.Thread.yield() catch {};
+    }
+    thread.join();
+    ctx.server.deinit(std.testing.io);
+
+    switch (outcome) {
+        .ok => |content| {
+            defer std.testing.allocator.free(content);
+            return error.UnexpectedSuccess;
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "404"));
+        },
+    }
+}
+
+test "loadRemote reports when the response exceeds the byte limit" {
+    const Ctx = struct {
+        io: std.Io,
+        server: std.Io.net.Server,
+        body: []const u8,
+        done: std.atomic.Value(bool) = .init(false),
+
+        fn serve(self: *@This()) void {
+            defer self.done.store(true, .release);
+            var stream = self.server.accept(self.io) catch return;
+            defer stream.close(self.io);
+
+            var in_buf: [4096]u8 = undefined;
+            var out_buf: [4096]u8 = undefined;
+            var reader = stream.reader(self.io, &in_buf);
+            var writer = stream.writer(self.io, &out_buf);
+
+            var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+            var req = http_server.receiveHead() catch return;
+            req.respond(self.body, .{}) catch return;
+        }
+    };
+
+    const big = try std.testing.allocator.alloc(u8, 2000);
+    defer std.testing.allocator.free(big);
+    @memset(big, 'x');
+
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch |err| {
+        std.debug.print("listen failed: {s}\n", .{@errorName(err)});
+        return error.ListenFailed;
+    };
+    const port = server.socket.address.getPort();
+
+    var ctx = Ctx{ .io = std.testing.io, .server = server, .body = big };
+    const thread = try std.Thread.spawn(.{}, Ctx.serve, .{&ctx});
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/big.md", .{port});
+    defer std.testing.allocator.free(url);
+
+    const outcome = loadRemote(std.testing.allocator, std.testing.io, url, 10, remote_timeout_ns);
+
+    var guard: usize = 0;
+    while (!ctx.done.load(.acquire) and guard < 10_000_000) : (guard += 1) {
+        std.Thread.yield() catch {};
+    }
+    thread.join();
+    ctx.server.deinit(std.testing.io);
+
+    switch (outcome) {
+        .ok => |content| {
+            defer std.testing.allocator.free(content);
+            return error.UnexpectedSuccess;
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "Response exceeds 10 byte limit"));
+        },
+    }
+}
+
+test "loadRemote reports a connection failure" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch |err| {
+        std.debug.print("listen failed: {s}\n", .{@errorName(err)});
+        return error.ListenFailed;
+    };
+    const port = server.socket.address.getPort();
+    server.deinit(std.testing.io);
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/closed.md", .{port});
+    defer std.testing.allocator.free(url);
+
+    const outcome = loadRemote(std.testing.allocator, std.testing.io, url, max_prompt_bytes, remote_timeout_ns);
+    switch (outcome) {
+        .ok => |content| {
+            defer std.testing.allocator.free(content);
+            return error.UnexpectedSuccess;
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            try std.testing.expect(std.mem.containsAtLeast(u8, e.message, 1, "Request failed"));
+        },
+    }
+}
+
+test "transferBody trims and copies the worker body" {
+    const outcome = transferBody(std.testing.allocator, "  hello\n");
+    switch (outcome) {
+        .ok => |content| {
+            defer std.testing.allocator.free(content);
+            try std.testing.expectEqualStrings("hello", content);
+        },
+        .err => |e| {
+            defer if (e.owned) std.testing.allocator.free(e.message);
+            return error.UnexpectedFailure;
+        },
+    }
+}
+
+test "transferBody falls back to a static error under allocation failure" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    const outcome = transferBody(failing.allocator(), "x");
+    switch (outcome) {
+        .ok => return error.UnexpectedSuccess,
+        .err => |e| {
+            try std.testing.expectEqualStrings("Out of memory", e.message);
+            try std.testing.expect(!e.owned);
+        },
+    }
+}
+
+test "transferErr copies the worker error message" {
+    const err = transferErr(std.testing.allocator, .{ .message = "boom", .owned = true });
+    defer std.testing.allocator.free(err.message);
+    try std.testing.expect(err.owned);
+    try std.testing.expectEqualStrings("boom", err.message);
+}
+
+test "dupeOr duplicates text or falls back to a static string" {
+    const owned = dupeOr(std.testing.allocator, "text");
+    defer std.testing.allocator.free(owned.message);
+    try std.testing.expect(owned.owned);
+    try std.testing.expectEqualStrings("text", owned.message);
+
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    const fallback = dupeOr(failing.allocator(), "static");
+    try std.testing.expect(!fallback.owned);
+    try std.testing.expectEqualStrings("static", fallback.message);
+}
+
+test "isHttpUrl rejects bare scheme URLs" {
+    try std.testing.expect(!isHttpUrl("http://"));
+    try std.testing.expect(!isHttpUrl("https://"));
+    try std.testing.expect(isHttpUrl("https://example.com"));
+    try std.testing.expect(isHttpUrl("https://example.com/"));
+}
