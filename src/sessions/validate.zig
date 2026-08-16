@@ -68,3 +68,38 @@ test "isValidSessionId rejects empty, dot, and path components" {
     try std.testing.expect(!isValidSessionId("a\\b"));
     try std.testing.expect(!isValidSessionId("../etc"));
 }
+
+test "truncateFirstPrompt returns a prompt ending exactly at the limit unchanged" {
+    const arena = std.testing.allocator;
+    const prompt = try std.fmt.allocPrint(arena, "{s}", .{"c" ** first_prompt_limit});
+    defer arena.free(prompt);
+    const out = try truncateFirstPrompt(arena, prompt);
+    defer arena.free(out);
+    try std.testing.expectEqual(@as(usize, first_prompt_limit), out.len);
+    try std.testing.expectEqualStrings(prompt, out);
+}
+
+test "truncateFirstPrompt returns an empty prompt unchanged" {
+    const arena = std.testing.allocator;
+    const out = try truncateFirstPrompt(arena, "");
+    defer arena.free(out);
+    try std.testing.expectEqualStrings("", out);
+}
+
+test "truncateFirstPrompt keeps a multi-byte code point ending exactly at the limit" {
+    const arena = std.testing.allocator;
+    const prompt = try std.fmt.allocPrint(arena, "{s}\xE2\x82\xAC", .{"d" ** (first_prompt_limit - 3)});
+    defer arena.free(prompt);
+    const out = try truncateFirstPrompt(arena, prompt);
+    defer arena.free(out);
+    try std.testing.expectEqual(@as(usize, first_prompt_limit), out.len);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(out));
+}
+
+test "isValidSessionId accepts dot-prefixed, unicode, and single-character ids" {
+    try std.testing.expect(isValidSessionId(".hidden"));
+    try std.testing.expect(isValidSessionId("..x"));
+    try std.testing.expect(isValidSessionId("x"));
+    try std.testing.expect(isValidSessionId("sessión"));
+    try std.testing.expect(isValidSessionId("session:with:colons"));
+}
