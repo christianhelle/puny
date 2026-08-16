@@ -664,6 +664,62 @@ test "parseSseBytes respects the cancellation token" {
     try std.testing.expectError(error.Cancelled, parseSseBytes(allocator, "data: x\n\n", &recorder, &token));
 }
 
+const FailingSseReader = struct {
+    reader: std.Io.Reader,
+
+    fn init() FailingSseReader {
+        return .{
+            .reader = .{
+                .buffer = &.{},
+                .seek = 0,
+                .end = 0,
+                .vtable = &.{
+                    .stream = stream,
+                    .discard = discard,
+                    .readVec = readVec,
+                    .rebase = rebase,
+                },
+            },
+        };
+    }
+
+    fn rebase(ctx: *std.Io.Reader, capacity: usize) std.Io.Reader.Error!void {
+        _ = ctx;
+        _ = capacity;
+    }
+
+    fn stream(ctx: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+        _ = ctx;
+        _ = w;
+        _ = limit;
+        return error.ReadFailed;
+    }
+
+    fn discard(ctx: *std.Io.Reader, limit: std.Io.Limit) std.Io.Reader.Error!usize {
+        _ = ctx;
+        _ = limit;
+        return error.ReadFailed;
+    }
+
+    fn readVec(ctx: *std.Io.Reader, data: [][]u8) std.Io.Reader.Error!usize {
+        _ = ctx;
+        _ = data;
+        return error.ReadFailed;
+    }
+};
+
+test "parseSseReader propagates read failures" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events };
+
+    var failing = FailingSseReader.init();
+    try std.testing.expectError(error.ReadFailed, parseSseReader(allocator, &failing.reader, &recorder, null));
+}
+
 const TypedChunk = struct {
     value: []const u8,
 };
@@ -962,6 +1018,68 @@ test "requestRaw reports connection errors to the http observer" {
     if (requestRaw(&c, .GET, url, null)) |_| {
         return error.ExpectedConnectionFailure;
     } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
+}
+
+test "requestRaw invokes every observer callback on connection errors" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+    server.deinit(std.testing.io);
+
+    const ObserverCtx = struct {
+        requests: usize = 0,
+        responses: usize = 0,
+        errors: usize = 0,
+
+        fn onRequest(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = headers;
+            _ = body;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.requests += 1;
+        }
+
+        fn onResponse(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, status: std.http.Status, headers: []const std.http.Header, body: []const u8, duration_ns: u64) void {
+            _ = method;
+            _ = request_url;
+            _ = status;
+            _ = headers;
+            _ = body;
+            _ = duration_ns;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.responses += 1;
+        }
+
+        fn onError(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, err_name: []const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = err_name;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            self.errors += 1;
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    const observer = HttpObserver{
+        .ctx = &observer_ctx,
+        .onRequest = ObserverCtx.onRequest,
+        .onResponse = ObserverCtx.onResponse,
+        .onError = ObserverCtx.onError,
+    };
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+    c.withBaseUrl(url);
+    c.http_observer = observer;
+
+    if (requestRaw(&c, .GET, url, null)) |_| {
+        return error.ExpectedConnectionFailure;
+    } else |_| {}
+    try std.testing.expectEqual(@as(usize, 1), observer_ctx.requests);
+    try std.testing.expectEqual(@as(usize, 0), observer_ctx.responses);
     try std.testing.expectEqual(@as(usize, 1), observer_ctx.errors);
 }
 
