@@ -34,6 +34,16 @@ test "modeWithAnsi is idempotent" {
     try std.testing.expectEqual(once, modeWithAnsi(once));
 }
 
+test "modeWithAnsi leaves unrelated bits untouched" {
+    const existing: u32 = 0xABC8;
+    try std.testing.expectEqual(existing | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING, modeWithAnsi(existing));
+}
+
+test "ANSI mode constants match the Windows console flags" {
+    try std.testing.expectEqual(@as(u32, 0x0001), ENABLE_PROCESSED_OUTPUT);
+    try std.testing.expectEqual(@as(u32, 0x0004), ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+}
+
 test "enableAnsi is safe to call on any platform" {
     // Calling enableAnsi() on Windows would mutate the test process console
     // mode and is not restored; the Windows code path is still validated at
