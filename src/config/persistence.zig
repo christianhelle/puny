@@ -729,3 +729,79 @@ test "save round-trips an empty API key" {
     try std.testing.expectEqualStrings("", loaded.config.providerEntryConst(.lmstudio).apiKey.?);
     try std.testing.expect(loaded.config.providerEntryConst(.lmstudio).stored_plaintext == null);
 }
+
+test "decryptStoredApiKeys warns once and nulls keys for multiple undecryptable providers" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x31} ** secrets.key_length;
+    const blob_a = try secrets.encrypt(std.testing.allocator, key, random, "sk-live-a");
+    defer std.testing.allocator.free(blob_a);
+    const blob_b = try secrets.encrypt(std.testing.allocator, key, random, "sk-live-b");
+    defer std.testing.allocator.free(blob_b);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = blob_a;
+    cfg.providerEntry(.opencode_zen).apiKey = blob_b;
+
+    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+
+    try std.testing.expect(cfg.providerEntryConst(.lmstudio).apiKey == null);
+    try std.testing.expectEqualStrings(blob_a, cfg.providerEntryConst(.lmstudio).stored_blob.?);
+    try std.testing.expect(cfg.providerEntryConst(.opencode_zen).apiKey == null);
+    try std.testing.expectEqualStrings(blob_b, cfg.providerEntryConst(.opencode_zen).stored_blob.?);
+}
+
+test "decryptStoredApiKeys warns when the key file cannot be read" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x47} ** secrets.key_length;
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-unreadable-key-file");
+    defer std.testing.allocator.free(blob);
+
+    // A directory at the key file path makes loadKey fail with error.IsDir,
+    // which is neither FileNotFound nor MalformedKeyFile.
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().createDir(std.testing.io, key_path, .default_dir);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = blob;
+
+    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+
+    try std.testing.expect(cfg.providerEntryConst(.lmstudio).apiKey == null);
+    try std.testing.expectEqualStrings(blob, cfg.providerEntryConst(.lmstudio).stored_blob.?);
+}
+
+test "save propagates a key file read failure" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    // A directory at the key file path makes loadKey fail with error.IsDir,
+    // which save must propagate rather than treat as a missing key file.
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().createDir(std.testing.io, key_path, .default_dir);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = "sk-live-encrypt-me";
+
+    try std.testing.expectError(error.IsDir, save(std.testing.allocator, std.testing.io, cfg, &fixture.env));
+}
