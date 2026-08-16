@@ -380,6 +380,47 @@ test "generic rendering covers empty objects, strings and numbers" {
     try expectRendered("custom_tool", "{\"a\":1,\"b\":\"two\",\"c\":true}", "Calling \"custom_tool\" with a=1, b=\"two\", c=true");
 }
 
+test "invalid arguments are escaped when summarized" {
+    // The control character makes the JSON invalid, so the fallback summary
+    // path escapes every special byte: quotes, backslashes, newlines, tabs,
+    // carriage returns, control bytes and multi-byte UTF-8.
+    try expectRendered(
+        "read_file",
+        "{\"a\":\"x\x01y\"} \"q\" \\ \n\t\r ü",
+        "Calling \"read_file\" (invalid arguments: \"{\\\"a\\\":\\\"x\\u0001y\\\"} \\\"q\\\" \\\\ \\n\\t\\r ü\")",
+    );
+}
+
+test "appendCapped truncates long non-string JSON values" {
+    // A JSON array of 120 numbers stringifies to several hundred display
+    // characters, far beyond max_value_length, so appendCapped must cut it
+    // off with an ellipsis.
+    var arguments_buffer: [1024]u8 = undefined;
+    var written: usize = 0;
+    const prefix = "{\"items\":[";
+    @memcpy(arguments_buffer[0..prefix.len], prefix);
+    written += prefix.len;
+    var i: usize = 1;
+    while (i <= 120) : (i += 1) {
+        const chunk = try std.fmt.bufPrint(arguments_buffer[written..], "{d}{s}", .{ i, if (i < 120) ", " else "" });
+        written += chunk.len;
+    }
+    arguments_buffer[written] = ']';
+    written += 1;
+    arguments_buffer[written] = '}';
+    written += 1;
+
+    const rendered = try renderToolCall(
+        std.testing.allocator,
+        makeToolCall("custom_tool", arguments_buffer[0..written]),
+    );
+    defer std.testing.allocator.free(rendered);
+
+    try std.testing.expect(std.mem.startsWith(u8, rendered, "Calling \"custom_tool\" with items=[1,2,3"));
+    try std.testing.expect(std.mem.endsWith(u8, rendered, "..."));
+    try std.testing.expect(rendered.len < 200);
+}
+
 test "lineCount counts non-empty content" {
     try std.testing.expectEqual(@as(usize, 0), lineCount(""));
     try std.testing.expectEqual(@as(usize, 1), lineCount("one"));
