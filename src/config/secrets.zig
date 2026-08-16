@@ -492,3 +492,68 @@ test "ensureKeyFile stages the key and never leaves the final path on a staging 
     // The final key file must not exist after the failed staged write.
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, path, .{}));
 }
+
+test "isEncrypted requires at least nonce plus tag bytes after the prefix" {
+    var buf: [1024]u8 = undefined;
+
+    const raw = [_]u8{0x41} ** (nonce_length + tag_length);
+    const encoded = std.base64.standard.Encoder.encode(&buf, &raw);
+    const full = try std.fmt.allocPrint(std.testing.allocator, "enc:v1:{s}", .{encoded});
+    defer std.testing.allocator.free(full);
+    try std.testing.expect(isEncrypted(full));
+
+    // Valid base64, but the decoded bytes are shorter than nonce + tag.
+    const short_raw = [_]u8{0x42} ** 4;
+    const short_encoded = std.base64.standard.Encoder.encode(&buf, &short_raw);
+    const short = try std.fmt.allocPrint(std.testing.allocator, "enc:v1:{s}", .{short_encoded});
+    defer std.testing.allocator.free(short);
+    try std.testing.expect(!isEncrypted(short));
+}
+
+test "encrypt and decrypt round-trip an empty plaintext" {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x51} ** key_length;
+
+    const blob = try encrypt(std.testing.allocator, key, random, "");
+    defer std.testing.allocator.free(blob);
+    try std.testing.expect(isEncrypted(blob));
+
+    const decrypted = try decrypt(std.testing.allocator, key, blob);
+    defer std.testing.allocator.free(decrypted);
+    try std.testing.expectEqualStrings("", decrypted);
+}
+
+test "encrypt produces distinct blobs for the same plaintext" {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x66} ** key_length;
+
+    const a = try encrypt(std.testing.allocator, key, random, "same-plaintext");
+    defer std.testing.allocator.free(a);
+    const b = try encrypt(std.testing.allocator, key, random, "same-plaintext");
+    defer std.testing.allocator.free(b);
+    try std.testing.expect(!std.mem.eql(u8, a, b));
+
+    const plain_a = try decrypt(std.testing.allocator, key, a);
+    defer std.testing.allocator.free(plain_a);
+    const plain_b = try decrypt(std.testing.allocator, key, b);
+    defer std.testing.allocator.free(plain_b);
+    try std.testing.expectEqualStrings("same-plaintext", plain_a);
+    try std.testing.expectEqualStrings("same-plaintext", plain_b);
+}
+
+test "loadKey rejects a 64-byte key file at the read limit" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const path = try keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x42} ** 64) });
+
+    try std.testing.expectError(error.MalformedKeyFile, loadKey(std.testing.allocator, std.testing.io, &fixture.env));
+}
