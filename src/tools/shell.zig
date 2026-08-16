@@ -51,3 +51,40 @@ test "execute_shell captures stderr" {
     try std.testing.expect(std.mem.indexOf(u8, output, "problem") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "STDERR:") != null);
 }
+
+test "execute_shell reports the exit code when there is no output" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = "true" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDOUT") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STDERR") == null);
+}
+
+test "execute_shell honors a generous model-supplied timeout" {
+    const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = "echo quick", .timeout_seconds = 60 });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "quick") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+}
+
+test "execute_shell runs the command in the given working directory" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    const dir_name = "puny-test-shell-workdir";
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(std.testing.io, dir_name);
+    defer cwd.deleteDir(std.testing.io, dir_name) catch {};
+
+    const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = "pwd", .working_directory = dir_name });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, dir_name));
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+}
+
+test "execute_shell propagates errors for a missing working directory" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    try std.testing.expectError(
+        error.FileNotFound,
+        executeShell(std.testing.allocator, std.testing.io, .{ .command = "echo x", .working_directory = "puny-test-shell-missing-dir" }),
+    );
+}
