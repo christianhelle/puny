@@ -105,3 +105,54 @@ pub const PeakTrackingAllocator = struct {
         self.backing.rawFree(memory, alignment, ret_addr);
     }
 };
+
+test "PeakTrackingAllocator accounts live and peak bytes" {
+    var tracking = PeakTrackingAllocator{ .backing = std.testing.allocator };
+    const alloc = tracking.allocator();
+
+    const small = try alloc.alloc(u8, 100);
+    defer alloc.free(small);
+    try std.testing.expectEqual(@as(usize, 100), tracking.live);
+    try std.testing.expectEqual(@as(usize, 100), tracking.peak);
+
+    const big = try alloc.alloc(u8, 300);
+    try std.testing.expectEqual(@as(usize, 400), tracking.live);
+    try std.testing.expectEqual(@as(usize, 400), tracking.peak);
+    alloc.free(big);
+
+    try std.testing.expectEqual(@as(usize, 100), tracking.live);
+    try std.testing.expectEqual(@as(usize, 400), tracking.peak);
+}
+
+test "PeakTrackingAllocator accounts resizes" {
+    var tracking = PeakTrackingAllocator{ .backing = std.testing.allocator };
+    const alloc = tracking.allocator();
+
+    var buf = try alloc.alloc(u8, 8);
+    try std.testing.expectEqual(@as(usize, 8), tracking.live);
+
+    buf = try alloc.realloc(buf, 32);
+    try std.testing.expectEqual(@as(usize, 32), tracking.live);
+
+    buf = try alloc.realloc(buf, 16);
+    try std.testing.expectEqual(@as(usize, 16), tracking.live);
+
+    alloc.free(buf);
+    try std.testing.expectEqual(@as(usize, 0), tracking.live);
+}
+
+test "createTestSessionDirFull writes the conversation meta file" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io, "fixtures-meta");
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    try createTestSessionDirFull(std.testing.io, test_dir, "meta-1", true, true);
+
+    const meta_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, "sessions", "meta-1", "session.json" });
+    defer std.testing.allocator.free(meta_path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, meta_path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("{\"planning_mode\":false,\"first_prompt\":\"hello\"}", data);
+}
