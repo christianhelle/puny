@@ -394,3 +394,306 @@ test "save re-encrypts keys when the typed value changes" {
     try std.testing.expect(secrets.isEncrypted(parsed.value.providerEntryConst(.lmstudio).apiKey.?));
     try std.testing.expect(!std.mem.eql(u8, parsed.value.providerEntryConst(.lmstudio).apiKey.?, "sk-live-new-secret"));
 }
+
+fn writeConfigFile(fixture: anytype, content: []const u8) !void {
+    const path = try configPath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = content });
+}
+
+fn readConfigFile(fixture: anytype) !std.json.Parsed(schema.Config) {
+    const path = try configPath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1 << 20));
+    defer std.testing.allocator.free(data);
+    return try std.json.parseFromSlice(schema.Config, std.testing.allocator, data, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+}
+
+/// Wraps a single provider JSON object into a config with all four provider
+/// slots filled, matching the shape save() writes.
+fn configJsonWithLmstudio(allocator: std.mem.Allocator, lmstudio_json: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "{{\"providers\":[{s},{{\"name\":\"opencode_zen\"}},{{\"name\":\"opencode_go\"}},{{\"name\":\"copilot\"}}]}}", .{lmstudio_json});
+}
+
+test "load returns defaults when the config file does not exist" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    try std.testing.expect(!loaded.file_existed);
+    try std.testing.expect(!loaded.had_error);
+    try std.testing.expectEqual(.lmstudio, loaded.config.provider);
+}
+
+test "load falls back to defaults when the config file is malformed" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    try writeConfigFile(&fixture, "not json {{{");
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.file_existed);
+    try std.testing.expect(loaded.had_error);
+    try std.testing.expectEqual(.lmstudio, loaded.config.provider);
+}
+
+test "load treats a config with invalid UTF-8 bytes as a parse failure" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    // The JSON parser rejects invalid UTF-8 before the model check can run.
+    try writeConfigFile(&fixture, "{\"provider\":\"lmstudio\",\"providers\":[{\"name\":\"lmstudio\",\"model\":\"\xff\"}]}");
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.file_existed);
+    try std.testing.expect(loaded.had_error);
+    try std.testing.expectEqual(.lmstudio, loaded.config.provider);
+}
+
+test "load marks legacy plaintext API keys as stored_plaintext" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const json = try configJsonWithLmstudio(std.testing.allocator, "{\"name\":\"lmstudio\",\"apiKey\":\"sk-legacy-plain\",\"url\":\"http://127.0.0.1:1234\",\"model\":\"\"}");
+    defer std.testing.allocator.free(json);
+    try writeConfigFile(&fixture, json);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    const entry = loaded.config.providerEntryConst(.lmstudio);
+    try std.testing.expectEqualStrings("sk-legacy-plain", entry.apiKey.?);
+    try std.testing.expectEqualStrings("sk-legacy-plain", entry.stored_plaintext.?);
+    try std.testing.expect(entry.stored_blob == null);
+}
+
+test "load decrypts an encrypted API key via the key file" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const key = [_]u8{0x12} ** secrets.key_length;
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = key_path, .data = &key });
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-live-secret");
+    defer std.testing.allocator.free(blob);
+
+    const lmstudio_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"name\":\"lmstudio\",\"apiKey\":\"{s}\",\"url\":\"http://127.0.0.1:1234\",\"model\":\"\"}}", .{blob});
+    defer std.testing.allocator.free(lmstudio_json);
+    const json = try configJsonWithLmstudio(std.testing.allocator, lmstudio_json);
+    defer std.testing.allocator.free(json);
+    try writeConfigFile(&fixture, json);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    const entry = loaded.config.providerEntryConst(.lmstudio);
+    try std.testing.expectEqualStrings("sk-live-secret", entry.apiKey.?);
+    try std.testing.expectEqualStrings(blob, entry.stored_blob.?);
+    try std.testing.expectEqualStrings("sk-live-secret", entry.stored_plaintext.?);
+}
+
+test "load keeps an encrypted blob when the key file is missing" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x21} ** secrets.key_length;
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-undecryptable");
+    defer std.testing.allocator.free(blob);
+
+    const lmstudio_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"name\":\"lmstudio\",\"apiKey\":\"{s}\",\"url\":\"http://127.0.0.1:1234\",\"model\":\"\"}}", .{blob});
+    defer std.testing.allocator.free(lmstudio_json);
+    const json = try configJsonWithLmstudio(std.testing.allocator, lmstudio_json);
+    defer std.testing.allocator.free(json);
+    try writeConfigFile(&fixture, json);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    const entry = loaded.config.providerEntryConst(.lmstudio);
+    try std.testing.expect(entry.apiKey == null);
+    try std.testing.expectEqualStrings(blob, entry.stored_blob.?);
+    try std.testing.expect(entry.stored_plaintext == null);
+}
+
+test "load clears an API key it cannot decrypt" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const wrong_key = [_]u8{0x33} ** secrets.key_length;
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = key_path, .data = &wrong_key });
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const real_key = [_]u8{0x44} ** secrets.key_length;
+    const blob = try secrets.encrypt(std.testing.allocator, real_key, random, "sk-mismatched");
+    defer std.testing.allocator.free(blob);
+
+    const lmstudio_json = try std.fmt.allocPrint(std.testing.allocator, "{{\"name\":\"lmstudio\",\"apiKey\":\"{s}\",\"url\":\"http://127.0.0.1:1234\",\"model\":\"\"}}", .{blob});
+    defer std.testing.allocator.free(lmstudio_json);
+    const json = try configJsonWithLmstudio(std.testing.allocator, lmstudio_json);
+    defer std.testing.allocator.free(json);
+    try writeConfigFile(&fixture, json);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    const entry = loaded.config.providerEntryConst(.lmstudio);
+    try std.testing.expect(entry.apiKey == null);
+    try std.testing.expectEqualStrings(blob, entry.stored_blob.?);
+}
+
+test "save writes an already-encrypted API key verbatim" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x55} ** secrets.key_length;
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-live-secret");
+    defer std.testing.allocator.free(blob);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = blob;
+
+    try save(std.testing.allocator, std.testing.io, cfg, &fixture.env);
+
+    const written = try readConfigFile(&fixture);
+    defer written.deinit();
+    try std.testing.expectEqualStrings(blob, written.value.providerEntryConst(.lmstudio).apiKey.?);
+}
+
+test "save preserves an undecryptable stored blob when apiKey is null" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const key = [_]u8{0x61} ** secrets.key_length;
+    const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-retained");
+    defer std.testing.allocator.free(blob);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = null;
+    cfg.providerEntry(.lmstudio).stored_blob = blob;
+
+    try save(std.testing.allocator, std.testing.io, cfg, &fixture.env);
+
+    const written = try readConfigFile(&fixture);
+    defer written.deinit();
+    try std.testing.expectEqualStrings(blob, written.value.providerEntryConst(.lmstudio).apiKey.?);
+}
+
+test "save does not persist new keys when the key file is malformed" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
+    defer std.testing.allocator.free(key_path);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = key_path, .data = "too-short" });
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = "sk-live-new-secret";
+
+    try save(std.testing.allocator, std.testing.io, cfg, &fixture.env);
+
+    const written = try readConfigFile(&fixture);
+    defer written.deinit();
+    try std.testing.expect(written.value.providerEntryConst(.lmstudio).apiKey == null);
+}
+
+test "save re-encrypts an unchanged key when another provider forces a missing key file" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    const old_key = [_]u8{0x71} ** secrets.key_length;
+    const blob = try secrets.encrypt(std.testing.allocator, old_key, random, "sk-lm-unchanged");
+    defer std.testing.allocator.free(blob);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = "sk-lm-unchanged";
+    cfg.providerEntry(.lmstudio).stored_blob = blob;
+    cfg.providerEntry(.lmstudio).stored_plaintext = "sk-lm-unchanged";
+    cfg.providerEntry(.opencode_zen).apiKey = "sk-zen-new";
+
+    try save(std.testing.allocator, std.testing.io, cfg, &fixture.env);
+
+    const written = try readConfigFile(&fixture);
+    defer written.deinit();
+    const lm = written.value.providerEntryConst(.lmstudio).apiKey.?;
+    const zen = written.value.providerEntryConst(.opencode_zen).apiKey.?;
+    try std.testing.expect(secrets.isEncrypted(lm));
+    try std.testing.expect(secrets.isEncrypted(zen));
+
+    // Both keys are decryptable with the key file created by save.
+    const loaded_key = (try secrets.loadKey(std.testing.allocator, std.testing.io, &fixture.env)).?;
+    const lm_plain = try secrets.decrypt(std.testing.allocator, loaded_key, lm);
+    defer std.testing.allocator.free(lm_plain);
+    const zen_plain = try secrets.decrypt(std.testing.allocator, loaded_key, zen);
+    defer std.testing.allocator.free(zen_plain);
+    try std.testing.expectEqualStrings("sk-lm-unchanged", lm_plain);
+    try std.testing.expectEqualStrings("sk-zen-new", zen_plain);
+}
+
+test "save round-trips an empty API key" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var fixture = try tempHomeEnv();
+    defer fixture.tmp.cleanup();
+    defer fixture.env.deinit();
+    defer std.testing.allocator.free(fixture.home);
+
+    var cfg = schema.Config.default();
+    cfg.providerEntry(.lmstudio).apiKey = "";
+
+    try save(std.testing.allocator, std.testing.io, cfg, &fixture.env);
+
+    var loaded = try load(std.testing.allocator, std.testing.io, &fixture.env);
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("", loaded.config.providerEntryConst(.lmstudio).apiKey.?);
+    try std.testing.expect(loaded.config.providerEntryConst(.lmstudio).stored_plaintext == null);
+}
