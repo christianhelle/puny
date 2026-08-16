@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.3.4](https://github.com/christianhelle/puny/releases/tag/v0.3.4) (2026-08-16)
 
 ### Features
 - Fix regression test warning output ([#152](https://github.com/christianhelle/puny/pull/152)) ([@christianhelle](https://github.com/christianhelle/))
