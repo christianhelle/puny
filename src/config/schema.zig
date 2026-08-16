@@ -246,3 +246,191 @@ pub const LoadResult = struct {
         }
     }
 };
+
+test "isValidUtf8 accepts empty and multibyte strings" {
+    try std.testing.expect(isValidUtf8(""));
+    try std.testing.expect(isValidUtf8("héllo wörld"));
+    try std.testing.expect(isValidUtf8("emoji: \xf0\x9f\x98\x80"));
+}
+
+test "isValidUtf8 rejects truncated and overlong sequences" {
+    try std.testing.expect(!isValidUtf8(&.{ 0xE2, 0x82 }));
+    try std.testing.expect(!isValidUtf8(&.{ 0xC0, 0x80 }));
+    try std.testing.expect(!isValidUtf8(&.{ 0xF0, 0x9F, 0x98 }));
+}
+
+test "PromptOverride clone is a deep copy of every field" {
+    const allocator = std.testing.allocator;
+    const original = PromptOverride{ .prefix = "pre", .suffix = "suf", .override = "over" };
+
+    var cloned = try original.clone(allocator);
+    defer cloned.deinit(allocator);
+    try std.testing.expectEqualStrings("pre", cloned.prefix);
+    try std.testing.expectEqualStrings("suf", cloned.suffix);
+    try std.testing.expectEqualStrings("over", cloned.override.?);
+    try std.testing.expect(cloned.prefix.ptr != original.prefix.ptr);
+    try std.testing.expect(cloned.override.?.ptr != original.override.?.ptr);
+}
+
+test "PromptOverride clone handles a null override" {
+    const allocator = std.testing.allocator;
+    const original = PromptOverride{ .prefix = "", .suffix = "", .override = null };
+
+    var cloned = try original.clone(allocator);
+    defer cloned.deinit(allocator);
+    try std.testing.expect(cloned.override == null);
+    try std.testing.expectEqualStrings("", cloned.prefix);
+}
+
+test "PromptsConfig clone deep-copies both entries" {
+    const allocator = std.testing.allocator;
+    const original = PromptsConfig{
+        .system = .{ .prefix = "sys-pre" },
+        .planning = .{ .override = "plan-over" },
+    };
+
+    var cloned = try original.clone(allocator);
+    defer cloned.deinit(allocator);
+    try std.testing.expectEqualStrings("sys-pre", cloned.system.prefix);
+    try std.testing.expectEqualStrings("plan-over", cloned.planning.override.?);
+}
+
+test "Provider clone deep-copies all fields" {
+    const allocator = std.testing.allocator;
+    const original = Provider{
+        .name = .opencode_zen,
+        .apiKey = "key-1",
+        .url = "https://example.com",
+        .model = "gpt-4o",
+        .reasoning_effort = "high",
+        .stored_blob = "enc:v1:blob",
+        .stored_plaintext = "key-1",
+    };
+
+    var cloned = try original.clone(allocator);
+    defer cloned.deinit(allocator);
+    try std.testing.expectEqual(.opencode_zen, cloned.name);
+    try std.testing.expectEqualStrings("key-1", cloned.apiKey.?);
+    try std.testing.expectEqualStrings("https://example.com", cloned.url);
+    try std.testing.expectEqualStrings("gpt-4o", cloned.model);
+    try std.testing.expectEqualStrings("high", cloned.reasoning_effort.?);
+    try std.testing.expectEqualStrings("enc:v1:blob", cloned.stored_blob.?);
+    try std.testing.expectEqualStrings("key-1", cloned.stored_plaintext.?);
+}
+
+test "Provider clone handles null optional fields" {
+    const allocator = std.testing.allocator;
+    const original = Provider{ .name = .copilot, .apiKey = null, .url = "", .model = "" };
+
+    var cloned = try original.clone(allocator);
+    defer cloned.deinit(allocator);
+    try std.testing.expect(cloned.apiKey == null);
+    try std.testing.expect(cloned.reasoning_effort == null);
+    try std.testing.expect(cloned.stored_blob == null);
+    try std.testing.expect(cloned.stored_plaintext == null);
+    try std.testing.expectEqualStrings("", cloned.url);
+}
+
+test "validatePersistedStrings accepts valid strings" {
+    const v = Provider{ .name = .lmstudio, .apiKey = "k", .url = "u", .model = "m", .reasoning_effort = "r" };
+    try v.validatePersistedStrings();
+}
+
+test "validatePersistedStrings rejects invalid UTF-8 in required and optional fields" {
+    const bad_model = Provider{ .name = .lmstudio, .apiKey = null, .url = "ok", .model = &[_]u8{0xff} };
+    try std.testing.expectError(error.InvalidUtf8, bad_model.validatePersistedStrings());
+
+    const bad_url = Provider{ .name = .lmstudio, .apiKey = null, .url = &[_]u8{0xfe}, .model = "" };
+    try std.testing.expectError(error.InvalidUtf8, bad_url.validatePersistedStrings());
+
+    const bad_key = Provider{ .name = .lmstudio, .apiKey = &[_]u8{0x80}, .url = "ok", .model = "" };
+    try std.testing.expectError(error.InvalidUtf8, bad_key.validatePersistedStrings());
+
+    const bad_effort = Provider{ .name = .lmstudio, .apiKey = null, .url = "ok", .model = "", .reasoning_effort = &[_]u8{0x81} };
+    try std.testing.expectError(error.InvalidUtf8, bad_effort.validatePersistedStrings());
+}
+
+test "jsonStringify fails on invalid UTF-8 instead of writing bad bytes" {
+    const v = Provider{ .name = .lmstudio, .apiKey = null, .url = "ok", .model = &[_]u8{0xff} };
+
+    var writer: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer writer.deinit();
+    try std.testing.expectError(error.WriteFailed, std.json.Stringify.value(v, .{}, &writer.writer));
+}
+
+test "Provider jsonParse applies defaults for missing fields" {
+    const allocator = std.testing.allocator;
+    const json = "{\"name\":\"opencode_go\"}";
+
+    const parsed = try std.json.parseFromSlice(Provider, allocator, json, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(.opencode_go, parsed.value.name);
+    // The url default is the lmstudio base url regardless of the parsed name.
+    try std.testing.expectEqualStrings(default_lm_studio_url, parsed.value.url);
+    try std.testing.expectEqualStrings("", parsed.value.model);
+    try std.testing.expect(parsed.value.apiKey == null);
+}
+
+test "Provider jsonParse reads all persisted fields" {
+    const allocator = std.testing.allocator;
+    const json = "{\"name\":\"copilot\",\"apiKey\":null,\"url\":\"https://api.example.com\",\"model\":\"gpt-5\",\"reasoning_effort\":\"low\"}";
+
+    const parsed = try std.json.parseFromSlice(Provider, allocator, json, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(.copilot, parsed.value.name);
+    try std.testing.expect(parsed.value.apiKey == null);
+    try std.testing.expectEqualStrings("https://api.example.com", parsed.value.url);
+    try std.testing.expectEqualStrings("gpt-5", parsed.value.model);
+    try std.testing.expectEqualStrings("low", parsed.value.reasoning_effort.?);
+}
+
+test "Provider jsonParseFromValue rejects non-object roots" {
+    const value: std.json.Value = .{ .string = "not an object" };
+    try std.testing.expectError(error.UnexpectedToken, Provider.jsonParseFromValue(std.testing.allocator, value, .{}));
+}
+
+test "Config clone is a deep copy independent of the original" {
+    const allocator = std.testing.allocator;
+    var src = Config.default();
+    src.provider = .copilot;
+    src.providerEntry(.copilot).apiKey = "sk-key";
+    src.providerEntry(.copilot).model = "claude";
+    src.prompts.system.prefix = "pre";
+    src.prompts.planning.override = "ov";
+
+    var cloned = try src.clone(allocator);
+    defer cloned.deinit(allocator);
+
+    try std.testing.expectEqual(.copilot, cloned.provider);
+    try std.testing.expectEqualStrings("sk-key", cloned.providerEntryConst(.copilot).apiKey.?);
+    try std.testing.expectEqualStrings("claude", cloned.providerEntryConst(.copilot).model);
+    try std.testing.expectEqualStrings("pre", cloned.prompts.system.prefix);
+    try std.testing.expectEqualStrings("ov", cloned.prompts.planning.override.?);
+
+    try std.testing.expect(cloned.providerEntryConst(.copilot).apiKey.?.ptr != src.providerEntryConst(.copilot).apiKey.?.ptr);
+    try std.testing.expect(cloned.providerEntryConst(.copilot).model.ptr != src.providerEntryConst(.copilot).model.ptr);
+}
+
+test "resolvePrompt returns the default when there is no decoration" {
+    const allocator = std.testing.allocator;
+    const cfg = Config.default();
+
+    const result = try cfg.resolvePrompt(allocator, "planning", "default-prompt");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("default-prompt", result);
+}
+
+test "LoadResult deinit is a no-op without an arena" {
+    var result = LoadResult{ .config = Config.default() };
+    result.deinit();
+    var with_error = LoadResult{ .config = Config.default(), .had_error = true, .file_existed = true };
+    with_error.deinit();
+}
