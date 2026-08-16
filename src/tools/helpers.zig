@@ -381,3 +381,116 @@ test "httpGet returns an empty string for an empty response body" {
 
     waitForHttpGetTestServer(&ctx, thread, &server);
 }
+
+const HttpDownloadTestCtx = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    body: []const u8,
+    status: std.http.Status = .ok,
+    done: std.atomic.Value(bool) = .init(false),
+
+    fn serve(self: *@This()) void {
+        defer self.done.store(true, .release);
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+};
+
+fn withDownloadServer(dir: std.Io.Dir, body: []const u8, status: std.http.Status, f: anytype) !void {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch |err| {
+        std.debug.print("listen failed: {s}\n", .{@errorName(err)});
+        return error.ListenFailed;
+    };
+    var ctx = HttpDownloadTestCtx{ .io = std.testing.io, .server = server, .body = body, .status = status };
+    const thread = try std.Thread.spawn(.{}, HttpDownloadTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/download", .{port});
+    defer std.testing.allocator.free(url);
+
+    errdefer server.deinit(std.testing.io);
+    try f(url, dir);
+
+    var guard: usize = 0;
+    while (!ctx.done.load(.acquire) and guard < 100_000_000) : (guard += 1) {
+        std.Thread.yield() catch {};
+    }
+    thread.join();
+    server.deinit(std.testing.io);
+}
+
+test "httpDownloadFile downloads the body to the destination" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try withDownloadServer(tmp.dir, "downloaded payload", .ok, struct {
+        fn call(url: []const u8, dir: std.Io.Dir) !void {
+            try httpDownloadFile(std.testing.allocator, std.testing.io, url, dir, "dl.bin");
+            const data = try dir.readFileAlloc(std.testing.io, "dl.bin", std.testing.allocator, std.Io.Limit.limited(1024));
+            defer std.testing.allocator.free(data);
+            try std.testing.expectEqualStrings("downloaded payload", data);
+        }
+    }.call);
+}
+
+test "httpDownloadFile fails and cleans up on an HTTP error status" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try withDownloadServer(tmp.dir, "not found", .not_found, struct {
+        fn call(url: []const u8, dir: std.Io.Dir) !void {
+            try std.testing.expectError(error.HttpNotOk, httpDownloadFile(std.testing.allocator, std.testing.io, url, dir, "dl.bin"));
+            try std.testing.expectError(error.FileNotFound, dir.statFile(std.testing.io, "dl.bin", .{}));
+        }
+    }.call);
+}
+
+test "httpDownloadFile rejects an empty download" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try withDownloadServer(tmp.dir, "", .ok, struct {
+        fn call(url: []const u8, dir: std.Io.Dir) !void {
+            try std.testing.expectError(error.TruncatedDownload, httpDownloadFile(std.testing.allocator, std.testing.io, url, dir, "dl.bin"));
+            try std.testing.expectError(error.FileNotFound, dir.statFile(std.testing.io, "dl.bin", .{}));
+        }
+    }.call);
+}
+
+test "httpGetTimed returns the body from a local server" {
+    var server = try listenForHttpGetTest(std.testing.io);
+    var ctx = HttpGetTestCtx{ .io = std.testing.io, .server = server, .body = "timed body" };
+    const thread = try std.Thread.spawn(.{}, HttpGetTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/timed", .{port});
+    defer std.testing.allocator.free(url);
+
+    const body = try httpGetTimed(std.testing.allocator, std.testing.io, url, 5 * std.time.ns_per_s);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualStrings("timed body", body);
+
+    waitForHttpGetTestServer(&ctx, thread, &server);
+}
+
+test "listDirectory returns an empty string for an empty directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(path);
+
+    const listing = try listDirectory(std.testing.allocator, std.testing.io, path);
+    defer std.testing.allocator.free(listing);
+    try std.testing.expectEqualStrings("", listing);
+}
