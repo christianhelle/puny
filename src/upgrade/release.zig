@@ -70,3 +70,31 @@ test "latestTagFromRelease rejects a non-object payload" {
     defer parsed.deinit();
     try std.testing.expectError(error.InvalidReleaseResponse, latestTagFromRelease(parsed.value));
 }
+
+test "latestTagFromRelease rejects a non-string tag_name" {
+    var parsed = try parseTestRelease(std.testing.allocator, "{ \"tag_name\": 42 }");
+    defer parsed.deinit();
+    try std.testing.expectError(error.InvalidReleaseTag, latestTagFromRelease(parsed.value));
+}
+
+test "latestTagFromRelease rejects a null tag_name" {
+    var parsed = try parseTestRelease(std.testing.allocator, "{ \"tag_name\": null }");
+    defer parsed.deinit();
+    try std.testing.expectError(error.InvalidReleaseTag, latestTagFromRelease(parsed.value));
+}
+
+test "latestTagFromRelease accepts an empty tag" {
+    var parsed = try parseTestRelease(std.testing.allocator, "{ \"tag_name\": \"\" }");
+    defer parsed.deinit();
+    const latest = try latestTagFromRelease(parsed.value);
+    try std.testing.expectEqualStrings("", latest.tag);
+    try std.testing.expectEqualStrings("", latest.version);
+}
+
+test "latestTagFromRelease strips a bare v prefix" {
+    var parsed = try parseTestRelease(std.testing.allocator, "{ \"tag_name\": \"v\" }");
+    defer parsed.deinit();
+    const latest = try latestTagFromRelease(parsed.value);
+    try std.testing.expectEqualStrings("v", latest.tag);
+    try std.testing.expectEqualStrings("", latest.version);
+}
