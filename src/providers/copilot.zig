@@ -1353,6 +1353,31 @@ test "chatStreaming returns ResponseError on a non-success status" {
     try std.testing.expectError(error.ResponseError, chatStreaming(&c, request, recorder.callback()));
 }
 
+test "chatStreaming returns Canceled when the stream is cancelled" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startCopilotServer(.ok, body);
+    defer stopCopilotServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try copilotClientForServer(ctx, arena);
+    defer c.deinit();
+    try seedCopilotToken(&c);
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.setCancelled();
+    defer cancel.reset();
+    try std.testing.expectError(error.Canceled, chatStreaming(&c, request, undefined));
+}
+
 test "listModels reports connection errors to the http observer" {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
