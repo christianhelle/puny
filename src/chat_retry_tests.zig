@@ -105,3 +105,100 @@ test "runChatWithRetry silently retries transient failures" {
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome.success, outcome);
     try std.testing.expectEqualStrings("", output.written());
 }
+
+test "runChatWithRetry returns cancelled without retrying" {
+    const CancellingProvider = struct {
+        calls: usize = 0,
+
+        pub fn chatStreaming(self: *@This(), _: openai.ChatRequest, _: openai.StreamCallback) !void {
+            self.calls += 1;
+            return error.Canceled;
+        }
+    };
+    var prov = CancellingProvider{};
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var callback_context: u8 = 0;
+    const callback = openai.StreamCallback{
+        .context = &callback_context,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(_: *anyopaque, _: openai.StreamEvent) anyerror!void {}
+            }.event,
+        },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "test",
+        .messages = &.{},
+        .tools = &.{},
+    };
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    const outcome = try chat_retry.runChatWithRetry(&prov, request, callback, std.testing.io, random, &output.writer);
+    try std.testing.expectEqual(chat_retry.ChatRetryOutcome.cancelled, outcome);
+    try std.testing.expectEqual(@as(usize, 1), prov.calls);
+}
+
+test "runChatWithRetry reports non-transient failures immediately" {
+    var prov = TestChatProvider{ .err = error.OutOfMemory };
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var callback_context: u8 = 0;
+    const callback = openai.StreamCallback{
+        .context = &callback_context,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(_: *anyopaque, _: openai.StreamEvent) anyerror!void {}
+            }.event,
+        },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "test",
+        .messages = &.{},
+        .tools = &.{},
+    };
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    const outcome = try chat_retry.runChatWithRetry(&prov, request, callback, std.testing.io, random, &output.writer);
+    try std.testing.expectEqual(chat_retry.ChatRetryOutcome{ .failed = error.OutOfMemory }, outcome);
+    try std.testing.expectEqual(@as(usize, 1), prov.calls);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Chat failed") != null);
+}
+
+test "runChatWithRetry gives up after max retries" {
+    var prov = TestChatProvider{ .fail_count = 10 };
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var callback_context: u8 = 0;
+    const callback = openai.StreamCallback{
+        .context = &callback_context,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(_: *anyopaque, _: openai.StreamEvent) anyerror!void {}
+            }.event,
+        },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "test",
+        .messages = &.{},
+        .tools = &.{},
+    };
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    const outcome = try chat_retry.runChatWithRetry(&prov, request, callback, std.testing.io, random, &output.writer);
+    try std.testing.expectEqual(chat_retry.ChatRetryOutcome{ .failed = error.ConnectionRefused }, outcome);
+    try std.testing.expectEqual(@as(usize, 5), prov.calls);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Chat failed after 5 retries") != null);
+}
