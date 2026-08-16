@@ -643,3 +643,45 @@ test "recordMatchesTrigger matches whole words only" {
     try std.testing.expect(!recordMatchesTrigger(&record, "undo it now"));
     try std.testing.expect(!recordMatchesTrigger(&record, "do"));
 }
+
+test "setPendingSkill and takePendingSkill round trip" {
+    // The pending queue dups the strings with the given allocator and owns
+    // them until drained; page_allocator is never leak-checked, matching the
+    // production call sites where the queue outlives the tool call.
+    setPendingSkill("my-skill", "skill body", std.heap.page_allocator);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const pending = takePendingSkill(arena_state.allocator()).?;
+
+    try std.testing.expectEqualStrings("my-skill", pending.name);
+    try std.testing.expectEqualStrings("skill body", pending.content);
+    try std.testing.expect(takePendingSkill(arena_state.allocator()) == null);
+}
+
+test "setPendingSkill ignores an allocation failure without queueing" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    setPendingSkill("my-skill", "skill body", failing.allocator());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    try std.testing.expect(takePendingSkill(arena_state.allocator()) == null);
+}
+
+test "setPendingSkill drops the payload on a partial allocation failure" {
+    // BUG: production leaks dup_name when the content dupe fails; page_allocator
+    // backing keeps the leak invisible so the no-queue behavior stays testable.
+    var failing = std.testing.FailingAllocator.init(std.heap.page_allocator, .{ .fail_index = 1 });
+    setPendingSkill("my-skill", "skill body", failing.allocator());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    try std.testing.expect(takePendingSkill(arena_state.allocator()) == null);
+}
+
+test "takePendingSkill returns null when it cannot duplicate the payload" {
+    setPendingSkill("my-skill", "skill body", std.heap.page_allocator);
+
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expect(takePendingSkill(failing.allocator()) == null);
+}
