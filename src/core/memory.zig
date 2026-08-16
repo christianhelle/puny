@@ -70,3 +70,12 @@ test "formatBytes handles boundaries and large values" {
     // brittle to floating-point rounding.
     try std.testing.expectEqualStrings("10240 GB", formatBytes(&buf, 10 * 1024 * 1024 * 1024 * 1024));
 }
+
+test "formatBytes formats exact multiples of intermediate units" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("3 KB", formatBytes(&buf, 3 * 1024));
+    try std.testing.expectEqualStrings("512 KB", formatBytes(&buf, 512 * 1024));
+    try std.testing.expectEqualStrings("5 MB", formatBytes(&buf, 5 * 1024 * 1024));
+    try std.testing.expectEqualStrings("2 GB", formatBytes(&buf, 2 * 1024 * 1024 * 1024));
+    try std.testing.expectEqualStrings("1.5 MB", formatBytes(&buf, 1_572_864));
+}
