@@ -194,3 +194,82 @@ test "buildAttachedMessage uses a fence longer than any backtick run in the cont
 
     try std.testing.expect(std.mem.indexOf(u8, out, "\n````\n") != null);
 }
+
+test "fenceLen is strictly longer than any backtick run" {
+    try std.testing.expectEqual(@as(usize, 3), fenceLen(""));
+    try std.testing.expectEqual(@as(usize, 3), fenceLen("no backticks"));
+    try std.testing.expectEqual(@as(usize, 3), fenceLen("a`b"));
+    try std.testing.expectEqual(@as(usize, 4), fenceLen("```"));
+    try std.testing.expectEqual(@as(usize, 5), fenceLen("````"));
+    try std.testing.expectEqual(@as(usize, 4), fenceLen("x\n```\ny"));
+    try std.testing.expectEqual(@as(usize, 4), fenceLen("``a```"));
+}
+
+test "extractRefs finds a mention at the end of the text" {
+    const refs = try extractRefs(std.testing.allocator, "please look at @src/main.zig");
+    defer {
+        for (refs) |r| std.testing.allocator.free(r);
+        std.testing.allocator.free(refs);
+    }
+    try std.testing.expectEqual(@as(usize, 1), refs.len);
+    try std.testing.expectEqualStrings("src/main.zig", refs[0]);
+}
+
+test "extractRefs finds mentions separated by newlines and tabs" {
+    const refs = try extractRefs(std.testing.allocator, "see @a.txt\nand\t@b.txt");
+    defer {
+        for (refs) |r| std.testing.allocator.free(r);
+        std.testing.allocator.free(refs);
+    }
+    try std.testing.expectEqual(@as(usize, 2), refs.len);
+    try std.testing.expectEqualStrings("a.txt", refs[0]);
+    try std.testing.expectEqualStrings("b.txt", refs[1]);
+}
+
+test "extractRefs ignores an @ in the middle of a word" {
+    const refs = try extractRefs(std.testing.allocator, "foo@bar and @baz");
+    defer {
+        for (refs) |r| std.testing.allocator.free(r);
+        std.testing.allocator.free(refs);
+    }
+    try std.testing.expectEqual(@as(usize, 1), refs.len);
+    try std.testing.expectEqualStrings("baz", refs[0]);
+}
+
+test "buildAttachedMessage attaches only readable files" {
+    const path = "puny-test-mixed.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try helpers.writeFile(std.testing.io, path, "present\n");
+
+    const out = try buildAttachedMessage(std.testing.allocator, std.testing.io, "see @puny-test-mixed.txt and @puny-test-absent.txt");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.startsWith(u8, out, "see @puny-test-mixed.txt and @puny-test-absent.txt"));
+    try std.testing.expect(std.mem.indexOf(u8, out, "\n\n@puny-test-mixed.txt\n```\npresent\n```\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\n\n@puny-test-absent.txt\n") == null);
+}
+
+test "buildAttachedMessage appends a newline before the closing fence" {
+    const path = "puny-test-no-trailing-newline.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try helpers.writeFile(std.testing.io, path, "no newline at end");
+
+    const out = try buildAttachedMessage(std.testing.allocator, std.testing.io, "see @puny-test-no-trailing-newline.txt");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "```\nno newline at end\n```\n") != null);
+}
+
+test "buildAttachedMessage handles an empty referenced file" {
+    const path = "puny-test-empty.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try helpers.writeFile(std.testing.io, path, "");
+
+    const out = try buildAttachedMessage(std.testing.allocator, std.testing.io, "see @puny-test-empty.txt");
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "\n\n@puny-test-empty.txt\n```\n\n```\n") != null);
+}
