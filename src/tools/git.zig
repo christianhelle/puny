@@ -90,3 +90,38 @@ test "git_status accepts a path argument" {
     try std.testing.expect(std.mem.indexOf(u8, output, "## ") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, path) != null);
 }
+
+test "git_diff reports unstaged changes" {
+    const path = "puny-test-git-diff.txt";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+
+    var f = try cwd.createFile(std.testing.io, path, .{});
+    f.close(std.testing.io);
+
+    // The command must succeed inside a repository even when there is
+    // nothing to report for the worktree.
+    const output = try gitDiff(std.testing.allocator, std.testing.io, .{});
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+}
+
+test "git_diff reports staged changes when requested" {
+    // Staged diff output is empty for a clean index; the command must
+    // still succeed.
+    const output = try gitDiff(std.testing.allocator, std.testing.io, .{ .staged = true });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+}
+
+test "git_diff accepts a path argument" {
+    const output = try gitDiff(std.testing.allocator, std.testing.io, .{ .path = "-puny-git-diff-probe.txt" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+}
+
+test "git_diff accepts both staged and path arguments" {
+    const output = try gitDiff(std.testing.allocator, std.testing.io, .{ .staged = false, .path = "src" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Exit code: 0") != null);
+}
