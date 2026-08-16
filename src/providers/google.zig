@@ -644,3 +644,323 @@ test "GoogleSseCallback emits thought parts as reasoning events" {
     try std.testing.expectEqual(@as(i64, 10), events.items[3].usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 20), events.items[3].usage.output_tokens);
 }
+
+test "googleRequestPayload labels unknown tool results with the call id" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{
+            .{ .tool = .{ .tool_call_id = "call_404", .content = "result" } },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const contents = parsed.value.object.get("contents").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), contents.len);
+    const parts = contents[0].object.get("parts").?.array.items;
+    try std.testing.expectEqualStrings("Tool call_404 result:", parts[0].object.get("text").?.string);
+    try std.testing.expectEqualStrings("result", parts[1].object.get("text").?.string);
+}
+
+test "googleRequestPayload keeps only the first system message" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{
+            .{ .system = "first system" },
+            .{ .system = "second system" },
+            .{ .user = "hello" },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    const system_parts = root.get("systemInstruction").?.object.get("parts").?.array.items;
+    try std.testing.expectEqualStrings("first system", system_parts[0].object.get("text").?.string);
+    try std.testing.expectEqual(@as(usize, 1), root.get("contents").?.array.items.len);
+}
+
+test "googleRequestPayload omits system and tools for an empty request" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{},
+        .tools = &.{},
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqual(@as(usize, 0), root.get("contents").?.array.items.len);
+    try std.testing.expect(root.get("systemInstruction") == null);
+    try std.testing.expect(root.get("tools") == null);
+}
+
+test "googleRequestPayload defaults a missing tool schema" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const function = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        allocator,
+        "{\"name\":\"noop\"}",
+        .{},
+    );
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{},
+        .tools = &.{.{ .function = function }},
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const declaration = parsed.value.object.get("tools").?.array.items[0].object.get("functionDeclarations").?.array.items[0].object;
+    try std.testing.expectEqualStrings("noop", declaration.get("name").?.string);
+    try std.testing.expectEqualStrings("", declaration.get("description").?.string);
+    try std.testing.expectEqual(@as(usize, 0), declaration.get("parameters").?.object.count());
+}
+
+test "googleRequestPayload rejects tools without a name" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const function = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        allocator,
+        "{\"description\":\"no name\"}",
+        .{},
+    );
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{},
+        .tools = &.{.{ .function = function }},
+    };
+
+    try std.testing.expectError(error.MissingToolName, googleRequestPayload(allocator, request));
+}
+
+test "googleRequestPayload writes empty tool call arguments as empty args" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{
+            .{ .assistant = .{
+                .tool_calls = &.{
+                    .{ .id = "call_1", .function = .{ .name = "noop", .arguments = "   " } },
+                },
+            } },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const part = parsed.value.object.get("contents").?.array.items[0].object.get("parts").?.array.items[0].object;
+    const function_call = part.get("functionCall").?.object;
+    try std.testing.expectEqualStrings("noop", function_call.get("name").?.string);
+    try std.testing.expectEqual(@as(usize, 0), function_call.get("args").?.object.count());
+}
+
+test "GoogleSseCallback ignores non-object payloads and malformed candidates" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    var sse = GoogleSseCallback{ .allocator = allocator, .callback = callback };
+
+    try sse.event("[1,2,3]");
+    try sse.event("{\"candidates\":\"nope\"}");
+    try sse.event("{\"candidates\":[42,{\"content\":{\"parts\":[{\"text\":\"hi\"}]}}]}");
+    try sse.event("{\"candidates\":[{\"content\":\"not an object\"}]}");
+    try sse.event("{\"candidates\":[{\"finishReason\":\"\"}]}");
+    try sse.event("{\"usageMetadata\":{\"candidatesTokenCount\":5}}");
+
+    try std.testing.expectEqual(@as(usize, 3), events.items.len);
+    try std.testing.expectEqualStrings("hi", events.items[0].content);
+    try std.testing.expect(events.items[1].finish == null);
+    try std.testing.expectEqual(@as(i64, 0), events.items[2].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 5), events.items[2].usage.output_tokens);
+}
+
+test "GoogleSseCallback ignores malformed function calls" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    var sse = GoogleSseCallback{ .allocator = allocator, .callback = callback };
+
+    try sse.event("{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":\"not an object\"}]}}]}");
+    try sse.event("{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"args\":{}}}]}}]}");
+    try sse.event("{\"candidates\":[{\"content\":{\"parts\":[{\"unknown\":true}]}}]}");
+
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
+
+// ── chatStreamingGoogle server tests ─────────────────────────────────
+
+const GoogleServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    status: std.http.Status,
+    body: []const u8,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+};
+
+fn startGoogleServer(status: std.http.Status, body: []const u8) !*GoogleServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(GoogleServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    ctx.thread = try std.Thread.spawn(.{}, GoogleServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopGoogleServer(ctx: *GoogleServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+fn googleClientForServer(ctx: *GoogleServer, arena: std.mem.Allocator) !http_client.Client {
+    const url = try std.fmt.allocPrint(arena, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    var c = http_client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    c.withBaseUrl(url);
+    return c;
+}
+
+test "chatStreamingGoogle delivers SSE events from a local server" {
+    const body =
+        "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello\"}]}}]}\n\n" ++
+        "data: {\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":4,\"candidatesTokenCount\":2}}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startGoogleServer(.ok, body);
+    defer stopGoogleServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try googleClientForServer(ctx, arena);
+    defer c.deinit();
+    const allocator = arena;
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreamingGoogle(&c, request, callback);
+
+    try std.testing.expectEqual(@as(usize, 3), events.items.len);
+    try std.testing.expectEqualStrings("Hello", events.items[0].content);
+    try std.testing.expectEqualStrings("STOP", events.items[1].finish.?);
+    try std.testing.expectEqual(@as(i64, 4), events.items[2].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 2), events.items[2].usage.output_tokens);
+}
+
+test "chatStreamingGoogle returns ResponseError on a non-success status" {
+    const ctx = try startGoogleServer(.internal_server_error, "exploded");
+    defer stopGoogleServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try googleClientForServer(ctx, arena);
+    defer c.deinit();
+    const allocator = arena;
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, chatStreamingGoogle(&c, request, callback));
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
