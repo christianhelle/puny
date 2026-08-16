@@ -445,3 +445,219 @@ test "countNewlines counts line breaks" {
     try std.testing.expectEqual(@as(usize, 3), countNewlines("a\nb\nc\n"));
     try std.testing.expectEqual(@as(usize, 2), countNewlines("\n\n"));
 }
+
+test "OpenAiAccumulator ignores tool deltas for unknown indexes" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 7, .arguments = "{}" } });
+    try acc.onEvent(.{ .finish = "tool_calls" });
+
+    try std.testing.expect(!acc.hasToolCalls());
+}
+
+test "OpenAiAccumulator keeps the first tool call start for a repeated index" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "first", .name = "read_file" } });
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "second", .name = "grep_search" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{}" } });
+    try acc.onEvent(.{ .finish = "tool_calls" });
+
+    try std.testing.expectEqual(@as(usize, 1), acc.tool_calls.items.len);
+    try std.testing.expectEqualStrings("first", acc.tool_calls.items[0].id);
+    try std.testing.expectEqualStrings("read_file", acc.tool_calls.items[0].function.name);
+}
+
+test "OpenAiAccumulator assembles interleaved tool call deltas" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_0", .name = "read_file" } });
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 1, .id = "call_1", .name = "list_directory" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{\"path\":" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 1, .arguments = "{\"path\":" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "\"x\"}" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 1, .arguments = "\"y\"}" } });
+    try acc.onEvent(.{ .finish = "tool_calls" });
+
+    try std.testing.expectEqual(@as(usize, 2), acc.tool_calls.items.len);
+    try std.testing.expectEqualStrings("read_file", acc.tool_calls.items[0].function.name);
+    try std.testing.expectEqualStrings("{\"path\":\"x\"}", acc.tool_calls.items[0].function.arguments);
+    try std.testing.expectEqualStrings("list_directory", acc.tool_calls.items[1].function.name);
+    try std.testing.expectEqualStrings("{\"path\":\"y\"}", acc.tool_calls.items[1].function.arguments);
+}
+
+test "OpenAiAccumulator records usage events" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try std.testing.expect(acc.usage == null);
+    try acc.onEvent(.{ .usage = .{ .input_tokens = 10, .output_tokens = 5 } });
+
+    try std.testing.expect(acc.usage != null);
+    try std.testing.expectEqual(@as(i64, 10), acc.usage.?.input_tokens);
+    try std.testing.expectEqual(@as(i64, 5), acc.usage.?.output_tokens);
+}
+
+test "OpenAiAccumulator assistantContent reflects content and tool calls" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+
+    var empty = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer empty.deinit();
+    try std.testing.expect(empty.assistantContent() == null);
+
+    var content_only = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer content_only.deinit();
+    try content_only.onEvent(.{ .content = "hi" });
+    const with_content = content_only.assistantContent().?;
+    try std.testing.expect(with_content.content != null);
+    try std.testing.expect(with_content.tool_calls == null);
+
+    var tools_only = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer tools_only.deinit();
+    try tools_only.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });
+    try tools_only.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{}" } });
+    try tools_only.onEvent(.{ .finish = "tool_calls" });
+    const with_tools = tools_only.assistantContent().?;
+    try std.testing.expect(with_tools.content == null);
+    try std.testing.expect(with_tools.tool_calls != null);
+}
+
+test "OpenAiAccumulator cloneAssistantContent deep-copies" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "Hello" });
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{}" } });
+    try acc.onEvent(.{ .finish = "tool_calls" });
+
+    const cloned = (try acc.cloneAssistantContent(std.testing.allocator)).?;
+    defer {
+        std.testing.allocator.free(cloned.content.?);
+        for (cloned.tool_calls.?) |tc| {
+            std.testing.allocator.free(tc.id);
+            std.testing.allocator.free(tc.function.name);
+            std.testing.allocator.free(tc.function.arguments);
+        }
+        std.testing.allocator.free(cloned.tool_calls.?);
+    }
+
+    try std.testing.expectEqualStrings("Hello", cloned.content.?);
+    try std.testing.expect(cloned.content.?.ptr != acc.content.items.ptr);
+    try std.testing.expectEqualStrings("call_1", cloned.tool_calls.?[0].id);
+    try std.testing.expectEqualStrings("read_file", cloned.tool_calls.?[0].function.name);
+    try std.testing.expectEqualStrings("{}", cloned.tool_calls.?[0].function.arguments);
+}
+
+test "OpenAiAccumulator cloneAssistantContent returns null when empty" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try std.testing.expect((try acc.cloneAssistantContent(std.testing.allocator)) == null);
+}
+
+test "OpenAiAccumulator finishStream returns zero without a stream" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "x" });
+    try std.testing.expectEqual(@as(usize, 0), try acc.finishStream());
+}
+
+test "OpenAiAccumulator streamCallback reset clears partial state" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    const callback = acc.streamCallback();
+    try callback.emit(.{ .content = "Hello" });
+    try callback.emit(.{ .reasoning = "thinking" });
+    try callback.emit(.{ .usage = .{ .input_tokens = 1, .output_tokens = 2 } });
+    try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });
+    try callback.emit(.{ .tool_call_delta = .{ .index = 0, .arguments = "{}" } });
+    try callback.emit(.{ .finish = "tool_calls" });
+
+    callback.reset();
+
+    try std.testing.expectEqual(@as(usize, 0), acc.content.items.len);
+    try std.testing.expectEqual(@as(usize, 0), acc.reasoning.items.len);
+    try std.testing.expect(acc.usage == null);
+    try std.testing.expect(!acc.hasToolCalls());
+    try std.testing.expect(!acc.has_streamed_output);
+}
+
+test "OpenAiAccumulator prints dimmed reasoning when show thinking is enabled" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, &output.writer, &session_stats);
+    defer acc.deinit();
+    acc.show_thinking = true;
+
+    try acc.onEvent(.{ .reasoning = "thinking\n" });
+    try acc.onEvent(.{ .reasoning = " more\n" });
+    try acc.onEvent(.{ .content = "answer" });
+    try acc.onEvent(.{ .finish = "stop" });
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, ansi.dim) != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "thinking") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, " more") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "\r\n") != null);
+    try std.testing.expectEqualStrings("answer", acc.content.items);
+}
+
+test "OpenAiAccumulator cancellation clears content and tool calls" {
+    cancel.reset();
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var acc = OpenAiAccumulator.init(arena_state.allocator(), std.testing.io, null, &session_stats);
+    defer acc.deinit();
+
+    try acc.onEvent(.{ .content = "Partial" });
+    try acc.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });
+    try acc.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{}" } });
+    try acc.onEvent(.{ .finish = "tool_calls" });
+    try std.testing.expect(acc.hasToolCalls());
+
+    cancel.setCancelled();
+    try std.testing.expectError(error.Canceled, acc.onEvent(.{ .content = "ignored" }));
+
+    try std.testing.expectEqual(@as(usize, 0), acc.content.items.len);
+    try std.testing.expect(!acc.hasToolCalls());
+}
