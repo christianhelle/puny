@@ -99,3 +99,11 @@ test "grepSearch passes --ignore-case when case_sensitive is false" {
     defer std.testing.allocator.free(strict);
     try std.testing.expect(std.mem.indexOf(u8, strict, "case.txt") == null);
 }
+
+test "grepSearch defaults to the current directory when no path is given" {
+    if (!ripgrepAvailable(std.testing.io)) return error.SkipZigTest;
+
+    const output = try grepSearch(std.testing.allocator, std.testing.io, .{ .query = "puny", .case_sensitive = true });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(output.len > 0);
+}
