@@ -847,3 +847,355 @@ test "anthropicRequestPayload maps xhigh to max effort" {
     const root = parsed.value.object;
     try std.testing.expectEqualStrings("max", root.get("output_config").?.object.get("effort").?.string);
 }
+
+test "parseModels errors when the data field is missing" {
+    try std.testing.expectError(error.MissingData, parseModels(std.testing.allocator, "{\"object\":\"list\"}"));
+}
+
+test "parseModels skips entries without id and defaults owned_by" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"data":[
+        \\  {"object":"model","owned_by":"vendor-a"},
+        \\  {"id":"alpha","object":"model"},
+        \\  {"id":"beta","object":"model","owned_by":"vendor-b"}
+        \\]}
+    ;
+
+    var result = try parseModels(allocator, json);
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), result.value().data.len);
+    try std.testing.expectEqualStrings("alpha", result.value().data[0].id);
+    try std.testing.expectEqualStrings("opencode", result.value().data[0].owned_by);
+    try std.testing.expectEqualStrings("beta", result.value().data[1].id);
+    try std.testing.expectEqualStrings("vendor-b", result.value().data[1].owned_by);
+}
+
+test "toSharedModels copies zen models into the shared model list" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"data":[
+        \\  {"id":"alpha","owned_by":"opencode"},
+        \\  {"id":"beta","owned_by":"acme"}
+        \\]}
+    ;
+
+    const parsed = try std.json.parseFromSlice(ModelsList, allocator, json, .{ .ignore_unknown_fields = true });
+    var owned = http_client.Owned(ModelsList){
+        .allocator = allocator,
+        .body = try allocator.dupe(u8, json),
+        .parsed = parsed,
+    };
+
+    var shared = try toSharedModels(&owned);
+    defer shared.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), shared.value().models.len);
+    try std.testing.expectEqualStrings("alpha", shared.value().models[0].id);
+    try std.testing.expectEqualStrings("alpha", shared.value().models[0].display_name);
+    try std.testing.expectEqualStrings("opencode", shared.value().models[0].provider);
+    try std.testing.expectEqual(@as(i64, 0), shared.value().models[0].context_length);
+    try std.testing.expectEqualStrings("beta", shared.value().models[1].id);
+    try std.testing.expectEqualStrings("acme", shared.value().models[1].provider);
+}
+
+// ── listModels server tests ──────────────────────────────────────────
+
+const ModelsServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    status: std.http.Status,
+    body: []const u8,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+};
+
+fn startModelsServer(status: std.http.Status, body: []const u8) !*ModelsServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(ModelsServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    ctx.thread = try std.Thread.spawn(.{}, ModelsServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopModelsServer(ctx: *ModelsServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+fn clientForServer(ctx: *ModelsServer, arena: std.mem.Allocator) !http_client.Client {
+    const url = try std.fmt.allocPrint(arena, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    var c = http_client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    c.withBaseUrl(url);
+    return c;
+}
+
+test "listModels fetches and parses the model list" {
+    const body =
+        \\{"data":[{"id":"big-pickle","object":"model","owned_by":"opencode"}]}
+    ;
+    const ctx = try startModelsServer(.ok, body);
+    defer stopModelsServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try clientForServer(ctx, arena);
+    defer c.deinit();
+
+    var owned = try listModels(&c);
+    defer owned.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), owned.value().data.len);
+    try std.testing.expectEqualStrings("big-pickle", owned.value().data[0].id);
+}
+
+test "listModels returns ResponseError on API failure" {
+    const ctx = try startModelsServer(.internal_server_error, "nope");
+    defer stopModelsServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try clientForServer(ctx, arena);
+    defer c.deinit();
+
+    try std.testing.expectError(error.ResponseError, listModels(&c));
+}
+
+test "listModels returns ResponseParseError on invalid body" {
+    const ctx = try startModelsServer(.ok, "not json at all");
+    defer stopModelsServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try clientForServer(ctx, arena);
+    defer c.deinit();
+
+    try std.testing.expectError(error.ResponseParseError, listModels(&c));
+}
+
+test "listModels returns ResponseError on unauthorized" {
+    const ctx = try startModelsServer(.unauthorized, "{}");
+    defer stopModelsServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try clientForServer(ctx, arena);
+    defer c.deinit();
+
+    try std.testing.expectError(error.ResponseError, listModels(&c));
+}
+
+test "anthropicRequestPayload defaults missing tool description and schema" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const function = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        allocator,
+        "{\"name\":\"noop\"}",
+        .{},
+    );
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{},
+        .tools = &.{.{ .function = function }},
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const tool = parsed.value.object.get("tools").?.array.items[0].object;
+    try std.testing.expectEqualStrings("noop", tool.get("name").?.string);
+    try std.testing.expectEqualStrings("", tool.get("description").?.string);
+    try std.testing.expectEqual(@as(usize, 0), tool.get("input_schema").?.object.count());
+}
+
+test "anthropicRequestPayload rejects tools without a name" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const function = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        allocator,
+        "{\"description\":\"no name\"}",
+        .{},
+    );
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{},
+        .tools = &.{.{ .function = function }},
+    };
+
+    try std.testing.expectError(error.MissingToolName, anthropicRequestPayload(allocator, request));
+}
+
+test "anthropicRequestPayload writes empty tool call arguments as empty input" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{
+            .{ .assistant = .{
+                .tool_calls = &.{
+                    .{ .id = "call_1", .function = .{ .name = "noop", .arguments = "   " } },
+                },
+            } },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const block = parsed.value.object.get("messages").?.array.items[0].object.get("content").?.array.items[0].object;
+    try std.testing.expectEqualStrings("tool_use", block.get("type").?.string);
+    try std.testing.expectEqual(@as(usize, 0), block.get("input").?.object.count());
+}
+
+test "anthropicRequestPayload keeps only the first system message" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{
+            .{ .system = "first system" },
+            .{ .system = "second system" },
+            .{ .user = "hello" },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("first system", root.get("system").?.string);
+    try std.testing.expectEqual(@as(usize, 1), root.get("messages").?.array.items.len);
+}
+
+test "anthropicRequestPayload honors the stream flag with empty messages" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{},
+        .tools = &.{},
+        .stream = false,
+    };
+
+    const payload = try anthropicRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqual(false, root.get("stream").?.bool);
+    try std.testing.expectEqual(@as(usize, 0), root.get("messages").?.array.items.len);
+    try std.testing.expect(root.get("system") == null);
+    try std.testing.expect(root.get("tools") == null);
+}
+
+test "AnthropicSseCallback ignores unknown events and missing fields" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const block_types = std.ArrayList(BlockType).empty;
+
+    var sse = AnthropicSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .block_types = block_types,
+    };
+
+    try sse.event("{\"type\":\"ping\"}");
+    try sse.event("{\"type\":\"message_start\"}");
+    try sse.event("{\"type\":\"content_block_start\",\"index\":0}");
+    try sse.event("{\"type\":\"content_block_start\",\"content_block\":{\"type\":\"text\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":5,\"delta\":{\"type\":\"text_delta\",\"text\":\"x\"}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{}}");
+    try sse.event("{\"type\":\"content_block_delta\",\"index\":0}");
+    try sse.event("{\"type\":\"message_delta\"}");
+
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqual(@as(i64, 0), events.items[0].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 0), events.items[0].usage.output_tokens);
+}
+
+test "AnthropicSseCallback maps an empty stop reason and missing usage" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{
+            .event = TestSseCallback.event,
+        },
+    };
+
+    const block_types = std.ArrayList(BlockType).empty;
+
+    var sse = AnthropicSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .block_types = block_types,
+    };
+
+    try sse.event("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"\"}}");
+
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expect(events.items[0].finish == null);
+    try std.testing.expectEqual(@as(i64, 0), events.items[1].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 0), events.items[1].usage.output_tokens);
+}
