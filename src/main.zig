@@ -638,6 +638,11 @@ test "formatRestoreHeader includes load time" {
     try std.testing.expectEqualStrings("Restored session abc123 — 5 messages (42 ms)", result);
 }
 
+test "formatRestoreHeader falls back when the buffer is too small" {
+    var small: [4]u8 = undefined;
+    try std.testing.expectEqualStrings("Restored session", formatRestoreHeader(&small, "abc123", 5, 42_000_000));
+}
+
 fn toolNames(definitions: []const openai.ToolDefinition) [][]const u8 {
     const names = std.heap.page_allocator.alloc([]const u8, definitions.len) catch unreachable;
     for (definitions, 0..) |definition, i| {

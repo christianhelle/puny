@@ -135,3 +135,13 @@ test "load reads multi-line content correctly" {
     try std.testing.expectEqualStrings("AGENTS.md", result.filename);
     try std.testing.expectEqualStrings(multiline, result.content);
 }
+
+test "load propagates non-ignorable read errors" {
+    // A repo root longer than PATH_MAX makes readFileAlloc fail with
+    // NameTooLong, which is neither FileNotFound, IsDir, nor AccessDenied, so
+    // load must propagate it instead of skipping the candidate.
+    var long_root: [4200]u8 = undefined;
+    @memset(&long_root, 'a');
+
+    try std.testing.expectError(error.NameTooLong, load(std.testing.allocator, std.testing.io, long_root[0..]));
+}

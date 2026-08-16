@@ -654,3 +654,154 @@ test "findInDir locates a file by name" {
     const missing = try findInDir(std.testing.allocator, std.testing.io, tmp.dir, "does-not-exist");
     try std.testing.expect(missing == null);
 }
+
+var test_flaky_download_attempts: usize = 0;
+
+fn testFlakyDownload(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    dest_dir: std.Io.Dir,
+    dest_name: []const u8,
+) anyerror!void {
+    _ = allocator;
+    _ = url;
+    test_flaky_download_attempts += 1;
+    if (test_flaky_download_attempts == 1) return error.ConnectionRefused;
+    var file = try dest_dir.createFile(io, dest_name, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, "test-archive");
+}
+
+fn testFlakyExtractUnpack(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    archive_name: []const u8,
+    binary_name: []const u8,
+) anyerror![]const u8 {
+    _ = archive_name;
+    var bin = try dir.createFile(io, binary_name, .{});
+    defer bin.close(io);
+    try bin.writeStreamingAll(io, "new binary");
+    return try allocator.dupe(u8, binary_name);
+}
+
+test "retryExtract retries a transient download failure" {
+    test_flaky_download_attempts = 0;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var tmp, var tmp_dir = try testTmpSubDir();
+    defer {
+        tmp_dir.close(std.testing.io);
+        tmp.cleanup();
+    }
+
+    var progress_buf: [128]u8 = undefined;
+    var progress_writer = std.Io.Writer.fixed(&progress_buf);
+
+    const result = try retryExtract(
+        std.testing.allocator,
+        std.testing.io,
+        tmp_dir,
+        "archive.zip",
+        "puny",
+        "http://example.com/archive.zip",
+        null,
+        random,
+        &progress_writer,
+        testFlakyDownload,
+        testFlakyExtractUnpack,
+    );
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualStrings("puny", result);
+    try std.testing.expectEqual(@as(usize, 2), test_flaky_download_attempts);
+}
+
+fn testFailingDownload(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    dest_dir: std.Io.Dir,
+    dest_name: []const u8,
+) anyerror!void {
+    _ = allocator;
+    _ = io;
+    _ = url;
+    _ = dest_dir;
+    _ = dest_name;
+    return error.OutOfMemory;
+}
+
+fn testFailingExtract(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    archive_name: []const u8,
+    binary_name: []const u8,
+) anyerror![]const u8 {
+    _ = allocator;
+    _ = io;
+    _ = dir;
+    _ = archive_name;
+    _ = binary_name;
+    return error.OutOfMemory;
+}
+
+test "retryExtract fails immediately on a non-transient download error" {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var tmp, var tmp_dir = try testTmpSubDir();
+    defer {
+        tmp_dir.close(std.testing.io);
+        tmp.cleanup();
+    }
+
+    var progress_buf: [128]u8 = undefined;
+    var progress_writer = std.Io.Writer.fixed(&progress_buf);
+
+    try std.testing.expectError(error.OutOfMemory, retryExtract(
+        std.testing.allocator,
+        std.testing.io,
+        tmp_dir,
+        "archive.zip",
+        "puny",
+        "http://example.com/archive.zip",
+        null,
+        random,
+        &progress_writer,
+        testFailingDownload,
+        testFailingExtract,
+    ));
+}
+
+test "retryExtract fails immediately on a non-transient extract error" {
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var tmp, var tmp_dir = try testTmpSubDir();
+    defer {
+        tmp_dir.close(std.testing.io);
+        tmp.cleanup();
+    }
+
+    var progress_buf: [128]u8 = undefined;
+    var progress_writer = std.Io.Writer.fixed(&progress_buf);
+
+    try std.testing.expectError(error.OutOfMemory, retryExtract(
+        std.testing.allocator,
+        std.testing.io,
+        tmp_dir,
+        "archive.zip",
+        "puny",
+        "http://example.com/archive.zip",
+        null,
+        random,
+        &progress_writer,
+        testRetryExtractDownload,
+        testFailingExtract,
+    ));
+}
