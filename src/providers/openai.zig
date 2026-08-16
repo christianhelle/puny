@@ -494,3 +494,339 @@ test "ReasoningEffort JSON serialization" {
         try std.testing.expectEqualStrings(@tagName(effort), parsed.value.string);
     }
 }
+
+// ── SSE callback tests ───────────────────────────────────────────────
+
+const SseTestEvent = union(enum) {
+    content: []const u8,
+    reasoning: []const u8,
+    tool_call_start: struct { index: usize, id: []const u8, name: []const u8 },
+    tool_call_delta: struct { index: usize, arguments: []const u8 },
+    finish: ?[]const u8,
+    usage: TurnUsage,
+};
+
+const SseRecorder = struct {
+    allocator: std.mem.Allocator,
+    events: *std.ArrayList(SseTestEvent),
+    chunks: *std.ArrayList([]u8),
+
+    fn callback(self: *SseRecorder) StreamCallback {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .event = event,
+                .reset = null,
+            },
+        };
+    }
+
+    fn event(ctx: *anyopaque, ev: StreamEvent) !void {
+        const self: *SseRecorder = @ptrCast(@alignCast(ctx));
+        switch (ev) {
+            .content => |v| try self.events.append(self.allocator, .{ .content = try self.allocator.dupe(u8, v) }),
+            .reasoning => |v| try self.events.append(self.allocator, .{ .reasoning = try self.allocator.dupe(u8, v) }),
+            .tool_call_start => |v| try self.events.append(self.allocator, .{ .tool_call_start = .{
+                .index = v.index,
+                .id = try self.allocator.dupe(u8, v.id),
+                .name = try self.allocator.dupe(u8, v.name),
+            } }),
+            .tool_call_delta => |v| try self.events.append(self.allocator, .{ .tool_call_delta = .{
+                .index = v.index,
+                .arguments = try self.allocator.dupe(u8, v.arguments),
+            } }),
+            .finish => |v| try self.events.append(self.allocator, .{ .finish = if (v) |s| try self.allocator.dupe(u8, s) else null }),
+            .usage => |v| try self.events.append(self.allocator, .{ .usage = v }),
+        }
+    }
+
+    fn onChunk(ctx: ?*anyopaque, data: []const u8) void {
+        const self: *SseRecorder = @ptrCast(@alignCast(ctx.?));
+        self.chunks.append(self.allocator, self.allocator.dupe(u8, data) catch return) catch {};
+    }
+};
+
+test "SseCallback emits content reasoning and tool call events" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+    const observer = client.HttpObserver{
+        .ctx = &recorder,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = null,
+        .on_chunk = SseRecorder.onChunk,
+    };
+
+    var sse = SseCallback{ .allocator = allocator, .callback = recorder.callback(), .observer = observer };
+
+    const data =
+        \\{"choices":[{"delta":{"reasoning_content":"think","content":"hi","tool_calls":[{"index":0,"id":"c1","function":{"name":"read_file","arguments":"{\"p"}},{"index":2,"id":"","function":{"name":"search","arguments":"x}"}}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20}}
+    ;
+    try sse.event(data);
+
+    try std.testing.expectEqual(@as(usize, 7), events.items.len);
+    try std.testing.expectEqualStrings("think", events.items[0].reasoning);
+    try std.testing.expectEqualStrings("hi", events.items[1].content);
+    try std.testing.expectEqual(@as(usize, 0), events.items[2].tool_call_start.index);
+    try std.testing.expectEqualStrings("c1", events.items[2].tool_call_start.id);
+    try std.testing.expectEqualStrings("read_file", events.items[2].tool_call_start.name);
+    try std.testing.expectEqualStrings("{\"p", events.items[3].tool_call_delta.arguments);
+    try std.testing.expectEqual(@as(usize, 2), events.items[4].tool_call_delta.index);
+    try std.testing.expectEqualStrings("x}", events.items[4].tool_call_delta.arguments);
+    try std.testing.expectEqualStrings("stop", events.items[5].finish.?);
+    try std.testing.expectEqual(@as(i64, 10), events.items[6].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 20), events.items[6].usage.output_tokens);
+    try std.testing.expect(events.items[6].usage.reasoning_output_tokens == null);
+
+    try std.testing.expectEqual(@as(usize, 1), chunks.items.len);
+    try std.testing.expectEqualStrings(data, chunks.items[0]);
+}
+
+test "SseCallback emits a null finish for an empty finish reason" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+    var sse = SseCallback{ .allocator = allocator, .callback = recorder.callback() };
+
+    try sse.event("{\"choices\":[{\"delta\":{},\"finish_reason\":\"\"}]}");
+    try sse.event("{\"choices\":[{\"delta\":{\"content\":\"done\"}}]}");
+
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expect(events.items[0].finish == null);
+    try std.testing.expectEqualStrings("done", events.items[1].content);
+}
+
+test "SseCallback defaults missing tool call fields" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+    var sse = SseCallback{ .allocator = allocator, .callback = recorder.callback() };
+
+    try sse.event("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{}\"}}]}}]}");
+    try sse.event("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"name\":\"\"}}]}}]}");
+
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqual(@as(usize, 0), events.items[0].tool_call_delta.index);
+    try std.testing.expectEqualStrings("{}", events.items[0].tool_call_delta.arguments);
+}
+
+test "StreamCallback reset invokes the vtable reset when present" {
+    const ResetCounter = struct {
+        count: usize = 0,
+        fn resetFn(ctx: *anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.count += 1;
+        }
+    };
+
+    var counter = ResetCounter{};
+    var cb = StreamCallback{ .context = &counter, .vtable = &.{
+        .event = undefined,
+        .reset = ResetCounter.resetFn,
+    } };
+    cb.reset();
+    try std.testing.expectEqual(@as(usize, 1), counter.count);
+
+    var cb2 = StreamCallback{ .context = &counter, .vtable = &.{ .event = undefined } };
+    cb2.reset();
+    try std.testing.expectEqual(@as(usize, 1), counter.count);
+}
+
+test "CancelableReader passes through when not cancelled and fails when cancelled" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    cancel.reset();
+    var fixed = std.Io.Reader.fixed("hello");
+    var buffer: [1]u8 = undefined;
+    var reader = CancelableReader.init(&fixed, &buffer);
+    _ = try reader.reader.streamRemaining(&out.writer);
+    try std.testing.expectEqualStrings("hello", out.written());
+
+    cancel.setCancelled();
+    defer cancel.reset();
+    var fixed2 = std.Io.Reader.fixed("hello");
+    var buffer2: [1]u8 = undefined;
+    var reader2 = CancelableReader.init(&fixed2, &buffer2);
+    try std.testing.expectError(error.ReadFailed, reader2.reader.streamRemaining(&out.writer));
+}
+
+test "requestPayload serializes temperature messages and tools" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const schema = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        allocator,
+        "{\"name\":\"read_file\",\"description\":\"Read a file\",\"parameters\":{\"type\":\"object\"}}",
+        .{},
+    );
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{
+            .{ .system = "You are helpful." },
+            .{ .user = "Read src/main.zig" },
+            .{ .assistant = .{
+                .tool_calls = &.{
+                    .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"src/main.zig\"}" } },
+                },
+            } },
+            .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } },
+        },
+        .tools = &.{
+            .{ .function = schema },
+        },
+        .temperature = 0.7,
+    };
+
+    const payload = try requestPayload(std.testing.allocator, request);
+    defer std.testing.allocator.free(payload);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("test-model", root.get("model").?.string);
+    try std.testing.expectEqual(@as(f64, 0.7), root.get("temperature").?.float);
+    try std.testing.expectEqual(@as(usize, 4), root.get("messages").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 1), root.get("tools").?.array.items.len);
+    const tool = root.get("tools").?.array.items[0].object;
+    try std.testing.expectEqualStrings("function", tool.get("type").?.string);
+    try std.testing.expectEqualStrings("read_file", tool.get("function").?.object.get("name").?.string);
+}
+
+// ── chatStreaming server tests ───────────────────────────────────────
+
+const ChatServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    status: std.http.Status,
+    body: []const u8,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+};
+
+fn startChatServer(status: std.http.Status, body: []const u8) !*ChatServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(ChatServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    ctx.thread = try std.Thread.spawn(.{}, ChatServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopChatServer(ctx: *ChatServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+fn chatServerUrl(ctx: *ChatServer) ![]u8 {
+    return std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+}
+
+test "chatStreaming delivers SSE events from a local server" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startChatServer(.ok, body);
+    defer stopChatServer(ctx);
+
+    const url = try chatServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+    c.http_observer = client.HttpObserver{
+        .ctx = &recorder,
+        .onRequest = null,
+        .onResponse = null,
+        .onError = null,
+        .on_chunk = SseRecorder.onChunk,
+    };
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreaming(&c, request, recorder.callback());
+
+    try std.testing.expectEqual(@as(usize, 4), events.items.len);
+    try std.testing.expectEqualStrings("Hello", events.items[0].content);
+    try std.testing.expectEqualStrings(" world", events.items[1].content);
+    try std.testing.expectEqualStrings("stop", events.items[2].finish.?);
+    try std.testing.expectEqual(@as(i64, 7), events.items[3].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 3), events.items[3].usage.output_tokens);
+    try std.testing.expectEqual(@as(usize, 3), chunks.items.len);
+}
+
+test "chatStreaming returns ResponseError on a non-success status" {
+    const ctx = try startChatServer(.internal_server_error, "server exploded");
+    defer stopChatServer(ctx);
+
+    const url = try chatServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, chatStreaming(&c, request, recorder.callback()));
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
