@@ -1,3 +1,5 @@
+[![CI](https://github.com/christianhelle/puny/actions/workflows/ci.yml/badge.svg)](https://github.com/christianhelle/puny/actions/workflows/ci.yml) 
+
 # Puny
 
 Puny is a minimal natively compiled single-binary coding agent with a ~1 MB footprint.
