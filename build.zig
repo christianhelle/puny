@@ -30,6 +30,20 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_tests.step);
 
+    const test_coverage_step = b.step("test-coverage", "Run unit tests with code coverage");
+    const coverage_test = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "test",
+        b.pathFromRoot("src/main.zig"),
+        "--test-runner",
+        b.pathFromRoot("src/custom_test_runner.zig"),
+        "-fprofile-instr-generate",
+        "-fcoverage-mapping",
+        b.fmt("-Doptimize={s}", .{@tagName(optimize)}),
+    });
+    coverage_test.setEnvironmentVariable("LLVM_PROFILE_FILE", "coverage-%p-%m.profraw");
+    test_coverage_step.dependOn(&coverage_test.step);
+
     const docker_step = b.step("docker", "Build Docker image");
     const docker_build = b.addSystemCommand(&.{
         b.graph.zig_exe,
