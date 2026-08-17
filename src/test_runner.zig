@@ -131,6 +131,9 @@ test "include providers.opencode_go tests" {
 test "include providers.opencode_zen tests" {
     _ = @import("providers/opencode_zen.zig");
 }
+test "include providers.anthropic tests" {
+    _ = @import("providers/anthropic.zig");
+}
 
 test "include providers.google tests" {
     _ = @import("providers/google.zig");
