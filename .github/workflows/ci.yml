@@ -23,21 +23,21 @@ jobs:
       - name: Run regression tests
         run: zig build test-regression --summary all
 
-      - name: Install zcov
-        if: runner.os == 'Linux'
-        run: |
-          git clone https://github.com/christianhelle/zcov /tmp/zcov
-          cd /tmp/zcov && zig build -Doptimize=ReleaseSafe
-          echo "/tmp/zcov/zig-out/bin" >> $GITHUB_PATH
+      # - name: Install zcov
+      #   if: runner.os == 'Linux'
+      #   run: |
+      #     git clone https://github.com/christianhelle/zcov /tmp/zcov
+      #     cd /tmp/zcov && zig build -Doptimize=ReleaseSafe
+      #     echo "/tmp/zcov/zig-out/bin" >> $GITHUB_PATH
 
-      - name: Run tests with coverage
-        if: runner.os == 'Linux'
-        run: zig-cov test --format=lcov --output=coverage.lcov --summary all
+      # - name: Run tests with coverage
+      #   if: runner.os == 'Linux'
+      #   run: zig-cov test --format=lcov --output=coverage.lcov --summary all
 
-      - name: Upload coverage to Codecov
-        if: runner.os == 'Linux'
-        uses: codecov/codecov-action@v5
-        with:
-          files: coverage.lcov
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+      # - name: Upload coverage to Codecov
+      #   if: runner.os == 'Linux'
+      #   uses: codecov/codecov-action@v5
+      #   with:
+      #     files: coverage.lcov
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     fail_ci_if_error: false
