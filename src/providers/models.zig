@@ -130,8 +130,8 @@ test "toSharedModels falls back to key when display_name is invalid UTF-8" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     const allocator = std.testing.allocator;
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
+    var arena = try allocator.create(std.heap.ArenaAllocator);
+    arena.* = std.heap.ArenaAllocator.init(allocator);
     const arena_alloc = arena.allocator();
 
     const invalid_name = try arena_alloc.dupe(u8, &[_]u8{ 0xff, 0xfe, 'a' });
@@ -147,7 +147,7 @@ test "toSharedModels falls back to key when display_name is invalid UTF-8" {
         .allocator = allocator,
         .body = try allocator.dupe(u8, ""),
         .parsed = .{
-            .arena = &arena,
+            .arena = arena,
             .value = .{ .models = models },
         },
     };
