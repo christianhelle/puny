@@ -30,29 +30,14 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_tests.step);
 
-    const test_coverage_step = b.step("test-coverage", "Run unit tests with code coverage");
+    const test_coverage_step = b.step("test-coverage", "Build test binary for coverage");
     const coverage_exe = b.addTest(.{
         .root_module = exe.root_module,
         .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .simple },
         .use_llvm = true,
     });
     b.installArtifact(coverage_exe);
-    const kcov_bin = b.findProgram(&.{"kcov"}, &.{}) catch "kcov";
-    const run_cover = b.addSystemCommand(&.{
-        kcov_bin,
-        "--clean",
-        "--cobertura-only",
-        "--include-pattern=src/",
-    });
-    const coverage_output = run_cover.addOutputDirectoryArg(".");
-    run_cover.addArtifactArg(coverage_exe);
-    const install_coverage = b.addInstallDirectory(.{
-        .source_dir = coverage_output,
-        .install_dir = .{ .custom = "coverage" },
-        .install_subdir = "",
-    });
-    install_coverage.step.dependOn(&run_cover.step);
-    test_coverage_step.dependOn(&install_coverage.step);
+    test_coverage_step.dependOn(b.getInstallStep());
 
     const docker_step = b.step("docker", "Build Docker image");
     const docker_build = b.addSystemCommand(&.{
