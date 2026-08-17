@@ -41,9 +41,6 @@ WORKDIR /app
 
 RUN zig build test-coverage --summary all
 RUN --security=insecure kcov --clean --cobertura-only --include-pattern=src/ coverage zig-out/bin/test || true
-RUN find coverage -type f 2>/dev/null || echo "No coverage files found"
-
-RUN mkdir -p /output
-RUN if [ -f coverage/cobertura.xml ]; then cp coverage/cobertura.xml /output/; fi
-
-CMD ["cat", "/output/cobertura.xml"]
+RUN find /app/coverage -type f 2>/dev/null && echo "Found coverage files" || echo "No coverage files"
+RUN mkdir -p /output && cp -r /app/coverage/* /output/ 2>/dev/null || true
+RUN ls -la /output/ 2>/dev/null || echo "No output"
