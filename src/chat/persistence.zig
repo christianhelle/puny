@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const context = @import("context.zig");
 const core_session = @import("../core/session.zig");
 const openai = @import("../providers/openai.zig");
@@ -355,6 +356,7 @@ test "saveSessionMeta tolerates an unwritable session directory" {
 }
 
 test "loadMessagesIntoContext propagates non-missing-file read errors" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const file_path = "puny-test-load-fail.txt";
     defer std.Io.Dir.cwd().deleteFile(std.testing.io, file_path) catch {};
 
