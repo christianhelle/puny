@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Add coverage reporting, runtime hooks, and extensive test suite ([#153](https://github.com/christianhelle/puny/pull/153)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.3.4](https://github.com/christianhelle/puny/releases/tag/v0.3.4) (2026-08-16)
 
 ### Features
