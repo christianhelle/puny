@@ -17,43 +17,26 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Install kcov
-        run: |
-          echo "Types: deb" | sudo tee /etc/apt/sources.list.d/plucky.sources
-          echo "URIs: http://archive.ubuntu.com/ubuntu/" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Suites: plucky plucky-updates plucky-backports" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Components: main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Types: deb" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "URIs: http://security.ubuntu.com/ubuntu/" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Suites: plucky-security" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Components: main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg" | sudo tee -a /etc/apt/sources.list.d/plucky.sources
-          echo "Package: *" | sudo tee /etc/apt/preferences.d/plucky-pin
-          echo "Pin: release n=plucky" | sudo tee -a /etc/apt/preferences.d/plucky-pin
-          echo "Pin-Priority: -10" | sudo tee -a /etc/apt/preferences.d/plucky-pin
-          echo "" | sudo tee -a /etc/apt/preferences.d/plucky-pin
-          echo "Package: kcov" | sudo tee -a /etc/apt/preferences.d/plucky-pin
-          echo "Pin: release n=plucky" | sudo tee -a /etc/apt/preferences.d/plucky-pin
-          echo "Pin-Priority: 500" | sudo tee -a /etc/apt/preferences.d/plucky-pin
-          sudo apt-get update -qq
-          sudo apt-get install -qq --no-install-recommends -y kcov
-
       - name: Check zig fmt
         run: zig fmt --check src/
 
       - name: Run regression tests
         run: zig build test-regression --summary all
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Run tests with coverage
-        run: bash scripts/coverage.sh
+        run: |
+          docker buildx create --name insecure-builder --buildkitd-flags "--allow-insecure-entitlement security.insecure" 2>/dev/null || true
+          docker buildx use insecure-builder
+          docker buildx build --progress plain --builder insecure-builder --allow security.insecure --file Dockerfile.coverage --output type=local,dest=. .
         continue-on-error: true
 
       - name: Upload coverage to Codecov
-        if: hashFiles('coverage/cobertura.xml') != ''
+        if: hashFiles('output/cobertura.xml') != ''
         uses: codecov/codecov-action@v5
         with:
-          files: coverage/cobertura.xml
+          files: output/cobertura.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
