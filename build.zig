@@ -31,18 +31,27 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_exe_tests.step);
 
     const test_coverage_step = b.step("test-coverage", "Run unit tests with code coverage");
-    const coverage_test = b.addSystemCommand(&.{
-        b.graph.zig_exe,
-        "test",
-        b.pathFromRoot("src/main.zig"),
-        "--test-runner",
-        b.pathFromRoot("src/custom_test_runner.zig"),
-        "-fprofile-instr-generate",
-        "-fcoverage-mapping",
-        b.fmt("-Doptimize={s}", .{@tagName(optimize)}),
+    const coverage_exe = b.addTest(.{
+        .root_module = exe.root_module,
+        .use_llvm = true,
     });
-    coverage_test.setEnvironmentVariable("LLVM_PROFILE_FILE", "coverage-%p-%m.profraw");
-    test_coverage_step.dependOn(&coverage_test.step);
+    b.installArtifact(coverage_exe);
+    const kcov_bin = b.findProgram(&.{"kcov"}, &.{}) catch "kcov";
+    const run_cover = b.addSystemCommand(&.{
+        kcov_bin,
+        "--clean",
+        "--cobertura-xml",
+        "--include-pattern=src/",
+    });
+    const coverage_output = run_cover.addOutputDirectoryArg(".");
+    run_cover.addArtifactArg(coverage_exe);
+    const install_coverage = b.addInstallDirectory(.{
+        .source_dir = coverage_output,
+        .install_dir = .{ .custom = "coverage" },
+        .install_subdir = "",
+    });
+    install_coverage.step.dependOn(&run_cover.step);
+    test_coverage_step.dependOn(&install_coverage.step);
 
     const docker_step = b.step("docker", "Build Docker image");
     const docker_build = b.addSystemCommand(&.{
