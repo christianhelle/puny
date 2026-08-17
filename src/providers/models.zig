@@ -131,14 +131,11 @@ test "toSharedModels falls back to key when display_name is invalid UTF-8" {
     const allocator = std.testing.allocator;
     const json =
         \\{"models":[
-        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"Qwen 2.5","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
+        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"\xff","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
         \\]}
     ;
 
     const owned = try std.json.parseFromSlice(ModelsList, allocator, json, .{ .ignore_unknown_fields = true });
-    // Corrupt the display name in place to exercise the UTF-8 fallback.
-    const name: []u8 = @constCast(owned.value.models[0].display_name);
-    name[0] = 0xff;
     var wrapped = client.Owned(ModelsList){
         .allocator = allocator,
         .body = try allocator.dupe(u8, json),
