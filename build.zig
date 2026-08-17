@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) !void {
     const run_cover = b.addSystemCommand(&.{
         kcov_bin,
         "--clean",
-        "--cobertura-xml",
+        "--cobertura-only",
         "--include-pattern=src/",
     });
     const coverage_output = run_cover.addOutputDirectoryArg(".");
