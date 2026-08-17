@@ -125,12 +125,15 @@ pub fn build(b: *std.Build) !void {
 
     test_regression_step.dependOn(test_step);
 
+    const slow_tests_root = b.createModule(.{
+        .root_source_file = b.path("src/slow_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    slow_tests_root.addOptions("build_options", build_options);
+
     const slow_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/slow_tests.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = slow_tests_root,
         .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .server },
     });
 
