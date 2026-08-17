@@ -47,7 +47,7 @@ jobs:
         run: zig build test-regression --summary all
 
       - name: Run tests with coverage
-        run: zig build test-coverage --summary all
+        run: bash scripts/coverage.sh
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
