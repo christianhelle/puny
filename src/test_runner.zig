@@ -159,6 +159,9 @@ test "include tools.git tests" {
 test "include tools.helpers tests" {
     _ = @import("tools/helpers.zig");
 }
+test "include tools.http tests" {
+    _ = @import("tools/http.zig");
+}
 test "include tools.root tests" {
     _ = @import("tools/root.zig");
 }
