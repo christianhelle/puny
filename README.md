@@ -1,4 +1,5 @@
-[![CI](https://github.com/christianhelle/puny/actions/workflows/ci.yml/badge.svg)](https://github.com/christianhelle/puny/actions/workflows/ci.yml) 
+[![CI](https://github.com/christianhelle/puny/actions/workflows/ci.yml/badge.svg)](https://github.com/christianhelle/puny/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/christianhelle/puny/graph/badge.svg?token=ZnheGzJyII)](https://codecov.io/gh/christianhelle/puny)
 
 # Puny
 
