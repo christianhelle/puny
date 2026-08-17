@@ -33,6 +33,7 @@ pub fn build(b: *std.Build) !void {
     const test_coverage_step = b.step("test-coverage", "Run unit tests with code coverage");
     const coverage_exe = b.addTest(.{
         .root_module = exe.root_module,
+        .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .simple },
         .use_llvm = true,
     });
     b.installArtifact(coverage_exe);
