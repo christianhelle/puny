@@ -1097,6 +1097,6 @@ test "FailingSseReader discard and readVec report read failures" {
     var failing = FailingSseReader.init();
     try std.testing.expectError(error.ReadFailed, failing.reader.discard(.limited(16)));
     var buf: [1]u8 = undefined;
-    const vec = [_][]u8{&buf};
+    var vec = [_][]u8{&buf};
     try std.testing.expectError(error.ReadFailed, failing.reader.readVec(vec[0..]));
 }
