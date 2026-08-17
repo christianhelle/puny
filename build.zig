@@ -4,6 +4,8 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const docker = b.option(bool, "docker", "Build for Docker container") orelse false;
+    const coverage = b.option(bool, "coverage", "Enable zig-cov coverage instrumentation") orelse false;
+    const rt_path = b.option([]const u8, "coverage-rt", "Path to zig-cov-rt.o") orelse null;
 
     const build_options = createBuildInfoOptions(b);
     build_options.addOption(bool, "docker", docker);
@@ -25,6 +27,13 @@ pub fn build(b: *std.Build) !void {
         .root_module = exe.root_module,
         .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .server },
     });
+
+    if (coverage) {
+        exe_tests.use_llvm = true;
+        exe_tests.root_module.fuzz = true;
+        exe_tests.root_module.link_libc = true;
+        if (rt_path) |p| exe_tests.root_module.addObjectFile(.{ .cwd_relative = p });
+    }
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run unit tests");
