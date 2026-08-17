@@ -460,6 +460,7 @@ test "history size is capped" {
 }
 
 test "historyPath prefers XDG_CONFIG_HOME" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var env = std.process.Environ.Map.init(std.testing.allocator);
     defer env.deinit();
     try env.put("XDG_CONFIG_HOME", "/xdg");
@@ -471,6 +472,7 @@ test "historyPath prefers XDG_CONFIG_HOME" {
 }
 
 test "historyPath falls back to HOME/.config" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var env = std.process.Environ.Map.init(std.testing.allocator);
     defer env.deinit();
     try env.put("HOME", "/home/user");
