@@ -17,6 +17,9 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: Install LLVM tools
+        run: sudo apt-get update && sudo apt-get install -y llvm
+
       - name: Check zig fmt
         run: zig fmt --check src/
 
