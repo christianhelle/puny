@@ -1087,8 +1087,8 @@ test "isValidUtf8 accepts multibyte sequences and rejects truncation" {
     try std.testing.expect(isValidUtf8("héllo"));
     try std.testing.expect(isValidUtf8("日本語テキスト"));
     try std.testing.expect(isValidUtf8("emoji 🎉 ok"));
-    try std.testing.expect(!isValidUtf8(&.{ 0xc3 }));
-    try std.testing.expect(!isValidUtf8(&.{ 0x80 }));
+    try std.testing.expect(!isValidUtf8(&.{0xc3}));
+    try std.testing.expect(!isValidUtf8(&.{0x80}));
     try std.testing.expect(!isValidUtf8(&.{ 0xf0, 0x9f, 0x8e }));
     try std.testing.expect(!isValidUtf8(&.{ 'a', 0xe2, 0x82 }));
 }

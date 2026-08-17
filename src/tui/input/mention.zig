@@ -50,7 +50,7 @@ test "buildMention preserves an empty path" {
 }
 
 test "buildMention prefixes a path when called out of line" {
-    const out = try @call(.never_inline, buildMention, .{std.testing.allocator, "docs/api.md"});
+    const out = try @call(.never_inline, buildMention, .{ std.testing.allocator, "docs/api.md" });
     defer std.testing.allocator.free(out);
     try std.testing.expectEqualStrings("@docs/api.md", out);
 }

@@ -631,15 +631,15 @@ test "editor methods work when called out of line" {
     defer out.deinit();
 
     var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
-    try @call(.never_inline, LineEditor.append, .{&editor, 'a'});
+    try @call(.never_inline, LineEditor.append, .{ &editor, 'a' });
     try @call(.never_inline, LineEditor.backspace, .{&editor});
     try std.testing.expectEqualStrings("", line_alloc.written());
     try std.testing.expectEqualStrings("a\x08 \x08", out.written());
 
-    try @call(.never_inline, LineEditor.appendSlice, .{&editor, "xy"});
+    try @call(.never_inline, LineEditor.appendSlice, .{ &editor, "xy" });
     try std.testing.expectEqualStrings("xy", line_alloc.written());
 
-    try @call(.never_inline, writeMentionHighlighted, .{&out.writer, "a @b c"});
+    try @call(.never_inline, writeMentionHighlighted, .{ &out.writer, "a @b c" });
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[32m@b\x1b[0m") != null);
 }
 

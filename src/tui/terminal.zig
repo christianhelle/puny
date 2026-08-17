@@ -272,6 +272,6 @@ test "terminalWidth returns a positive width or null" {
 test "writeWithCRLF converts a trailing newline when called out of line" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
-    try @call(.never_inline, writeWithCRLF, .{&output.writer, "one\ntwo\n"});
+    try @call(.never_inline, writeWithCRLF, .{ &output.writer, "one\ntwo\n" });
     try std.testing.expectEqualStrings("one\r\ntwo\r\n", output.written());
 }

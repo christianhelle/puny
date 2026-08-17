@@ -183,7 +183,7 @@ test "finish rewrites the indicator line when called out of line" {
     defer output.deinit();
 
     var indicator = ThinkingIndicator.init(std.testing.io);
-    try @call(.never_inline, ThinkingIndicator.finish, .{&indicator, std.testing.io, &output.writer, 2, true, true, .done, 0.5});
+    try @call(.never_inline, ThinkingIndicator.finish, .{ &indicator, std.testing.io, &output.writer, 2, true, true, .done, 0.5 });
     try std.testing.expectEqualStrings(
         "\x1b[2A\x1b[G\x1b[K\x1b[2B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
         output.written(),

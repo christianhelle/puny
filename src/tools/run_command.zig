@@ -437,7 +437,7 @@ test "runCommandTimed formats the exit code and stdout of a fast child" {
 
 test "runCommand propagates a spawn failure for a missing executable" {
     const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
-        &.{ "C:\\nonexistent-puny-binary-xyz.exe" }
+        &.{"C:\\nonexistent-puny-binary-xyz.exe"}
     else
         &.{"/nonexistent-puny-binary-xyz"};
     try std.testing.expectError(error.FileNotFound, runCommand(std.testing.allocator, std.testing.io, argv, null));
@@ -445,7 +445,7 @@ test "runCommand propagates a spawn failure for a missing executable" {
 
 test "runCommandTimed propagates a spawn failure for a missing executable" {
     const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
-        &.{ "C:\\nonexistent-puny-binary-xyz.exe" }
+        &.{"C:\\nonexistent-puny-binary-xyz.exe"}
     else
         &.{"/nonexistent-puny-binary-xyz"};
     try std.testing.expectError(error.FileNotFound, runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s));

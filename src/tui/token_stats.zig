@@ -94,7 +94,7 @@ test "printTokenFooter renders session total in k notation" {
 test "printTokenFooter renders large turns in k notation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try @call(.never_inline, printTokenFooter, .{&out.writer, 10000, 23000, false, 90000});
+    try @call(.never_inline, printTokenFooter, .{ &out.writer, 10000, 23000, false, 90000 });
     const text = out.written();
     try std.testing.expect(std.mem.indexOf(u8, text, "in 10.0k") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "out 23.0k") != null);
