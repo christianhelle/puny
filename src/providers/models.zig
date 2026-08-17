@@ -129,17 +129,27 @@ test "toSharedModels falls back to key when display_name is empty" {
 test "toSharedModels falls back to key when display_name is invalid UTF-8" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     const allocator = std.testing.allocator;
-    const json =
-        \\{"models":[
-        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"\xff","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
-        \\]}
-    ;
 
-    const owned = try std.json.parseFromSlice(ModelsList, allocator, json, .{ .ignore_unknown_fields = true });
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
+    const invalid_name = try arena_alloc.dupe(u8, &[_]u8{ 0xff, 0xfe, 'a' });
+    const models = try arena_alloc.alloc(ModelInfo, 1);
+    models[0] = .{
+        .key = "qwen2.5-7b",
+        .display_name = invalid_name,
+        .publisher = "lmstudio",
+        .max_context_length = 32768,
+    };
+
     var wrapped = client.Owned(ModelsList){
         .allocator = allocator,
-        .body = try allocator.dupe(u8, json),
-        .parsed = owned,
+        .body = try allocator.dupe(u8, ""),
+        .parsed = .{
+            .arena = &arena,
+            .value = .{ .models = models },
+        },
     };
 
     var shared = try toSharedModels(&wrapped);
