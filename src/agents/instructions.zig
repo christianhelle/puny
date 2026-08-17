@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const LoadResult = struct {
     filename: []const u8,
@@ -137,6 +138,7 @@ test "load reads multi-line content correctly" {
 }
 
 test "load propagates non-ignorable read errors" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     // A repo root longer than PATH_MAX makes readFileAlloc fail with
     // NameTooLong, which is neither FileNotFound, IsDir, nor AccessDenied, so
     // load must propagate it instead of skipping the candidate.
