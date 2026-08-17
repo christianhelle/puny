@@ -1107,6 +1107,7 @@ test "discoverGithubToken returns null with an empty environment" {
 }
 
 test "discoverGithubToken reads apps.json from XDG_CONFIG_HOME" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.createDirPath(std.testing.io, "github-copilot");
