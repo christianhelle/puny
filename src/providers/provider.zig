@@ -3,6 +3,7 @@ const client = @import("client.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
 const opencode_zen = @import("opencode_zen.zig");
+const anthropic = @import("anthropic.zig");
 const google = @import("google.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
@@ -70,13 +71,13 @@ pub const Provider = union(enum) {
         return switch (self.*) {
             .lmstudio => |*c| openai.chatStreaming(c, request, callback),
             .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
-                opencode_zen.chatStreamingAnthropic(c, request, callback)
+                anthropic.chatStreaming(c, request, callback)
             else if (google.isGoogleModel(request.model))
                 google.chatStreamingGoogle(c, request, callback)
             else
                 openai.chatStreaming(c, request, callback),
             .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
-                opencode_zen.chatStreamingAnthropic(c, request, callback)
+                anthropic.chatStreaming(c, request, callback)
             else
                 openai.chatStreaming(c, request, callback),
             .copilot => |*c| copilot.chatStreaming(c, request, callback),
