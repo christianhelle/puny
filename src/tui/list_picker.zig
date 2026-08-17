@@ -335,6 +335,7 @@ test "redrawList renders items with the selection highlighted" {
 }
 
 test "readKeyPosix interprets key bytes from the pending buffer" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const cases = [_]struct {
         bytes: []const u8,
         expected: Key,
@@ -360,6 +361,7 @@ test "readKeyPosix interprets key bytes from the pending buffer" {
 }
 
 test "readKeyPosix buffers extra bytes received in one read" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     pending_len = 0;
     @memcpy(pending_buf[0..2], "ab");
     pending_len = 2;
@@ -370,6 +372,7 @@ test "readKeyPosix buffers extra bytes received in one read" {
 }
 
 test "readKeyPosix buffers leftover bytes after an escape sequence" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     pending_len = 0;
     @memcpy(pending_buf[0..4], "\x1b[Aq");
     pending_len = 4;

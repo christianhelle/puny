@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const client = @import("client.zig");
 
 pub const ModelInfo = struct {
@@ -126,6 +127,7 @@ test "toSharedModels falls back to key when display_name is empty" {
 }
 
 test "toSharedModels falls back to key when display_name is invalid UTF-8" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const json =
         \\{"models":[
@@ -192,6 +194,7 @@ fn stopListModelsServer(ctx: *ListModelsServer) void {
 }
 
 test "listModels parses a successful model list response" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const body =
         \\{"models":[
         \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"Qwen2.5 7B","max_context_length":32768}

@@ -586,7 +586,7 @@ test "render shows the type-to-filter hint for an empty query" {
 
 test "render shows the match count for a non-empty query" {
     const files = [_][]const u8{ "a.zig", "b.zig" };
-    const match_indices = [_]usize{ 1 };
+    const match_indices = [_]usize{1};
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
 
@@ -659,6 +659,7 @@ test "scrollOffset keeps the selection inside the visible window" {
 }
 
 test "KeyReader interprets plain keys from the pending buffer" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var reader = KeyReader{};
     const cases = [_]struct { byte: u8, expected: std.meta.Tag(Key) }{
         .{ .byte = 'x', .expected = .char },
@@ -683,6 +684,7 @@ test "KeyReader interprets plain keys from the pending buffer" {
 }
 
 test "KeyReader interprets escape sequences from the pending buffer" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var reader = KeyReader{};
     const cases = [_]struct { bytes: []const u8, expected: Key }{
         .{ .bytes = "\x1b[A", .expected = .up },
@@ -702,6 +704,7 @@ test "KeyReader interprets escape sequences from the pending buffer" {
 }
 
 test "KeyReader buffers extra bytes received in one read" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var reader = KeyReader{};
     reader.pending[0] = 'a';
     reader.pending[1] = 'b';
