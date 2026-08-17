@@ -26,7 +26,7 @@ jobs:
       - name: Install zcov
         if: runner.os == 'Linux'
         run: |
-          git clone https://github.com/ericsssan/zcov /tmp/zcov
+          git clone https://github.com/christianhelle/zcov /tmp/zcov
           cd /tmp/zcov && zig build -Doptimize=ReleaseSafe
           echo "/tmp/zcov/zig-out/bin" >> $GITHUB_PATH
 
