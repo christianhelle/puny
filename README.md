@@ -594,6 +594,10 @@ While in a chat session:
 - `/skills` — list all available global and repository skills (prints "Skills are disabled." with `--no-skills`)
 - `/file <path|url>` — load a prompt from a local file or URL and send it as the next message
 
+When the active model reports a context window, Puny also auto-compacts the
+conversation once the estimated context exceeds 90% of that window, keeping the
+system prompts and the most recent messages.
+
 Any unrecognized slash command (e.g. `/nano-commits`, `/grill-me`) is treated as a
 skill name and loads the matching skill if found. With `--no-skills` these commands
 are treated as ordinary prompts instead.
