@@ -540,6 +540,167 @@ test "handleCompact trims old messages and reports the token estimate" {
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Context compacted: removed 40 messages") != null);
 }
 
+fn maybeAutoCompact(ctx: *ChatLoopContext) !void {
+    if (!compaction.shouldAutoCompact(compaction.estimateContextTokens(ctx.messages.items), ctx.context_window)) return;
+    const before_tokens = compaction.estimateContextTokens(ctx.messages.items);
+    const removed = try compaction.compactMessages(ctx.messages_arena.allocator(), ctx.messages, compaction.default_keep_recent);
+    if (removed == 0) return;
+    const after_tokens = compaction.estimateContextTokens(ctx.messages.items);
+    var before_buf: [24]u8 = undefined;
+    var after_buf: [24]u8 = undefined;
+    try ctx.stdout_writer.print("\n{s}Context window 90% reached — auto-compacted: removed {d} messages (est. {s} → {s} tokens){s}\n", .{
+        ansi.dim,
+        removed,
+        token_stats.formatTokens(&before_buf, before_tokens),
+        token_stats.formatTokens(&after_buf, after_tokens),
+        ansi.reset,
+    });
+    try ctx.stdout_writer.flush();
+}
+
+test "maybeAutoCompact compacts when the estimate exceeds ninety percent" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    const allocator = messages_arena_state.allocator();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(allocator);
+    try messages.append(allocator, .{ .system = "System prompt" });
+    var i: usize = 0;
+    while (i < 40) : (i += 1) {
+        try messages.append(allocator, .{ .user = "x" ** 100 });
+        try messages.append(allocator, .{ .assistant = .{ .content = "y" ** 100 } });
+    }
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var ctx = ChatLoopContext{
+        .arena = std.testing.allocator,
+        .messages_arena = &messages_arena_state,
+        .io = std.testing.io,
+        .init = undefined,
+        .parsed = undefined,
+        .cfg = undefined,
+        .stdout_writer = &out.writer,
+        .random = undefined,
+        .history = undefined,
+        .prov = undefined,
+        .model_provider = undefined,
+        .provider_url = undefined,
+        .model_key = undefined,
+        .reasoning_effort = undefined,
+        .full_tool_definitions = undefined,
+        .planning_tool_definitions = undefined,
+        .messages = &messages,
+        .planning_mode = undefined,
+        .context_window = 1000,
+        .session = undefined,
+        .session_stats = undefined,
+        .debug_log = null,
+        .chat_log = null,
+        .skill_registry = undefined,
+    };
+
+    try maybeAutoCompact(&ctx);
+
+    // system + notice + 20 kept conversation messages.
+    try std.testing.expectEqual(@as(usize, 22), messages.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "auto-compacted") != null);
+}
+
+test "maybeAutoCompact does nothing below the threshold" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    const allocator = messages_arena_state.allocator();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(allocator);
+    try messages.append(allocator, .{ .system = "System prompt" });
+    try messages.append(allocator, .{ .user = "hello" });
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var ctx = ChatLoopContext{
+        .arena = std.testing.allocator,
+        .messages_arena = &messages_arena_state,
+        .io = std.testing.io,
+        .init = undefined,
+        .parsed = undefined,
+        .cfg = undefined,
+        .stdout_writer = &out.writer,
+        .random = undefined,
+        .history = undefined,
+        .prov = undefined,
+        .model_provider = undefined,
+        .provider_url = undefined,
+        .model_key = undefined,
+        .reasoning_effort = undefined,
+        .full_tool_definitions = undefined,
+        .planning_tool_definitions = undefined,
+        .messages = &messages,
+        .planning_mode = undefined,
+        .context_window = 100000,
+        .session = undefined,
+        .session_stats = undefined,
+        .debug_log = null,
+        .chat_log = null,
+        .skill_registry = undefined,
+    };
+
+    try maybeAutoCompact(&ctx);
+
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expectEqual(@as(usize, 0), out.written().len);
+}
+
+test "maybeAutoCompact does nothing when the context window is unknown" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    const allocator = messages_arena_state.allocator();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(allocator);
+    try messages.append(allocator, .{ .system = "System prompt" });
+    var i: usize = 0;
+    while (i < 40) : (i += 1) {
+        try messages.append(allocator, .{ .user = "x" ** 100 });
+        try messages.append(allocator, .{ .assistant = .{ .content = "y" ** 100 } });
+    }
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var ctx = ChatLoopContext{
+        .arena = std.testing.allocator,
+        .messages_arena = &messages_arena_state,
+        .io = std.testing.io,
+        .init = undefined,
+        .parsed = undefined,
+        .cfg = undefined,
+        .stdout_writer = &out.writer,
+        .random = undefined,
+        .history = undefined,
+        .prov = undefined,
+        .model_provider = undefined,
+        .provider_url = undefined,
+        .model_key = undefined,
+        .reasoning_effort = undefined,
+        .full_tool_definitions = undefined,
+        .planning_tool_definitions = undefined,
+        .messages = &messages,
+        .planning_mode = undefined,
+        .session = undefined,
+        .session_stats = undefined,
+        .debug_log = null,
+        .chat_log = null,
+        .skill_registry = undefined,
+    };
+
+    try maybeAutoCompact(&ctx);
+
+    try std.testing.expectEqual(@as(usize, 81), messages.items.len);
+    try std.testing.expectEqual(@as(usize, 0), out.written().len);
+}
+
 fn readUserInput(
     ctx: *ChatLoopContext,
     pending_prompt: *?[]const u8,
@@ -573,6 +734,7 @@ fn readUserInput(
 }
 
 fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
+    try maybeAutoCompact(ctx);
     var turn_complete = false;
     var turn_cancelled = false;
     var turn_had_error = false;
