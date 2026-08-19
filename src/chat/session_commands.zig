@@ -82,6 +82,7 @@ pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !v
         ctx.random,
     )) |result| {
         ctx.model_key.* = result.model_key;
+        ctx.context_window = result.context_length;
         if (result.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
         }
@@ -139,6 +140,7 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
 
     if (model_selection_result) |sel| {
         ctx.model_key.* = sel.model_key;
+        ctx.context_window = sel.context_length;
         if (sel.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
         }
@@ -203,6 +205,7 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
 
         if (model_selection_result) |sel| {
             ctx.model_key.* = sel.model_key;
+            ctx.context_window = sel.context_length;
             if (sel.reasoning_effort) |effort| {
                 ctx.reasoning_effort.* = effort;
             }

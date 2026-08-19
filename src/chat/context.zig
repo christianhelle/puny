@@ -40,6 +40,7 @@ pub const ChatLoopContext = struct {
     planning_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
+    context_window: i64 = 0,
     restore_incomplete: bool = false,
     session: *core_session.Session,
     session_stats: *stats.SessionStats,

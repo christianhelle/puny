@@ -162,6 +162,7 @@ pub fn main(init: std.process.Init) !void {
     var provider_url: []const u8 = undefined;
     var model_key: []const u8 = undefined;
     var reasoning_effort: ?openai.ReasoningEffort = null;
+    var context_window: i64 = 0;
     try initializeProviderAndModel(
         arena,
         messages_arena,
@@ -176,6 +177,7 @@ pub fn main(init: std.process.Init) !void {
         &provider_url,
         &model_key,
         &reasoning_effort,
+        &context_window,
     );
 
     var session_restored = false;
@@ -324,6 +326,7 @@ pub fn main(init: std.process.Init) !void {
         .planning_tool_definitions = &planning_tool_definitions,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .context_window = context_window,
         .restore_incomplete = restore_incomplete,
         .session = &current_session,
         .session_stats = &session_stats,
@@ -465,6 +468,7 @@ fn initializeProviderAndModel(
     provider_url: *[]const u8,
     model_key: *[]const u8,
     reasoning_effort: *?openai.ReasoningEffort,
+    context_window: *i64,
 ) !void {
     selected_provider.* = resolver.effectiveProvider(parsed, cfg.*);
     provider_url.* = if (parsed.mock) "-" else resolver.baseUrlFor(selected_provider.*, parsed, cfg.*);
@@ -535,6 +539,7 @@ fn initializeProviderAndModel(
         };
     };
     model_key.* = init_result.model_key;
+    context_window.* = init_result.context_length;
     if (init_result.reasoning_effort) |effort| {
         reasoning_effort.* = effort;
     } else if (cfg.providerEntry(selected_provider.*).reasoning_effort) |effort_str| {
