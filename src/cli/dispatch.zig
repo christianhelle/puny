@@ -20,6 +20,7 @@ pub const Action = union(enum) {
     switch_provider: ?[]const u8,
     switch_effort: ?[]const u8,
     list_sessions,
+    compact,
     prune_sessions,
     restore_session: ?[]const u8,
     list_skills,
@@ -118,6 +119,8 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         },
 
         .sessions => return .list_sessions,
+
+        .compact => return .compact,
 
         .prune => return .prune_sessions,
 
@@ -570,6 +573,30 @@ test "dispatch sessions returns list_sessions" {
     });
 
     try std.testing.expectEqual(Action.list_sessions, action);
+}
+
+test "dispatch compact returns compact" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var planning_mode = false;
+
+    const action = try dispatch(.compact, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .planning_mode = &planning_mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.compact, action);
 }
 
 test "dispatch prune returns prune_sessions" {
