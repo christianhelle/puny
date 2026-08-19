@@ -7,6 +7,7 @@ const display = @import("display.zig");
 const persistence = @import("persistence.zig");
 const session_commands = @import("session_commands.zig");
 const context = @import("context.zig");
+const compaction = @import("compaction.zig");
 const token_stats = @import("../tui/token_stats.zig");
 const commands = @import("../cli/commands.zig");
 const core_session = @import("../core/session.zig");
@@ -393,6 +394,10 @@ pub const ChatSession = struct {
                     }
                 },
                 .run_chat_turn => {},
+                .compact => {
+                    try handleCompact(ctx);
+                    continue;
+                },
             }
 
             const turn_result = try runChatTurn(ctx);
@@ -419,6 +424,120 @@ fn maybeLoadTriggeredSkills(
         try ctx.stdout_writer.flush();
         loaded_skills.put(ctx.arena, r.name, {}) catch {};
     }
+}
+
+fn handleCompact(ctx: *ChatLoopContext) !void {
+    const allocator = ctx.messages_arena.allocator();
+    const before_tokens = compaction.estimateContextTokens(ctx.messages.items);
+    const removed = try compaction.compactMessages(allocator, ctx.messages, compaction.default_keep_recent);
+    if (removed == 0) {
+        try ctx.stdout_writer.print("\n{s}Context is already compact.{s}\n", .{ ansi.dim, ansi.reset });
+    } else {
+        const after_tokens = compaction.estimateContextTokens(ctx.messages.items);
+        var before_buf: [24]u8 = undefined;
+        var after_buf: [24]u8 = undefined;
+        try ctx.stdout_writer.print("\n{s}Context compacted: removed {d} messages (est. {s} → {s} tokens){s}\n", .{
+            ansi.dim,
+            removed,
+            token_stats.formatTokens(&before_buf, before_tokens),
+            token_stats.formatTokens(&after_buf, after_tokens),
+            ansi.reset,
+        });
+    }
+    try ctx.stdout_writer.flush();
+}
+
+test "handleCompact reports when the context is already small enough" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    const allocator = messages_arena_state.allocator();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(allocator);
+    try messages.append(allocator, .{ .system = "System prompt" });
+    try messages.append(allocator, .{ .user = "hello" });
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var ctx = ChatLoopContext{
+        .arena = std.testing.allocator,
+        .messages_arena = &messages_arena_state,
+        .io = std.testing.io,
+        .init = undefined,
+        .parsed = undefined,
+        .cfg = undefined,
+        .stdout_writer = &out.writer,
+        .random = undefined,
+        .history = undefined,
+        .prov = undefined,
+        .model_provider = undefined,
+        .provider_url = undefined,
+        .model_key = undefined,
+        .reasoning_effort = undefined,
+        .full_tool_definitions = undefined,
+        .planning_tool_definitions = undefined,
+        .messages = &messages,
+        .planning_mode = undefined,
+        .session = undefined,
+        .session_stats = undefined,
+        .debug_log = null,
+        .chat_log = null,
+        .skill_registry = undefined,
+    };
+
+    try handleCompact(&ctx);
+
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Context is already compact.") != null);
+}
+
+test "handleCompact trims old messages and reports the token estimate" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    const allocator = messages_arena_state.allocator();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(allocator);
+    try messages.append(allocator, .{ .system = "System prompt" });
+    var i: usize = 0;
+    while (i < 30) : (i += 1) {
+        try messages.append(allocator, .{ .user = "question" });
+        try messages.append(allocator, .{ .assistant = .{ .content = "answer" } });
+    }
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    var ctx = ChatLoopContext{
+        .arena = std.testing.allocator,
+        .messages_arena = &messages_arena_state,
+        .io = std.testing.io,
+        .init = undefined,
+        .parsed = undefined,
+        .cfg = undefined,
+        .stdout_writer = &out.writer,
+        .random = undefined,
+        .history = undefined,
+        .prov = undefined,
+        .model_provider = undefined,
+        .provider_url = undefined,
+        .model_key = undefined,
+        .reasoning_effort = undefined,
+        .full_tool_definitions = undefined,
+        .planning_tool_definitions = undefined,
+        .messages = &messages,
+        .planning_mode = undefined,
+        .session = undefined,
+        .session_stats = undefined,
+        .debug_log = null,
+        .chat_log = null,
+        .skill_registry = undefined,
+    };
+
+    try handleCompact(&ctx);
+
+    // system + notice + 20 kept conversation messages.
+    try std.testing.expectEqual(@as(usize, 22), messages.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Context compacted: removed 40 messages") != null);
 }
 
 fn readUserInput(
