@@ -11,6 +11,7 @@ pub const Command = union(enum) {
     provider: ?[]const u8,
     thinking: ?[]const u8,
     sessions,
+    compact,
     prune,
     resume_session: ?[]const u8,
     skills,
@@ -37,6 +38,7 @@ pub const command_tokens = [_][]const u8{
     "/sessions",
     "/resume",
     "/prune",
+    "/compact",
     "/skills",
     "/file",
     "/help",
@@ -133,6 +135,9 @@ pub fn parse(user_message: []const u8) Command {
     if (eqlIgnoreCase(user_message, "/sessions") or eqlIgnoreCase(user_message, ":sessions"))
         return .sessions;
 
+    if (eqlIgnoreCase(user_message, "/compact") or eqlIgnoreCase(user_message, ":compact"))
+        return .compact;
+
     if (eqlIgnoreCase(user_message, "/prune") or eqlIgnoreCase(user_message, ":prune"))
         return .prune;
 
@@ -184,6 +189,9 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqual(Command.sessions, parse("/sessions"));
     try std.testing.expectEqual(Command.prune, parse("/prune"));
     try std.testing.expectEqual(Command.skills, parse("/skills"));
+
+    try std.testing.expectEqual(Command.compact, parse("/compact"));
+    try std.testing.expectEqual(Command.compact, parse(":compact"));
 
     try std.testing.expectEqualDeep(Command{ .resume_session = null }, parse("/resume"));
     try std.testing.expectEqualDeep(Command{ .resume_session = "abc-123" }, parse("/resume abc-123"));
