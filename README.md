@@ -590,6 +590,7 @@ While in a chat session:
 - `/sessions` — list all saved sessions, showing their UUID, whether they have a `plan.md` or saved conversation, and a preview of the first user message
 - `/resume [id]` — list saved sessions and pick one to restore, or restore a specific session by UUID prefix
 - `/prune` — delete all session directories except the current one
+- `/compact` — compact the conversation context, keeping system prompts and the most recent messages
 - `/skills` — list all available global and repository skills (prints "Skills are disabled." with `--no-skills`)
 - `/file <path|url>` — load a prompt from a local file or URL and send it as the next message
 

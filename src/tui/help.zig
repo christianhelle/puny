@@ -18,6 +18,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/sessions", "List saved sessions");
     try printCommand(writer, "/resume [id]", "Resume a saved session");
     try printCommand(writer, "/prune", "Remove old sessions");
+    try printCommand(writer, "/compact", "Compact the conversation context");
     try printCommand(writer, "/skills", "List global and repository skills");
     try printCommand(writer, "/file [path|url]", "Load a prompt from a file or URL");
     try printCommand(writer, "/help", "Show this help message");
@@ -45,7 +46,8 @@ test "showHelp lists all commands" {
     const commands = [_][]const u8{
         "/quit, /exit",  "/new, /reset", "/stats",           "/config",           "/plan [task]",
         "/build [task]", "/model [id]",  "/provider [name]", "/thinking [level]", "/sessions",
-        "/resume [id]",  "/prune",       "/skills",          "/file [path|url]",  "/help",
+        "/resume [id]",  "/prune",       "/compact",         "/skills",           "/file [path|url]",
+        "/help",
         "@path",
     };
     for (commands) |command| {
