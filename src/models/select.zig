@@ -12,6 +12,7 @@ const retry = @import("../core/retry.zig");
 pub const SelectionResult = struct {
     model_key: []const u8,
     reasoning_effort: ?openai.ReasoningEffort,
+    context_length: i64 = 0,
 };
 
 pub fn select(
@@ -32,11 +33,15 @@ pub fn select(
         }
         var models = try listModelsWithRetry(prov, io, random, 0);
         defer models.deinit();
+        var context_length: i64 = 0;
         const found = for (models.value().models) |m| {
-            if (std.mem.eql(u8, m.id, id)) break true;
+            if (std.mem.eql(u8, m.id, id)) {
+                context_length = m.context_length;
+                break true;
+            }
         } else false;
         if (found) {
-            return .{ .model_key = try arena.dupe(u8, id), .reasoning_effort = null };
+            return .{ .model_key = try arena.dupe(u8, id), .reasoning_effort = null, .context_length = context_length };
         }
         return null;
     }
@@ -45,6 +50,14 @@ pub fn select(
     model_picker.setModels(models.value().models);
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
     const effort = (try effort_picker.pickEffort(arena, io)) orelse return null;
+
+    var context_length: i64 = 0;
+    for (models.value().models) |m| {
+        if (std.mem.eql(u8, m.id, key)) {
+            context_length = m.context_length;
+            break;
+        }
+    }
 
     if (cfg) |c| {
         if (client.isValidUtf8(key) and current_provider != .mock) {
@@ -61,7 +74,7 @@ pub fn select(
         }
     }
 
-    return .{ .model_key = key, .reasoning_effort = effort };
+    return .{ .model_key = key, .reasoning_effort = effort, .context_length = context_length };
 }
 
 fn selectModelInteractive(
@@ -250,6 +263,16 @@ test "select returns the validated model id when it exists" {
     try std.testing.expect(result != null);
     try std.testing.expectEqualStrings("mock-model", result.?.model_key);
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), result.?.reasoning_effort);
+}
+
+test "select carries the context length of the validated model" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = try select(&prov, "mock-model", arena.allocator(), std.testing.io, undefined, false, null, .mock, undefined, testRandom());
+    try std.testing.expectEqual(@as(i64, 128000), result.?.context_length);
 }
 
 test "select returns null when the model id is unknown" {
