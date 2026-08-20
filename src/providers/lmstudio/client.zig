@@ -5,7 +5,8 @@
 // </auto-generated>
 
 const std = @import("std");
-const models = @import("models.zig");
+const mdl = @import("models.zig");
+const models = mdl;
 const runtime = @import("runtime.zig");
 const Owned = runtime.Owned;
 const HttpObserver = runtime.HttpObserver;
@@ -541,42 +542,42 @@ pub const resources = struct {
                 return chatStreamingEvents(Event, client, requestBody, callback, cancellation_token);
             }
         };
-        pub const models = struct {
-            pub fn list(client: *Client) !Owned(models.ListModelsResponse) {
+        pub const models_res = struct {
+            pub fn list(client: *Client) !Owned(mdl.ListModelsResponse) {
                 return listModels(client);
             }
-            pub fn listResult(client: *Client) !ApiResult(models.ListModelsResponse) {
+            pub fn listResult(client: *Client) !ApiResult(mdl.ListModelsResponse) {
                 return listModelsResult(client);
             }
             pub const download = struct {
-                pub fn downloadmodel(client: *Client, requestBody: models.DownloadModelRequest) !Owned(models.DownloadModelResponse) {
+                pub fn downloadmodel(client: *Client, requestBody: mdl.DownloadModelRequest) !Owned(mdl.DownloadModelResponse) {
                     return downloadModel(client, requestBody);
                 }
-                pub fn downloadmodelResult(client: *Client, requestBody: models.DownloadModelRequest) !ApiResult(models.DownloadModelResponse) {
+                pub fn downloadmodelResult(client: *Client, requestBody: mdl.DownloadModelRequest) !ApiResult(mdl.DownloadModelResponse) {
                     return downloadModelResult(client, requestBody);
                 }
                 pub const status = struct {
-                    pub fn get(client: *Client, job_id: []const u8) !Owned(models.DownloadStatusResponse) {
+                    pub fn get(client: *Client, job_id: []const u8) !Owned(mdl.DownloadStatusResponse) {
                         return getDownloadStatus(client, job_id);
                     }
-                    pub fn getResult(client: *Client, job_id: []const u8) !ApiResult(models.DownloadStatusResponse) {
+                    pub fn getResult(client: *Client, job_id: []const u8) !ApiResult(mdl.DownloadStatusResponse) {
                         return getDownloadStatusResult(client, job_id);
                     }
                 };
             };
             pub const load = struct {
-                pub fn loadmodel(client: *Client, requestBody: models.LoadModelRequest) !Owned(models.LoadModelResponse) {
+                pub fn loadmodel(client: *Client, requestBody: mdl.LoadModelRequest) !Owned(mdl.LoadModelResponse) {
                     return loadModel(client, requestBody);
                 }
-                pub fn loadmodelResult(client: *Client, requestBody: models.LoadModelRequest) !ApiResult(models.LoadModelResponse) {
+                pub fn loadmodelResult(client: *Client, requestBody: mdl.LoadModelRequest) !ApiResult(mdl.LoadModelResponse) {
                     return loadModelResult(client, requestBody);
                 }
             };
             pub const unload = struct {
-                pub fn unloadmodel(client: *Client, requestBody: models.UnloadModelRequest) !Owned(models.UnloadModelResponse) {
+                pub fn unloadmodel(client: *Client, requestBody: mdl.UnloadModelRequest) !Owned(mdl.UnloadModelResponse) {
                     return unloadModel(client, requestBody);
                 }
-                pub fn unloadmodelResult(client: *Client, requestBody: models.UnloadModelRequest) !ApiResult(models.UnloadModelResponse) {
+                pub fn unloadmodelResult(client: *Client, requestBody: mdl.UnloadModelRequest) !ApiResult(mdl.UnloadModelResponse) {
                     return unloadModelResult(client, requestBody);
                 }
             };
