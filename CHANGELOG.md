@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Quiet provider test output in failure-path checks ([#156](https://github.com/christianhelle/puny/pull/156)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor opencode_zen.zig and helpers.zig into smaller modules ([#155](https://github.com/christianhelle/puny/pull/155)) ([@christianhelle](https://github.com/christianhelle/))
 - Add code coverage collection for Codecov ([#154](https://github.com/christianhelle/puny/pull/154)) ([@christianhelle](https://github.com/christianhelle/))
 - add test suite and zcov/Codecov integration ([#153](https://github.com/christianhelle/puny/pull/153)) ([@christianhelle](https://github.com/christianhelle/))
