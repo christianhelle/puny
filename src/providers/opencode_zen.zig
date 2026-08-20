@@ -75,6 +75,8 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !htt
 
 /// Convert an OpenCode-specific model list into the app-wide shared model list.
 /// The source `owned` is deinitialized; ownership of the returned value is transferred.
+const default_context_length: i64 = 1_000_000;
+
 pub fn toSharedModels(owned: *http_client.Owned(ModelsList)) !http_client.Owned(http_client.ModelsList) {
     const allocator = owned.allocator;
     const source = owned.value();
@@ -93,7 +95,7 @@ pub fn toSharedModels(owned: *http_client.Owned(ModelsList)) !http_client.Owned(
             .id = try arena_alloc.dupe(u8, m.id),
             .display_name = try arena_alloc.dupe(u8, m.id),
             .provider = try arena_alloc.dupe(u8, m.owned_by),
-            .context_length = 0,
+            .context_length = default_context_length,
         };
     }
 
@@ -257,7 +259,7 @@ test "toSharedModels copies zen models into the shared model list" {
     try std.testing.expectEqualStrings("alpha", shared.value().models[0].id);
     try std.testing.expectEqualStrings("alpha", shared.value().models[0].display_name);
     try std.testing.expectEqualStrings("opencode", shared.value().models[0].provider);
-    try std.testing.expectEqual(@as(i64, 0), shared.value().models[0].context_length);
+    try std.testing.expectEqual(@as(i64, 1_000_000), shared.value().models[0].context_length);
     try std.testing.expectEqualStrings("beta", shared.value().models[1].id);
     try std.testing.expectEqualStrings("acme", shared.value().models[1].provider);
 }
