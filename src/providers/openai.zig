@@ -264,7 +264,7 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
             client.printAuthHint(chat_client.io);
         }
 
-        std.debug.print("OpenAI chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
+        client.emitDiagnostic("OpenAI chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
             url,
             @intFromEnum(response.head.status),
             payload,

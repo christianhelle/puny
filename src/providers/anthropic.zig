@@ -262,7 +262,7 @@ pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, c
             http_client.printAuthHint(client.io);
         }
 
-        std.debug.print("Anthropic chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
+        http_client.emitDiagnostic("Anthropic chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
             url,
             @intFromEnum(response.head.status),
             payload,

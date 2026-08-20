@@ -544,13 +544,13 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         }
 
         if (builtin.mode == .Debug) {
-            std.debug.print("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n  Response: {s}\n", .{
+            client.emitDiagnostic("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n  Response: {s}\n", .{
                 url,
                 @intFromEnum(response.head.status),
                 body_alloc.written(),
             });
         } else {
-            std.debug.print("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n", .{
+            client.emitDiagnostic("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n", .{
                 url,
                 @intFromEnum(response.head.status),
             });

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 ///////////////////////////////////////////
 // Shared app model-list types
@@ -278,7 +279,13 @@ pub fn isAuthFailure(status: std.http.Status) bool {
     return status == .unauthorized or status == .forbidden;
 }
 
+pub fn emitDiagnostic(comptime format: []const u8, args: anytype) void {
+    if (builtin.is_test) return;
+    std.debug.print(format, args);
+}
+
 pub fn printAuthHint(io: std.Io) void {
+    if (builtin.is_test) return;
     var buf: [256]u8 = undefined;
     var fw: std.Io.File.Writer = .init(.stderr(), io, &buf);
     fw.interface.print("Authentication failed. Configure an API key with --api-key, PUNY_API_KEY, or --reconfigure.\n", .{}) catch {};
