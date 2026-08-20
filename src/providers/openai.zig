@@ -1,6 +1,8 @@
 const std = @import("std");
 const cancel = @import("../core/cancel.zig");
 const client = @import("client.zig");
+const shim = @import("openai/shim.zig");
+const openai_models = @import("openai/models.zig");
 
 const message = @import("message.zig");
 
@@ -8,6 +10,8 @@ pub const ToolCall = message.ToolCall;
 pub const AssistantContent = message.AssistantContent;
 pub const ToolResult = message.ToolResult;
 pub const Message = message.Message;
+
+pub const Client = shim.Client;
 
 pub const TurnUsage = struct {
     input_tokens: i64,
@@ -199,97 +203,102 @@ pub const CancelableReader = struct {
 };
 
 pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback: StreamCallback) !void {
-    const allocator = chat_client.allocator;
-    const payload = try requestPayload(allocator, request);
-    defer allocator.free(payload);
+    const shim_client: *shim.Client = @ptrCast(chat_client);
+    var arena_state = std.heap.ArenaAllocator.init(chat_client.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
 
-    const url = try std.fmt.allocPrint(allocator, "{s}/v1/chat/completions", .{chat_client.base_url});
-    defer allocator.free(url);
-
-    var headers = std.ArrayList(std.http.Header).empty;
-    defer headers.deinit(allocator);
-    const auth_header = try client.appendClientHeaders(allocator, &headers, chat_client, "application/json", "text/event-stream");
-    defer if (auth_header) |value| allocator.free(value);
-
-    const uri = try std.Uri.parse(url);
-
-    if (chat_client.http_observer) |obs| {
-        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
-    }
-
-    const start = std.Io.Clock.awake.now(chat_client.io);
-    var req = chat_client.http.request(.POST, uri, .{
-        .redirect_behavior = .unhandled,
-        .headers = .{ .accept_encoding = .{ .override = "identity" } },
-        .extra_headers = headers.items,
-    }) catch |err| {
-        if (chat_client.http_observer) |obs| {
-            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
-        }
-        return err;
-    };
-    defer req.deinit();
-
-    req.transfer_encoding = .{ .content_length = payload.len };
-    var body = try req.sendBodyUnflushed(&.{});
-    try body.writer.writeAll(payload);
-    try body.end();
-    try req.connection.?.flush();
-
-    var response = req.receiveHead(&.{}) catch |err| {
-        if (chat_client.http_observer) |obs| {
-            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
-        }
-        return err;
-    };
-    const elapsed_ns = @as(u64, @intCast(start.untilNow(chat_client.io, .awake).nanoseconds));
-
-    var transfer_buffer: [8 * 1024]u8 = undefined;
-    const response_reader = response.reader(&transfer_buffer);
-
-    var cancelable_reader_buffer: [1]u8 = undefined;
-    var cancelable_reader = CancelableReader.init(response_reader, &cancelable_reader_buffer);
-    const reader = &cancelable_reader.reader;
-
-    if (response.head.status.class() != .success) {
-        var body_alloc: std.Io.Writer.Allocating = .init(allocator);
-        defer body_alloc.deinit();
-        _ = reader.streamRemaining(&body_alloc.writer) catch {};
-
-        if (chat_client.http_observer) |obs| {
-            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
-        }
-
-        if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            client.printAuthHint(chat_client.io);
-        }
-
-        client.emitDiagnostic("OpenAI chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
-            url,
-            @intFromEnum(response.head.status),
-            payload,
-            body_alloc.written(),
-        });
-        return error.ResponseError;
-    }
-
-    if (chat_client.http_observer) |obs| {
-        if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
-    }
+    const body = try toGeneratedRequest(arena, request);
 
     var sse = SseCallback{
-        .allocator = allocator,
+        .allocator = chat_client.allocator,
         .callback = callback,
         .observer = chat_client.http_observer,
     };
 
-    client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
+    shim.createChatCompletionStreaming(
+        shim_client,
+        body,
+        &sse,
+        null,
+    ) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
         },
         else => return err,
     };
+}
+
+fn toGeneratedRequest(allocator: std.mem.Allocator, request: ChatRequest) !openai_models.CreateChatCompletionRequest {
+    var messages = try allocator.alloc(openai_models.ChatCompletionRequestMessage, request.messages.len);
+    for (request.messages, 0..) |msg, i| {
+        messages[i] = switch (msg) {
+            .system => |content| .{ .system = .{ .content = .{ .text = content }, .role = "system" } },
+            .user => |content| .{ .user = .{ .content = .{ .text = content }, .role = "user" } },
+            .assistant => |assistant| .{ .assistant = .{
+                .content = if (assistant.content) |c| .{ .string = c } else null,
+                .role = "assistant",
+                .tool_calls = if (assistant.tool_calls) |tcs| blk: {
+                    var out = try allocator.alloc(openai_models.ChatCompletionMessageToolCallsItem, tcs.len);
+                    for (tcs, 0..) |tc, j| {
+                        out[j] = .{ .function = .{
+                            .id = tc.id,
+                            .type = tc.type,
+                            .function = .{
+                                .name = tc.function.name,
+                                .arguments = tc.function.arguments,
+                            },
+                        } };
+                    }
+                    break :blk out;
+                } else null,
+            } },
+            .tool => |tool| .{ .tool = .{ .content = .{ .text = tool.content }, .role = "tool", .tool_call_id = tool.tool_call_id } },
+        };
+    }
+
+    var tools: ?[]openai_models.CreateChatCompletionRequestToolsItem = null;
+    if (request.tools.len > 0) {
+        var items = try allocator.alloc(openai_models.CreateChatCompletionRequestToolsItem, request.tools.len);
+        for (request.tools, 0..) |tool, i| {
+            const params = tool.function;
+            const maybe_name = if (params == .object) params.object.get("name") else null;
+            items[i] = .{ .chat_completion_tool = .{
+                .type = tool.type,
+                .function = if (maybe_name) |name_val|
+                    .{
+                        .name = if (name_val == .string) name_val.string else "unknown",
+                        .description = if (params.object.get("description")) |d| (if (d == .string) d.string else null) else null,
+                    }
+                else
+                    .{ .name = "unknown" },
+            } };
+        }
+        tools = items;
+    }
+
+    const stream_options: ?std.json.Value = try std.json.parseFromSliceLeaky(std.json.Value, allocator, "{\"include_usage\":true}", .{});
+
+    var req = openai_models.CreateChatCompletionRequest{
+        .model = request.model,
+        .messages = messages,
+        .stream = true,
+        .stream_options = stream_options,
+        .tools = tools,
+    };
+
+    if (request.temperature) |t| req.temperature = t;
+    if (request.reasoning_effort) |effort| {
+        if (effort != .default) {
+            const name = try allocator.dupe(u8, @tagName(effort));
+            req.reasoning_effort = name;
+            const extra_body: ?std.json.Value = try std.json.parseFromSliceLeaky(std.json.Value, allocator, "{\"thinking\":{\"type\":\"enabled\"}}", .{});
+            req.extra_body = extra_body;
+        }
+    }
+
+    return req;
 }
 
 pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {
