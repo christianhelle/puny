@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
 const context = @import("context.zig");
@@ -48,11 +49,13 @@ pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8)
         const effort_str = if (effort != .default) @tagName(effort) else null;
         ctx.cfg.providerEntry(ctx.model_provider.*).reasoning_effort = if (effort_str) |e| try ctx.arena.dupe(u8, e) else null;
         config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map) catch |err| {
-            var stderr_buffer: [1024]u8 = undefined;
-            var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), ctx.io, &stderr_buffer);
-            const stderr_writer = &stderr_file_writer.interface;
-            stderr_writer.print("Warning: failed to save reasoning effort to config: {s}\n", .{@errorName(err)}) catch {};
-            stderr_writer.flush() catch {};
+            if (!builtin.is_test) {
+                var stderr_buffer: [1024]u8 = undefined;
+                var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), ctx.io, &stderr_buffer);
+                const stderr_writer = &stderr_file_writer.interface;
+                stderr_writer.print("Warning: failed to save reasoning effort to config: {s}\n", .{@errorName(err)}) catch {};
+                stderr_writer.flush() catch {};
+            }
         };
     }
 
