@@ -9,6 +9,7 @@ const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
+const anthropic_shim = @import("anthropic_shim.zig");
 const lmstudio = @import("lmstudio/client.zig");
 const openai_client = @import("openai/client.zig");
 const anthropic_client = @import("anthropic/client.zig");
@@ -75,13 +76,13 @@ pub const Provider = union(enum) {
         return switch (self.*) {
             .lmstudio => |*c| openai_shim.chatStreaming(c, request, callback),
             .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
-                anthropic.chatStreaming(c, request, callback)
+                anthropic_shim.chatStreaming(c, request, callback)
             else if (google.isGoogleModel(request.model))
                 google.chatStreamingGoogle(c, request, callback)
             else
                 openai_shim.chatStreaming(c, request, callback),
             .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
-                anthropic.chatStreaming(c, request, callback)
+                anthropic_shim.chatStreaming(c, request, callback)
             else
                 openai_shim.chatStreaming(c, request, callback),
             .copilot => |*c| copilot.chatStreaming(c, request, callback),
