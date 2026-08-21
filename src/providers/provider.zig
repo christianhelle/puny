@@ -8,6 +8,9 @@ const google = @import("google.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const models = @import("models.zig");
+const lmstudio = @import("lmstudio/client.zig");
+const openai_client = @import("openai/client.zig");
+const anthropic_client = @import("anthropic/client.zig");
 
 pub const ModelProvider = enum {
     lmstudio,
