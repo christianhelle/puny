@@ -104,6 +104,9 @@ test "include core.sigint tests" {
 test "include models.select tests" {
     _ = @import("models/select.zig");
 }
+test "include providers.adapter tests" {
+    _ = @import("providers/adapter.zig");
+}
 test "include providers.client tests" {
     _ = @import("providers/client.zig");
 }
