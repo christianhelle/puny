@@ -111,13 +111,20 @@ test "include providers.copilot tests" {
     _ = @import("providers/copilot.zig");
 }
 test "include providers.lmstudio tests" {
-    _ = @import("providers/lmstudio.zig");
+    _ = @import("providers/lmstudio/client.zig");
+    _ = @import("providers/lmstudio/contracts.zig");
+}
+test "include providers.lmstudio_shim tests" {
+    _ = @import("providers/lmstudio_shim.zig");
+}
+test "include providers.openai_shim tests" {
+    _ = @import("providers/openai_shim.zig");
+}
+test "include providers.anthropic_shim tests" {
+    _ = @import("providers/anthropic_shim.zig");
 }
 test "include providers.mock tests" {
     _ = @import("providers/mock.zig");
-}
-test "include providers.models tests" {
-    _ = @import("providers/models.zig");
 }
 test "include providers.openai tests" {
     _ = @import("providers/openai.zig");

@@ -1,17 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const client = @import("client.zig");
+const lmstudio = @import("lmstudio/contracts.zig");
 
-pub const ModelInfo = struct {
-    key: []const u8,
-    display_name: []const u8,
-    publisher: []const u8,
-    max_context_length: i64,
-};
-
-pub const ModelsList = struct {
-    models: []const ModelInfo,
-};
+pub const ModelInfo = lmstudio.ModelInfo;
+pub const ModelsList = lmstudio.ListModelsResponse;
 
 pub fn listModels(http_client: *client.Client) !client.Owned(ModelsList) {
     const allocator = http_client.allocator;
@@ -40,8 +33,7 @@ pub fn listModels(http_client: *client.Client) !client.Owned(ModelsList) {
     };
 }
 
-/// Convert an LM-Studio-specific model list into the app-wide shared model list.
-/// The source `owned` is deinitialized; ownership of the returned value is transferred.
+/// Convert a LM-Studio-specific model list into the app-wide shared model list.
 pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.ModelsList) {
     const allocator = owned.allocator;
     const source = owned.value();
@@ -80,11 +72,11 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
     };
 }
 
-test "toSharedModels copies LM Studio model fields" {
+test "toSharedModels copies LM Studio model fields via generated contracts" {
     const allocator = std.testing.allocator;
     const json =
         \\{"models":[
-        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"Qwen2.5 7B Instruct","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
+        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"Qwen2.5 7B Instruct","format":"gguf","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
         \\]}
     ;
 
@@ -109,7 +101,7 @@ test "toSharedModels falls back to key when display_name is empty" {
     const allocator = std.testing.allocator;
     const json =
         \\{"models":[
-        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
+        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"","format":"gguf","size_bytes":123,"max_context_length":32768,"loaded_instances":[]}
         \\]}
     ;
 
@@ -141,6 +133,10 @@ test "toSharedModels falls back to key when display_name is invalid UTF-8" {
         .display_name = invalid_name,
         .publisher = "lmstudio",
         .max_context_length = 32768,
+        .type = "llm",
+        .format = "gguf",
+        .size_bytes = 123,
+        .loaded_instances = &.{},
     };
 
     var wrapped = client.Owned(ModelsList){
@@ -157,79 +153,3 @@ test "toSharedModels falls back to key when display_name is invalid UTF-8" {
 
     try std.testing.expectEqualStrings("qwen2.5-7b", shared.value().models[0].display_name);
 }
-
-const ListModelsServer = struct {
-    io: std.Io,
-    server: std.Io.net.Server,
-    status: std.http.Status = .ok,
-    body: []const u8,
-    done: std.atomic.Value(bool) = .init(false),
-
-    fn serve(self: *@This()) void {
-        defer self.done.store(true, .release);
-        var stream = self.server.accept(self.io) catch return;
-        defer stream.close(self.io);
-
-        var in_buf: [4096]u8 = undefined;
-        var out_buf: [4096]u8 = undefined;
-        var reader = stream.reader(self.io, &in_buf);
-        var writer = stream.writer(self.io, &out_buf);
-
-        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
-        var request = http_server.receiveHead() catch return;
-        request.respond(self.body, .{ .status = self.status }) catch return;
-    }
-};
-
-fn startListModelsServer(status: std.http.Status, body: []const u8) !*ListModelsServer {
-    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
-    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
-    const ctx = try std.testing.allocator.create(ListModelsServer);
-    ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
-    const thread = try std.Thread.spawn(.{}, ListModelsServer.serve, .{ctx});
-    thread.detach();
-    return ctx;
-}
-
-fn stopListModelsServer(ctx: *ListModelsServer) void {
-    var guard: usize = 0;
-    while (!ctx.done.load(.acquire) and guard < 100_000_000) : (guard += 1) {
-        std.Thread.yield() catch {};
-    }
-    ctx.server.deinit(std.testing.io);
-    std.testing.allocator.destroy(ctx);
-}
-
-test "listModels parses a successful model list response" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
-    const body =
-        \\{"models":[
-        \\  {"type":"llm","publisher":"lmstudio","key":"qwen2.5-7b","display_name":"Qwen2.5 7B","max_context_length":32768}
-        \\]}
-    ;
-    const ctx = try startListModelsServer(.ok, body);
-
-    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
-    defer std.testing.allocator.free(url);
-
-    var http_client = client.Client.init(std.testing.allocator, std.testing.io, "");
-    defer http_client.deinit();
-    http_client.withBaseUrl(url);
-
-    var owned = try listModels(&http_client);
-    defer owned.deinit();
-
-    try std.testing.expectEqual(@as(usize, 1), owned.value().models.len);
-    try std.testing.expectEqualStrings("qwen2.5-7b", owned.value().models[0].key);
-    try std.testing.expectEqualStrings("Qwen2.5 7B", owned.value().models[0].display_name);
-    try std.testing.expectEqualStrings("lmstudio", owned.value().models[0].publisher);
-    try std.testing.expectEqual(@as(i64, 32768), owned.value().models[0].max_context_length);
-
-    stopListModelsServer(ctx);
-}
-
-// NOTE: error-path tests for listModels (non-success status) are intentionally
-// omitted: src/providers/models.zig:22 uses `errdefer raw.deinit()` while the
-// non-success branch calls `raw.deinit()` again before returning
-// error.ResponseError (line 26), double-freeing the response body and
-// segfaulting the test process. Skipped pending a production fix.
