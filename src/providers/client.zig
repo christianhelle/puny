@@ -472,11 +472,9 @@ test "appendClientHeaders omits Authorization header when api key is empty" {
     try std.testing.expect(auth == null);
 }
 
-test "lmstudio.zig compiles after regeneration" {
-    const lmstudio = @import("lmstudio.zig");
-    _ = lmstudio.Client;
-    _ = lmstudio.ListModelsResponse;
-    _ = lmstudio.ModelInfo;
+test "lmstudio/client.zig compiles after regeneration" {
+    const lmstudio_client = @import("lmstudio/client.zig");
+    _ = lmstudio_client.Client;
 }
 
 test "isValidUtf8 accepts ASCII and rejects invalid bytes" {
