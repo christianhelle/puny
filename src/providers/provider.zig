@@ -7,7 +7,11 @@ const anthropic = @import("anthropic.zig");
 const google = @import("google.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
-const models = @import("models.zig");
+const lmstudio_shim = @import("lmstudio_shim.zig");
+const openai_shim = @import("openai_shim.zig");
+const adapter = @import("adapter.zig");
+const lmstudio = @import("lmstudio/client.zig");
+const openai_client = @import("openai/client.zig");
 
 pub const ModelProvider = enum {
     lmstudio,
@@ -45,16 +49,16 @@ pub const Provider = union(enum) {
     pub fn listModels(self: *Provider) !client.Owned(client.ModelsList) {
         return switch (self.*) {
             .lmstudio => |*c| blk: {
-                var owned = try models.listModels(c);
-                break :blk try models.toSharedModels(&owned);
+                var owned = try lmstudio_shim.listModels(c);
+                break :blk try lmstudio_shim.toSharedModels(&owned);
             },
             .opencode => |*c| blk: {
-                var owned = try opencode_zen.listModels(c);
-                break :blk try opencode_zen.toSharedModels(&owned);
+                var owned = try openai_shim.listModels(c);
+                break :blk try openai_shim.toSharedModels(&owned);
             },
             .opencode_go => |*c| blk: {
-                var owned = try opencode_go.listModels(c);
-                break :blk try opencode_go.toSharedModels(&owned);
+                var owned = try openai_shim.listModels(c);
+                break :blk try openai_shim.toSharedModels(&owned);
             },
             .copilot => |*c| blk: {
                 var owned = try copilot.listModels(c);
@@ -69,17 +73,53 @@ pub const Provider = union(enum) {
 
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
-            .lmstudio => |*c| openai.chatStreaming(c, request, callback),
+            .lmstudio => |*c| {
+                var generated = adapter.lmStudioClient(c);
+                defer generated.deinit();
+                generated.base_url = c.base_url;
+                var sse = openai.SseCallback{
+                    .allocator = c.allocator,
+                    .callback = callback,
+                    .observer = c.http_observer,
+                };
+                const reasoning = if (request.reasoning_effort) |effort| if (effort != .default) @tagName(effort) else null else null;
+                try lmstudio.chatStreaming(&generated, adapter.LmStudioStreamingRequest{
+                    .model = request.model,
+                    .messages = request.messages,
+                    .temperature = request.temperature,
+                    .reasoning = reasoning,
+                }, &sse, null);
+            },
             .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
                 anthropic.chatStreaming(c, request, callback)
             else if (google.isGoogleModel(request.model))
                 google.chatStreamingGoogle(c, request, callback)
-            else
-                openai.chatStreaming(c, request, callback),
+            else blk: {
+                var generated = adapter.openAiClient(c);
+                defer generated.deinit();
+                generated.base_url = c.base_url;
+                var sse = openai.SseCallback{
+                    .allocator = c.allocator,
+                    .callback = callback,
+                    .observer = c.http_observer,
+                };
+                try openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, null);
+                break :blk {};
+            },
             .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
                 anthropic.chatStreaming(c, request, callback)
-            else
-                openai.chatStreaming(c, request, callback),
+            else blk: {
+                var generated = adapter.openAiClient(c);
+                defer generated.deinit();
+                generated.base_url = c.base_url;
+                var sse = openai.SseCallback{
+                    .allocator = c.allocator,
+                    .callback = callback,
+                    .observer = c.http_observer,
+                };
+                try openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, null);
+                break :blk {};
+            },
             .copilot => |*c| copilot.chatStreaming(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
         };
