@@ -16,7 +16,8 @@ pub const BetaManagedAgentsGetMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory_store")) {
             return .{ .memory_store = try std.json.parseFromValueLeaky(BetaManagedAgentsMemoryStore, allocator, source, options) };
@@ -26,7 +27,8 @@ pub const BetaManagedAgentsGetMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory_store => |value| try jw.write(value),
+        switch (self) {
+            .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -129,7 +131,8 @@ pub const BetaManagedAgentsAgentTool = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "agent_toolset_20260401")) {
             return .{ .agent_toolset_20260401 = try std.json.parseFromValueLeaky(BetaManagedAgentsAgentToolset20260401, allocator, source, options) };
@@ -145,7 +148,8 @@ pub const BetaManagedAgentsAgentTool = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .agent_toolset_20260401 => |value| try jw.write(value),
+        switch (self) {
+            .agent_toolset_20260401 => |value| try jw.write(value),
             .mcp_toolset => |value| try jw.write(value),
             .custom => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -203,7 +207,8 @@ pub const BetaManagedAgentsInputEvent = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "user.message")) {
             return .{ .user_message = try std.json.parseFromValueLeaky(BetaManagedAgentsUserMessageEvent, allocator, source, options) };
@@ -231,7 +236,8 @@ pub const BetaManagedAgentsInputEvent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .user_message => |value| try jw.write(value),
+        switch (self) {
+            .user_message => |value| try jw.write(value),
             .user_interrupt => |value| try jw.write(value),
             .user_tool_confirmation => |value| try jw.write(value),
             .user_custom_tool_result => |value| try jw.write(value),
@@ -296,7 +302,8 @@ pub const BetaManagedAgentsModelParams = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(std.json.Value, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(std.json.Value, allocator, source, options)) |value| {
             return .{ .beta_managed_agents_model = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaManagedAgentsModelConfigParams, allocator, source, options)) |value| {
@@ -306,7 +313,8 @@ pub const BetaManagedAgentsModelParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_managed_agents_model => |value| try jw.write(value),
+        switch (self) {
+            .beta_managed_agents_model => |value| try jw.write(value),
             .beta_managed_agents_model_config_params => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -338,7 +346,8 @@ pub const InputContentBlock = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(RequestTextBlock, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(RequestTextBlock, allocator, source, options)) |value| {
             return .{ .request_text_block = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(RequestImageBlock, allocator, source, options)) |value| {
@@ -393,7 +402,8 @@ pub const InputContentBlock = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .request_text_block => |value| try jw.write(value),
+        switch (self) {
+            .request_text_block => |value| try jw.write(value),
             .request_image_block => |value| try jw.write(value),
             .request_document_block => |value| try jw.write(value),
             .request_search_result_block => |value| try jw.write(value),
@@ -448,7 +458,8 @@ pub const BetaResponseCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .beta_response_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaResponseCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -461,7 +472,8 @@ pub const BetaResponseCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_code_execution_tool_result_error => |value| try jw.write(value),
             .beta_response_code_execution_result_block => |value| try jw.write(value),
             .beta_response_encrypted_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -551,7 +563,8 @@ pub const InputMessageContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const InputContentBlock, allocator, source, options)) |value| {
@@ -561,7 +574,8 @@ pub const InputMessageContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .input_content_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -592,7 +606,8 @@ pub const BetaManagedAgentsMcpOauthCreateParamsRefreshTokenEndpointAuth = union(
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "none")) {
             return .{ .none = try std.json.parseFromValueLeaky(BetaManagedAgentsTokenEndpointAuthNoneParam, allocator, source, options) };
@@ -608,7 +623,8 @@ pub const BetaManagedAgentsMcpOauthCreateParamsRefreshTokenEndpointAuth = union(
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .none => |value| try jw.write(value),
+        switch (self) {
+            .none => |value| try jw.write(value),
             .client_secret_basic => |value| try jw.write(value),
             .client_secret_post => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -661,7 +677,8 @@ pub const ResponseCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ResponseCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ResponseCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .response_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ResponseCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -674,7 +691,8 @@ pub const ResponseCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .response_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .response_code_execution_tool_result_error => |value| try jw.write(value),
             .response_code_execution_result_block => |value| try jw.write(value),
             .response_encrypted_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -719,7 +737,8 @@ pub const BetaManagedAgentsScheduleParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "cron")) {
             return .{ .cron = try std.json.parseFromValueLeaky(BetaManagedAgentsCronScheduleParams, allocator, source, options) };
@@ -729,7 +748,8 @@ pub const BetaManagedAgentsScheduleParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .cron => |value| try jw.write(value),
+        switch (self) {
+            .cron => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -747,7 +767,8 @@ pub const BetaManagedAgentsCredentialAuth = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "mcp_oauth")) {
             return .{ .mcp_oauth = try std.json.parseFromValueLeaky(BetaManagedAgentsMcpOauthAuthResponse, allocator, source, options) };
@@ -763,7 +784,8 @@ pub const BetaManagedAgentsCredentialAuth = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .mcp_oauth => |value| try jw.write(value),
+        switch (self) {
+            .mcp_oauth => |value| try jw.write(value),
             .static_bearer => |value| try jw.write(value),
             .environment_variable => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -819,7 +841,8 @@ pub const CreateMessageParamsWithoutStreamToolsItem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(Tool, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(Tool, allocator, source, options)) |value| {
             return .{ .tool = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BashTool_20250124, allocator, source, options)) |value| {
@@ -880,7 +903,8 @@ pub const CreateMessageParamsWithoutStreamToolsItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .tool => |value| try jw.write(value),
+        switch (self) {
+            .tool => |value| try jw.write(value),
             .bash_tool_20250124 => |value| try jw.write(value),
             .code_execution_tool_20250522 => |value| try jw.write(value),
             .code_execution_tool_20250825 => |value| try jw.write(value),
@@ -918,7 +942,8 @@ pub const CreateMessageParamsWithoutStreamSystem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const RequestTextBlock, allocator, source, options)) |value| {
@@ -928,7 +953,8 @@ pub const CreateMessageParamsWithoutStreamSystem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .request_text_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -1038,7 +1064,8 @@ pub const BetaManagedAgentsActor = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "session_actor")) {
             return .{ .session_actor = try std.json.parseFromValueLeaky(BetaManagedAgentsSessionActor, allocator, source, options) };
@@ -1054,7 +1081,8 @@ pub const BetaManagedAgentsActor = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .session_actor => |value| try jw.write(value),
+        switch (self) {
+            .session_actor => |value| try jw.write(value),
             .api_actor => |value| try jw.write(value),
             .user_actor => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -1081,7 +1109,8 @@ pub const RequestWebSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const RequestWebSearchResultBlock, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const RequestWebSearchResultBlock, allocator, source, options)) |value| {
             return .{ .web_search_tool_result_block_item = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(RequestWebSearchToolResultError, allocator, source, options)) |value| {
@@ -1091,7 +1120,8 @@ pub const RequestWebSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .web_search_tool_result_block_item => |value| try jw.write(value),
+        switch (self) {
+            .web_search_tool_result_block_item => |value| try jw.write(value),
             .request_web_search_tool_result_error => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -1233,7 +1263,8 @@ pub const BetaManagedAgentsError = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaInvalidRequestError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaInvalidRequestError, allocator, source, options)) |value| {
             return .{ .beta_invalid_request_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaAuthenticationError, allocator, source, options)) |value| {
@@ -1273,7 +1304,8 @@ pub const BetaManagedAgentsError = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_invalid_request_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_invalid_request_error => |value| try jw.write(value),
             .beta_authentication_error => |value| try jw.write(value),
             .beta_billing_error => |value| try jw.write(value),
             .beta_permission_error => |value| try jw.write(value),
@@ -1308,7 +1340,8 @@ pub const BetaManagedAgentsSkill = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "anthropic")) {
             return .{ .anthropic = try std.json.parseFromValueLeaky(BetaManagedAgentsAnthropicSkill, allocator, source, options) };
@@ -1321,7 +1354,8 @@ pub const BetaManagedAgentsSkill = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .anthropic => |value| try jw.write(value),
+        switch (self) {
+            .anthropic => |value| try jw.write(value),
             .custom => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -1446,7 +1480,8 @@ pub const BetaResponseBashCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseBashCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseBashCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .beta_response_bash_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaResponseBashCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -1456,7 +1491,8 @@ pub const BetaResponseBashCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_bash_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_bash_code_execution_tool_result_error => |value| try jw.write(value),
             .beta_response_bash_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -1523,7 +1559,8 @@ pub const BetaManagedAgentsDeploymentInitialEventParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "user.message")) {
             return .{ .user_message = try std.json.parseFromValueLeaky(BetaManagedAgentsUserMessageEventParams, allocator, source, options) };
@@ -1539,7 +1576,8 @@ pub const BetaManagedAgentsDeploymentInitialEventParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .user_message => |value| try jw.write(value),
+        switch (self) {
+            .user_message => |value| try jw.write(value),
             .user_define_outcome => |value| try jw.write(value),
             .system_message => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -1568,7 +1606,8 @@ pub const BetaManagedAgentsDeleteMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory_store_deleted")) {
             return .{ .memory_store_deleted = try std.json.parseFromValueLeaky(BetaManagedAgentsDeletedMemoryStore, allocator, source, options) };
@@ -1578,7 +1617,8 @@ pub const BetaManagedAgentsDeleteMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory_store_deleted => |value| try jw.write(value),
+        switch (self) {
+            .memory_store_deleted => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -1687,7 +1727,8 @@ pub const BetaManagedAgentsSchedule = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "cron")) {
             return .{ .cron = try std.json.parseFromValueLeaky(BetaManagedAgentsCronSchedule, allocator, source, options) };
@@ -1697,7 +1738,8 @@ pub const BetaManagedAgentsSchedule = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .cron => |value| try jw.write(value),
+        switch (self) {
+            .cron => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -1786,7 +1828,8 @@ pub const BetaRequestToolSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaRequestToolSearchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaRequestToolSearchToolResultError, allocator, source, options)) |value| {
             return .{ .beta_request_tool_search_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestToolSearchToolSearchResultBlock, allocator, source, options)) |value| {
@@ -1796,7 +1839,8 @@ pub const BetaRequestToolSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_request_tool_search_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_request_tool_search_tool_result_error => |value| try jw.write(value),
             .beta_request_tool_search_tool_search_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -1890,7 +1934,8 @@ pub const ContentBlock = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ResponseTextBlock, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ResponseTextBlock, allocator, source, options)) |value| {
             return .{ .response_text_block = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ResponseThinkingBlock, allocator, source, options)) |value| {
@@ -1930,7 +1975,8 @@ pub const ContentBlock = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .response_text_block => |value| try jw.write(value),
+        switch (self) {
+            .response_text_block => |value| try jw.write(value),
             .response_thinking_block => |value| try jw.write(value),
             .response_redacted_thinking_block => |value| try jw.write(value),
             .response_tool_use_block => |value| try jw.write(value),
@@ -1957,7 +2003,8 @@ pub const BetaDreamOutput = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory_store")) {
             return .{ .memory_store = try std.json.parseFromValueLeaky(BetaDreamMemoryStoreOutput, allocator, source, options) };
@@ -1967,7 +2014,8 @@ pub const BetaDreamOutput = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory_store => |value| try jw.write(value),
+        switch (self) {
+            .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -1984,7 +2032,8 @@ pub const BetaManagedAgentsTriggerContext = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "schedule")) {
             return .{ .schedule = try std.json.parseFromValueLeaky(BetaManagedAgentsScheduleTriggerContext, allocator, source, options) };
@@ -1997,7 +2046,8 @@ pub const BetaManagedAgentsTriggerContext = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .schedule => |value| try jw.write(value),
+        switch (self) {
+            .schedule => |value| try jw.write(value),
             .manual => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -2030,7 +2080,8 @@ pub const BetaManagedAgentsMCPServer = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "url")) {
             return .{ .url = try std.json.parseFromValueLeaky(BetaManagedAgentsMCPServerURLDefinition, allocator, source, options) };
@@ -2040,7 +2091,8 @@ pub const BetaManagedAgentsMCPServer = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .url => |value| try jw.write(value),
+        switch (self) {
+            .url => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -2137,7 +2189,8 @@ pub const BetaResponseAdvisorToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseAdvisorToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseAdvisorToolResultError, allocator, source, options)) |value| {
             return .{ .beta_response_advisor_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaResponseAdvisorResultBlock, allocator, source, options)) |value| {
@@ -2150,7 +2203,8 @@ pub const BetaResponseAdvisorToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_advisor_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_advisor_tool_result_error => |value| try jw.write(value),
             .beta_response_advisor_result_block => |value| try jw.write(value),
             .beta_response_advisor_redacted_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -2198,7 +2252,8 @@ pub const BetaCountMessageTokensParamsToolsItem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaTool, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaTool, allocator, source, options)) |value| {
             return .{ .beta_tool = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaBashTool_20241022, allocator, source, options)) |value| {
@@ -2280,7 +2335,8 @@ pub const BetaCountMessageTokensParamsToolsItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_tool => |value| try jw.write(value),
+        switch (self) {
+            .beta_tool => |value| try jw.write(value),
             .beta_bash_tool_20241022 => |value| try jw.write(value),
             .beta_bash_tool_20250124 => |value| try jw.write(value),
             .beta_code_execution_tool_20250522 => |value| try jw.write(value),
@@ -2325,7 +2381,8 @@ pub const BetaCountMessageTokensParamsSystem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const BetaRequestTextBlock, allocator, source, options)) |value| {
@@ -2335,7 +2392,8 @@ pub const BetaCountMessageTokensParamsSystem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .beta_request_text_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -2385,7 +2443,8 @@ pub const RequestTextEditorCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(RequestTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(RequestTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .request_text_editor_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(RequestTextEditorCodeExecutionViewResultBlock, allocator, source, options)) |value| {
@@ -2401,7 +2460,8 @@ pub const RequestTextEditorCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .request_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .request_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
             .request_text_editor_code_execution_view_result_block => |value| try jw.write(value),
             .request_text_editor_code_execution_create_result_block => |value| try jw.write(value),
             .request_text_editor_code_execution_str_replace_result_block => |value| try jw.write(value),
@@ -2590,7 +2650,8 @@ pub const BetaManagedAgentsPrecondition = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "content_sha256")) {
             return .{ .content_sha256 = try std.json.parseFromValueLeaky(BetaManagedAgentsContentSha256Precondition, allocator, source, options) };
@@ -2600,7 +2661,8 @@ pub const BetaManagedAgentsPrecondition = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .content_sha256 => |value| try jw.write(value),
+        switch (self) {
+            .content_sha256 => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -2642,7 +2704,8 @@ pub const BetaManagedAgentsGetSessionResource = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "github_repository")) {
             return .{ .github_repository = try std.json.parseFromValueLeaky(BetaManagedAgentsGitHubRepositoryResource, allocator, source, options) };
@@ -2658,7 +2721,8 @@ pub const BetaManagedAgentsGetSessionResource = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .github_repository => |value| try jw.write(value),
+        switch (self) {
+            .github_repository => |value| try jw.write(value),
             .file => |value| try jw.write(value),
             .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -2788,7 +2852,8 @@ pub const BetaManagedAgentsCredentialUpdateAuth = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "mcp_oauth")) {
             return .{ .mcp_oauth = try std.json.parseFromValueLeaky(BetaManagedAgentsMcpOauthUpdateParams, allocator, source, options) };
@@ -2804,7 +2869,8 @@ pub const BetaManagedAgentsCredentialUpdateAuth = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .mcp_oauth => |value| try jw.write(value),
+        switch (self) {
+            .mcp_oauth => |value| try jw.write(value),
             .static_bearer => |value| try jw.write(value),
             .environment_variable => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -2875,7 +2941,8 @@ pub const ResponseToolSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ResponseToolSearchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ResponseToolSearchToolResultError, allocator, source, options)) |value| {
             return .{ .response_tool_search_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ResponseToolSearchToolSearchResultBlock, allocator, source, options)) |value| {
@@ -2885,7 +2952,8 @@ pub const ResponseToolSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .response_tool_search_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .response_tool_search_tool_result_error => |value| try jw.write(value),
             .response_tool_search_tool_search_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -3011,7 +3079,8 @@ pub const BetaResponseWebFetchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseWebFetchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseWebFetchToolResultError, allocator, source, options)) |value| {
             return .{ .beta_response_web_fetch_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaResponseWebFetchResultBlock, allocator, source, options)) |value| {
@@ -3021,7 +3090,8 @@ pub const BetaResponseWebFetchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_web_fetch_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_web_fetch_tool_result_error => |value| try jw.write(value),
             .beta_response_web_fetch_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -3047,7 +3117,8 @@ pub const BetaResponseWebSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseWebSearchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseWebSearchToolResultError, allocator, source, options)) |value| {
             return .{ .beta_response_web_search_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const BetaResponseWebSearchResultBlock, allocator, source, options)) |value| {
@@ -3057,7 +3128,8 @@ pub const BetaResponseWebSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_web_search_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_web_search_tool_result_error => |value| try jw.write(value),
             .beta_response_web_search_result_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -3128,7 +3200,8 @@ pub const CountMessageTokensParamsToolsItem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(Tool, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(Tool, allocator, source, options)) |value| {
             return .{ .tool = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BashTool_20250124, allocator, source, options)) |value| {
@@ -3189,7 +3262,8 @@ pub const CountMessageTokensParamsToolsItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .tool => |value| try jw.write(value),
+        switch (self) {
+            .tool => |value| try jw.write(value),
             .bash_tool_20250124 => |value| try jw.write(value),
             .code_execution_tool_20250522 => |value| try jw.write(value),
             .code_execution_tool_20250825 => |value| try jw.write(value),
@@ -3227,7 +3301,8 @@ pub const CountMessageTokensParamsSystem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const RequestTextBlock, allocator, source, options)) |value| {
@@ -3237,7 +3312,8 @@ pub const CountMessageTokensParamsSystem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .request_text_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -3314,7 +3390,8 @@ pub const CreateMessageParamsToolsItem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(Tool, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(Tool, allocator, source, options)) |value| {
             return .{ .tool = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BashTool_20250124, allocator, source, options)) |value| {
@@ -3375,7 +3452,8 @@ pub const CreateMessageParamsToolsItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .tool => |value| try jw.write(value),
+        switch (self) {
+            .tool => |value| try jw.write(value),
             .bash_tool_20250124 => |value| try jw.write(value),
             .code_execution_tool_20250522 => |value| try jw.write(value),
             .code_execution_tool_20250825 => |value| try jw.write(value),
@@ -3413,7 +3491,8 @@ pub const CreateMessageParamsSystem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const RequestTextBlock, allocator, source, options)) |value| {
@@ -3423,7 +3502,8 @@ pub const CreateMessageParamsSystem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .request_text_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -3479,7 +3559,8 @@ pub const BetaRequestTextEditorCodeExecutionToolResultBlockContent = union(enum)
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaRequestTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaRequestTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .beta_request_text_editor_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestTextEditorCodeExecutionViewResultBlock, allocator, source, options)) |value| {
@@ -3495,7 +3576,8 @@ pub const BetaRequestTextEditorCodeExecutionToolResultBlockContent = union(enum)
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_request_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_request_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
             .beta_request_text_editor_code_execution_view_result_block => |value| try jw.write(value),
             .beta_request_text_editor_code_execution_create_result_block => |value| try jw.write(value),
             .beta_request_text_editor_code_execution_str_replace_result_block => |value| try jw.write(value),
@@ -3527,7 +3609,8 @@ pub const BetaManagedAgentsEventParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "user.message")) {
             return .{ .user_message = try std.json.parseFromValueLeaky(BetaManagedAgentsUserMessageEventParams, allocator, source, options) };
@@ -3555,7 +3638,8 @@ pub const BetaManagedAgentsEventParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .user_message => |value| try jw.write(value),
+        switch (self) {
+            .user_message => |value| try jw.write(value),
             .user_interrupt => |value| try jw.write(value),
             .user_tool_confirmation => |value| try jw.write(value),
             .user_custom_tool_result => |value| try jw.write(value),
@@ -3637,7 +3721,8 @@ pub const BetaManagedAgentsMemoryListItem = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory")) {
             return .{ .memory = try std.json.parseFromValueLeaky(BetaManagedAgentsMemory, allocator, source, options) };
@@ -3650,7 +3735,8 @@ pub const BetaManagedAgentsMemoryListItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory => |value| try jw.write(value),
+        switch (self) {
+            .memory => |value| try jw.write(value),
             .memory_prefix => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -3693,7 +3779,8 @@ pub const BetaManagedAgentsAddSessionResource = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "file")) {
             return .{ .file = try std.json.parseFromValueLeaky(BetaManagedAgentsFileResource, allocator, source, options) };
@@ -3703,7 +3790,8 @@ pub const BetaManagedAgentsAddSessionResource = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .file => |value| try jw.write(value),
+        switch (self) {
+            .file => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -3783,7 +3871,8 @@ pub const BetaToolChoice = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaToolChoiceAuto, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaToolChoiceAuto, allocator, source, options)) |value| {
             return .{ .beta_tool_choice_auto = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaToolChoiceAny, allocator, source, options)) |value| {
@@ -3799,7 +3888,8 @@ pub const BetaToolChoice = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_tool_choice_auto => |value| try jw.write(value),
+        switch (self) {
+            .beta_tool_choice_auto => |value| try jw.write(value),
             .beta_tool_choice_any => |value| try jw.write(value),
             .beta_tool_choice_tool => |value| try jw.write(value),
             .beta_tool_choice_none => |value| try jw.write(value),
@@ -3820,7 +3910,8 @@ pub const BetaManagedAgentsUpdateSessionResource = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "github_repository")) {
             return .{ .github_repository = try std.json.parseFromValueLeaky(BetaManagedAgentsGitHubRepositoryResource, allocator, source, options) };
@@ -3836,7 +3927,8 @@ pub const BetaManagedAgentsUpdateSessionResource = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .github_repository => |value| try jw.write(value),
+        switch (self) {
+            .github_repository => |value| try jw.write(value),
             .file => |value| try jw.write(value),
             .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -3880,7 +3972,8 @@ pub const BetaManagedAgentsSessionStatusIdleEventStopReason = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "end_turn")) {
             return .{ .end_turn = try std.json.parseFromValueLeaky(BetaManagedAgentsSessionEndTurn, allocator, source, options) };
@@ -3896,7 +3989,8 @@ pub const BetaManagedAgentsSessionStatusIdleEventStopReason = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .end_turn => |value| try jw.write(value),
+        switch (self) {
+            .end_turn => |value| try jw.write(value),
             .requires_action => |value| try jw.write(value),
             .retries_exhausted => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -3994,7 +4088,8 @@ pub const BetaRequestToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const std.json.Value, allocator, source, options)) |value| {
@@ -4004,7 +4099,8 @@ pub const BetaRequestToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .items_1 => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -4064,7 +4160,8 @@ pub const BetaInputContentBlock = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaRequestTextBlock, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaRequestTextBlock, allocator, source, options)) |value| {
             return .{ .beta_request_text_block = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestImageBlock, allocator, source, options)) |value| {
@@ -4134,7 +4231,8 @@ pub const BetaInputContentBlock = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_request_text_block => |value| try jw.write(value),
+        switch (self) {
+            .beta_request_text_block => |value| try jw.write(value),
             .beta_request_image_block => |value| try jw.write(value),
             .beta_request_document_block => |value| try jw.write(value),
             .beta_request_search_result_block => |value| try jw.write(value),
@@ -4224,7 +4322,8 @@ pub const BetaManagedAgentsRubric = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "file")) {
             return .{ .file = try std.json.parseFromValueLeaky(BetaManagedAgentsFileRubric, allocator, source, options) };
@@ -4237,7 +4336,8 @@ pub const BetaManagedAgentsRubric = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .file => |value| try jw.write(value),
+        switch (self) {
+            .file => |value| try jw.write(value),
             .text => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -4307,7 +4407,8 @@ pub const BetaClearThinking20251015Keep = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(std.json.Value, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(std.json.Value, allocator, source, options)) |value| {
             return .{ .object = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
@@ -4317,7 +4418,8 @@ pub const BetaClearThinking20251015Keep = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .object => |value| try jw.write(value),
+        switch (self) {
+            .object => |value| try jw.write(value),
             .string => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -4385,7 +4487,8 @@ pub const BetaManagedAgentsRetryStatus = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "retrying")) {
             return .{ .retrying = try std.json.parseFromValueLeaky(BetaManagedAgentsRetryStatusRetrying, allocator, source, options) };
@@ -4401,7 +4504,8 @@ pub const BetaManagedAgentsRetryStatus = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .retrying => |value| try jw.write(value),
+        switch (self) {
+            .retrying => |value| try jw.write(value),
             .exhausted => |value| try jw.write(value),
             .terminal => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -4431,7 +4535,8 @@ pub const BetaManagedAgentsMultiagentParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "coordinator")) {
             return .{ .coordinator = try std.json.parseFromValueLeaky(BetaManagedAgentsMultiagentCoordinatorParams, allocator, source, options) };
@@ -4441,7 +4546,8 @@ pub const BetaManagedAgentsMultiagentParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .coordinator => |value| try jw.write(value),
+        switch (self) {
+            .coordinator => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -4465,7 +4571,8 @@ pub const BetaManagedAgentsMCPServerParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "url")) {
             return .{ .url = try std.json.parseFromValueLeaky(BetaManagedAgentsURLMCPServerParams, allocator, source, options) };
@@ -4475,7 +4582,8 @@ pub const BetaManagedAgentsMCPServerParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .url => |value| try jw.write(value),
+        switch (self) {
+            .url => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -4615,7 +4723,8 @@ pub const BetaRequestCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaRequestCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaRequestCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .beta_request_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -4628,7 +4737,8 @@ pub const BetaRequestCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_request_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_request_code_execution_tool_result_error => |value| try jw.write(value),
             .beta_request_code_execution_result_block => |value| try jw.write(value),
             .beta_request_encrypted_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -4787,7 +4897,8 @@ pub const BetaResponseToolSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseToolSearchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseToolSearchToolResultError, allocator, source, options)) |value| {
             return .{ .beta_response_tool_search_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaResponseToolSearchToolSearchResultBlock, allocator, source, options)) |value| {
@@ -4797,7 +4908,8 @@ pub const BetaResponseToolSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_tool_search_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_tool_search_tool_result_error => |value| try jw.write(value),
             .beta_response_tool_search_tool_search_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -4821,7 +4933,8 @@ pub const BetaManagedAgentsCredentialNetworkingParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "unrestricted")) {
             return .{ .unrestricted = try std.json.parseFromValueLeaky(BetaManagedAgentsUnrestrictedCredentialNetworkingParams, allocator, source, options) };
@@ -4834,7 +4947,8 @@ pub const BetaManagedAgentsCredentialNetworkingParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .unrestricted => |value| try jw.write(value),
+        switch (self) {
+            .unrestricted => |value| try jw.write(value),
             .limited => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -4852,7 +4966,8 @@ pub const BetaDreamInput = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory_store")) {
             return .{ .memory_store = try std.json.parseFromValueLeaky(BetaDreamMemoryStoreInput, allocator, source, options) };
@@ -4865,7 +4980,8 @@ pub const BetaDreamInput = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory_store => |value| try jw.write(value),
+        switch (self) {
+            .memory_store => |value| try jw.write(value),
             .sessions => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -4900,7 +5016,8 @@ pub const BetaManagedAgentsSessionResource = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "github_repository")) {
             return .{ .github_repository = try std.json.parseFromValueLeaky(BetaManagedAgentsGitHubRepositoryResource, allocator, source, options) };
@@ -4916,7 +5033,8 @@ pub const BetaManagedAgentsSessionResource = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .github_repository => |value| try jw.write(value),
+        switch (self) {
+            .github_repository => |value| try jw.write(value),
             .file => |value| try jw.write(value),
             .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -4947,7 +5065,8 @@ pub const BetaManagedAgentsUserContentBlock = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "text")) {
             return .{ .text = try std.json.parseFromValueLeaky(BetaManagedAgentsTextBlock, allocator, source, options) };
@@ -4963,7 +5082,8 @@ pub const BetaManagedAgentsUserContentBlock = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .text => |value| try jw.write(value),
+        switch (self) {
+            .text => |value| try jw.write(value),
             .image => |value| try jw.write(value),
             .document => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -5121,7 +5241,8 @@ pub const ResponseTextEditorCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ResponseTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ResponseTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .response_text_editor_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ResponseTextEditorCodeExecutionViewResultBlock, allocator, source, options)) |value| {
@@ -5137,7 +5258,8 @@ pub const ResponseTextEditorCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .response_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .response_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
             .response_text_editor_code_execution_view_result_block => |value| try jw.write(value),
             .response_text_editor_code_execution_create_result_block => |value| try jw.write(value),
             .response_text_editor_code_execution_str_replace_result_block => |value| try jw.write(value),
@@ -5300,7 +5422,8 @@ pub const BetaContentBlock = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseTextBlock, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseTextBlock, allocator, source, options)) |value| {
             return .{ .beta_response_text_block = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaResponseThinkingBlock, allocator, source, options)) |value| {
@@ -5355,7 +5478,8 @@ pub const BetaContentBlock = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_text_block => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_text_block => |value| try jw.write(value),
             .beta_response_thinking_block => |value| try jw.write(value),
             .beta_response_redacted_thinking_block => |value| try jw.write(value),
             .beta_response_tool_use_block => |value| try jw.write(value),
@@ -5466,7 +5590,8 @@ pub const BetaManagedAgentsDeploymentInitialEvent = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "user.message")) {
             return .{ .user_message = try std.json.parseFromValueLeaky(BetaManagedAgentsDeploymentUserMessageEvent, allocator, source, options) };
@@ -5482,7 +5607,8 @@ pub const BetaManagedAgentsDeploymentInitialEvent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .user_message => |value| try jw.write(value),
+        switch (self) {
+            .user_message => |value| try jw.write(value),
             .user_define_outcome => |value| try jw.write(value),
             .system_message => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -5585,7 +5711,8 @@ pub const BetaManagedAgentsMcpOauthRefreshResponseTokenEndpointAuth = union(enum
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "none")) {
             return .{ .none = try std.json.parseFromValueLeaky(BetaManagedAgentsTokenEndpointAuthNoneResponse, allocator, source, options) };
@@ -5601,7 +5728,8 @@ pub const BetaManagedAgentsMcpOauthRefreshResponseTokenEndpointAuth = union(enum
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .none => |value| try jw.write(value),
+        switch (self) {
+            .none => |value| try jw.write(value),
             .client_secret_basic => |value| try jw.write(value),
             .client_secret_post => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -5700,7 +5828,8 @@ pub const BetaManagedAgentsMcpOauthAuthResponseRefreshTokenEndpointAuth = union(
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "none")) {
             return .{ .none = try std.json.parseFromValueLeaky(BetaManagedAgentsTokenEndpointAuthNoneResponse, allocator, source, options) };
@@ -5716,7 +5845,8 @@ pub const BetaManagedAgentsMcpOauthAuthResponseRefreshTokenEndpointAuth = union(
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .none => |value| try jw.write(value),
+        switch (self) {
+            .none => |value| try jw.write(value),
             .client_secret_basic => |value| try jw.write(value),
             .client_secret_post => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -5808,7 +5938,8 @@ pub const BetaResponseTextEditorCodeExecutionToolResultBlockContent = union(enum
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaResponseTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaResponseTextEditorCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .beta_response_text_editor_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaResponseTextEditorCodeExecutionViewResultBlock, allocator, source, options)) |value| {
@@ -5824,7 +5955,8 @@ pub const BetaResponseTextEditorCodeExecutionToolResultBlockContent = union(enum
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_response_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_response_text_editor_code_execution_tool_result_error => |value| try jw.write(value),
             .beta_response_text_editor_code_execution_view_result_block => |value| try jw.write(value),
             .beta_response_text_editor_code_execution_create_result_block => |value| try jw.write(value),
             .beta_response_text_editor_code_execution_str_replace_result_block => |value| try jw.write(value),
@@ -5949,7 +6081,8 @@ pub const BetaManagedAgentsDocumentSource = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "base64")) {
             return .{ .base64 = try std.json.parseFromValueLeaky(BetaManagedAgentsBase64DocumentSource, allocator, source, options) };
@@ -5968,7 +6101,8 @@ pub const BetaManagedAgentsDocumentSource = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .base64 => |value| try jw.write(value),
+        switch (self) {
+            .base64 => |value| try jw.write(value),
             .text => |value| try jw.write(value),
             .url => |value| try jw.write(value),
             .file => |value| try jw.write(value),
@@ -6018,7 +6152,8 @@ pub const BetaManagedAgentsSessionErrorEventError = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "unknown_error")) {
             return .{ .unknown_error = try std.json.parseFromValueLeaky(BetaManagedAgentsUnknownError, allocator, source, options) };
@@ -6049,7 +6184,8 @@ pub const BetaManagedAgentsSessionErrorEventError = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .unknown_error => |value| try jw.write(value),
+        switch (self) {
+            .unknown_error => |value| try jw.write(value),
             .model_overloaded_error => |value| try jw.write(value),
             .model_rate_limited_error => |value| try jw.write(value),
             .model_request_failed_error => |value| try jw.write(value),
@@ -6088,7 +6224,8 @@ pub const MessageStreamEvent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(MessageStartEvent, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(MessageStartEvent, allocator, source, options)) |value| {
             return .{ .message_start_event = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(MessageDeltaEvent, allocator, source, options)) |value| {
@@ -6110,7 +6247,8 @@ pub const MessageStreamEvent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .message_start_event => |value| try jw.write(value),
+        switch (self) {
+            .message_start_event => |value| try jw.write(value),
             .message_delta_event => |value| try jw.write(value),
             .message_stop_event => |value| try jw.write(value),
             .content_block_start_event => |value| try jw.write(value),
@@ -6163,7 +6301,8 @@ pub const ResponseWebFetchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ResponseWebFetchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ResponseWebFetchToolResultError, allocator, source, options)) |value| {
             return .{ .response_web_fetch_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ResponseWebFetchResultBlock, allocator, source, options)) |value| {
@@ -6173,7 +6312,8 @@ pub const ResponseWebFetchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .response_web_fetch_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .response_web_fetch_tool_result_error => |value| try jw.write(value),
             .response_web_fetch_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -6205,7 +6345,8 @@ pub const BetaManagedAgentsCredentialNetworkingResponse = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "unrestricted")) {
             return .{ .unrestricted = try std.json.parseFromValueLeaky(BetaManagedAgentsUnrestrictedCredentialNetworkingResponse, allocator, source, options) };
@@ -6218,7 +6359,8 @@ pub const BetaManagedAgentsCredentialNetworkingResponse = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .unrestricted => |value| try jw.write(value),
+        switch (self) {
+            .unrestricted => |value| try jw.write(value),
             .limited => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -6249,7 +6391,8 @@ pub const BetaManagedAgentsAgentToolParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "agent_toolset_20260401")) {
             return .{ .agent_toolset_20260401 = try std.json.parseFromValueLeaky(BetaManagedAgentsAgentToolset20260401Params, allocator, source, options) };
@@ -6265,7 +6408,8 @@ pub const BetaManagedAgentsAgentToolParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .agent_toolset_20260401 => |value| try jw.write(value),
+        switch (self) {
+            .agent_toolset_20260401 => |value| try jw.write(value),
             .mcp_toolset => |value| try jw.write(value),
             .custom => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -6299,7 +6443,8 @@ pub const BetaManagedAgentsEventDeltaEvent_Delta = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "content_delta")) {
             return .{ .content_delta = try std.json.parseFromValueLeaky(BetaManagedAgentsEventDeltaEvent_ContentDelta, allocator, source, options) };
@@ -6309,7 +6454,8 @@ pub const BetaManagedAgentsEventDeltaEvent_Delta = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .content_delta => |value| try jw.write(value),
+        switch (self) {
+            .content_delta => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -6572,7 +6718,8 @@ pub const BetaManagedAgentsRepositoryCheckout = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "branch")) {
             return .{ .branch = try std.json.parseFromValueLeaky(BetaManagedAgentsBranchCheckout, allocator, source, options) };
@@ -6585,7 +6732,8 @@ pub const BetaManagedAgentsRepositoryCheckout = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .branch => |value| try jw.write(value),
+        switch (self) {
+            .branch => |value| try jw.write(value),
             .commit => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -6634,7 +6782,8 @@ pub const ContentBlockSourceContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const std.json.Value, allocator, source, options)) |value| {
@@ -6644,7 +6793,8 @@ pub const ContentBlockSourceContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .content_block_source_content => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -6679,7 +6829,8 @@ pub const BetaManagedAgentsMultiagentRosterEntryParams = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(std.json.Value, allocator, source, options)) |value| {
@@ -6689,7 +6840,8 @@ pub const BetaManagedAgentsMultiagentRosterEntryParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .object => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -6725,7 +6877,8 @@ pub const BetaMemoryTool_20250818_Command = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("command") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("command") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "view")) {
             return .{ .view = try std.json.parseFromValueLeaky(BetaMemoryTool_20250818_ViewCommand, allocator, source, options) };
@@ -6750,7 +6903,8 @@ pub const BetaMemoryTool_20250818_Command = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .view => |value| try jw.write(value),
+        switch (self) {
+            .view => |value| try jw.write(value),
             .create => |value| try jw.write(value),
             .str_replace => |value| try jw.write(value),
             .insert => |value| try jw.write(value),
@@ -6837,7 +6991,8 @@ pub const BetaManagedAgentsPermissionPolicy = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "always_allow")) {
             return .{ .always_allow = try std.json.parseFromValueLeaky(BetaManagedAgentsAlwaysAllowPolicy, allocator, source, options) };
@@ -6850,7 +7005,8 @@ pub const BetaManagedAgentsPermissionPolicy = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .always_allow => |value| try jw.write(value),
+        switch (self) {
+            .always_allow => |value| try jw.write(value),
             .always_ask => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -6892,7 +7048,8 @@ pub const BetaManagedAgentsUpdateMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory_store")) {
             return .{ .memory_store = try std.json.parseFromValueLeaky(BetaManagedAgentsMemoryStore, allocator, source, options) };
@@ -6902,7 +7059,8 @@ pub const BetaManagedAgentsUpdateMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory_store => |value| try jw.write(value),
+        switch (self) {
+            .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -6979,7 +7137,8 @@ pub const BetaRequestWebFetchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaRequestWebFetchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaRequestWebFetchToolResultError, allocator, source, options)) |value| {
             return .{ .beta_request_web_fetch_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestWebFetchResultBlock, allocator, source, options)) |value| {
@@ -6989,7 +7148,8 @@ pub const BetaRequestWebFetchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_request_web_fetch_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_request_web_fetch_tool_result_error => |value| try jw.write(value),
             .beta_request_web_fetch_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -7030,7 +7190,8 @@ pub const BetaManagedAgentsMultiagent = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "coordinator")) {
             return .{ .coordinator = try std.json.parseFromValueLeaky(BetaManagedAgentsMultiagentCoordinator, allocator, source, options) };
@@ -7040,7 +7201,8 @@ pub const BetaManagedAgentsMultiagent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .coordinator => |value| try jw.write(value),
+        switch (self) {
+            .coordinator => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -7112,7 +7274,8 @@ pub const BetaResponseMcptoolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const BetaResponseTextBlock, allocator, source, options)) |value| {
@@ -7122,7 +7285,8 @@ pub const BetaResponseMcptoolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .beta_mcp_tool_result_block_content => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -7166,7 +7330,8 @@ pub const ToolChoice = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ToolChoiceAuto, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ToolChoiceAuto, allocator, source, options)) |value| {
             return .{ .tool_choice_auto = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ToolChoiceAny, allocator, source, options)) |value| {
@@ -7182,7 +7347,8 @@ pub const ToolChoice = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .tool_choice_auto => |value| try jw.write(value),
+        switch (self) {
+            .tool_choice_auto => |value| try jw.write(value),
             .tool_choice_any => |value| try jw.write(value),
             .tool_choice_tool => |value| try jw.write(value),
             .tool_choice_none => |value| try jw.write(value),
@@ -7224,7 +7390,8 @@ pub const BetaManagedAgentsSkillParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "anthropic")) {
             return .{ .anthropic = try std.json.parseFromValueLeaky(BetaManagedAgentsAnthropicSkillParams, allocator, source, options) };
@@ -7237,7 +7404,8 @@ pub const BetaManagedAgentsSkillParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .anthropic => |value| try jw.write(value),
+        switch (self) {
+            .anthropic => |value| try jw.write(value),
             .custom => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -7300,7 +7468,8 @@ pub const BetaManagedAgentsSessionEvent = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "user.message")) {
             return .{ .user_message = try std.json.parseFromValueLeaky(BetaManagedAgentsUserMessageEvent, allocator, source, options) };
@@ -7409,7 +7578,8 @@ pub const BetaManagedAgentsSessionEvent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .user_message => |value| try jw.write(value),
+        switch (self) {
+            .user_message => |value| try jw.write(value),
             .user_interrupt => |value| try jw.write(value),
             .user_tool_confirmation => |value| try jw.write(value),
             .user_custom_tool_result => |value| try jw.write(value),
@@ -7502,7 +7672,8 @@ pub const BetaManagedAgentsSessionResourceConfig = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "github_repository")) {
             return .{ .github_repository = try std.json.parseFromValueLeaky(BetaManagedAgentsGitHubRepositoryResourceConfig, allocator, source, options) };
@@ -7518,7 +7689,8 @@ pub const BetaManagedAgentsSessionResourceConfig = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .github_repository => |value| try jw.write(value),
+        switch (self) {
+            .github_repository => |value| try jw.write(value),
             .file => |value| try jw.write(value),
             .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -7710,7 +7882,8 @@ pub const RequestToolSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(RequestToolSearchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(RequestToolSearchToolResultError, allocator, source, options)) |value| {
             return .{ .request_tool_search_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(RequestToolSearchToolSearchResultBlock, allocator, source, options)) |value| {
@@ -7720,7 +7893,8 @@ pub const RequestToolSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .request_tool_search_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .request_tool_search_tool_result_error => |value| try jw.write(value),
             .request_tool_search_tool_search_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -7744,7 +7918,8 @@ pub const BetaManagedAgentsCreateMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory_store")) {
             return .{ .memory_store = try std.json.parseFromValueLeaky(BetaManagedAgentsMemoryStore, allocator, source, options) };
@@ -7754,7 +7929,8 @@ pub const BetaManagedAgentsCreateMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory_store => |value| try jw.write(value),
+        switch (self) {
+            .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -7772,7 +7948,8 @@ pub const BetaManagedAgentsSessionResourceParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "github_repository")) {
             return .{ .github_repository = try std.json.parseFromValueLeaky(BetaManagedAgentsGitHubRepositoryResourceParams, allocator, source, options) };
@@ -7788,7 +7965,8 @@ pub const BetaManagedAgentsSessionResourceParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .github_repository => |value| try jw.write(value),
+        switch (self) {
+            .github_repository => |value| try jw.write(value),
             .file => |value| try jw.write(value),
             .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -7818,7 +7996,8 @@ pub const BetaRequestMcptoolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const BetaRequestTextBlock, allocator, source, options)) |value| {
@@ -7828,7 +8007,8 @@ pub const BetaRequestMcptoolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .beta_mcp_tool_result_block_param_content => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -7876,7 +8056,8 @@ pub const BetaRequestAdvisorToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaRequestAdvisorToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaRequestAdvisorToolResultError, allocator, source, options)) |value| {
             return .{ .beta_request_advisor_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestAdvisorResultBlock, allocator, source, options)) |value| {
@@ -7889,7 +8070,8 @@ pub const BetaRequestAdvisorToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_request_advisor_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_request_advisor_tool_result_error => |value| try jw.write(value),
             .beta_request_advisor_result_block => |value| try jw.write(value),
             .beta_request_advisor_redacted_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -7970,7 +8152,8 @@ pub const BetaManagedAgentsMcpOauthUpdateParamsRefreshTokenEndpointAuth = union(
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "client_secret_basic")) {
             return .{ .client_secret_basic = try std.json.parseFromValueLeaky(BetaManagedAgentsTokenEndpointAuthBasicUpdateParam, allocator, source, options) };
@@ -7983,7 +8166,8 @@ pub const BetaManagedAgentsMcpOauthUpdateParamsRefreshTokenEndpointAuth = union(
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .client_secret_basic => |value| try jw.write(value),
+        switch (self) {
+            .client_secret_basic => |value| try jw.write(value),
             .client_secret_post => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8061,7 +8245,8 @@ pub const BetaManagedAgentsDeploymentPausedReason = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "manual")) {
             return .{ .manual = try std.json.parseFromValueLeaky(BetaManagedAgentsManualDeploymentPausedReason, allocator, source, options) };
@@ -8074,7 +8259,8 @@ pub const BetaManagedAgentsDeploymentPausedReason = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .manual => |value| try jw.write(value),
+        switch (self) {
+            .manual => |value| try jw.write(value),
             .error_ => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8114,7 +8300,8 @@ pub const BetaManagedAgentsCreateSessionAgentUnionParams = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(std.json.Value, allocator, source, options)) |value| {
@@ -8124,7 +8311,8 @@ pub const BetaManagedAgentsCreateSessionAgentUnionParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .object => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8154,7 +8342,8 @@ pub const BetaManagedAgentsMcpOauthRefreshParamsTokenEndpointAuth = union(enum) 
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "none")) {
             return .{ .none = try std.json.parseFromValueLeaky(BetaManagedAgentsTokenEndpointAuthNoneParam, allocator, source, options) };
@@ -8170,7 +8359,8 @@ pub const BetaManagedAgentsMcpOauthRefreshParamsTokenEndpointAuth = union(enum) 
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .none => |value| try jw.write(value),
+        switch (self) {
+            .none => |value| try jw.write(value),
             .client_secret_basic => |value| try jw.write(value),
             .client_secret_post => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -8225,7 +8415,8 @@ pub const ResponseBashCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ResponseBashCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ResponseBashCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .response_bash_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ResponseBashCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -8235,7 +8426,8 @@ pub const ResponseBashCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .response_bash_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .response_bash_code_execution_tool_result_error => |value| try jw.write(value),
             .response_bash_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8356,7 +8548,8 @@ pub const BetaManagedAgentsMcpOauthRefreshUpdateParamsTokenEndpointAuth = union(
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "client_secret_basic")) {
             return .{ .client_secret_basic = try std.json.parseFromValueLeaky(BetaManagedAgentsTokenEndpointAuthBasicUpdateParam, allocator, source, options) };
@@ -8369,7 +8562,8 @@ pub const BetaManagedAgentsMcpOauthRefreshUpdateParamsTokenEndpointAuth = union(
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .client_secret_basic => |value| try jw.write(value),
+        switch (self) {
+            .client_secret_basic => |value| try jw.write(value),
             .client_secret_post => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8394,7 +8588,8 @@ pub const BetaDreamModelParams = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaDreamModelConfigParams, allocator, source, options)) |value| {
@@ -8404,7 +8599,8 @@ pub const BetaDreamModelParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .beta_dream_model_config_params => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8427,7 +8623,8 @@ pub const BetaManagedAgentsSessionThreadStatusIdleEventStopReason = union(enum) 
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "end_turn")) {
             return .{ .end_turn = try std.json.parseFromValueLeaky(BetaManagedAgentsSessionEndTurn, allocator, source, options) };
@@ -8443,7 +8640,8 @@ pub const BetaManagedAgentsSessionThreadStatusIdleEventStopReason = union(enum) 
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .end_turn => |value| try jw.write(value),
+        switch (self) {
+            .end_turn => |value| try jw.write(value),
             .requires_action => |value| try jw.write(value),
             .retries_exhausted => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -8512,7 +8710,8 @@ pub const BetaManagedAgentsDeploymentPausedReasonError = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "environment_archived_error")) {
             return .{ .environment_archived_error = try std.json.parseFromValueLeaky(BetaManagedAgentsEnvironmentArchivedDeploymentPausedReasonError, allocator, source, options) };
@@ -8561,7 +8760,8 @@ pub const BetaManagedAgentsDeploymentPausedReasonError = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .environment_archived_error => |value| try jw.write(value),
+        switch (self) {
+            .environment_archived_error => |value| try jw.write(value),
             .agent_archived_error => |value| try jw.write(value),
             .environment_not_found_error => |value| try jw.write(value),
             .vault_not_found_error => |value| try jw.write(value),
@@ -8608,7 +8808,8 @@ pub const BetaInputMessageContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const BetaInputContentBlock, allocator, source, options)) |value| {
@@ -8618,7 +8819,8 @@ pub const BetaInputMessageContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .beta_input_content_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8699,7 +8901,8 @@ pub const BetaManagedAgentsSystemContentBlock = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "text")) {
             return .{ .text = try std.json.parseFromValueLeaky(BetaManagedAgentsTextBlock, allocator, source, options) };
@@ -8709,7 +8912,8 @@ pub const BetaManagedAgentsSystemContentBlock = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .text => |value| try jw.write(value),
+        switch (self) {
+            .text => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -8731,7 +8935,8 @@ pub const BetaManagedAgentsEventStartEvent_Event = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "agent.message")) {
             return .{ .agent_message = try std.json.parseFromValueLeaky(BetaManagedAgentsEventStartEvent_AgentMessagePreview, allocator, source, options) };
@@ -8744,7 +8949,8 @@ pub const BetaManagedAgentsEventStartEvent_Event = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .agent_message => |value| try jw.write(value),
+        switch (self) {
+            .agent_message => |value| try jw.write(value),
             .agent_thinking => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8779,7 +8985,8 @@ pub const RequestBashCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(RequestBashCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(RequestBashCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .request_bash_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(RequestBashCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -8789,7 +8996,8 @@ pub const RequestBashCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .request_bash_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .request_bash_code_execution_tool_result_error => |value| try jw.write(value),
             .request_bash_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -8847,7 +9055,8 @@ pub const BetaWebhookEventData = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaWebhookSessionCreatedEventData, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaWebhookSessionCreatedEventData, allocator, source, options)) |value| {
             return .{ .beta_webhook_session_created_event_data = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaWebhookSessionPendingEventData, allocator, source, options)) |value| {
@@ -8959,7 +9168,8 @@ pub const BetaWebhookEventData = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_webhook_session_created_event_data => |value| try jw.write(value),
+        switch (self) {
+            .beta_webhook_session_created_event_data => |value| try jw.write(value),
             .beta_webhook_session_pending_event_data => |value| try jw.write(value),
             .beta_webhook_session_running_event_data => |value| try jw.write(value),
             .beta_webhook_session_idled_event_data => |value| try jw.write(value),
@@ -9098,7 +9308,8 @@ pub const RequestWebFetchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(RequestWebFetchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(RequestWebFetchToolResultError, allocator, source, options)) |value| {
             return .{ .request_web_fetch_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(RequestWebFetchResultBlock, allocator, source, options)) |value| {
@@ -9108,7 +9319,8 @@ pub const RequestWebFetchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .request_web_fetch_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .request_web_fetch_tool_result_error => |value| try jw.write(value),
             .request_web_fetch_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -9141,7 +9353,8 @@ pub const BetaManagedAgentsRubricParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "file")) {
             return .{ .file = try std.json.parseFromValueLeaky(BetaManagedAgentsFileRubricParams, allocator, source, options) };
@@ -9154,7 +9367,8 @@ pub const BetaManagedAgentsRubricParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .file => |value| try jw.write(value),
+        switch (self) {
+            .file => |value| try jw.write(value),
             .text => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -9347,7 +9561,8 @@ pub const BetaThinkingConfigParam = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaThinkingConfigEnabled, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaThinkingConfigEnabled, allocator, source, options)) |value| {
             return .{ .beta_thinking_config_enabled = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaThinkingConfigDisabled, allocator, source, options)) |value| {
@@ -9360,7 +9575,8 @@ pub const BetaThinkingConfigParam = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_thinking_config_enabled => |value| try jw.write(value),
+        switch (self) {
+            .beta_thinking_config_enabled => |value| try jw.write(value),
             .beta_thinking_config_disabled => |value| try jw.write(value),
             .beta_thinking_config_adaptive => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -9395,7 +9611,8 @@ pub const BetaManagedAgentsToolResultContentBlock = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "text")) {
             return .{ .text = try std.json.parseFromValueLeaky(BetaManagedAgentsTextBlock, allocator, source, options) };
@@ -9414,7 +9631,8 @@ pub const BetaManagedAgentsToolResultContentBlock = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .text => |value| try jw.write(value),
+        switch (self) {
+            .text => |value| try jw.write(value),
             .image => |value| try jw.write(value),
             .document => |value| try jw.write(value),
             .search_result => |value| try jw.write(value),
@@ -9453,7 +9671,8 @@ pub const RequestToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const std.json.Value, allocator, source, options)) |value| {
@@ -9463,7 +9682,8 @@ pub const RequestToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .items_1 => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -9527,7 +9747,8 @@ pub const BetaManagedAgentsStreamSessionEvents = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "user.message")) {
             return .{ .user_message = try std.json.parseFromValueLeaky(BetaManagedAgentsUserMessageEvent, allocator, source, options) };
@@ -9642,7 +9863,8 @@ pub const BetaManagedAgentsStreamSessionEvents = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .user_message => |value| try jw.write(value),
+        switch (self) {
+            .user_message => |value| try jw.write(value),
             .user_interrupt => |value| try jw.write(value),
             .user_tool_confirmation => |value| try jw.write(value),
             .user_custom_tool_result => |value| try jw.write(value),
@@ -9693,7 +9915,8 @@ pub const BetaManagedAgentsAddSessionResourceParams = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "file")) {
             return .{ .file = try std.json.parseFromValueLeaky(BetaManagedAgentsFileResourceParams, allocator, source, options) };
@@ -9703,7 +9926,8 @@ pub const BetaManagedAgentsAddSessionResourceParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .file => |value| try jw.write(value),
+        switch (self) {
+            .file => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -9732,7 +9956,8 @@ pub const BetaManagedAgentsImageSource = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "base64")) {
             return .{ .base64 = try std.json.parseFromValueLeaky(BetaManagedAgentsBase64ImageSource, allocator, source, options) };
@@ -9748,7 +9973,8 @@ pub const BetaManagedAgentsImageSource = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .base64 => |value| try jw.write(value),
+        switch (self) {
+            .base64 => |value| try jw.write(value),
             .url => |value| try jw.write(value),
             .file => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -9794,7 +10020,8 @@ pub const BetaManagedAgentsCredentialCreateAuth = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "mcp_oauth")) {
             return .{ .mcp_oauth = try std.json.parseFromValueLeaky(BetaManagedAgentsMcpOauthCreateParams, allocator, source, options) };
@@ -9810,7 +10037,8 @@ pub const BetaManagedAgentsCredentialCreateAuth = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .mcp_oauth => |value| try jw.write(value),
+        switch (self) {
+            .mcp_oauth => |value| try jw.write(value),
             .static_bearer => |value| try jw.write(value),
             .environment_variable => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -9946,7 +10174,8 @@ pub const BetaManagedAgentsRunError = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "environment_archived_error")) {
             return .{ .environment_archived_error = try std.json.parseFromValueLeaky(BetaManagedAgentsEnvironmentArchivedRunError, allocator, source, options) };
@@ -10001,7 +10230,8 @@ pub const BetaManagedAgentsRunError = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .environment_archived_error => |value| try jw.write(value),
+        switch (self) {
+            .environment_archived_error => |value| try jw.write(value),
             .agent_archived_error => |value| try jw.write(value),
             .environment_not_found_error => |value| try jw.write(value),
             .vault_not_found_error => |value| try jw.write(value),
@@ -10071,7 +10301,8 @@ pub const ThinkingConfigParam = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ThinkingConfigEnabled, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ThinkingConfigEnabled, allocator, source, options)) |value| {
             return .{ .thinking_config_enabled = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(ThinkingConfigDisabled, allocator, source, options)) |value| {
@@ -10084,7 +10315,8 @@ pub const ThinkingConfigParam = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .thinking_config_enabled => |value| try jw.write(value),
+        switch (self) {
+            .thinking_config_enabled => |value| try jw.write(value),
             .thinking_config_disabled => |value| try jw.write(value),
             .thinking_config_adaptive => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -10169,7 +10401,8 @@ pub const BetaManagedAgentsSessionMultiagent = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "coordinator")) {
             return .{ .coordinator = try std.json.parseFromValueLeaky(BetaManagedAgentsSessionMultiagentCoordinator, allocator, source, options) };
@@ -10179,7 +10412,8 @@ pub const BetaManagedAgentsSessionMultiagent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .coordinator => |value| try jw.write(value),
+        switch (self) {
+            .coordinator => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -10249,7 +10483,8 @@ pub const BetaManagedAgentsStreamSessionThreadEvents = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "user.message")) {
             return .{ .user_message = try std.json.parseFromValueLeaky(BetaManagedAgentsUserMessageEvent, allocator, source, options) };
@@ -10364,7 +10599,8 @@ pub const BetaManagedAgentsStreamSessionThreadEvents = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .user_message => |value| try jw.write(value),
+        switch (self) {
+            .user_message => |value| try jw.write(value),
             .user_interrupt => |value| try jw.write(value),
             .user_tool_confirmation => |value| try jw.write(value),
             .user_custom_tool_result => |value| try jw.write(value),
@@ -10470,7 +10706,8 @@ pub const RequestCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(RequestCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(RequestCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .request_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(RequestCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -10483,7 +10720,8 @@ pub const RequestCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .request_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .request_code_execution_tool_result_error => |value| try jw.write(value),
             .request_code_execution_result_block => |value| try jw.write(value),
             .request_encrypted_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
@@ -10703,7 +10941,8 @@ pub const BetaRequestWebSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const BetaRequestWebSearchResultBlock, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const BetaRequestWebSearchResultBlock, allocator, source, options)) |value| {
             return .{ .result_block = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestWebSearchToolResultError, allocator, source, options)) |value| {
@@ -10713,7 +10952,8 @@ pub const BetaRequestWebSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .result_block => |value| try jw.write(value),
+        switch (self) {
+            .result_block => |value| try jw.write(value),
             .beta_request_web_search_tool_result_error => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -10754,7 +10994,8 @@ pub const BetaManagedAgentsArchiveMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;        const discriminator = source.object.get("type") orelse return .{ .raw = source };
+        if (source != .object) return error.UnexpectedToken;
+        const discriminator = source.object.get("type") orelse return .{ .raw = source };
         if (discriminator != .string) return .{ .raw = source };
         if (std.mem.eql(u8, discriminator.string, "memory_store")) {
             return .{ .memory_store = try std.json.parseFromValueLeaky(BetaManagedAgentsMemoryStore, allocator, source, options) };
@@ -10764,7 +11005,8 @@ pub const BetaManagedAgentsArchiveMemoryStoreResponse = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .memory_store => |value| try jw.write(value),
+        switch (self) {
+            .memory_store => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
     }
@@ -10880,7 +11122,8 @@ pub const BetaCreateMessageParamsSystem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const BetaRequestTextBlock, allocator, source, options)) |value| {
@@ -10890,7 +11133,8 @@ pub const BetaCreateMessageParamsSystem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .beta_request_text_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -10931,7 +11175,8 @@ pub const BetaCreateMessageParamsToolsItem = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaTool, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaTool, allocator, source, options)) |value| {
             return .{ .beta_tool = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaBashTool_20241022, allocator, source, options)) |value| {
@@ -11013,7 +11258,8 @@ pub const BetaCreateMessageParamsToolsItem = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_tool => |value| try jw.write(value),
+        switch (self) {
+            .beta_tool => |value| try jw.write(value),
             .beta_bash_tool_20241022 => |value| try jw.write(value),
             .beta_bash_tool_20250124 => |value| try jw.write(value),
             .beta_code_execution_tool_20250522 => |value| try jw.write(value),
@@ -11097,7 +11343,8 @@ pub const BetaManagedAgentsAgentUnionParams = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(std.json.Value, allocator, source, options)) |value| {
@@ -11107,7 +11354,8 @@ pub const BetaManagedAgentsAgentUnionParams = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .object => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -11133,7 +11381,8 @@ pub const ResponseWebSearchToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(ResponseWebSearchToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(ResponseWebSearchToolResultError, allocator, source, options)) |value| {
             return .{ .response_web_search_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const ResponseWebSearchResultBlock, allocator, source, options)) |value| {
@@ -11143,7 +11392,8 @@ pub const ResponseWebSearchToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .response_web_search_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .response_web_search_tool_result_error => |value| try jw.write(value),
             .response_web_search_result_block_items => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -11240,7 +11490,8 @@ pub const BetaMessageStreamEvent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaMessageStartEvent, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaMessageStartEvent, allocator, source, options)) |value| {
             return .{ .beta_message_start_event = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaMessageDeltaEvent, allocator, source, options)) |value| {
@@ -11262,7 +11513,8 @@ pub const BetaMessageStreamEvent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_message_start_event => |value| try jw.write(value),
+        switch (self) {
+            .beta_message_start_event => |value| try jw.write(value),
             .beta_message_delta_event => |value| try jw.write(value),
             .beta_message_stop_event => |value| try jw.write(value),
             .beta_content_block_start_event => |value| try jw.write(value),
@@ -11340,7 +11592,8 @@ pub const BetaRequestBashCodeExecutionToolResultBlockContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky(BetaRequestBashCodeExecutionToolResultError, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky(BetaRequestBashCodeExecutionToolResultError, allocator, source, options)) |value| {
             return .{ .beta_request_bash_code_execution_tool_result_error = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky(BetaRequestBashCodeExecutionResultBlock, allocator, source, options)) |value| {
@@ -11350,7 +11603,8 @@ pub const BetaRequestBashCodeExecutionToolResultBlockContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .beta_request_bash_code_execution_tool_result_error => |value| try jw.write(value),
+        switch (self) {
+            .beta_request_bash_code_execution_tool_result_error => |value| try jw.write(value),
             .beta_request_bash_code_execution_result_block => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -11378,7 +11632,8 @@ pub const BetaContentBlockSourceContent = union(enum) {
         return jsonParseFromValue(allocator, value, options);
     }
 
-    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (std.json.parseFromValueLeaky([]const u8, allocator, source, options)) |value| {
             return .{ .string = value };
         } else |_| {}
         if (std.json.parseFromValueLeaky([]const std.json.Value, allocator, source, options)) |value| {
@@ -11388,7 +11643,8 @@ pub const BetaContentBlockSourceContent = union(enum) {
     }
 
     pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        switch (self) {            .string => |value| try jw.write(value),
+        switch (self) {
+            .string => |value| try jw.write(value),
             .beta_content_block_source_content => |value| try jw.write(value),
             .raw => |value| try jw.write(value),
         }
@@ -11432,4 +11688,3 @@ pub const ResponseDocumentBlock = struct {
     type: []const u8,
     title: ?[]const u8,
 };
-
