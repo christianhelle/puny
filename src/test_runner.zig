@@ -111,7 +111,11 @@ test "include providers.copilot tests" {
     _ = @import("providers/copilot.zig");
 }
 test "include providers.lmstudio tests" {
-    _ = @import("providers/lmstudio.zig");
+    _ = @import("providers/lmstudio/client.zig");
+    _ = @import("providers/lmstudio/contracts.zig");
+}
+test "include providers.lmstudio_shim tests" {
+    _ = @import("providers/lmstudio_shim.zig");
 }
 test "include providers.mock tests" {
     _ = @import("providers/mock.zig");
