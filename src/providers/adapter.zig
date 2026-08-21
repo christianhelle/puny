@@ -235,4 +235,3 @@ test "OpenAiStreamingRequest serializes tools" {
     try testing.expectEqualStrings("function", tool.get("type").?.string);
     try testing.expectEqualStrings("read_file", tool.get("function").?.object.get("name").?.string);
 }
-

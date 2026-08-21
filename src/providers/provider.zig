@@ -74,7 +74,12 @@ pub const Provider = union(enum) {
             .lmstudio => |*c| blk: {
                 var generated = adapter.openAiClient(c);
                 defer generated.deinit();
-                generated.base_url = c.base_url;
+                const base_url_needs_v1 = !std.mem.endsWith(u8, c.base_url, "/v1");
+                generated.base_url = if (base_url_needs_v1)
+                    try std.fmt.allocPrint(c.allocator, "{s}/v1", .{c.base_url})
+                else
+                    c.base_url;
+                defer if (base_url_needs_v1) c.allocator.free(generated.base_url);
                 if (c.http_observer) |observer| {
                     generated.http_observer = .{
                         .ctx = observer.ctx,
@@ -98,7 +103,12 @@ pub const Provider = union(enum) {
             else blk: {
                 var generated = adapter.openAiClient(c);
                 defer generated.deinit();
-                generated.base_url = c.base_url;
+                const base_url_needs_v1 = !std.mem.endsWith(u8, c.base_url, "/v1");
+                generated.base_url = if (base_url_needs_v1)
+                    try std.fmt.allocPrint(c.allocator, "{s}/v1", .{c.base_url})
+                else
+                    c.base_url;
+                defer if (base_url_needs_v1) c.allocator.free(generated.base_url);
                 if (c.http_observer) |observer| {
                     generated.http_observer = .{
                         .ctx = observer.ctx,
@@ -120,7 +130,12 @@ pub const Provider = union(enum) {
             else blk: {
                 var generated = adapter.openAiClient(c);
                 defer generated.deinit();
-                generated.base_url = c.base_url;
+                const base_url_needs_v1 = !std.mem.endsWith(u8, c.base_url, "/v1");
+                generated.base_url = if (base_url_needs_v1)
+                    try std.fmt.allocPrint(c.allocator, "{s}/v1", .{c.base_url})
+                else
+                    c.base_url;
+                defer if (base_url_needs_v1) c.allocator.free(generated.base_url);
                 if (c.http_observer) |observer| {
                     generated.http_observer = .{
                         .ctx = observer.ctx,
