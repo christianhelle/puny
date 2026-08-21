@@ -104,14 +104,14 @@ test "include core.sigint tests" {
 test "include models.select tests" {
     _ = @import("models/select.zig");
 }
+test "include providers.adapter tests" {
+    _ = @import("providers/adapter.zig");
+}
 test "include providers.client tests" {
     _ = @import("providers/client.zig");
 }
 test "include providers.copilot tests" {
     _ = @import("providers/copilot.zig");
-}
-test "include providers.lmstudio tests" {
-    _ = @import("providers/lmstudio.zig");
 }
 test "include providers.mock tests" {
     _ = @import("providers/mock.zig");
