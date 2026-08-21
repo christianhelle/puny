@@ -120,6 +120,9 @@ test "include providers.lmstudio_shim tests" {
 test "include providers.openai_shim tests" {
     _ = @import("providers/openai_shim.zig");
 }
+test "include providers.adapter tests" {
+    _ = @import("providers/adapter.zig");
+}
 test "include providers.mock tests" {
     _ = @import("providers/mock.zig");
 }
