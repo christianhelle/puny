@@ -55,7 +55,7 @@ pub const OpenAiStreamingRequest = struct {
                 try jw.objectField("reasoning_effort");
                 try jw.write(@tagName(effort));
                 try jw.objectField("thinking");
-                try jw.write(.{ .@"type" = "enabled" });
+                try jw.write(.{ .type = "enabled" });
             }
         }
 

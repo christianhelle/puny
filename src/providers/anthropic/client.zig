@@ -307,7 +307,7 @@ pub fn BetaRunDeploymentNowRaw(client: *Client, @"anthropic-version": []const u8
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/deployments/{s}/run?beta=true", .{client.base_url, deployment_id});
+    try uri_buf.writer.print("{s}/v1/deployments/{s}/run?beta=true", .{ client.base_url, deployment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -323,9 +323,9 @@ pub fn BetaRunDeploymentNowResult(client: *Client, @"anthropic-version": []const
 //
 // Description:
 // Batches may be canceled any time before processing ends. Once cancellation is initiated, the batch enters a `canceling` state, at which time the system may complete any in-progress, non-interruptible requests before finalizing cancellation.
-// 
+//
 // The number of canceled requests is specified in `request_counts`. To determine which requests were canceled, check the individual results within the batch. Note that cancellation may not result in any canceled requests if they were non-interruptible.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn message_batches_cancel(client: *Client, message_batch_id: []const u8, @"anthropic-version": []const u8) !Owned(contracts.MessageBatch) {
@@ -348,7 +348,7 @@ pub fn message_batches_cancelRaw(client: *Client, message_batch_id: []const u8, 
     _ = @"anthropic-version";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/cancel", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/cancel", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -364,7 +364,7 @@ pub fn message_batches_cancelResult(client: *Client, message_batch_id: []const u
 //
 // Description:
 // List all Message Batches within a Workspace. Most recently created batches are returned first.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn beta_message_batches_list(client: *Client, before_id: ?[]const u8, after_id: ?[]const u8, limit: ?i64, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.BetaListResponse_MessageBatch_) {
@@ -415,9 +415,9 @@ pub fn beta_message_batches_listResult(client: *Client, before_id: ?[]const u8, 
 //
 // Description:
 // Send a batch of Message creation requests.
-// 
+//
 // The Message Batches API can be used to process multiple Messages API requests at once. Once a Message Batch is created, it begins processing immediately. Batches can take up to 24 hours to complete.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn beta_message_batches_post(client: *Client, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"anthropic-user-profile-id": []const u8, requestBody: contracts.BetaCreateMessageBatchParams) !Owned(contracts.BetaMessageBatch) {
@@ -577,9 +577,9 @@ pub fn BetaCreateSessionResult(client: *Client, @"anthropic-version": []const u8
 //
 // Description:
 // Batches may be canceled any time before processing ends. Once cancellation is initiated, the batch enters a `canceling` state, at which time the system may complete any in-progress, non-interruptible requests before finalizing cancellation.
-// 
+//
 // The number of canceled requests is specified in `request_counts`. To determine which requests were canceled, check the individual results within the batch. Note that cancellation may not result in any canceled requests if they were non-interruptible.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn beta_message_batches_cancel(client: *Client, message_batch_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8) !Owned(contracts.BetaMessageBatch) {
@@ -603,7 +603,7 @@ pub fn beta_message_batches_cancelRaw(client: *Client, message_batch_id: []const
     _ = @"anthropic-version";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/cancel?beta=true", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/cancel?beta=true", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -639,7 +639,7 @@ pub fn beta_download_file_v1_files__file_id__content_getRaw(client: *Client, fil
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/files/{s}/content?beta=true", .{client.base_url, file_id});
+    try uri_buf.writer.print("{s}/v1/files/{s}/content?beta=true", .{ client.base_url, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -675,7 +675,7 @@ pub fn BetaGetAgentRaw(client: *Client, @"x-api-key": []const u8, @"anthropic-ve
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/agents/{s}?beta=true", .{client.base_url, agent_id});
+    try uri_buf.writer.print("{s}/v1/agents/{s}?beta=true", .{ client.base_url, agent_id });
     var first_query = true;
     if (version) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "version", value);
@@ -714,7 +714,7 @@ pub fn BetaUpdateAgentRaw(client: *Client, @"anthropic-version": []const u8, @"a
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/agents/{s}?beta=true", .{client.base_url, agent_id});
+    try uri_buf.writer.print("{s}/v1/agents/{s}?beta=true", .{ client.base_url, agent_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -753,7 +753,7 @@ pub fn BetaArchiveAgentRaw(client: *Client, @"anthropic-version": []const u8, @"
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/agents/{s}/archive?beta=true", .{client.base_url, agent_id});
+    try uri_buf.writer.print("{s}/v1/agents/{s}/archive?beta=true", .{ client.base_url, agent_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -769,7 +769,7 @@ pub fn BetaArchiveAgentResult(client: *Client, @"anthropic-version": []const u8,
 //
 // Description:
 // List all Message Batches within a Workspace. Most recently created batches are returned first.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn message_batches_list(client: *Client, before_id: ?[]const u8, after_id: ?[]const u8, limit: ?i64, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.ListResponse_MessageBatch_) {
@@ -819,9 +819,9 @@ pub fn message_batches_listResult(client: *Client, before_id: ?[]const u8, after
 //
 // Description:
 // Send a batch of Message creation requests.
-// 
+//
 // The Message Batches API can be used to process multiple Messages API requests at once. Once a Message Batch is created, it begins processing immediately. Batches can take up to 24 hours to complete.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn message_batches_post(client: *Client, @"anthropic-version": []const u8, @"anthropic-user-profile-id": []const u8, requestBody: contracts.CreateMessageBatchParams) !Owned(contracts.MessageBatch) {
@@ -884,7 +884,7 @@ pub fn BetaPauseDeploymentRaw(client: *Client, @"anthropic-version": []const u8,
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/deployments/{s}/pause?beta=true", .{client.base_url, deployment_id});
+    try uri_buf.writer.print("{s}/v1/deployments/{s}/pause?beta=true", .{ client.base_url, deployment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -900,7 +900,7 @@ pub fn BetaPauseDeploymentResult(client: *Client, @"anthropic-version": []const 
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Archives a tunnel certificate, removing it from the set Anthropic trusts for the tunnel. The certificate record is retained. Archiving the last non-archived certificate is permitted; the tunnel rejects MCP traffic until a new certificate is added.
 //
 pub fn BetaArchiveTunnelCertificate(client: *Client, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8, certificate_id: []const u8) !Owned(contracts.BetaTunnelCertificate) {
@@ -924,7 +924,7 @@ pub fn BetaArchiveTunnelCertificateRaw(client: *Client, @"anthropic-version": []
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates/{s}/archive?beta=true", .{client.base_url, tunnel_id, certificate_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates/{s}/archive?beta=true", .{ client.base_url, tunnel_id, certificate_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -1051,7 +1051,7 @@ pub fn BetaListEventsRaw(client: *Client, @"x-api-key": []const u8, @"anthropic-
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/events?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/events?beta=true", .{ client.base_url, session_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -1111,7 +1111,7 @@ pub fn BetaSendEventsRaw(client: *Client, @"anthropic-version": []const u8, @"an
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/events?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/events?beta=true", .{ client.base_url, session_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1154,7 +1154,7 @@ pub fn beta_download_skill_version_content_v1_skills__skill_id__versions__versio
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/skills/{s}/ss/{s}/content?beta=true", .{client.base_url, skill_id, version});
+    try uri_buf.writer.print("{s}/v1/skills/{s}/ss/{s}/content?beta=true", .{ client.base_url, skill_id, version });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1170,7 +1170,7 @@ pub fn beta_download_skill_version_content_v1_skills__skill_id__versions__versio
 //
 // Description:
 // Note: these endpoints are called automatically by the pre-built environment worker provided in the SDKs and CLI, for orchestrating sessions with self-hosted sandbox environments. They are included here as a reference; you do not need to invoke them directly.
-// 
+//
 // Retrieve detailed information about a specific work item.
 //
 pub fn beta_get_work_v1_environments__environment_id__work__work_id__get(client: *Client, environment_id: []const u8, work_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.BetaSelfHostedWork) {
@@ -1195,7 +1195,7 @@ pub fn beta_get_work_v1_environments__environment_id__work__work_id__getRaw(clie
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}?beta=true", .{client.base_url, environment_id, work_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}?beta=true", .{ client.base_url, environment_id, work_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1211,7 +1211,7 @@ pub fn beta_get_work_v1_environments__environment_id__work__work_id__getResult(c
 //
 // Description:
 // Note: these endpoints are called automatically by the pre-built environment worker provided in the SDKs and CLI, for orchestrating sessions with self-hosted sandbox environments. They are included here as a reference; you do not need to invoke them directly.
-// 
+//
 // Update work item metadata with merge semantics.
 //
 pub fn beta_update_work_v1_environments__environment_id__work__work_id__post(client: *Client, environment_id: []const u8, work_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, requestBody: contracts.BetaSelfHostedWorkUpdateRequest) !Owned(contracts.BetaSelfHostedWork) {
@@ -1235,7 +1235,7 @@ pub fn beta_update_work_v1_environments__environment_id__work__work_id__postRaw(
     _ = @"anthropic-version";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}?beta=true", .{client.base_url, environment_id, work_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}?beta=true", .{ client.base_url, environment_id, work_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1275,7 +1275,7 @@ pub fn BetaGetMemoryStoreRaw(client: *Client, @"x-api-key": []const u8, @"anthro
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}?beta=true", .{client.base_url, memory_store_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}?beta=true", .{ client.base_url, memory_store_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1310,7 +1310,7 @@ pub fn BetaUpdateMemoryStoreRaw(client: *Client, @"anthropic-version": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}?beta=true", .{client.base_url, memory_store_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}?beta=true", .{ client.base_url, memory_store_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1350,7 +1350,7 @@ pub fn BetaDeleteMemoryStoreRaw(client: *Client, @"x-api-key": []const u8, @"ant
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}?beta=true", .{client.base_url, memory_store_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}?beta=true", .{ client.base_url, memory_store_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -1385,7 +1385,7 @@ pub fn BetaRedactMemoryVersionRaw(client: *Client, @"anthropic-version": []const
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memory_versions/{s}/redact?beta=true", .{client.base_url, memory_store_id, memory_version_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memory_versions/{s}/redact?beta=true", .{ client.base_url, memory_store_id, memory_version_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -1495,7 +1495,7 @@ pub fn BetaCreateDreamResult(client: *Client, @"anthropic-version": []const u8, 
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Fetches a tunnel by ID.
 //
 pub fn BetaGetTunnel(client: *Client, @"x-api-key": []const u8, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8) !Owned(contracts.BetaTunnel) {
@@ -1520,7 +1520,7 @@ pub fn BetaGetTunnelRaw(client: *Client, @"x-api-key": []const u8, @"anthropic-v
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}?beta=true", .{client.base_url, tunnel_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}?beta=true", .{ client.base_url, tunnel_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1627,7 +1627,7 @@ pub fn BetaCreateAgentResult(client: *Client, @"anthropic-version": []const u8, 
 //
 // Description:
 // This endpoint is idempotent and can be used to poll for Message Batch completion. To access the results of a Message Batch, make a request to the `results_url` field in the response.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn beta_message_batches_retrieve(client: *Client, message_batch_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.BetaMessageBatch) {
@@ -1652,7 +1652,7 @@ pub fn beta_message_batches_retrieveRaw(client: *Client, message_batch_id: []con
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}?beta=true", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}?beta=true", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1668,9 +1668,9 @@ pub fn beta_message_batches_retrieveResult(client: *Client, message_batch_id: []
 //
 // Description:
 // Delete a Message Batch.
-// 
+//
 // Message Batches can only be deleted once they've finished processing. If you'd like to delete an in-progress batch, you must first cancel it.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn beta_message_batches_delete(client: *Client, message_batch_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.BetaDeleteMessageBatchResponse) {
@@ -1695,7 +1695,7 @@ pub fn beta_message_batches_deleteRaw(client: *Client, message_batch_id: []const
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}?beta=true", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}?beta=true", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -1802,7 +1802,7 @@ pub fn BetaCreateMemoryStoreResult(client: *Client, @"anthropic-version": []cons
 //
 // Description:
 // List available models.
-// 
+//
 // The Models API response can be used to determine which models are available for use in the API. More recently released models are listed first.
 //
 pub fn models_list(client: *Client, before_id: ?[]const u8, after_id: ?[]const u8, limit: ?i64, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, @"x-api-key": []const u8) !Owned(contracts.ListResponse_ModelInfo_) {
@@ -1872,7 +1872,7 @@ pub fn BetaCancelDreamRaw(client: *Client, @"anthropic-version": []const u8, @"a
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/dreams/{s}/cancel?beta=true", .{client.base_url, dream_id});
+    try uri_buf.writer.print("{s}/v1/dreams/{s}/cancel?beta=true", .{ client.base_url, dream_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -1912,7 +1912,7 @@ pub fn beta_get_environment_stats_v1_environments__environment_id__work_stats_ge
     _ = authorization;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work/stats?beta=true", .{client.base_url, environment_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work/stats?beta=true", .{ client.base_url, environment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1928,7 +1928,7 @@ pub fn beta_get_environment_stats_v1_environments__environment_id__work_stats_ge
 //
 // Description:
 // Get a specific model.
-// 
+//
 // The Models API response can be used to determine information about a specific model or resolve a model alias to a model ID.
 //
 pub fn beta_models_get(client: *Client, model_id: []const u8, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, @"x-api-key": []const u8) !Owned(contracts.BetaModelInfo) {
@@ -1953,7 +1953,7 @@ pub fn beta_models_getRaw(client: *Client, model_id: []const u8, @"anthropic-ver
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/models/{s}?beta=true", .{client.base_url, model_id});
+    try uri_buf.writer.print("{s}/v1/models/{s}?beta=true", .{ client.base_url, model_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -2165,7 +2165,7 @@ pub fn beta_archive_environment_v1_environments__environment_id__archive_postRaw
     _ = @"anthropic-version";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/archive?beta=true", .{client.base_url, environment_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/archive?beta=true", .{ client.base_url, environment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -2201,7 +2201,7 @@ pub fn BetaGetSessionRaw(client: *Client, @"x-api-key": []const u8, @"anthropic-
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}?beta=true", .{ client.base_url, session_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -2236,7 +2236,7 @@ pub fn BetaUpdateSessionRaw(client: *Client, @"anthropic-version": []const u8, @
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}?beta=true", .{ client.base_url, session_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2276,7 +2276,7 @@ pub fn BetaDeleteSessionRaw(client: *Client, @"x-api-key": []const u8, @"anthrop
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}?beta=true", .{ client.base_url, session_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -2311,7 +2311,7 @@ pub fn BetaArchiveSessionThreadRaw(client: *Client, @"anthropic-version": []cons
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}/archive?beta=true", .{client.base_url, session_id, thread_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}/archive?beta=true", .{ client.base_url, session_id, thread_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -2347,7 +2347,7 @@ pub fn BetaListAgentVersionsRaw(client: *Client, @"x-api-key": []const u8, @"ant
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/agents/{s}/versions?beta=true", .{client.base_url, agent_id});
+    try uri_buf.writer.print("{s}/v1/agents/{s}/versions?beta=true", .{ client.base_url, agent_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -2390,7 +2390,7 @@ pub fn BetaGetCredentialRaw(client: *Client, @"x-api-key": []const u8, @"anthrop
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}?beta=true", .{client.base_url, vault_id, credential_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}?beta=true", .{ client.base_url, vault_id, credential_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -2425,7 +2425,7 @@ pub fn BetaUpdateCredentialRaw(client: *Client, @"anthropic-version": []const u8
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}?beta=true", .{client.base_url, vault_id, credential_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}?beta=true", .{ client.base_url, vault_id, credential_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2465,7 +2465,7 @@ pub fn BetaDeleteCredentialRaw(client: *Client, @"x-api-key": []const u8, @"anth
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}?beta=true", .{client.base_url, vault_id, credential_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}?beta=true", .{ client.base_url, vault_id, credential_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -2501,7 +2501,7 @@ pub fn BetaListResourcesRaw(client: *Client, @"x-api-key": []const u8, @"anthrop
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources?beta=true", .{ client.base_url, session_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -2543,7 +2543,7 @@ pub fn BetaAddResourceRaw(client: *Client, @"anthropic-version": []const u8, @"a
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources?beta=true", .{ client.base_url, session_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2563,7 +2563,7 @@ pub fn BetaAddResourceResult(client: *Client, @"anthropic-version": []const u8, 
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Lists tunnels. Results are ordered by creation time, newest first; archived tunnels are excluded unless include_archived is set.
 //
 pub fn BetaListTunnels(client: *Client, @"x-api-key": []const u8, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, limit: ?i64, page: ?[]const u8, include_archived: ?bool) !Owned(contracts.BetaListTunnelsResponse) {
@@ -2614,7 +2614,7 @@ pub fn BetaListTunnelsResult(client: *Client, @"x-api-key": []const u8, @"anthro
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Creates a tunnel. Creation allocates a fresh hostname and provisions the tunnel; it is not idempotent. The new tunnel rejects MCP traffic until at least one CA certificate is added.
 //
 pub fn BetaCreateTunnel(client: *Client, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, requestBody: contracts.BetaCreateTunnelRequest) !Owned(contracts.BetaTunnel) {
@@ -2774,7 +2774,7 @@ pub fn BetaArchiveSessionRaw(client: *Client, @"anthropic-version": []const u8, 
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/archive?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/archive?beta=true", .{ client.base_url, session_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -2810,7 +2810,7 @@ pub fn BetaGetMemoryVersionRaw(client: *Client, @"x-api-key": []const u8, @"anth
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memory_versions/{s}?beta=true", .{client.base_url, memory_store_id, memory_version_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memory_versions/{s}?beta=true", .{ client.base_url, memory_store_id, memory_version_id });
     var first_query = true;
     if (view) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "view", value);
@@ -2830,7 +2830,7 @@ pub fn BetaGetMemoryVersionResult(client: *Client, @"x-api-key": []const u8, @"a
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Lists the certificates registered on a tunnel. Archived certificates are excluded unless include_archived is set.
 //
 pub fn BetaListTunnelCertificates(client: *Client, @"x-api-key": []const u8, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8, limit: ?i64, page: ?[]const u8, include_archived: ?bool) !Owned(contracts.BetaListTunnelCertificatesResponse) {
@@ -2855,7 +2855,7 @@ pub fn BetaListTunnelCertificatesRaw(client: *Client, @"x-api-key": []const u8, 
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates?beta=true", .{client.base_url, tunnel_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates?beta=true", .{ client.base_url, tunnel_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -2881,7 +2881,7 @@ pub fn BetaListTunnelCertificatesResult(client: *Client, @"x-api-key": []const u
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Registers a public CA certificate on a tunnel. Anthropic verifies the gateway's server certificate against this CA when it terminates the inner TLS session. A tunnel holds at most two non-archived certificates.
 //
 pub fn BetaCreateTunnelCertificate(client: *Client, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8, requestBody: contracts.BetaCreateTunnelCertificateRequestBody) !Owned(contracts.BetaTunnelCertificate) {
@@ -2905,7 +2905,7 @@ pub fn BetaCreateTunnelCertificateRaw(client: *Client, @"anthropic-version": []c
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates?beta=true", .{client.base_url, tunnel_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates?beta=true", .{ client.base_url, tunnel_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2925,7 +2925,7 @@ pub fn BetaCreateTunnelCertificateResult(client: *Client, @"anthropic-version": 
 //
 // Description:
 // List available models.
-// 
+//
 // The Models API response can be used to determine which models are available for use in the API. More recently released models are listed first.
 //
 pub fn beta_models_list(client: *Client, before_id: ?[]const u8, after_id: ?[]const u8, limit: ?i64, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, @"x-api-key": []const u8) !Owned(contracts.BetaListResponse_ModelInfo_) {
@@ -2976,7 +2976,7 @@ pub fn beta_models_listResult(client: *Client, before_id: ?[]const u8, after_id:
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Archives a tunnel. Archival is irreversible: every non-archived certificate on the tunnel is archived in the same operation, the hostname is retired and never re-allocated, and the tunnel token is invalidated. Retrying against an already-archived tunnel returns the existing record unchanged.
 //
 pub fn BetaArchiveTunnel(client: *Client, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8) !Owned(contracts.BetaTunnel) {
@@ -3000,7 +3000,7 @@ pub fn BetaArchiveTunnelRaw(client: *Client, @"anthropic-version": []const u8, @
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}/archive?beta=true", .{client.base_url, tunnel_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}/archive?beta=true", .{ client.base_url, tunnel_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -3036,7 +3036,7 @@ pub fn beta_get_skill_v1_skills__skill_id__getRaw(client: *Client, skill_id: []c
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/skills/{s}?beta=true", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/v1/skills/{s}?beta=true", .{ client.base_url, skill_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3072,7 +3072,7 @@ pub fn beta_delete_skill_v1_skills__skill_id__deleteRaw(client: *Client, skill_i
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/skills/{s}?beta=true", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/v1/skills/{s}?beta=true", .{ client.base_url, skill_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -3108,7 +3108,7 @@ pub fn BetaGetDeploymentRaw(client: *Client, @"x-api-key": []const u8, @"anthrop
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/deployments/{s}?beta=true", .{client.base_url, deployment_id});
+    try uri_buf.writer.print("{s}/v1/deployments/{s}?beta=true", .{ client.base_url, deployment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3143,7 +3143,7 @@ pub fn BetaUpdateDeploymentRaw(client: *Client, @"anthropic-version": []const u8
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/deployments/{s}?beta=true", .{client.base_url, deployment_id});
+    try uri_buf.writer.print("{s}/v1/deployments/{s}?beta=true", .{ client.base_url, deployment_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -3183,7 +3183,7 @@ pub fn BetaListCredentialsRaw(client: *Client, @"x-api-key": []const u8, @"anthr
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials?beta=true", .{client.base_url, vault_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials?beta=true", .{ client.base_url, vault_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -3228,7 +3228,7 @@ pub fn BetaCreateCredentialRaw(client: *Client, @"anthropic-version": []const u8
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials?beta=true", .{client.base_url, vault_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials?beta=true", .{ client.base_url, vault_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -3268,7 +3268,7 @@ pub fn beta_get_file_metadata_v1_files__file_id__getRaw(client: *Client, file_id
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/files/{s}?beta=true", .{client.base_url, file_id});
+    try uri_buf.writer.print("{s}/v1/files/{s}?beta=true", .{ client.base_url, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3304,7 +3304,7 @@ pub fn beta_delete_file_v1_files__file_id__deleteRaw(client: *Client, file_id: [
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/files/{s}?beta=true", .{client.base_url, file_id});
+    try uri_buf.writer.print("{s}/v1/files/{s}?beta=true", .{ client.base_url, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -3340,7 +3340,7 @@ pub fn BetaGetDeploymentRunRaw(client: *Client, @"x-api-key": []const u8, @"anth
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/deployment_runs/{s}?beta=true", .{client.base_url, deployment_run_id});
+    try uri_buf.writer.print("{s}/v1/deployment_runs/{s}?beta=true", .{ client.base_url, deployment_run_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3356,9 +3356,9 @@ pub fn BetaGetDeploymentRunResult(client: *Client, @"x-api-key": []const u8, @"a
 //
 // Description:
 // Streams the results of a Message Batch as a `.jsonl` file.
-// 
+//
 // Each line in the file is a JSON object containing the result of a single request in the Message Batch. Results are not guaranteed to be in the same order as requests. Use the `custom_id` field to match results to requests.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn beta_message_batches_results(client: *Client, message_batch_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.BetaMessageBatchIndividualResponse) {
@@ -3383,7 +3383,7 @@ pub fn beta_message_batches_resultsRaw(client: *Client, message_batch_id: []cons
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/results?beta=true", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/results?beta=true", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3419,7 +3419,7 @@ pub fn beta_get_skill_version_v1_skills__skill_id__versions__version__getRaw(cli
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/skills/{s}/ss/{s}?beta=true", .{client.base_url, skill_id, version});
+    try uri_buf.writer.print("{s}/v1/skills/{s}/ss/{s}?beta=true", .{ client.base_url, skill_id, version });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3455,7 +3455,7 @@ pub fn beta_delete_skill_version_v1_skills__skill_id__versions__version__deleteR
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/skills/{s}/ss/{s}?beta=true", .{client.base_url, skill_id, version});
+    try uri_buf.writer.print("{s}/v1/skills/{s}/ss/{s}?beta=true", .{ client.base_url, skill_id, version });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -3491,7 +3491,7 @@ pub fn BetaGetSessionThreadRaw(client: *Client, @"x-api-key": []const u8, @"anth
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}?beta=true", .{client.base_url, session_id, thread_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}?beta=true", .{ client.base_url, session_id, thread_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3526,7 +3526,7 @@ pub fn BetaArchiveDreamRaw(client: *Client, @"anthropic-version": []const u8, @"
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/dreams/{s}/archive?beta=true", .{client.base_url, dream_id});
+    try uri_buf.writer.print("{s}/v1/dreams/{s}/archive?beta=true", .{ client.base_url, dream_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -3542,9 +3542,9 @@ pub fn BetaArchiveDreamResult(client: *Client, @"anthropic-version": []const u8,
 //
 // Description:
 // Send a structured list of input messages with text and/or image content, and the model will generate the next message in the conversation.
-// 
+//
 // The Messages API can be used for either single queries or stateless multi-turn conversations.
-// 
+//
 // Learn more about the Messages API in our [user guide](https://platform.claude.com/docs/en/get-started)
 //
 pub fn beta_messages_post(client: *Client, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"anthropic-user-profile-id": []const u8, requestBody: contracts.BetaCreateMessageParams) !Owned(contracts.BetaMessage) {
@@ -3695,7 +3695,7 @@ pub fn BetaStreamSessionThreadEventsRaw(client: *Client, @"x-api-key": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}/stream?beta=true", .{client.base_url, session_id, thread_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}/stream?beta=true", .{ client.base_url, session_id, thread_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3730,7 +3730,7 @@ pub fn BetaArchiveDeploymentRaw(client: *Client, @"anthropic-version": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/deployments/{s}/archive?beta=true", .{client.base_url, deployment_id});
+    try uri_buf.writer.print("{s}/v1/deployments/{s}/archive?beta=true", .{ client.base_url, deployment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -3746,9 +3746,9 @@ pub fn BetaArchiveDeploymentResult(client: *Client, @"anthropic-version": []cons
 //
 // Description:
 // Send a structured list of input messages with text and/or image content, and the model will generate the next message in the conversation.
-// 
+//
 // The Messages API can be used for either single queries or stateless multi-turn conversations.
-// 
+//
 // Learn more about the Messages API in our [user guide](https://platform.claude.com/docs/en/get-started)
 //
 pub fn messages_post(client: *Client, @"anthropic-version": []const u8, @"anthropic-user-profile-id": []const u8, requestBody: contracts.CreateMessageParams) !Owned(contracts.Message) {
@@ -3792,7 +3792,7 @@ pub fn messages_postResult(client: *Client, @"anthropic-version": []const u8, @"
 //
 // Description:
 // Note: these endpoints are called automatically by the pre-built environment worker provided in the SDKs and CLI, for orchestrating sessions with self-hosted sandbox environments. They are included here as a reference; you do not need to invoke them directly.
-// 
+//
 // Acknowledge receipt of a work item, transitioning it from 'queued' to 'starting' and removing it from the queue.
 //
 pub fn beta_acknowledge_work_v1_environments__environment_id__work__work_id__ack_post(client: *Client, environment_id: []const u8, work_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, authorization: []const u8) !Owned(contracts.BetaSelfHostedWork) {
@@ -3817,7 +3817,7 @@ pub fn beta_acknowledge_work_v1_environments__environment_id__work__work_id__ack
     _ = authorization;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}/ack?beta=true", .{client.base_url, environment_id, work_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}/ack?beta=true", .{ client.base_url, environment_id, work_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -3852,7 +3852,7 @@ pub fn BetaCreateEnrollmentUrlRaw(client: *Client, @"anthropic-version": []const
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/user_profiles/{s}/enrollment_url?beta=true", .{client.base_url, user_profile_id});
+    try uri_buf.writer.print("{s}/v1/user_profiles/{s}/enrollment_url?beta=true", .{ client.base_url, user_profile_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -3888,7 +3888,7 @@ pub fn BetaGetVaultRaw(client: *Client, @"x-api-key": []const u8, @"anthropic-ve
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}?beta=true", .{client.base_url, vault_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}?beta=true", .{ client.base_url, vault_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3923,7 +3923,7 @@ pub fn BetaUpdateVaultRaw(client: *Client, @"anthropic-version": []const u8, @"a
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}?beta=true", .{client.base_url, vault_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}?beta=true", .{ client.base_url, vault_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -3963,7 +3963,7 @@ pub fn BetaDeleteVaultRaw(client: *Client, @"x-api-key": []const u8, @"anthropic
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}?beta=true", .{client.base_url, vault_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}?beta=true", .{ client.base_url, vault_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -4064,9 +4064,9 @@ pub fn BetaCreateVaultResult(client: *Client, @"anthropic-version": []const u8, 
 //
 // Description:
 // Streams the results of a Message Batch as a `.jsonl` file.
-// 
+//
 // Each line in the file is a JSON object containing the result of a single request in the Message Batch. Results are not guaranteed to be in the same order as requests. Use the `custom_id` field to match results to requests.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn message_batches_results(client: *Client, message_batch_id: []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.MessageBatchIndividualResponse) {
@@ -4090,7 +4090,7 @@ pub fn message_batches_resultsRaw(client: *Client, message_batch_id: []const u8,
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/results", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}/results", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -4126,7 +4126,7 @@ pub fn BetaListMemoriesRaw(client: *Client, @"x-api-key": []const u8, @"anthropi
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories?beta=true", .{client.base_url, memory_store_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories?beta=true", .{ client.base_url, memory_store_id });
     var first_query = true;
     if (path_prefix) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "path_prefix", value);
@@ -4177,7 +4177,7 @@ pub fn BetaCreateMemoryRaw(client: *Client, @"anthropic-version": []const u8, @"
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories?beta=true", .{client.base_url, memory_store_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories?beta=true", .{ client.base_url, memory_store_id });
     var first_query = true;
     if (view) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "view", value);
@@ -4201,9 +4201,9 @@ pub fn BetaCreateMemoryResult(client: *Client, @"anthropic-version": []const u8,
 //
 // Description:
 // [Legacy] Create a Text Completion.
-// 
+//
 // The Text Completions API is a legacy API. We recommend using the [Messages API](https://platform.claude.com/docs/en/api/messages) going forward.
-// 
+//
 // Future models and features will not be compatible with Text Completions. See our [migration guide](https://platform.claude.com/docs/en/build-with-claude/working-with-messages) for guidance in migrating from Text Completions to Messages.
 //
 pub fn complete_post(client: *Client, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, requestBody: contracts.CompletionRequest) !Owned(contracts.CompletionResponse) {
@@ -4247,7 +4247,7 @@ pub fn complete_postResult(client: *Client, @"anthropic-version": []const u8, @"
 //
 // Description:
 // Note: these endpoints are called automatically by the pre-built environment worker provided in the SDKs and CLI, for orchestrating sessions with self-hosted sandbox environments. They are included here as a reference; you do not need to invoke them directly.
-// 
+//
 // List work items in an environment.
 //
 pub fn beta_list_work_v1_environments__environment_id__work_get(client: *Client, environment_id: []const u8, limit: ?i64, page: ?[]const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, authorization: []const u8) !Owned(contracts.BetaSelfHostedWorkListResponse) {
@@ -4272,7 +4272,7 @@ pub fn beta_list_work_v1_environments__environment_id__work_getRaw(client: *Clie
     _ = authorization;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work?beta=true", .{client.base_url, environment_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work?beta=true", .{ client.base_url, environment_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -4318,7 +4318,7 @@ pub fn beta_get_environment_v1_environments__environment_id__getRaw(client: *Cli
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}?beta=true", .{client.base_url, environment_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}?beta=true", .{ client.base_url, environment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -4356,7 +4356,7 @@ pub fn beta_update_environment_v1_environments__environment_id__postRaw(client: 
     _ = @"anthropic-version";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}?beta=true", .{client.base_url, environment_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}?beta=true", .{ client.base_url, environment_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4399,7 +4399,7 @@ pub fn beta_delete_environment_v1_environments__environment_id__deleteRaw(client
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}?beta=true", .{client.base_url, environment_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}?beta=true", .{ client.base_url, environment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -4435,7 +4435,7 @@ pub fn BetaStreamSessionEventsRaw(client: *Client, @"x-api-key": []const u8, @"a
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/events/stream?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/events/stream?beta=true", .{ client.base_url, session_id });
     var first_query = true;
     if (@"event_deltas[]") |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "event_deltas[]", value);
@@ -4475,7 +4475,7 @@ pub fn BetaGetResourceRaw(client: *Client, @"x-api-key": []const u8, @"anthropic
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources/{s}?beta=true", .{client.base_url, session_id, resource_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources/{s}?beta=true", .{ client.base_url, session_id, resource_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -4510,7 +4510,7 @@ pub fn BetaUpdateResourceRaw(client: *Client, @"anthropic-version": []const u8, 
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources/{s}?beta=true", .{client.base_url, session_id, resource_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources/{s}?beta=true", .{ client.base_url, session_id, resource_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4550,7 +4550,7 @@ pub fn BetaDeleteResourceRaw(client: *Client, @"x-api-key": []const u8, @"anthro
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources/{s}?beta=true", .{client.base_url, session_id, resource_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/resources/{s}?beta=true", .{ client.base_url, session_id, resource_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -4566,7 +4566,7 @@ pub fn BetaDeleteResourceResult(client: *Client, @"x-api-key": []const u8, @"ant
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Rotates a tunnel's connector token. Rotation invalidates the current token for new connections and returns a fresh value; established connections are not severed. A connector restarted after rotation must use the new value.
 //
 pub fn BetaRotateTunnelToken(client: *Client, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8, requestBody: contracts.BetaRotateTunnelTokenRequestBody) !Owned(contracts.BetaTunnelToken) {
@@ -4590,7 +4590,7 @@ pub fn BetaRotateTunnelTokenRaw(client: *Client, @"anthropic-version": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}/rotate_token?beta=true", .{client.base_url, tunnel_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}/rotate_token?beta=true", .{ client.base_url, tunnel_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4610,7 +4610,7 @@ pub fn BetaRotateTunnelTokenResult(client: *Client, @"anthropic-version": []cons
 //
 // Description:
 // This endpoint is idempotent and can be used to poll for Message Batch completion. To access the results of a Message Batch, make a request to the `results_url` field in the response.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn message_batches_retrieve(client: *Client, message_batch_id: []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.MessageBatch) {
@@ -4634,7 +4634,7 @@ pub fn message_batches_retrieveRaw(client: *Client, message_batch_id: []const u8
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -4650,9 +4650,9 @@ pub fn message_batches_retrieveResult(client: *Client, message_batch_id: []const
 //
 // Description:
 // Delete a Message Batch.
-// 
+//
 // Message Batches can only be deleted once they've finished processing. If you'd like to delete an in-progress batch, you must first cancel it.
-// 
+//
 // Learn more about the Message Batches API in our [user guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
 //
 pub fn message_batches_delete(client: *Client, message_batch_id: []const u8, @"anthropic-version": []const u8, @"x-api-key": []const u8) !Owned(contracts.DeleteMessageBatchResponse) {
@@ -4676,7 +4676,7 @@ pub fn message_batches_deleteRaw(client: *Client, message_batch_id: []const u8, 
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/messages/batches/{s}", .{client.base_url, message_batch_id});
+    try uri_buf.writer.print("{s}/v1/messages/batches/{s}", .{ client.base_url, message_batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -4692,9 +4692,9 @@ pub fn message_batches_deleteResult(client: *Client, message_batch_id: []const u
 //
 // Description:
 // Count the number of tokens in a Message.
-// 
+//
 // The Token Count API can be used to count the number of tokens in a Message, including tools, images, and documents, without creating it.
-// 
+//
 // Learn more about token counting in our [user guide](https://platform.claude.com/docs/en/build-with-claude/token-counting)
 //
 pub fn beta_messages_count_tokens_post(client: *Client, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"anthropic-user-profile-id": []const u8, requestBody: contracts.BetaCountMessageTokensParams) !Owned(contracts.BetaCountMessageTokensResponse) {
@@ -4759,7 +4759,7 @@ pub fn BetaListSessionThreadsRaw(client: *Client, @"x-api-key": []const u8, @"an
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads?beta=true", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads?beta=true", .{ client.base_url, session_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -4801,7 +4801,7 @@ pub fn BetaUnpauseDeploymentRaw(client: *Client, @"anthropic-version": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/deployments/{s}/unpause?beta=true", .{client.base_url, deployment_id});
+    try uri_buf.writer.print("{s}/v1/deployments/{s}/unpause?beta=true", .{ client.base_url, deployment_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -4900,7 +4900,7 @@ pub fn BetaArchiveVaultRaw(client: *Client, @"anthropic-version": []const u8, @"
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/archive?beta=true", .{client.base_url, vault_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/archive?beta=true", .{ client.base_url, vault_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -4935,7 +4935,7 @@ pub fn BetaArchiveCredentialRaw(client: *Client, @"anthropic-version": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}/archive?beta=true", .{client.base_url, vault_id, credential_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}/archive?beta=true", .{ client.base_url, vault_id, credential_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -4970,7 +4970,7 @@ pub fn BetaValidateCredentialRaw(client: *Client, @"anthropic-version": []const 
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}/mcp_oauth_validate?beta=true", .{client.base_url, vault_id, credential_id});
+    try uri_buf.writer.print("{s}/v1/vaults/{s}/credentials/{s}/mcp_oauth_validate?beta=true", .{ client.base_url, vault_id, credential_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -4986,7 +4986,7 @@ pub fn BetaValidateCredentialResult(client: *Client, @"anthropic-version": []con
 //
 // Description:
 // Note: these endpoints are called automatically by the pre-built environment worker provided in the SDKs and CLI, for orchestrating sessions with self-hosted sandbox environments. They are included here as a reference; you do not need to invoke them directly.
-// 
+//
 // Stop a work item, initiating graceful or forced shutdown.
 //
 pub fn beta_stop_work_v1_environments__environment_id__work__work_id__stop_post(client: *Client, environment_id: []const u8, work_id: []const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, authorization: []const u8, requestBody: contracts.BetaSelfHostedWorkStopRequest) !Owned(contracts.BetaSelfHostedWork) {
@@ -5011,7 +5011,7 @@ pub fn beta_stop_work_v1_environments__environment_id__work__work_id__stop_postR
     _ = authorization;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}/stop?beta=true", .{client.base_url, environment_id, work_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}/stop?beta=true", .{ client.base_url, environment_id, work_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5051,7 +5051,7 @@ pub fn BetaListMemoryVersionsRaw(client: *Client, @"x-api-key": []const u8, @"an
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memory_versions?beta=true", .{client.base_url, memory_store_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memory_versions?beta=true", .{ client.base_url, memory_store_id });
     var first_query = true;
     if (memory_id) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "memory_id", value);
@@ -5115,7 +5115,7 @@ pub fn beta_list_skill_versions_v1_skills__skill_id__versions_getRaw(client: *Cl
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/skills/{s}/versions?beta=true", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/v1/skills/{s}/versions?beta=true", .{ client.base_url, skill_id });
     var first_query = true;
     if (page) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "page", value);
@@ -5157,7 +5157,7 @@ pub fn beta_create_skill_version_v1_skills__skill_id__versions_postRaw(client: *
     _ = @"anthropic-version";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/skills/{s}/versions?beta=true", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/v1/skills/{s}/versions?beta=true", .{ client.base_url, skill_id });
     // TODO(#53-followup): multipart/form-data and x-www-form-urlencoded request bodies are not yet supported; falling back to JSON encoding.
 
     var str: std.Io.Writer.Allocating = .init(allocator);
@@ -5198,7 +5198,7 @@ pub fn BetaGetUserProfileRaw(client: *Client, @"x-api-key": []const u8, @"anthro
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/user_profiles/{s}?beta=true", .{client.base_url, user_profile_id});
+    try uri_buf.writer.print("{s}/v1/user_profiles/{s}?beta=true", .{ client.base_url, user_profile_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -5233,7 +5233,7 @@ pub fn BetaUpdateUserProfileRaw(client: *Client, @"anthropic-version": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/user_profiles/{s}?beta=true", .{client.base_url, user_profile_id});
+    try uri_buf.writer.print("{s}/v1/user_profiles/{s}?beta=true", .{ client.base_url, user_profile_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5253,7 +5253,7 @@ pub fn BetaUpdateUserProfileResult(client: *Client, @"anthropic-version": []cons
 //
 // Description:
 // Get a specific model.
-// 
+//
 // The Models API response can be used to determine information about a specific model or resolve a model alias to a model ID.
 //
 pub fn models_get(client: *Client, model_id: []const u8, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, @"x-api-key": []const u8) !Owned(contracts.ModelInfo) {
@@ -5278,7 +5278,7 @@ pub fn models_getRaw(client: *Client, model_id: []const u8, @"anthropic-version"
     _ = @"x-api-key";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/models/{s}", .{client.base_url, model_id});
+    try uri_buf.writer.print("{s}/v1/models/{s}", .{ client.base_url, model_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -5294,7 +5294,7 @@ pub fn models_getResult(client: *Client, model_id: []const u8, @"anthropic-versi
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Reveals a tunnel's connector token. The value is fetched live on each call; Anthropic does not store it. Repeated calls return the same value until the token is rotated. Exposed as POST so the token does not appear in intermediary access logs.
 //
 pub fn BetaRevealTunnelToken(client: *Client, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8) !Owned(contracts.BetaTunnelToken) {
@@ -5318,7 +5318,7 @@ pub fn BetaRevealTunnelTokenRaw(client: *Client, @"anthropic-version": []const u
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}/reveal_token?beta=true", .{client.base_url, tunnel_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}/reveal_token?beta=true", .{ client.base_url, tunnel_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -5334,7 +5334,7 @@ pub fn BetaRevealTunnelTokenResult(client: *Client, @"anthropic-version": []cons
 //
 // Description:
 // The Tunnels API is in research preview. It requires the `anthropic-beta: mcp-tunnels-2026-06-22` header and may change without a deprecation period. It supersedes the Admin API endpoints at `/v1/organizations/tunnels`, which remain available during a migration window.
-// 
+//
 // Fetches a tunnel certificate by ID.
 //
 pub fn BetaGetTunnelCertificate(client: *Client, @"x-api-key": []const u8, @"anthropic-version": []const u8, @"anthropic-beta": []const u8, tunnel_id: []const u8, certificate_id: []const u8) !Owned(contracts.BetaTunnelCertificate) {
@@ -5359,7 +5359,7 @@ pub fn BetaGetTunnelCertificateRaw(client: *Client, @"x-api-key": []const u8, @"
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates/{s}?beta=true", .{client.base_url, tunnel_id, certificate_id});
+    try uri_buf.writer.print("{s}/v1/tunnels/{s}/certificates/{s}?beta=true", .{ client.base_url, tunnel_id, certificate_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -5394,7 +5394,7 @@ pub fn BetaArchiveMemoryStoreRaw(client: *Client, @"anthropic-version": []const 
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/archive?beta=true", .{client.base_url, memory_store_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/archive?beta=true", .{ client.base_url, memory_store_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -5410,7 +5410,7 @@ pub fn BetaArchiveMemoryStoreResult(client: *Client, @"anthropic-version": []con
 //
 // Description:
 // Note: these endpoints are called automatically by the pre-built environment worker provided in the SDKs and CLI, for orchestrating sessions with self-hosted sandbox environments. They are included here as a reference; you do not need to invoke them directly.
-// 
+//
 // Record a heartbeat for a work item to maintain the lease.
 //
 pub fn beta_record_heartbeat_v1_environments__environment_id__work__work_id__heartbeat_post(client: *Client, environment_id: []const u8, work_id: []const u8, desired_ttl_seconds: ?[]const u8, expected_last_heartbeat: ?[]const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, authorization: []const u8) !Owned(contracts.BetaSelfHostedWorkHeartbeatResponse) {
@@ -5435,7 +5435,7 @@ pub fn beta_record_heartbeat_v1_environments__environment_id__work__work_id__hea
     _ = authorization;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}/heartbeat?beta=true", .{client.base_url, environment_id, work_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work/{s}/heartbeat?beta=true", .{ client.base_url, environment_id, work_id });
     var first_query = true;
     if (desired_ttl_seconds) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "desired_ttl_seconds", value);
@@ -5478,7 +5478,7 @@ pub fn BetaGetDreamRaw(client: *Client, @"x-api-key": []const u8, @"anthropic-ve
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/dreams/{s}?beta=true", .{client.base_url, dream_id});
+    try uri_buf.writer.print("{s}/v1/dreams/{s}?beta=true", .{ client.base_url, dream_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -5514,7 +5514,7 @@ pub fn BetaListSessionThreadEventsRaw(client: *Client, @"x-api-key": []const u8,
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}/events?beta=true", .{client.base_url, session_id, thread_id});
+    try uri_buf.writer.print("{s}/v1/sessions/{s}/threads/{s}/events?beta=true", .{ client.base_url, session_id, thread_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -5557,7 +5557,7 @@ pub fn BetaGetMemoryRaw(client: *Client, @"x-api-key": []const u8, @"anthropic-v
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories/{s}?beta=true", .{client.base_url, memory_store_id, memory_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories/{s}?beta=true", .{ client.base_url, memory_store_id, memory_id });
     var first_query = true;
     if (view) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "view", value);
@@ -5596,7 +5596,7 @@ pub fn BetaUpdateMemoryRaw(client: *Client, @"anthropic-version": []const u8, @"
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories/{s}?beta=true", .{client.base_url, memory_store_id, memory_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories/{s}?beta=true", .{ client.base_url, memory_store_id, memory_id });
     var first_query = true;
     if (view) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "view", value);
@@ -5640,7 +5640,7 @@ pub fn BetaDeleteMemoryRaw(client: *Client, @"x-api-key": []const u8, @"anthropi
     _ = @"anthropic-beta";
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories/{s}?beta=true", .{client.base_url, memory_store_id, memory_id});
+    try uri_buf.writer.print("{s}/v1/memory_stores/{s}/memories/{s}?beta=true", .{ client.base_url, memory_store_id, memory_id });
     var first_query = true;
     if (expected_content_sha256) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "expected_content_sha256", value);
@@ -5660,7 +5660,7 @@ pub fn BetaDeleteMemoryResult(client: *Client, @"x-api-key": []const u8, @"anthr
 //
 // Description:
 // Note: these endpoints are called automatically by the pre-built environment worker provided in the SDKs and CLI, for orchestrating sessions with self-hosted sandbox environments. They are included here as a reference; you do not need to invoke them directly.
-// 
+//
 // Long poll for work items in the queue.
 //
 pub fn beta_poll_work_v1_environments__environment_id__work_poll_get(client: *Client, environment_id: []const u8, block_ms: ?[]const u8, reclaim_older_than_ms: ?[]const u8, @"anthropic-beta": []const u8, @"anthropic-version": []const u8, @"Anthropic-Worker-ID": []const u8, authorization: []const u8) !Owned(?contracts.BetaSelfHostedWork) {
@@ -5686,7 +5686,7 @@ pub fn beta_poll_work_v1_environments__environment_id__work_poll_getRaw(client: 
     _ = authorization;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1/environments/{s}/work/poll?beta=true", .{client.base_url, environment_id});
+    try uri_buf.writer.print("{s}/v1/environments/{s}/work/poll?beta=true", .{ client.base_url, environment_id });
     var first_query = true;
     if (block_ms) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "block_ms", value);
@@ -5709,9 +5709,9 @@ pub fn beta_poll_work_v1_environments__environment_id__work_poll_getResult(clien
 //
 // Description:
 // Count the number of tokens in a Message.
-// 
+//
 // The Token Count API can be used to count the number of tokens in a Message, including tools, images, and documents, without creating it.
-// 
+//
 // Learn more about token counting in our [user guide](https://platform.claude.com/docs/en/build-with-claude/token-counting)
 //
 pub fn messages_count_tokens_post(client: *Client, @"anthropic-version": []const u8, @"anthropic-user-profile-id": []const u8, requestBody: contracts.CountMessageTokensParams) !Owned(contracts.CountMessageTokensResponse) {
@@ -6882,4 +6882,3 @@ pub const user_profiles = resources.user_profiles;
 pub const user_profiles_beta_true = resources.user_profiles_beta_true;
 pub const vaults = resources.vaults;
 pub const vaults_beta_true = resources.vaults_beta_true;
-

@@ -291,7 +291,7 @@ fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std
 // [tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)
 // or [file search](/docs/guides/tools-file-search) to use your own data
 // as input for the model's response.
-// 
+//
 //
 pub fn createResponse(client: *Client, requestBody: contracts.CreateResponse) !Owned(contracts.Response) {
     var result = try createResponseResult(client, requestBody);
@@ -338,7 +338,7 @@ pub fn createResponseStreamingEvents(comptime Event: type, client: *Client, requ
 // Summary:
 // List stored Chat Completions. Only Chat Completions that have been stored
 // with the `store` parameter set to `true` will be returned.
-// 
+//
 //
 pub fn listChatCompletions(client: *Client, model: ?[]const u8, metadata: ?[]const u8, after: ?[]const u8, limit: ?i64, order: ?[]const u8) !Owned(contracts.ChatCompletionList) {
     var result = try listChatCompletionsResult(client, model, metadata, after, limit, order);
@@ -390,22 +390,22 @@ pub fn listChatCompletionsResult(client: *Client, model: ?[]const u8, metadata: 
 // **Starting a new project?** We recommend trying [Responses](/docs/api-reference/responses)
 // to take advantage of the latest OpenAI platform features. Compare
 // [Chat Completions with Responses](/docs/guides/responses-vs-chat-completions?api-mode=responses).
-// 
+//
 // ---
-// 
+//
 // Creates a model response for the given chat conversation. Learn more in the
 // [text generation](/docs/guides/text-generation), [vision](/docs/guides/vision),
 // and [audio](/docs/guides/audio) guides.
-// 
+//
 // Parameter support can differ depending on the model used to generate the
 // response, particularly for newer reasoning models. Parameters that are only
 // supported for reasoning models are noted below. For the current state of
 // unsupported parameters in reasoning models,
 // [refer to the reasoning guide](/docs/guides/reasoning).
-// 
+//
 // Returns a chat completion object, or a streamed sequence of chat completion
 // chunk objects if the request is streamed.
-// 
+//
 //
 pub fn createChatCompletion(client: *Client, requestBody: contracts.CreateChatCompletionRequest) !Owned(contracts.CreateChatCompletionResponse) {
     var result = try createChatCompletionResult(client, requestBody);
@@ -451,7 +451,7 @@ pub fn createChatCompletionStreamingEvents(comptime Event: type, client: *Client
 /////////////////
 // Summary:
 // Creates an image given a prompt. [Learn more](/docs/guides/images).
-// 
+//
 //
 pub fn createImage(client: *Client, requestBody: contracts.CreateImageRequest) !Owned(contracts.ImagesResponse) {
     var result = try createImageResult(client, requestBody);
@@ -517,7 +517,7 @@ pub fn getVectorStoreFileBatchRaw(client: *Client, vector_store_id: []const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches/{s}", .{client.base_url, vector_store_id, batch_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches/{s}", .{ client.base_url, vector_store_id, batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -550,7 +550,7 @@ pub fn @"archive-projectRaw"(client: *Client, project_id: []const u8) !RawRespon
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/archive", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/archive", .{ client.base_url, project_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -577,7 +577,7 @@ pub fn RetrieveContainerFileContentRaw(client: *Client, container_id: []const u8
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/containers/{s}/files/{s}/content", .{client.base_url, container_id, file_id});
+    try uri_buf.writer.print("{s}/containers/{s}/files/{s}/content", .{ client.base_url, container_id, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -606,7 +606,7 @@ pub fn @"list-project-rolesRaw"(client: *Client, project_id: []const u8, limit: 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/roles", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/projects/{s}/roles", .{ client.base_url, project_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -649,7 +649,7 @@ pub fn @"create-project-roleRaw"(client: *Client, project_id: []const u8, reques
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/roles", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/projects/{s}/roles", .{ client.base_url, project_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -686,7 +686,7 @@ pub fn cancelVectorStoreFileBatchRaw(client: *Client, vector_store_id: []const u
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches/{s}/cancel", .{client.base_url, vector_store_id, batch_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches/{s}/cancel", .{ client.base_url, vector_store_id, batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -711,7 +711,7 @@ pub fn @"hangup-realtime-callRaw"(client: *Client, call_id: []const u8) !RawResp
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/realtime/calls/{s}/hangup", .{client.base_url, call_id});
+    try uri_buf.writer.print("{s}/realtime/calls/{s}/hangup", .{ client.base_url, call_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -720,7 +720,7 @@ pub fn @"hangup-realtime-callRaw"(client: *Client, call_id: []const u8) !RawResp
 /////////////////
 // Summary:
 // Cancel an active ChatKit session and return its most recent metadata.
-// 
+//
 // Cancelling prevents new requests from using the issued client secret.
 //
 pub fn CancelChatSessionMethod(client: *Client, session_id: []const u8) !Owned(contracts.ChatSessionResource) {
@@ -742,7 +742,7 @@ pub fn CancelChatSessionMethodRaw(client: *Client, session_id: []const u8) !RawR
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chatkit/sessions/{s}/cancel", .{client.base_url, session_id});
+    try uri_buf.writer.print("{s}/chatkit/sessions/{s}/cancel", .{ client.base_url, session_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -755,9 +755,9 @@ pub fn CancelChatSessionMethodResult(client: *Client, session_id: []const u8) !A
 /////////////////
 // Summary:
 // Activate certificates at the organization level.
-// 
+//
 // You can atomically and idempotently activate up to 10 certificates at a time.
-// 
+//
 //
 pub fn activateOrganizationCertificates(client: *Client, requestBody: contracts.ToggleCertificatesRequest) !Owned(contracts.OrganizationCertificateActivationResponse) {
     var result = try activateOrganizationCertificatesResult(client, requestBody);
@@ -795,15 +795,15 @@ pub fn activateOrganizationCertificatesResult(client: *Client, requestBody: cont
 /////////////////
 // Summary:
 // Create an ephemeral API token for use in client-side applications with the
-// Realtime API specifically for realtime transcriptions. 
+// Realtime API specifically for realtime transcriptions.
 // Can be configured with the same session parameters as the `transcription_session.update` client event.
-// 
+//
 // It responds with a session object, plus a `client_secret` key which contains
 // a usable ephemeral API token that can be used to authenticate browser clients
 // for the Realtime API.
-// 
+//
 // Returns the created Realtime transcription session object, plus an ephemeral key.
-// 
+//
 //
 pub fn @"create-realtime-transcription-session"(client: *Client, requestBody: contracts.RealtimeTranscriptionSessionCreateRequest) !Owned(contracts.RealtimeTranscriptionSessionCreateResponse) {
     var result = try @"create-realtime-transcription-sessionResult"(client, requestBody);
@@ -861,7 +861,7 @@ pub fn @"list-project-user-role-assignmentsRaw"(client: *Client, project_id: []c
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/users/{s}/roles", .{client.base_url, project_id, user_id});
+    try uri_buf.writer.print("{s}/projects/{s}/users/{s}/roles", .{ client.base_url, project_id, user_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -904,7 +904,7 @@ pub fn @"assign-project-user-roleRaw"(client: *Client, project_id: []const u8, u
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/users/{s}/roles", .{client.base_url, project_id, user_id});
+    try uri_buf.writer.print("{s}/projects/{s}/users/{s}/roles", .{ client.base_url, project_id, user_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -921,9 +921,9 @@ pub fn @"assign-project-user-roleResult"(client: *Client, project_id: []const u8
 /////////////////
 // Summary:
 // Creates a completion for the provided prompt and parameters.
-// 
+//
 // Returns a completion object, or a sequence of completion objects if the request is streamed.
-// 
+//
 //
 pub fn createCompletion(client: *Client, requestBody: contracts.CreateCompletionRequest) !Owned(contracts.CreateCompletionResponse) {
     var result = try createCompletionResult(client, requestBody);
@@ -1067,7 +1067,7 @@ pub fn listInputItemsRaw(client: *Client, response_id: []const u8, limit: ?i64, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/responses/{s}/input_items", .{client.base_url, response_id});
+    try uri_buf.writer.print("{s}/responses/{s}/input_items", .{ client.base_url, response_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -1113,7 +1113,7 @@ pub fn searchVectorStoreRaw(client: *Client, vector_store_id: []const u8, reques
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/search", .{client.base_url, vector_store_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/search", .{ client.base_url, vector_store_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1150,7 +1150,7 @@ pub fn GetSkillContentRaw(client: *Client, skill_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}/content", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/skills/{s}/content", .{ client.base_url, skill_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1183,7 +1183,7 @@ pub fn cancelBatchRaw(client: *Client, batch_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/batches/{s}/cancel", .{client.base_url, batch_id});
+    try uri_buf.writer.print("{s}/batches/{s}/cancel", .{ client.base_url, batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -1216,7 +1216,7 @@ pub fn listVectorStoreFilesRaw(client: *Client, vector_store_id: []const u8, lim
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/files", .{client.base_url, vector_store_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/files", .{ client.base_url, vector_store_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -1269,7 +1269,7 @@ pub fn createVectorStoreFileRaw(client: *Client, vector_store_id: []const u8, re
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/files", .{client.base_url, vector_store_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/files", .{ client.base_url, vector_store_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1347,7 +1347,7 @@ pub fn @"list-audit-logsResult"(client: *Client, effective_at: ?[]const u8, @"pr
 /////////////////
 // Summary:
 // Download the generated video bytes or a derived preview asset.
-// 
+//
 // Streams the rendered video content for the specified video job.
 //
 pub fn RetrieveVideoContent(client: *Client, video_id: []const u8, variant: ?[]const u8) !Owned([]const u8) {
@@ -1369,7 +1369,7 @@ pub fn RetrieveVideoContentRaw(client: *Client, video_id: []const u8, variant: ?
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/videos/{s}/content", .{client.base_url, video_id});
+    try uri_buf.writer.print("{s}/videos/{s}/content", .{ client.base_url, video_id });
     var first_query = true;
     if (variant) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "variant", value);
@@ -1386,7 +1386,7 @@ pub fn RetrieveVideoContentResult(client: *Client, video_id: []const u8, variant
 /////////////////
 // Summary:
 // List checkpoints for a fine-tuning job.
-// 
+//
 //
 pub fn listFineTuningJobCheckpoints(client: *Client, fine_tuning_job_id: []const u8, after: ?[]const u8, limit: ?i64) !Owned(contracts.ListFineTuningJobCheckpointsResponse) {
     var result = try listFineTuningJobCheckpointsResult(client, fine_tuning_job_id, after, limit);
@@ -1407,7 +1407,7 @@ pub fn listFineTuningJobCheckpointsRaw(client: *Client, fine_tuning_job_id: []co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/checkpoints", .{client.base_url, fine_tuning_job_id});
+    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/checkpoints", .{ client.base_url, fine_tuning_job_id });
     var first_query = true;
     if (after) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "after", value);
@@ -1509,7 +1509,7 @@ pub fn cancelRunRaw(client: *Client, thread_id: []const u8, run_id: []const u8) 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/cancel", .{client.base_url, thread_id, run_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/cancel", .{ client.base_url, thread_id, run_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -1542,7 +1542,7 @@ pub fn listProjectCertificatesRaw(client: *Client, project_id: []const u8, limit
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/certificates", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/certificates", .{ client.base_url, project_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -1622,7 +1622,7 @@ pub fn getVectorStoreRaw(client: *Client, vector_store_id: []const u8) !RawRespo
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}", .{client.base_url, vector_store_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}", .{ client.base_url, vector_store_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1655,7 +1655,7 @@ pub fn modifyVectorStoreRaw(client: *Client, vector_store_id: []const u8, reques
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}", .{client.base_url, vector_store_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}", .{ client.base_url, vector_store_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1692,7 +1692,7 @@ pub fn deleteVectorStoreRaw(client: *Client, vector_store_id: []const u8) !RawRe
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}", .{client.base_url, vector_store_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}", .{ client.base_url, vector_store_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -1725,7 +1725,7 @@ pub fn getRunStepRaw(client: *Client, thread_id: []const u8, run_id: []const u8,
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/steps/{s}", .{client.base_url, thread_id, run_id, step_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/steps/{s}", .{ client.base_url, thread_id, run_id, step_id });
     var first_query = true;
     if (@"include[]") |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "include[]", value);
@@ -1762,7 +1762,7 @@ pub fn GetThreadMethodRaw(client: *Client, thread_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chatkit/threads/{s}", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/chatkit/threads/{s}", .{ client.base_url, thread_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -1795,7 +1795,7 @@ pub fn DeleteThreadMethodRaw(client: *Client, thread_id: []const u8) !RawRespons
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chatkit/threads/{s}", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/chatkit/threads/{s}", .{ client.base_url, thread_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -1809,7 +1809,7 @@ pub fn DeleteThreadMethodResult(client: *Client, thread_id: []const u8) !ApiResu
 // Summary:
 // Classifies if text and/or image inputs are potentially harmful. Learn
 // more in the [moderation guide](/docs/guides/moderation).
-// 
+//
 //
 pub fn createModeration(client: *Client, requestBody: contracts.CreateModerationRequest) !Owned(contracts.CreateModerationResponse) {
     var result = try createModerationResult(client, requestBody);
@@ -1929,7 +1929,7 @@ pub fn @"list-group-usersRaw"(client: *Client, group_id: []const u8, limit: ?i64
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}/users", .{client.base_url, group_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}/users", .{ client.base_url, group_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -1972,7 +1972,7 @@ pub fn @"add-group-userRaw"(client: *Client, group_id: []const u8, requestBody: 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}/users", .{client.base_url, group_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}/users", .{ client.base_url, group_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2071,7 +2071,7 @@ pub fn @"list-user-role-assignmentsRaw"(client: *Client, user_id: []const u8, li
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/users/{s}/roles", .{client.base_url, user_id});
+    try uri_buf.writer.print("{s}/organization/users/{s}/roles", .{ client.base_url, user_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -2114,7 +2114,7 @@ pub fn @"assign-user-roleRaw"(client: *Client, user_id: []const u8, requestBody:
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/users/{s}/roles", .{client.base_url, user_id});
+    try uri_buf.writer.print("{s}/organization/users/{s}/roles", .{ client.base_url, user_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2151,7 +2151,7 @@ pub fn @"retrieve-userRaw"(client: *Client, user_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/users/{s}", .{client.base_url, user_id});
+    try uri_buf.writer.print("{s}/organization/users/{s}", .{ client.base_url, user_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -2184,7 +2184,7 @@ pub fn @"modify-userRaw"(client: *Client, user_id: []const u8, requestBody: cont
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/users/{s}", .{client.base_url, user_id});
+    try uri_buf.writer.print("{s}/organization/users/{s}", .{ client.base_url, user_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2221,7 +2221,7 @@ pub fn @"delete-userRaw"(client: *Client, user_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/users/{s}", .{client.base_url, user_id});
+    try uri_buf.writer.print("{s}/organization/users/{s}", .{ client.base_url, user_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -2245,7 +2245,7 @@ pub fn @"refer-realtime-callRaw"(client: *Client, call_id: []const u8, requestBo
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/realtime/calls/{s}/refer", .{client.base_url, call_id});
+    try uri_buf.writer.print("{s}/realtime/calls/{s}/refer", .{ client.base_url, call_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2278,7 +2278,7 @@ pub fn @"unassign-project-user-roleRaw"(client: *Client, project_id: []const u8,
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/users/{s}/roles/{s}", .{client.base_url, project_id, user_id, role_id});
+    try uri_buf.writer.print("{s}/projects/{s}/users/{s}/roles/{s}", .{ client.base_url, project_id, user_id, role_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -2311,7 +2311,7 @@ pub fn @"list-project-group-role-assignmentsRaw"(client: *Client, project_id: []
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/groups/{s}/roles", .{client.base_url, project_id, group_id});
+    try uri_buf.writer.print("{s}/projects/{s}/groups/{s}/roles", .{ client.base_url, project_id, group_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -2354,7 +2354,7 @@ pub fn @"assign-project-group-roleRaw"(client: *Client, project_id: []const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/groups/{s}/roles", .{client.base_url, project_id, group_id});
+    try uri_buf.writer.print("{s}/projects/{s}/groups/{s}/roles", .{ client.base_url, project_id, group_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2391,7 +2391,7 @@ pub fn @"list-project-usersRaw"(client: *Client, project_id: []const u8, limit: 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/users", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/users", .{ client.base_url, project_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -2431,7 +2431,7 @@ pub fn @"create-project-userRaw"(client: *Client, project_id: []const u8, reques
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/users", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/users", .{ client.base_url, project_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2468,7 +2468,7 @@ pub fn @"update-groupRaw"(client: *Client, group_id: []const u8, requestBody: co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}", .{client.base_url, group_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}", .{ client.base_url, group_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2505,7 +2505,7 @@ pub fn @"delete-groupRaw"(client: *Client, group_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}", .{client.base_url, group_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}", .{ client.base_url, group_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -2594,7 +2594,7 @@ pub fn @"list-project-api-keysRaw"(client: *Client, project_id: []const u8, limi
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/api_keys", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/api_keys", .{ client.base_url, project_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -2614,9 +2614,9 @@ pub fn @"list-project-api-keysResult"(client: *Client, project_id: []const u8, l
 /////////////////
 // Summary:
 // Activate certificates at the project level.
-// 
+//
 // You can atomically and idempotently activate up to 10 certificates at a time.
-// 
+//
 //
 pub fn activateProjectCertificates(client: *Client, project_id: []const u8, requestBody: contracts.ToggleCertificatesRequest) !Owned(contracts.OrganizationProjectCertificateActivationResponse) {
     var result = try activateProjectCertificatesResult(client, project_id, requestBody);
@@ -2637,7 +2637,7 @@ pub fn activateProjectCertificatesRaw(client: *Client, project_id: []const u8, r
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/certificates/activate", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/certificates/activate", .{ client.base_url, project_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2654,7 +2654,7 @@ pub fn activateProjectCertificatesResult(client: *Client, project_id: []const u8
 /////////////////
 // Summary:
 // Retrieves a model response with the given ID.
-// 
+//
 //
 pub fn getResponse(client: *Client, response_id: []const u8, include: ?[]const u8, stream: ?bool, starting_after: ?i64, include_obfuscation: ?bool) !Owned(contracts.Response) {
     var result = try getResponseResult(client, response_id, include, stream, starting_after, include_obfuscation);
@@ -2675,7 +2675,7 @@ pub fn getResponseRaw(client: *Client, response_id: []const u8, include: ?[]cons
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/responses/{s}", .{client.base_url, response_id});
+    try uri_buf.writer.print("{s}/responses/{s}", .{ client.base_url, response_id });
     var first_query = true;
     if (include) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "include", value);
@@ -2701,7 +2701,7 @@ pub fn getResponseResult(client: *Client, response_id: []const u8, include: ?[]c
 /////////////////
 // Summary:
 // Deletes a model response with the given ID.
-// 
+//
 //
 pub fn deleteResponse(client: *Client, response_id: []const u8) !void {
     var raw = try deleteResponseRaw(client, response_id);
@@ -2713,7 +2713,7 @@ pub fn deleteResponseRaw(client: *Client, response_id: []const u8) !RawResponse 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/responses/{s}", .{client.base_url, response_id});
+    try uri_buf.writer.print("{s}/responses/{s}", .{ client.base_url, response_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -2722,7 +2722,7 @@ pub fn deleteResponseRaw(client: *Client, response_id: []const u8) !RawResponse 
 /////////////////
 // Summary:
 // Pause a fine-tune job.
-// 
+//
 //
 pub fn pauseFineTuningJob(client: *Client, fine_tuning_job_id: []const u8) !Owned(contracts.FineTuningJob) {
     var result = try pauseFineTuningJobResult(client, fine_tuning_job_id);
@@ -2743,7 +2743,7 @@ pub fn pauseFineTuningJobRaw(client: *Client, fine_tuning_job_id: []const u8) !R
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/pause", .{client.base_url, fine_tuning_job_id});
+    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/pause", .{ client.base_url, fine_tuning_job_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -2905,7 +2905,7 @@ pub fn getConversationRaw(client: *Client, conversation_id: []const u8) !RawResp
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/conversations/{s}", .{client.base_url, conversation_id});
+    try uri_buf.writer.print("{s}/conversations/{s}", .{ client.base_url, conversation_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -2938,7 +2938,7 @@ pub fn updateConversationRaw(client: *Client, conversation_id: []const u8, reque
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/conversations/{s}", .{client.base_url, conversation_id});
+    try uri_buf.writer.print("{s}/conversations/{s}", .{ client.base_url, conversation_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -2975,7 +2975,7 @@ pub fn deleteConversationRaw(client: *Client, conversation_id: []const u8) !RawR
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/conversations/{s}", .{client.base_url, conversation_id});
+    try uri_buf.writer.print("{s}/conversations/{s}", .{ client.base_url, conversation_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -2988,9 +2988,9 @@ pub fn deleteConversationResult(client: *Client, conversation_id: []const u8) !A
 /////////////////
 // Summary:
 // Deactivate certificates at the organization level.
-// 
+//
 // You can atomically and idempotently deactivate up to 10 certificates at a time.
-// 
+//
 //
 pub fn deactivateOrganizationCertificates(client: *Client, requestBody: contracts.ToggleCertificatesRequest) !Owned(contracts.OrganizationCertificateDeactivationResponse) {
     var result = try deactivateOrganizationCertificatesResult(client, requestBody);
@@ -3028,7 +3028,7 @@ pub fn deactivateOrganizationCertificatesResult(client: *Client, requestBody: co
 /////////////////
 // Summary:
 // List evaluations for a project.
-// 
+//
 //
 pub fn listEvals(client: *Client, after: ?[]const u8, limit: ?i64, order: ?[]const u8, order_by: ?[]const u8) !Owned(contracts.EvalList) {
     var result = try listEvalsResult(client, after, limit, order, order_by);
@@ -3077,7 +3077,7 @@ pub fn listEvalsResult(client: *Client, after: ?[]const u8, limit: ?i64, order: 
 // Create the structure of an evaluation that can be used to test a model's performance.
 // An evaluation is a set of testing criteria and the config for a data source, which dictates the schema of the data used in the evaluation. After creating an evaluation, you can run it on different models and model parameters. We support several types of graders and datasources.
 // For more information, see the [Evals guide](/docs/guides/evals).
-// 
+//
 //
 pub fn createEval(client: *Client, requestBody: contracts.CreateEvalRequest) !Owned(contracts.Eval) {
     var result = try createEvalResult(client, requestBody);
@@ -3117,13 +3117,13 @@ pub fn createEvalResult(client: *Client, requestBody: contracts.CreateEvalReques
 // Create an ephemeral API token for use in client-side applications with the
 // Realtime API. Can be configured with the same session parameters as the
 // `session.update` client event.
-// 
+//
 // It responds with a session object, plus a `client_secret` key which contains
 // a usable ephemeral API token that can be used to authenticate browser clients
 // for the Realtime API.
-// 
+//
 // Returns the created Realtime session object, plus an ephemeral key.
-// 
+//
 //
 pub fn @"create-realtime-session"(client: *Client, requestBody: contracts.RealtimeSessionCreateRequest) !Owned(contracts.RealtimeSessionCreateResponse) {
     var result = try @"create-realtime-sessionResult"(client, requestBody);
@@ -3181,7 +3181,7 @@ pub fn getThreadRaw(client: *Client, thread_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/threads/{s}", .{ client.base_url, thread_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3214,7 +3214,7 @@ pub fn modifyThreadRaw(client: *Client, thread_id: []const u8, requestBody: cont
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/threads/{s}", .{ client.base_url, thread_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -3251,7 +3251,7 @@ pub fn deleteThreadRaw(client: *Client, thread_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/threads/{s}", .{ client.base_url, thread_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -3332,19 +3332,19 @@ pub fn @"usage-imagesResult"(client: *Client, start_time: i64, end_time: ?i64, b
 /////////////////
 // Summary:
 // Create a Realtime client secret with an associated session configuration.
-// 
+//
 // Client secrets are short-lived tokens that can be passed to a client app,
 // such as a web frontend or mobile client, which grants access to the Realtime API without
 // leaking your main API key. You can configure a custom TTL for each client secret.
-// 
+//
 // You can also attach session configuration options to the client secret, which will be
 // applied to any sessions created using that client secret, but these can also be overridden
 // by the client connection.
-// 
+//
 // [Learn more about authentication with client secrets over WebRTC](/docs/guides/realtime-webrtc).
-// 
+//
 // Returns the created client secret and the effective session object. The client secret is a string that looks like `ek_1234`.
-// 
+//
 //
 pub fn @"create-realtime-client-secret"(client: *Client, requestBody: contracts.RealtimeCreateClientSecretRequest) !Owned(contracts.RealtimeCreateClientSecretResponse) {
     var result = try @"create-realtime-client-secretResult"(client, requestBody);
@@ -3402,7 +3402,7 @@ pub fn getConversationItemRaw(client: *Client, conversation_id: []const u8, item
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/conversations/{s}/items/{s}", .{client.base_url, conversation_id, item_id});
+    try uri_buf.writer.print("{s}/conversations/{s}/items/{s}", .{ client.base_url, conversation_id, item_id });
     var first_query = true;
     if (include) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "include", value);
@@ -3439,7 +3439,7 @@ pub fn deleteConversationItemRaw(client: *Client, conversation_id: []const u8, i
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/conversations/{s}/items/{s}", .{client.base_url, conversation_id, item_id});
+    try uri_buf.writer.print("{s}/conversations/{s}/items/{s}", .{ client.base_url, conversation_id, item_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -3502,7 +3502,7 @@ pub fn listFilesResult(client: *Client, purpose: ?[]const u8, limit: ?i64, order
 // total. There is no organization-wide storage limit. Uploads to this
 // endpoint are rate-limited to 1,000 requests per minute per authenticated
 // user.
-// 
+//
 // - The Assistants API supports files up to 2 million tokens and of specific
 //   file types. See the [Assistants Tools guide](/docs/assistants/tools) for
 //   details.
@@ -3519,10 +3519,10 @@ pub fn listFilesResult(client: *Client, purpose: ?[]const u8, limit: ?i64, order
 //   instead of attaching them one by one. Vector store attachment has separate
 //   limits from file upload, including 2,000 attached files per minute per
 //   organization.
-// 
+//
 // Please [contact us](https://help.openai.com/) if you need to increase these
 // storage limits.
-// 
+//
 //
 pub fn createFile(client: *Client, requestBody: contracts.CreateFileRequest) !Owned(contracts.OpenAIFile) {
     var result = try createFileResult(client, requestBody);
@@ -3564,9 +3564,9 @@ pub fn createFileResult(client: *Client, requestBody: contracts.CreateFileReques
 //
 // Description:
 // Retrieve consent recording metadata used for creating custom voices.
-// 
+//
 // See the [custom voices guide](/docs/guides/text-to-speech#custom-voices). Custom voices are limited to eligible customers.
-// 
+//
 //
 pub fn getVoiceConsent(client: *Client, consent_id: []const u8) !Owned(contracts.VoiceConsentResource) {
     var result = try getVoiceConsentResult(client, consent_id);
@@ -3587,7 +3587,7 @@ pub fn getVoiceConsentRaw(client: *Client, consent_id: []const u8) !RawResponse 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/audio/voice_consents/{s}", .{client.base_url, consent_id});
+    try uri_buf.writer.print("{s}/audio/voice_consents/{s}", .{ client.base_url, consent_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -3603,9 +3603,9 @@ pub fn getVoiceConsentResult(client: *Client, consent_id: []const u8) !ApiResult
 //
 // Description:
 // Update consent recording metadata used for creating custom voices. This endpoint updates metadata only and does not replace the underlying audio.
-// 
+//
 // See the [custom voices guide](/docs/guides/text-to-speech#custom-voices). Custom voices are limited to eligible customers.
-// 
+//
 //
 pub fn updateVoiceConsent(client: *Client, consent_id: []const u8, requestBody: contracts.UpdateVoiceConsentRequest) !Owned(contracts.VoiceConsentResource) {
     var result = try updateVoiceConsentResult(client, consent_id, requestBody);
@@ -3626,7 +3626,7 @@ pub fn updateVoiceConsentRaw(client: *Client, consent_id: []const u8, requestBod
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/audio/voice_consents/{s}", .{client.base_url, consent_id});
+    try uri_buf.writer.print("{s}/audio/voice_consents/{s}", .{ client.base_url, consent_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -3646,9 +3646,9 @@ pub fn updateVoiceConsentResult(client: *Client, consent_id: []const u8, request
 //
 // Description:
 // Delete a consent recording that was uploaded for creating custom voices.
-// 
+//
 // See the [custom voices guide](/docs/guides/text-to-speech#custom-voices). Custom voices are limited to eligible customers.
-// 
+//
 //
 pub fn deleteVoiceConsent(client: *Client, consent_id: []const u8) !Owned(contracts.VoiceConsentDeletedResource) {
     var result = try deleteVoiceConsentResult(client, consent_id);
@@ -3669,7 +3669,7 @@ pub fn deleteVoiceConsentRaw(client: *Client, consent_id: []const u8) !RawRespon
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/audio/voice_consents/{s}", .{client.base_url, consent_id});
+    try uri_buf.writer.print("{s}/audio/voice_consents/{s}", .{ client.base_url, consent_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -3702,7 +3702,7 @@ pub fn listConversationItemsRaw(client: *Client, conversation_id: []const u8, li
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/conversations/{s}/items", .{client.base_url, conversation_id});
+    try uri_buf.writer.print("{s}/conversations/{s}/items", .{ client.base_url, conversation_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -3748,7 +3748,7 @@ pub fn createConversationItemsRaw(client: *Client, conversation_id: []const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/conversations/{s}/items", .{client.base_url, conversation_id});
+    try uri_buf.writer.print("{s}/conversations/{s}/items", .{ client.base_url, conversation_id });
     var first_query = true;
     if (include) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "include", value);
@@ -3769,7 +3769,7 @@ pub fn createConversationItemsResult(client: *Client, conversation_id: []const u
 /////////////////
 // Summary:
 // List your organization's fine-tuning jobs
-// 
+//
 //
 pub fn listPaginatedFineTuningJobs(client: *Client, after: ?[]const u8, limit: ?i64, metadata: ?[]const u8) !Owned(contracts.ListPaginatedFineTuningJobsResponse) {
     var result = try listPaginatedFineTuningJobsResult(client, after, limit, metadata);
@@ -3813,11 +3813,11 @@ pub fn listPaginatedFineTuningJobsResult(client: *Client, after: ?[]const u8, li
 /////////////////
 // Summary:
 // Creates a fine-tuning job which begins the process of creating a new model from a given dataset.
-// 
+//
 // Response includes details of the enqueued job including job status and the name of the fine-tuned models once complete.
-// 
+//
 // [Learn more about fine-tuning](/docs/guides/model-optimization)
-// 
+//
 //
 pub fn createFineTuningJob(client: *Client, requestBody: contracts.CreateFineTuningJobRequest) !Owned(contracts.FineTuningJob) {
     var result = try createFineTuningJobResult(client, requestBody);
@@ -3912,7 +3912,7 @@ pub fn @"list-project-service-accountsRaw"(client: *Client, project_id: []const 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts", .{ client.base_url, project_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -3952,7 +3952,7 @@ pub fn @"create-project-service-accountRaw"(client: *Client, project_id: []const
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts", .{ client.base_url, project_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4027,7 +4027,7 @@ pub fn @"remove-project-groupRaw"(client: *Client, project_id: []const u8, group
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/groups/{s}", .{client.base_url, project_id, group_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/groups/{s}", .{ client.base_url, project_id, group_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -4116,7 +4116,7 @@ pub fn ListContainerFilesRaw(client: *Client, container_id: []const u8, limit: ?
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/containers/{s}/files", .{client.base_url, container_id});
+    try uri_buf.writer.print("{s}/containers/{s}/files", .{ client.base_url, container_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -4139,13 +4139,13 @@ pub fn ListContainerFilesResult(client: *Client, container_id: []const u8, limit
 /////////////////
 // Summary:
 // Create a Container File
-// 
+//
 // You can send either a multipart/form-data request with the raw file content, or a JSON request with a file ID.
-// 
+//
 //
 // Description:
 // Creates a container file.
-// 
+//
 //
 pub fn CreateContainerFile(client: *Client, container_id: []const u8, requestBody: contracts.CreateContainerFileBody) !Owned(contracts.ContainerFileResource) {
     var result = try CreateContainerFileResult(client, container_id, requestBody);
@@ -4166,7 +4166,7 @@ pub fn CreateContainerFileRaw(client: *Client, container_id: []const u8, request
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/containers/{s}/files", .{client.base_url, container_id});
+    try uri_buf.writer.print("{s}/containers/{s}/files", .{ client.base_url, container_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4186,12 +4186,12 @@ pub fn CreateContainerFileResult(client: *Client, container_id: []const u8, requ
 //
 // Description:
 // You can call this endpoint with either:
-// 
+//
 // - `multipart/form-data`: use binary uploads via `image` (and optional `mask`).
 // - `application/json`: use `images` (and optional `mask`) as references with either `image_url` or `file_id`.
-// 
+//
 // Note that JSON requests use `images` (array) instead of the multipart `image` field.
-// 
+//
 //
 pub fn createImageEdit(client: *Client, requestBody: contracts.EditImageBodyJsonParam) !Owned(contracts.ImagesResponse) {
     var result = try createImageEditResult(client, requestBody);
@@ -4337,7 +4337,7 @@ pub fn listRunsRaw(client: *Client, thread_id: []const u8, limit: ?i64, order: ?
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs", .{ client.base_url, thread_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -4383,7 +4383,7 @@ pub fn createRunRaw(client: *Client, thread_id: []const u8, @"include[]": ?[]con
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs", .{ client.base_url, thread_id });
     var first_query = true;
     if (@"include[]") |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "include[]", value);
@@ -4484,7 +4484,7 @@ pub fn @"create-groupResult"(client: *Client, requestBody: contracts.CreateGroup
 /////////////////
 // Summary:
 // Get a list of runs for an evaluation.
-// 
+//
 //
 pub fn getEvalRuns(client: *Client, eval_id: []const u8, after: ?[]const u8, limit: ?i64, order: ?[]const u8, status: ?[]const u8) !Owned(contracts.EvalRunList) {
     var result = try getEvalRunsResult(client, eval_id, after, limit, order, status);
@@ -4505,7 +4505,7 @@ pub fn getEvalRunsRaw(client: *Client, eval_id: []const u8, after: ?[]const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}/runs", .{client.base_url, eval_id});
+    try uri_buf.writer.print("{s}/evals/{s}/runs", .{ client.base_url, eval_id });
     var first_query = true;
     if (after) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "after", value);
@@ -4531,7 +4531,7 @@ pub fn getEvalRunsResult(client: *Client, eval_id: []const u8, after: ?[]const u
 /////////////////
 // Summary:
 // Kicks off a new run for a given evaluation, specifying the data source, and what model configuration to use to test. The datasource will be validated against the schema specified in the config of the evaluation.
-// 
+//
 //
 pub fn createEvalRun(client: *Client, eval_id: []const u8, requestBody: contracts.CreateEvalRunRequest) !Owned(contracts.EvalRun) {
     var result = try createEvalRunResult(client, eval_id, requestBody);
@@ -4552,7 +4552,7 @@ pub fn createEvalRunRaw(client: *Client, eval_id: []const u8, requestBody: contr
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}/runs", .{client.base_url, eval_id});
+    try uri_buf.writer.print("{s}/evals/{s}/runs", .{ client.base_url, eval_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4569,9 +4569,9 @@ pub fn createEvalRunResult(client: *Client, eval_id: []const u8, requestBody: co
 /////////////////
 // Summary:
 // Get a certificate that has been uploaded to the organization.
-// 
+//
 // You can get a certificate regardless of whether it is active or not.
-// 
+//
 //
 pub fn getCertificate(client: *Client, certificate_id: []const u8, include: ?[]const u8) !Owned(contracts.Certificate) {
     var result = try getCertificateResult(client, certificate_id, include);
@@ -4592,7 +4592,7 @@ pub fn getCertificateRaw(client: *Client, certificate_id: []const u8, include: ?
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/certificates/{s}", .{client.base_url, certificate_id});
+    try uri_buf.writer.print("{s}/organization/certificates/{s}", .{ client.base_url, certificate_id });
     var first_query = true;
     if (include) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "include", value);
@@ -4609,7 +4609,7 @@ pub fn getCertificateResult(client: *Client, certificate_id: []const u8, include
 /////////////////
 // Summary:
 // Modify a certificate. Note that only the name can be modified.
-// 
+//
 //
 pub fn modifyCertificate(client: *Client, certificate_id: []const u8, requestBody: contracts.ModifyCertificateRequest) !Owned(contracts.Certificate) {
     var result = try modifyCertificateResult(client, certificate_id, requestBody);
@@ -4630,7 +4630,7 @@ pub fn modifyCertificateRaw(client: *Client, certificate_id: []const u8, request
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/certificates/{s}", .{client.base_url, certificate_id});
+    try uri_buf.writer.print("{s}/organization/certificates/{s}", .{ client.base_url, certificate_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4647,9 +4647,9 @@ pub fn modifyCertificateResult(client: *Client, certificate_id: []const u8, requ
 /////////////////
 // Summary:
 // Delete a certificate from the organization.
-// 
+//
 // The certificate must be inactive for the organization and all projects.
-// 
+//
 //
 pub fn deleteCertificate(client: *Client, certificate_id: []const u8) !Owned(contracts.DeleteCertificateResponse) {
     var result = try deleteCertificateResult(client, certificate_id);
@@ -4670,7 +4670,7 @@ pub fn deleteCertificateRaw(client: *Client, certificate_id: []const u8) !RawRes
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/certificates/{s}", .{client.base_url, certificate_id});
+    try uri_buf.writer.print("{s}/organization/certificates/{s}", .{ client.base_url, certificate_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -4683,9 +4683,9 @@ pub fn deleteCertificateResult(client: *Client, certificate_id: []const u8) !Api
 /////////////////
 // Summary:
 // Generates audio from the input text.
-// 
+//
 // Returns the audio file content, or a stream of audio events.
-// 
+//
 //
 pub fn createSpeech(client: *Client, requestBody: contracts.CreateSpeechRequest) !Owned(contracts.CreateSpeechResponseStreamEvent) {
     var result = try createSpeechResult(client, requestBody);
@@ -4751,7 +4751,7 @@ pub fn getMessageRaw(client: *Client, thread_id: []const u8, message_id: []const
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/messages/{s}", .{client.base_url, thread_id, message_id});
+    try uri_buf.writer.print("{s}/threads/{s}/messages/{s}", .{ client.base_url, thread_id, message_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -4784,7 +4784,7 @@ pub fn modifyMessageRaw(client: *Client, thread_id: []const u8, message_id: []co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/messages/{s}", .{client.base_url, thread_id, message_id});
+    try uri_buf.writer.print("{s}/threads/{s}/messages/{s}", .{ client.base_url, thread_id, message_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4821,7 +4821,7 @@ pub fn deleteMessageRaw(client: *Client, thread_id: []const u8, message_id: []co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/messages/{s}", .{client.base_url, thread_id, message_id});
+    try uri_buf.writer.print("{s}/threads/{s}/messages/{s}", .{ client.base_url, thread_id, message_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -4834,15 +4834,15 @@ pub fn deleteMessageResult(client: *Client, thread_id: []const u8, message_id: [
 /////////////////
 // Summary:
 // Create a Realtime translation client secret with an associated translation session configuration.
-// 
+//
 // Client secrets are short-lived tokens that can be passed to a client app,
 // such as a web frontend or mobile client, which grants access to the Realtime
 // Translation API without leaking your main API key. You can configure a custom
 // TTL for each client secret.
-// 
+//
 // Returns the created client secret and the effective translation session object.
 // The client secret is a string that looks like `ek_1234`.
-// 
+//
 //
 pub fn @"create-realtime-translation-client-secret"(client: *Client, requestBody: contracts.RealtimeTranslationClientSecretCreateRequest) !Owned(contracts.RealtimeTranslationClientSecretCreateResponse) {
     var result = try @"create-realtime-translation-client-secretResult"(client, requestBody);
@@ -4880,7 +4880,7 @@ pub fn @"create-realtime-translation-client-secretResult"(client: *Client, reque
 /////////////////
 // Summary:
 // Compact a conversation. Returns a compacted response object.
-// 
+//
 // Learn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced).
 //
 pub fn Compactconversation(client: *Client, requestBody: contracts.CompactResponseMethodPublicBody) !Owned(contracts.CompactResource) {
@@ -4924,7 +4924,7 @@ pub fn CompactconversationResult(client: *Client, requestBody: contracts.Compact
 // The maximum number of files in a single batch request is 2000.
 // Vector store file attach requests are rate limited per vector store (300 requests per minute across both this endpoint and `/vector_stores/{vector_store_id}/files`).
 // For ingesting multiple files into the same vector store, this batch endpoint is recommended.
-// 
+//
 //
 pub fn createVectorStoreFileBatch(client: *Client, vector_store_id: []const u8, requestBody: contracts.CreateVectorStoreFileBatchRequest) !Owned(contracts.VectorStoreFileBatchObject) {
     var result = try createVectorStoreFileBatchResult(client, vector_store_id, requestBody);
@@ -4945,7 +4945,7 @@ pub fn createVectorStoreFileBatchRaw(client: *Client, vector_store_id: []const u
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches", .{client.base_url, vector_store_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches", .{ client.base_url, vector_store_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -4982,7 +4982,7 @@ pub fn @"list-group-role-assignmentsRaw"(client: *Client, group_id: []const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}/roles", .{client.base_url, group_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}/roles", .{ client.base_url, group_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -5025,7 +5025,7 @@ pub fn @"assign-group-roleRaw"(client: *Client, group_id: []const u8, requestBod
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}/roles", .{client.base_url, group_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}/roles", .{ client.base_url, group_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5100,7 +5100,7 @@ pub fn CreateVideoRemixRaw(client: *Client, video_id: []const u8, requestBody: c
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/videos/{s}/remix", .{client.base_url, video_id});
+    try uri_buf.writer.print("{s}/videos/{s}/remix", .{ client.base_url, video_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5160,9 +5160,9 @@ pub fn listOrganizationCertificatesResult(client: *Client, limit: ?i64, after: ?
 /////////////////
 // Summary:
 // Upload a certificate to the organization. This does **not** automatically activate the certificate.
-// 
+//
 // Organizations can upload up to 50 certificates.
-// 
+//
 //
 pub fn uploadCertificate(client: *Client, requestBody: contracts.UploadCertificateRequest) !Owned(contracts.Certificate) {
     var result = try uploadCertificateResult(client, requestBody);
@@ -5211,7 +5211,7 @@ pub fn @"reject-realtime-callRaw"(client: *Client, call_id: []const u8, requestB
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/realtime/calls/{s}/reject", .{client.base_url, call_id});
+    try uri_buf.writer.print("{s}/realtime/calls/{s}/reject", .{ client.base_url, call_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5244,7 +5244,7 @@ pub fn ListSkillVersionsRaw(client: *Client, skill_id: []const u8, limit: ?i64, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}/versions", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/skills/{s}/versions", .{ client.base_url, skill_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -5287,7 +5287,7 @@ pub fn CreateSkillVersionRaw(client: *Client, skill_id: []const u8, requestBody:
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}/versions", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/skills/{s}/versions", .{ client.base_url, skill_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5307,9 +5307,9 @@ pub fn CreateSkillVersionResult(client: *Client, skill_id: []const u8, requestBo
 //
 // Description:
 // Create a custom voice you can use for audio output (for example, in Text-to-Speech and the Realtime API). This requires an audio sample and a previously uploaded consent recording.
-// 
+//
 // See the [custom voices guide](/docs/guides/text-to-speech#custom-voices) for requirements and best practices. Custom voices are limited to eligible customers.
-// 
+//
 //
 pub fn createVoice(client: *Client, requestBody: contracts.CreateVoiceRequest) !Owned(contracts.VoiceResource) {
     var result = try createVoiceResult(client, requestBody);
@@ -5348,7 +5348,7 @@ pub fn createVoiceResult(client: *Client, requestBody: contracts.CreateVoiceRequ
 /////////////////
 // Summary:
 // Get status updates for a fine-tuning job.
-// 
+//
 //
 pub fn listFineTuningEvents(client: *Client, fine_tuning_job_id: []const u8, after: ?[]const u8, limit: ?i64) !Owned(contracts.ListFineTuningJobEventsResponse) {
     var result = try listFineTuningEventsResult(client, fine_tuning_job_id, after, limit);
@@ -5369,7 +5369,7 @@ pub fn listFineTuningEventsRaw(client: *Client, fine_tuning_job_id: []const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/events", .{client.base_url, fine_tuning_job_id});
+    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/events", .{ client.base_url, fine_tuning_job_id });
     var first_query = true;
     if (after) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "after", value);
@@ -5409,7 +5409,7 @@ pub fn @"unassign-group-roleRaw"(client: *Client, group_id: []const u8, role_id:
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}/roles/{s}", .{client.base_url, group_id, role_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}/roles/{s}", .{ client.base_url, group_id, role_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -5442,7 +5442,7 @@ pub fn GetVideoCharacterRaw(client: *Client, character_id: []const u8) !RawRespo
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/videos/characters/{s}", .{client.base_url, character_id});
+    try uri_buf.writer.print("{s}/videos/characters/{s}", .{ client.base_url, character_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -5492,7 +5492,7 @@ pub fn createEmbeddingResult(client: *Client, requestBody: contracts.CreateEmbed
 /////////////////
 // Summary:
 // Returns input token counts of the request.
-// 
+//
 // Returns an object with `object` set to `response.input_tokens` and an `input_tokens` count.
 //
 pub fn Getinputtokencounts(client: *Client, requestBody: contracts.TokenCountsBody) !Owned(contracts.TokenCountsResource) {
@@ -5631,7 +5631,7 @@ pub fn @"update-roleRaw"(client: *Client, role_id: []const u8, requestBody: cont
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/roles/{s}", .{client.base_url, role_id});
+    try uri_buf.writer.print("{s}/organization/roles/{s}", .{ client.base_url, role_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5668,7 +5668,7 @@ pub fn @"delete-roleRaw"(client: *Client, role_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/roles/{s}", .{client.base_url, role_id});
+    try uri_buf.writer.print("{s}/organization/roles/{s}", .{ client.base_url, role_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -5717,12 +5717,12 @@ pub fn createThreadAndRunResult(client: *Client, requestBody: contracts.CreateTh
 
 /////////////////
 // Summary:
-// Adds a [Part](/docs/api-reference/uploads/part-object) to an [Upload](/docs/api-reference/uploads/object) object. A Part represents a chunk of bytes from the file you are trying to upload. 
-// 
+// Adds a [Part](/docs/api-reference/uploads/part-object) to an [Upload](/docs/api-reference/uploads/object) object. A Part represents a chunk of bytes from the file you are trying to upload.
+//
 // Each Part can be at most 64 MB, and you can add Parts until you hit the Upload maximum of 8 GB.
-// 
+//
 // It is possible to add multiple Parts in parallel. You can decide the intended order of the Parts when you [complete the Upload](/docs/api-reference/uploads/complete).
-// 
+//
 //
 pub fn addUploadPart(client: *Client, upload_id: []const u8, requestBody: contracts.AddUploadPartRequest) !Owned(contracts.UploadPart) {
     var result = try addUploadPartResult(client, upload_id, requestBody);
@@ -5743,7 +5743,7 @@ pub fn addUploadPartRaw(client: *Client, upload_id: []const u8, requestBody: con
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/uploads/{s}/parts", .{client.base_url, upload_id});
+    try uri_buf.writer.print("{s}/uploads/{s}/parts", .{ client.base_url, upload_id });
     // TODO(#53-followup): multipart/form-data and x-www-form-urlencoded request bodies are not yet supported; falling back to JSON encoding.
 
     var str: std.Io.Writer.Allocating = .init(allocator);
@@ -5762,7 +5762,7 @@ pub fn addUploadPartResult(client: *Client, upload_id: []const u8, requestBody: 
 // Summary:
 // Get a stored chat completion. Only Chat Completions that have been created
 // with the `store` parameter set to `true` will be returned.
-// 
+//
 //
 pub fn getChatCompletion(client: *Client, completion_id: []const u8) !Owned(contracts.CreateChatCompletionResponse) {
     var result = try getChatCompletionResult(client, completion_id);
@@ -5783,7 +5783,7 @@ pub fn getChatCompletionRaw(client: *Client, completion_id: []const u8) !RawResp
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chat/completions/{s}", .{client.base_url, completion_id});
+    try uri_buf.writer.print("{s}/chat/completions/{s}", .{ client.base_url, completion_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -5798,7 +5798,7 @@ pub fn getChatCompletionResult(client: *Client, completion_id: []const u8) !ApiR
 // Modify a stored chat completion. Only Chat Completions that have been
 // created with the `store` parameter set to `true` can be modified. Currently,
 // the only supported modification is to update the `metadata` field.
-// 
+//
 //
 pub fn updateChatCompletion(client: *Client, completion_id: []const u8, requestBody: std.json.Value) !Owned(contracts.CreateChatCompletionResponse) {
     var result = try updateChatCompletionResult(client, completion_id, requestBody);
@@ -5819,7 +5819,7 @@ pub fn updateChatCompletionRaw(client: *Client, completion_id: []const u8, reque
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chat/completions/{s}", .{client.base_url, completion_id});
+    try uri_buf.writer.print("{s}/chat/completions/{s}", .{ client.base_url, completion_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -5837,7 +5837,7 @@ pub fn updateChatCompletionResult(client: *Client, completion_id: []const u8, re
 // Summary:
 // Delete a stored chat completion. Only Chat Completions that have been
 // created with the `store` parameter set to `true` can be deleted.
-// 
+//
 //
 pub fn deleteChatCompletion(client: *Client, completion_id: []const u8) !Owned(contracts.ChatCompletionDeleted) {
     var result = try deleteChatCompletionResult(client, completion_id);
@@ -5858,7 +5858,7 @@ pub fn deleteChatCompletionRaw(client: *Client, completion_id: []const u8) !RawR
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chat/completions/{s}", .{client.base_url, completion_id});
+    try uri_buf.writer.print("{s}/chat/completions/{s}", .{ client.base_url, completion_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -5891,7 +5891,7 @@ pub fn ListThreadItemsMethodRaw(client: *Client, thread_id: []const u8, limit: ?
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chatkit/threads/{s}/items", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/chatkit/threads/{s}/items", .{ client.base_url, thread_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -5917,10 +5917,10 @@ pub fn ListThreadItemsMethodResult(client: *Client, thread_id: []const u8, limit
 /////////////////
 // Summary:
 // Transcribes audio into the input language.
-// 
+//
 // Returns a transcription object in `json`, `diarized_json`, or `verbose_json`
 // format, or a stream of transcript events.
-// 
+//
 //
 pub fn createTranscription(client: *Client, requestBody: contracts.CreateTranscriptionRequest) !Owned(std.json.Value) {
     var result = try createTranscriptionResult(client, requestBody);
@@ -6044,7 +6044,7 @@ pub fn createBatchResult(client: *Client, requestBody: std.json.Value) !ApiResul
 /////////////////
 // Summary:
 // When a run has the `status: "requires_action"` and `required_action.type` is `submit_tool_outputs`, this endpoint can be used to submit the outputs from the tool calls once they're all completed. All outputs must be submitted in a single request.
-// 
+//
 //
 pub fn submitToolOuputsToRun(client: *Client, thread_id: []const u8, run_id: []const u8, requestBody: contracts.SubmitToolOutputsRunRequest) !Owned(contracts.RunObject) {
     var result = try submitToolOuputsToRunResult(client, thread_id, run_id, requestBody);
@@ -6065,7 +6065,7 @@ pub fn submitToolOuputsToRunRaw(client: *Client, thread_id: []const u8, run_id: 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/submit_tool_outputs", .{client.base_url, thread_id, run_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/submit_tool_outputs", .{ client.base_url, thread_id, run_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -6102,7 +6102,7 @@ pub fn GetVideoRaw(client: *Client, video_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/videos/{s}", .{client.base_url, video_id});
+    try uri_buf.writer.print("{s}/videos/{s}", .{ client.base_url, video_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6135,7 +6135,7 @@ pub fn DeleteVideoRaw(client: *Client, video_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/videos/{s}", .{client.base_url, video_id});
+    try uri_buf.writer.print("{s}/videos/{s}", .{ client.base_url, video_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -6168,7 +6168,7 @@ pub fn getAssistantRaw(client: *Client, assistant_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/assistants/{s}", .{client.base_url, assistant_id});
+    try uri_buf.writer.print("{s}/assistants/{s}", .{ client.base_url, assistant_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6201,7 +6201,7 @@ pub fn modifyAssistantRaw(client: *Client, assistant_id: []const u8, requestBody
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/assistants/{s}", .{client.base_url, assistant_id});
+    try uri_buf.writer.print("{s}/assistants/{s}", .{ client.base_url, assistant_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -6238,7 +6238,7 @@ pub fn deleteAssistantRaw(client: *Client, assistant_id: []const u8) !RawRespons
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/assistants/{s}", .{client.base_url, assistant_id});
+    try uri_buf.writer.print("{s}/assistants/{s}", .{ client.base_url, assistant_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -6274,7 +6274,7 @@ pub fn RetrieveContainerRaw(client: *Client, container_id: []const u8) !RawRespo
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/containers/{s}", .{client.base_url, container_id});
+    try uri_buf.writer.print("{s}/containers/{s}", .{ client.base_url, container_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6301,7 +6301,7 @@ pub fn DeleteContainerRaw(client: *Client, container_id: []const u8) !RawRespons
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/containers/{s}", .{client.base_url, container_id});
+    try uri_buf.writer.print("{s}/containers/{s}", .{ client.base_url, container_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -6310,9 +6310,9 @@ pub fn DeleteContainerRaw(client: *Client, container_id: []const u8) !RawRespons
 /////////////////
 // Summary:
 // Cancels a model response with the given ID. Only responses created with
-// the `background` parameter set to `true` can be cancelled. 
+// the `background` parameter set to `true` can be cancelled.
 // [Learn more](/docs/guides/background).
-// 
+//
 //
 pub fn cancelResponse(client: *Client, response_id: []const u8) !Owned(contracts.Response) {
     var result = try cancelResponseResult(client, response_id);
@@ -6333,7 +6333,7 @@ pub fn cancelResponseRaw(client: *Client, response_id: []const u8) !RawResponse 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/responses/{s}/cancel", .{client.base_url, response_id});
+    try uri_buf.writer.print("{s}/responses/{s}/cancel", .{ client.base_url, response_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -6346,7 +6346,7 @@ pub fn cancelResponseResult(client: *Client, response_id: []const u8) !ApiResult
 /////////////////
 // Summary:
 // Get an evaluation run output item by ID.
-// 
+//
 //
 pub fn getEvalRunOutputItem(client: *Client, eval_id: []const u8, run_id: []const u8, output_item_id: []const u8) !Owned(contracts.EvalRunOutputItem) {
     var result = try getEvalRunOutputItemResult(client, eval_id, run_id, output_item_id);
@@ -6367,7 +6367,7 @@ pub fn getEvalRunOutputItemRaw(client: *Client, eval_id: []const u8, run_id: []c
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}/output_items/{s}", .{client.base_url, eval_id, run_id, output_item_id});
+    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}/output_items/{s}", .{ client.base_url, eval_id, run_id, output_item_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6380,9 +6380,9 @@ pub fn getEvalRunOutputItemResult(client: *Client, eval_id: []const u8, run_id: 
 /////////////////
 // Summary:
 // Get info about a fine-tuning job.
-// 
+//
 // [Learn more about fine-tuning](/docs/guides/model-optimization)
-// 
+//
 //
 pub fn retrieveFineTuningJob(client: *Client, fine_tuning_job_id: []const u8) !Owned(contracts.FineTuningJob) {
     var result = try retrieveFineTuningJobResult(client, fine_tuning_job_id);
@@ -6403,7 +6403,7 @@ pub fn retrieveFineTuningJobRaw(client: *Client, fine_tuning_job_id: []const u8)
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}", .{client.base_url, fine_tuning_job_id});
+    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}", .{ client.base_url, fine_tuning_job_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6436,7 +6436,7 @@ pub fn listFilesInVectorStoreBatchRaw(client: *Client, vector_store_id: []const 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches/{s}/files", .{client.base_url, vector_store_id, batch_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/file_batches/{s}/files", .{ client.base_url, vector_store_id, batch_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -6550,7 +6550,7 @@ pub fn createVectorStoreResult(client: *Client, requestBody: contracts.CreateVec
 // Get the messages in a stored chat completion. Only Chat Completions that
 // have been created with the `store` parameter set to `true` will be
 // returned.
-// 
+//
 //
 pub fn getChatCompletionMessages(client: *Client, completion_id: []const u8, after: ?[]const u8, limit: ?i64, order: ?[]const u8) !Owned(contracts.ChatCompletionMessageList) {
     var result = try getChatCompletionMessagesResult(client, completion_id, after, limit, order);
@@ -6571,7 +6571,7 @@ pub fn getChatCompletionMessagesRaw(client: *Client, completion_id: []const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/chat/completions/{s}/messages", .{client.base_url, completion_id});
+    try uri_buf.writer.print("{s}/chat/completions/{s}/messages", .{ client.base_url, completion_id });
     var first_query = true;
     if (after) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "after", value);
@@ -6614,7 +6614,7 @@ pub fn retrieveBatchRaw(client: *Client, batch_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/batches/{s}", .{client.base_url, batch_id});
+    try uri_buf.writer.print("{s}/batches/{s}", .{ client.base_url, batch_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6700,7 +6700,7 @@ pub fn downloadFileRaw(client: *Client, file_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/files/{s}/content", .{client.base_url, file_id});
+    try uri_buf.writer.print("{s}/files/{s}/content", .{ client.base_url, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6776,7 +6776,7 @@ pub fn retrieveFileRaw(client: *Client, file_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/files/{s}", .{client.base_url, file_id});
+    try uri_buf.writer.print("{s}/files/{s}", .{ client.base_url, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -6809,7 +6809,7 @@ pub fn deleteFileRaw(client: *Client, file_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/files/{s}", .{client.base_url, file_id});
+    try uri_buf.writer.print("{s}/files/{s}", .{ client.base_url, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -6842,7 +6842,7 @@ pub fn @"list-project-rate-limitsRaw"(client: *Client, project_id: []const u8, l
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/rate_limits", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/rate_limits", .{ client.base_url, project_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -6885,7 +6885,7 @@ pub fn @"update-project-rate-limitsRaw"(client: *Client, project_id: []const u8,
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/rate_limits/{s}", .{client.base_url, project_id, rate_limit_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/rate_limits/{s}", .{ client.base_url, project_id, rate_limit_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -7130,7 +7130,7 @@ pub fn getVectorStoreFileRaw(client: *Client, vector_store_id: []const u8, file_
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}", .{client.base_url, vector_store_id, file_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}", .{ client.base_url, vector_store_id, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -7163,7 +7163,7 @@ pub fn updateVectorStoreFileAttributesRaw(client: *Client, vector_store_id: []co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}", .{client.base_url, vector_store_id, file_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}", .{ client.base_url, vector_store_id, file_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -7200,7 +7200,7 @@ pub fn deleteVectorStoreFileRaw(client: *Client, vector_store_id: []const u8, fi
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}", .{client.base_url, vector_store_id, file_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}", .{ client.base_url, vector_store_id, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -7322,7 +7322,7 @@ pub fn GetSkillRaw(client: *Client, skill_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/skills/{s}", .{ client.base_url, skill_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -7355,7 +7355,7 @@ pub fn UpdateSkillDefaultVersionRaw(client: *Client, skill_id: []const u8, reque
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/skills/{s}", .{ client.base_url, skill_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -7392,7 +7392,7 @@ pub fn DeleteSkillRaw(client: *Client, skill_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}", .{client.base_url, skill_id});
+    try uri_buf.writer.print("{s}/skills/{s}", .{ client.base_url, skill_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -7405,9 +7405,9 @@ pub fn DeleteSkillResult(client: *Client, skill_id: []const u8) !ApiResult(contr
 /////////////////
 // Summary:
 // **NOTE:** This endpoint requires an [admin API key](../admin-api-keys).
-// 
+//
 // Organization owners can use this endpoint to delete a permission for a fine-tuned model checkpoint.
-// 
+//
 //
 pub fn deleteFineTuningCheckpointPermission(client: *Client, fine_tuned_model_checkpoint: []const u8, permission_id: []const u8) !Owned(contracts.DeleteFineTuningCheckpointPermissionResponse) {
     var result = try deleteFineTuningCheckpointPermissionResult(client, fine_tuned_model_checkpoint, permission_id);
@@ -7428,7 +7428,7 @@ pub fn deleteFineTuningCheckpointPermissionRaw(client: *Client, fine_tuned_model
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/checkpoints/{s}/permissions/{s}", .{client.base_url, fine_tuned_model_checkpoint, permission_id});
+    try uri_buf.writer.print("{s}/fine_tuning/checkpoints/{s}/permissions/{s}", .{ client.base_url, fine_tuned_model_checkpoint, permission_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -7494,7 +7494,7 @@ pub fn GetSkillVersionContentRaw(client: *Client, skill_id: []const u8, version:
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}/ss/{s}/content", .{client.base_url, skill_id, version});
+    try uri_buf.writer.print("{s}/skills/{s}/ss/{s}/content", .{ client.base_url, skill_id, version });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -7519,7 +7519,7 @@ pub fn @"accept-realtime-callRaw"(client: *Client, call_id: []const u8, requestB
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/realtime/calls/{s}/accept", .{client.base_url, call_id});
+    try uri_buf.writer.print("{s}/realtime/calls/{s}/accept", .{ client.base_url, call_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -7615,9 +7615,9 @@ pub fn CreateSkillResult(client: *Client, requestBody: contracts.CreateSkillBody
 //
 // Description:
 // List consent recordings available to your organization for creating custom voices.
-// 
+//
 // See the [custom voices guide](/docs/guides/text-to-speech#custom-voices). Custom voices are limited to eligible customers.
-// 
+//
 //
 pub fn listVoiceConsents(client: *Client, after: ?[]const u8, limit: ?i64) !Owned(contracts.VoiceConsentListResource) {
     var result = try listVoiceConsentsResult(client, after, limit);
@@ -7661,9 +7661,9 @@ pub fn listVoiceConsentsResult(client: *Client, after: ?[]const u8, limit: ?i64)
 //
 // Description:
 // Upload a consent recording that authorizes creation of a custom voice.
-// 
+//
 // See the [custom voices guide](/docs/guides/text-to-speech#custom-voices) for requirements and best practices. Custom voices are limited to eligible customers.
-// 
+//
 //
 pub fn createVoiceConsent(client: *Client, requestBody: contracts.CreateVoiceConsentRequest) !Owned(contracts.VoiceConsentResource) {
     var result = try createVoiceConsentResult(client, requestBody);
@@ -7725,7 +7725,7 @@ pub fn @"admin-api-keys-getRaw"(client: *Client, key_id: []const u8) !RawRespons
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/admin_api_keys/{s}", .{client.base_url, key_id});
+    try uri_buf.writer.print("{s}/organization/admin_api_keys/{s}", .{ client.base_url, key_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -7761,7 +7761,7 @@ pub fn @"admin-api-keys-deleteRaw"(client: *Client, key_id: []const u8) !RawResp
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/admin_api_keys/{s}", .{client.base_url, key_id});
+    try uri_buf.writer.print("{s}/organization/admin_api_keys/{s}", .{ client.base_url, key_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -7794,7 +7794,7 @@ pub fn @"list-project-groupsRaw"(client: *Client, project_id: []const u8, limit:
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/groups", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/groups", .{ client.base_url, project_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -7837,7 +7837,7 @@ pub fn @"add-project-groupRaw"(client: *Client, project_id: []const u8, requestB
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/groups", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/groups", .{ client.base_url, project_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -7854,7 +7854,7 @@ pub fn @"add-project-groupResult"(client: *Client, project_id: []const u8, reque
 /////////////////
 // Summary:
 // Resume a fine-tune job.
-// 
+//
 //
 pub fn resumeFineTuningJob(client: *Client, fine_tuning_job_id: []const u8) !Owned(contracts.FineTuningJob) {
     var result = try resumeFineTuningJobResult(client, fine_tuning_job_id);
@@ -7875,7 +7875,7 @@ pub fn resumeFineTuningJobRaw(client: *Client, fine_tuning_job_id: []const u8) !
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/resume", .{client.base_url, fine_tuning_job_id});
+    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/resume", .{ client.base_url, fine_tuning_job_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -7888,7 +7888,7 @@ pub fn resumeFineTuningJobResult(client: *Client, fine_tuning_job_id: []const u8
 /////////////////
 // Summary:
 // Validate a grader.
-// 
+//
 //
 pub fn validateGrader(client: *Client, requestBody: contracts.ValidateGraderRequest) !Owned(contracts.ValidateGraderResponse) {
     var result = try validateGraderResult(client, requestBody);
@@ -8125,7 +8125,7 @@ pub fn @"update-project-roleRaw"(client: *Client, project_id: []const u8, role_i
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/roles/{s}", .{client.base_url, project_id, role_id});
+    try uri_buf.writer.print("{s}/projects/{s}/roles/{s}", .{ client.base_url, project_id, role_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -8162,7 +8162,7 @@ pub fn @"delete-project-roleRaw"(client: *Client, project_id: []const u8, role_i
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/roles/{s}", .{client.base_url, project_id, role_id});
+    try uri_buf.writer.print("{s}/projects/{s}/roles/{s}", .{ client.base_url, project_id, role_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8175,7 +8175,7 @@ pub fn @"delete-project-roleResult"(client: *Client, project_id: []const u8, rol
 /////////////////
 // Summary:
 // Get an evaluation run by ID.
-// 
+//
 //
 pub fn getEvalRun(client: *Client, eval_id: []const u8, run_id: []const u8) !Owned(contracts.EvalRun) {
     var result = try getEvalRunResult(client, eval_id, run_id);
@@ -8196,7 +8196,7 @@ pub fn getEvalRunRaw(client: *Client, eval_id: []const u8, run_id: []const u8) !
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}", .{client.base_url, eval_id, run_id});
+    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}", .{ client.base_url, eval_id, run_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -8209,7 +8209,7 @@ pub fn getEvalRunResult(client: *Client, eval_id: []const u8, run_id: []const u8
 /////////////////
 // Summary:
 // Cancel an ongoing evaluation run.
-// 
+//
 //
 pub fn cancelEvalRun(client: *Client, eval_id: []const u8, run_id: []const u8) !Owned(contracts.EvalRun) {
     var result = try cancelEvalRunResult(client, eval_id, run_id);
@@ -8230,7 +8230,7 @@ pub fn cancelEvalRunRaw(client: *Client, eval_id: []const u8, run_id: []const u8
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}", .{client.base_url, eval_id, run_id});
+    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}", .{ client.base_url, eval_id, run_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -8243,7 +8243,7 @@ pub fn cancelEvalRunResult(client: *Client, eval_id: []const u8, run_id: []const
 /////////////////
 // Summary:
 // Delete an eval run.
-// 
+//
 //
 pub fn deleteEvalRun(client: *Client, eval_id: []const u8, run_id: []const u8) !Owned(std.json.Value) {
     var result = try deleteEvalRunResult(client, eval_id, run_id);
@@ -8264,7 +8264,7 @@ pub fn deleteEvalRunRaw(client: *Client, eval_id: []const u8, run_id: []const u8
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}", .{client.base_url, eval_id, run_id});
+    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}", .{ client.base_url, eval_id, run_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8277,7 +8277,7 @@ pub fn deleteEvalRunResult(client: *Client, eval_id: []const u8, run_id: []const
 /////////////////
 // Summary:
 // Run a grader.
-// 
+//
 //
 pub fn runGrader(client: *Client, requestBody: contracts.RunGraderRequest) !Owned(contracts.RunGraderResponse) {
     var result = try runGraderResult(client, requestBody);
@@ -8315,7 +8315,7 @@ pub fn runGraderResult(client: *Client, requestBody: contracts.RunGraderRequest)
 /////////////////
 // Summary:
 // Immediately cancel a fine-tune job.
-// 
+//
 //
 pub fn cancelFineTuningJob(client: *Client, fine_tuning_job_id: []const u8) !Owned(contracts.FineTuningJob) {
     var result = try cancelFineTuningJobResult(client, fine_tuning_job_id);
@@ -8336,7 +8336,7 @@ pub fn cancelFineTuningJobRaw(client: *Client, fine_tuning_job_id: []const u8) !
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/cancel", .{client.base_url, fine_tuning_job_id});
+    try uri_buf.writer.print("{s}/fine_tuning/jobs/{s}/cancel", .{ client.base_url, fine_tuning_job_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -8369,7 +8369,7 @@ pub fn retrieveModelRaw(client: *Client, model: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/ss/{s}", .{client.base_url, model});
+    try uri_buf.writer.print("{s}/ss/{s}", .{ client.base_url, model });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -8402,7 +8402,7 @@ pub fn deleteModelRaw(client: *Client, model: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/ss/{s}", .{client.base_url, model});
+    try uri_buf.writer.print("{s}/ss/{s}", .{ client.base_url, model });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8435,7 +8435,7 @@ pub fn @"retrieve-project-api-keyRaw"(client: *Client, project_id: []const u8, a
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/api_keys/{s}", .{client.base_url, project_id, api_key_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/api_keys/{s}", .{ client.base_url, project_id, api_key_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -8448,10 +8448,10 @@ pub fn @"retrieve-project-api-keyResult"(client: *Client, project_id: []const u8
 /////////////////
 // Summary:
 // Deletes an API key from the project.
-// 
+//
 // Returns confirmation of the key deletion, or an error if the key belonged to
 // a service account.
-// 
+//
 //
 pub fn @"delete-project-api-key"(client: *Client, project_id: []const u8, api_key_id: []const u8) !Owned(contracts.ProjectApiKeyDeleteResponse) {
     var result = try @"delete-project-api-keyResult"(client, project_id, api_key_id);
@@ -8472,7 +8472,7 @@ pub fn @"delete-project-api-keyRaw"(client: *Client, project_id: []const u8, api
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/api_keys/{s}", .{client.base_url, project_id, api_key_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/api_keys/{s}", .{ client.base_url, project_id, api_key_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8485,7 +8485,7 @@ pub fn @"delete-project-api-keyResult"(client: *Client, project_id: []const u8, 
 /////////////////
 // Summary:
 // Get a list of output items for an evaluation run.
-// 
+//
 //
 pub fn getEvalRunOutputItems(client: *Client, eval_id: []const u8, run_id: []const u8, after: ?[]const u8, limit: ?i64, status: ?[]const u8, order: ?[]const u8) !Owned(contracts.EvalRunOutputItemList) {
     var result = try getEvalRunOutputItemsResult(client, eval_id, run_id, after, limit, status, order);
@@ -8506,7 +8506,7 @@ pub fn getEvalRunOutputItemsRaw(client: *Client, eval_id: []const u8, run_id: []
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}/output_items", .{client.base_url, eval_id, run_id});
+    try uri_buf.writer.print("{s}/evals/{s}/runs/{s}/output_items", .{ client.base_url, eval_id, run_id });
     var first_query = true;
     if (after) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "after", value);
@@ -8531,9 +8531,9 @@ pub fn getEvalRunOutputItemsResult(client: *Client, eval_id: []const u8, run_id:
 
 /////////////////
 // Summary:
-// Deactivate certificates at the project level. You can atomically and 
+// Deactivate certificates at the project level. You can atomically and
 // idempotently deactivate up to 10 certificates at a time.
-// 
+//
 //
 pub fn deactivateProjectCertificates(client: *Client, project_id: []const u8, requestBody: contracts.ToggleCertificatesRequest) !Owned(contracts.OrganizationProjectCertificateDeactivationResponse) {
     var result = try deactivateProjectCertificatesResult(client, project_id, requestBody);
@@ -8554,7 +8554,7 @@ pub fn deactivateProjectCertificatesRaw(client: *Client, project_id: []const u8,
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/certificates/deactivate", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/certificates/deactivate", .{ client.base_url, project_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -8674,7 +8674,7 @@ pub fn @"unassign-user-roleRaw"(client: *Client, user_id: []const u8, role_id: [
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/users/{s}/roles/{s}", .{client.base_url, user_id, role_id});
+    try uri_buf.writer.print("{s}/organization/users/{s}/roles/{s}", .{ client.base_url, user_id, role_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8707,7 +8707,7 @@ pub fn @"unassign-project-group-roleRaw"(client: *Client, project_id: []const u8
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/projects/{s}/groups/{s}/roles/{s}", .{client.base_url, project_id, group_id, role_id});
+    try uri_buf.writer.print("{s}/projects/{s}/groups/{s}/roles/{s}", .{ client.base_url, project_id, group_id, role_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8740,7 +8740,7 @@ pub fn @"retrieve-project-service-accountRaw"(client: *Client, project_id: []con
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts/{s}", .{client.base_url, project_id, service_account_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts/{s}", .{ client.base_url, project_id, service_account_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -8753,10 +8753,10 @@ pub fn @"retrieve-project-service-accountResult"(client: *Client, project_id: []
 /////////////////
 // Summary:
 // Deletes a service account from the project.
-// 
+//
 // Returns confirmation of service account deletion, or an error if the project
 // is archived (archived projects have no service accounts).
-// 
+//
 //
 pub fn @"delete-project-service-account"(client: *Client, project_id: []const u8, service_account_id: []const u8) !Owned(contracts.ProjectServiceAccountDeleteResponse) {
     var result = try @"delete-project-service-accountResult"(client, project_id, service_account_id);
@@ -8777,7 +8777,7 @@ pub fn @"delete-project-service-accountRaw"(client: *Client, project_id: []const
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts/{s}", .{client.base_url, project_id, service_account_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/service_accounts/{s}", .{ client.base_url, project_id, service_account_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8810,7 +8810,7 @@ pub fn @"remove-group-userRaw"(client: *Client, group_id: []const u8, user_id: [
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/groups/{s}/users/{s}", .{client.base_url, group_id, user_id});
+    try uri_buf.writer.print("{s}/organization/groups/{s}/users/{s}", .{ client.base_url, group_id, user_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -8843,7 +8843,7 @@ pub fn getRunRaw(client: *Client, thread_id: []const u8, run_id: []const u8) !Ra
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}", .{client.base_url, thread_id, run_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}", .{ client.base_url, thread_id, run_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -8876,7 +8876,7 @@ pub fn modifyRunRaw(client: *Client, thread_id: []const u8, run_id: []const u8, 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}", .{client.base_url, thread_id, run_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}", .{ client.base_url, thread_id, run_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -8913,7 +8913,7 @@ pub fn listRunStepsRaw(client: *Client, thread_id: []const u8, run_id: []const u
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/steps", .{client.base_url, thread_id, run_id});
+    try uri_buf.writer.print("{s}/threads/{s}/runs/{s}/steps", .{ client.base_url, thread_id, run_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -8962,7 +8962,7 @@ pub fn @"retrieve-inviteRaw"(client: *Client, invite_id: []const u8) !RawRespons
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/invites/{s}", .{client.base_url, invite_id});
+    try uri_buf.writer.print("{s}/organization/invites/{s}", .{ client.base_url, invite_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -8995,7 +8995,7 @@ pub fn @"delete-inviteRaw"(client: *Client, invite_id: []const u8) !RawResponse 
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/invites/{s}", .{client.base_url, invite_id});
+    try uri_buf.writer.print("{s}/organization/invites/{s}", .{ client.base_url, invite_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -9011,22 +9011,22 @@ pub fn @"delete-inviteResult"(client: *Client, invite_id: []const u8) !ApiResult
 // that you can add [Parts](/docs/api-reference/uploads/part-object) to.
 // Currently, an Upload can accept at most 8 GB in total and expires after an
 // hour after you create it.
-// 
+//
 // Once you complete the Upload, we will create a
 // [File](/docs/api-reference/files/object) object that contains all the parts
 // you uploaded. This File is usable in the rest of our platform as a regular
 // File object.
-// 
-// For certain `purpose` values, the correct `mime_type` must be specified. 
-// Please refer to documentation for the 
+//
+// For certain `purpose` values, the correct `mime_type` must be specified.
+// Please refer to documentation for the
 // [supported MIME types for your use case](/docs/assistants/tools/file-search#supported-files).
-// 
+//
 // For guidance on the proper filename extensions for each purpose, please
 // follow the documentation on [creating a
 // File](/docs/api-reference/files/create).
-// 
+//
 // Returns the Upload object with status `pending`.
-// 
+//
 //
 pub fn createUpload(client: *Client, requestBody: contracts.CreateUploadRequest) !Owned(contracts.Upload) {
     var result = try createUploadResult(client, requestBody);
@@ -9084,7 +9084,7 @@ pub fn listMessagesRaw(client: *Client, thread_id: []const u8, limit: ?i64, orde
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/messages", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/threads/{s}/messages", .{ client.base_url, thread_id });
     var first_query = true;
     if (limit) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "limit", value);
@@ -9133,7 +9133,7 @@ pub fn createMessageRaw(client: *Client, thread_id: []const u8, requestBody: con
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/threads/{s}/messages", .{client.base_url, thread_id});
+    try uri_buf.writer.print("{s}/threads/{s}/messages", .{ client.base_url, thread_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -9150,9 +9150,9 @@ pub fn createMessageResult(client: *Client, thread_id: []const u8, requestBody: 
 /////////////////
 // Summary:
 // **NOTE:** This endpoint requires an [admin API key](../admin-api-keys).
-// 
+//
 // Organization owners can use this endpoint to view all permissions for a fine-tuned model checkpoint.
-// 
+//
 //
 pub fn listFineTuningCheckpointPermissions(client: *Client, fine_tuned_model_checkpoint: []const u8, project_id: ?[]const u8, after: ?[]const u8, limit: ?i64, order: ?[]const u8) !Owned(contracts.ListFineTuningCheckpointPermissionResponse) {
     var result = try listFineTuningCheckpointPermissionsResult(client, fine_tuned_model_checkpoint, project_id, after, limit, order);
@@ -9173,7 +9173,7 @@ pub fn listFineTuningCheckpointPermissionsRaw(client: *Client, fine_tuned_model_
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/checkpoints/{s}/permissions", .{client.base_url, fine_tuned_model_checkpoint});
+    try uri_buf.writer.print("{s}/fine_tuning/checkpoints/{s}/permissions", .{ client.base_url, fine_tuned_model_checkpoint });
     var first_query = true;
     if (project_id) |value| {
         try appendQueryParam(&uri_buf.writer, &first_query, "project_id", value);
@@ -9199,9 +9199,9 @@ pub fn listFineTuningCheckpointPermissionsResult(client: *Client, fine_tuned_mod
 /////////////////
 // Summary:
 // **NOTE:** Calling this endpoint requires an [admin API key](../admin-api-keys).
-// 
+//
 // This enables organization owners to share fine-tuned models with other projects in their organization.
-// 
+//
 //
 pub fn createFineTuningCheckpointPermission(client: *Client, fine_tuned_model_checkpoint: []const u8, requestBody: contracts.CreateFineTuningCheckpointPermissionRequest) !Owned(contracts.ListFineTuningCheckpointPermissionResponse) {
     var result = try createFineTuningCheckpointPermissionResult(client, fine_tuned_model_checkpoint, requestBody);
@@ -9222,7 +9222,7 @@ pub fn createFineTuningCheckpointPermissionRaw(client: *Client, fine_tuned_model
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/fine_tuning/checkpoints/{s}/permissions", .{client.base_url, fine_tuned_model_checkpoint});
+    try uri_buf.writer.print("{s}/fine_tuning/checkpoints/{s}/permissions", .{ client.base_url, fine_tuned_model_checkpoint });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -9239,9 +9239,9 @@ pub fn createFineTuningCheckpointPermissionResult(client: *Client, fine_tuned_mo
 /////////////////
 // Summary:
 // Cancels the Upload. No Parts may be added after an Upload is cancelled.
-// 
+//
 // Returns the Upload object with status `cancelled`.
-// 
+//
 //
 pub fn cancelUpload(client: *Client, upload_id: []const u8) !Owned(contracts.Upload) {
     var result = try cancelUploadResult(client, upload_id);
@@ -9262,7 +9262,7 @@ pub fn cancelUploadRaw(client: *Client, upload_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/uploads/{s}/cancel", .{client.base_url, upload_id});
+    try uri_buf.writer.print("{s}/uploads/{s}/cancel", .{ client.base_url, upload_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.POST, uri_buf.written(), payload);
@@ -9274,15 +9274,15 @@ pub fn cancelUploadResult(client: *Client, upload_id: []const u8) !ApiResult(con
 
 /////////////////
 // Summary:
-// Completes the [Upload](/docs/api-reference/uploads/object). 
-// 
+// Completes the [Upload](/docs/api-reference/uploads/object).
+//
 // Within the returned Upload object, there is a nested [File](/docs/api-reference/files/object) object that is ready to use in the rest of the platform.
-// 
+//
 // You can specify the order of the Parts by passing in an ordered list of the Part IDs.
-// 
+//
 // The number of bytes uploaded upon completion must match the number of bytes initially specified when creating the Upload object. No Parts may be added after an Upload is completed.
 // Returns the Upload object with status `completed`, including an additional `file` property containing the created usable File object.
-// 
+//
 //
 pub fn completeUpload(client: *Client, upload_id: []const u8, requestBody: contracts.CompleteUploadRequest) !Owned(contracts.Upload) {
     var result = try completeUploadResult(client, upload_id, requestBody);
@@ -9303,7 +9303,7 @@ pub fn completeUploadRaw(client: *Client, upload_id: []const u8, requestBody: co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/uploads/{s}/complete", .{client.base_url, upload_id});
+    try uri_buf.writer.print("{s}/uploads/{s}/complete", .{ client.base_url, upload_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -9340,7 +9340,7 @@ pub fn retrieveVectorStoreFileContentRaw(client: *Client, vector_store_id: []con
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}/content", .{client.base_url, vector_store_id, file_id});
+    try uri_buf.writer.print("{s}/vector_stores/{s}/files/{s}/content", .{ client.base_url, vector_store_id, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -9376,7 +9376,7 @@ pub fn RetrieveContainerFileRaw(client: *Client, container_id: []const u8, file_
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/containers/{s}/files/{s}", .{client.base_url, container_id, file_id});
+    try uri_buf.writer.print("{s}/containers/{s}/files/{s}", .{ client.base_url, container_id, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -9403,7 +9403,7 @@ pub fn DeleteContainerFileRaw(client: *Client, container_id: []const u8, file_id
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/containers/{s}/files/{s}", .{client.base_url, container_id, file_id});
+    try uri_buf.writer.print("{s}/containers/{s}/files/{s}", .{ client.base_url, container_id, file_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -9432,7 +9432,7 @@ pub fn @"retrieve-project-userRaw"(client: *Client, project_id: []const u8, user
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/users/{s}", .{client.base_url, project_id, user_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/users/{s}", .{ client.base_url, project_id, user_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -9465,7 +9465,7 @@ pub fn @"modify-project-userRaw"(client: *Client, project_id: []const u8, user_i
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/users/{s}", .{client.base_url, project_id, user_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/users/{s}", .{ client.base_url, project_id, user_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -9482,10 +9482,10 @@ pub fn @"modify-project-userResult"(client: *Client, project_id: []const u8, use
 /////////////////
 // Summary:
 // Deletes a user from the project.
-// 
+//
 // Returns confirmation of project user deletion, or an error if the project is
 // archived (archived projects have no users).
-// 
+//
 //
 pub fn @"delete-project-user"(client: *Client, project_id: []const u8, user_id: []const u8) !Owned(contracts.ProjectUserDeleteResponse) {
     var result = try @"delete-project-userResult"(client, project_id, user_id);
@@ -9506,7 +9506,7 @@ pub fn @"delete-project-userRaw"(client: *Client, project_id: []const u8, user_i
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}/users/{s}", .{client.base_url, project_id, user_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}/users/{s}", .{ client.base_url, project_id, user_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -9519,7 +9519,7 @@ pub fn @"delete-project-userResult"(client: *Client, project_id: []const u8, use
 /////////////////
 // Summary:
 // Get an evaluation by ID.
-// 
+//
 //
 pub fn getEval(client: *Client, eval_id: []const u8) !Owned(contracts.Eval) {
     var result = try getEvalResult(client, eval_id);
@@ -9540,7 +9540,7 @@ pub fn getEvalRaw(client: *Client, eval_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}", .{client.base_url, eval_id});
+    try uri_buf.writer.print("{s}/evals/{s}", .{ client.base_url, eval_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -9553,7 +9553,7 @@ pub fn getEvalResult(client: *Client, eval_id: []const u8) !ApiResult(contracts.
 /////////////////
 // Summary:
 // Update certain properties of an evaluation.
-// 
+//
 //
 pub fn updateEval(client: *Client, eval_id: []const u8, requestBody: std.json.Value) !Owned(contracts.Eval) {
     var result = try updateEvalResult(client, eval_id, requestBody);
@@ -9574,7 +9574,7 @@ pub fn updateEvalRaw(client: *Client, eval_id: []const u8, requestBody: std.json
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}", .{client.base_url, eval_id});
+    try uri_buf.writer.print("{s}/evals/{s}", .{ client.base_url, eval_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -9591,7 +9591,7 @@ pub fn updateEvalResult(client: *Client, eval_id: []const u8, requestBody: std.j
 /////////////////
 // Summary:
 // Delete an evaluation.
-// 
+//
 //
 pub fn deleteEval(client: *Client, eval_id: []const u8) !Owned(std.json.Value) {
     var result = try deleteEvalResult(client, eval_id);
@@ -9612,7 +9612,7 @@ pub fn deleteEvalRaw(client: *Client, eval_id: []const u8) !RawResponse {
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/evals/{s}", .{client.base_url, eval_id});
+    try uri_buf.writer.print("{s}/evals/{s}", .{ client.base_url, eval_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -9645,7 +9645,7 @@ pub fn @"retrieve-projectRaw"(client: *Client, project_id: []const u8) !RawRespo
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}", .{ client.base_url, project_id });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -9678,7 +9678,7 @@ pub fn @"modify-projectRaw"(client: *Client, project_id: []const u8, requestBody
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/organization/projects/{s}", .{client.base_url, project_id});
+    try uri_buf.writer.print("{s}/organization/projects/{s}", .{ client.base_url, project_id });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -9752,7 +9752,7 @@ pub fn GetSkillVersionRaw(client: *Client, skill_id: []const u8, version: []cons
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}/ss/{s}", .{client.base_url, skill_id, version});
+    try uri_buf.writer.print("{s}/skills/{s}/ss/{s}", .{ client.base_url, skill_id, version });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.GET, uri_buf.written(), payload);
@@ -9785,7 +9785,7 @@ pub fn DeleteSkillVersionRaw(client: *Client, skill_id: []const u8, version: []c
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/skills/{s}/ss/{s}", .{client.base_url, skill_id, version});
+    try uri_buf.writer.print("{s}/skills/{s}/ss/{s}", .{ client.base_url, skill_id, version });
     const payload: ?[]const u8 = null;
 
     return requestRaw(client, std.http.Method.DELETE, uri_buf.written(), payload);
@@ -11557,4 +11557,3 @@ pub const threads = resources.threads;
 pub const uploads = resources.uploads;
 pub const vector_stores = resources.vector_stores;
 pub const videos = resources.videos;
-
