@@ -13,18 +13,16 @@ pub fn listModels(http_client: *client.Client) !client.Owned(ModelsList) {
     try uri_buf.writer.print("{s}/api/v1/models", .{http_client.base_url});
 
     var raw = try client.requestRaw(http_client, std.http.Method.GET, uri_buf.written(), null);
-    errdefer raw.deinit();
+    defer raw.deinit();
 
     if (raw.status.class() != .success) {
         if (client.isAuthFailure(raw.status)) client.printAuthHint(http_client.io);
-        raw.deinit();
         return error.ResponseError;
     }
 
     const body = try allocator.dupe(u8, raw.body);
     errdefer allocator.free(body);
     const parsed = try std.json.parseFromSlice(ModelsList, allocator, body, .{ .ignore_unknown_fields = true });
-    raw.deinit();
 
     return .{
         .allocator = allocator,
