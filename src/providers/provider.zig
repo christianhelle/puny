@@ -1,4 +1,5 @@
 const std = @import("std");
+const cancel = @import("../core/cancel.zig");
 const client = @import("client.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
@@ -10,8 +11,8 @@ const copilot = @import("copilot.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const adapter = @import("adapter.zig");
-const lmstudio = @import("lmstudio/client.zig");
 const openai_client = @import("openai/client.zig");
+const openai_runtime = @import("openai/runtime.zig");
 
 pub const ModelProvider = enum {
     lmstudio,
@@ -73,53 +74,17 @@ pub const Provider = union(enum) {
 
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
-            .lmstudio => |*c| {
-                var generated = adapter.lmStudioClient(c);
-                defer generated.deinit();
-                generated.base_url = c.base_url;
-                var sse = openai.SseCallback{
-                    .allocator = c.allocator,
-                    .callback = callback,
-                    .observer = c.http_observer,
-                };
-                const reasoning = if (request.reasoning_effort) |effort| if (effort != .default) @tagName(effort) else null else null;
-                try lmstudio.chatStreaming(&generated, adapter.LmStudioStreamingRequest{
-                    .model = request.model,
-                    .messages = request.messages,
-                    .temperature = request.temperature,
-                    .reasoning = reasoning,
-                }, &sse, null);
-            },
+            .lmstudio => |*c| chatStreamingOpenAi(c, request, callback),
             .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
                 anthropic.chatStreaming(c, request, callback)
             else if (google.isGoogleModel(request.model))
                 google.chatStreamingGoogle(c, request, callback)
-            else blk: {
-                var generated = adapter.openAiClient(c);
-                defer generated.deinit();
-                generated.base_url = c.base_url;
-                var sse = openai.SseCallback{
-                    .allocator = c.allocator,
-                    .callback = callback,
-                    .observer = c.http_observer,
-                };
-                try openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, null);
-                break :blk {};
-            },
+            else
+                chatStreamingOpenAi(c, request, callback),
             .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
                 anthropic.chatStreaming(c, request, callback)
-            else blk: {
-                var generated = adapter.openAiClient(c);
-                defer generated.deinit();
-                generated.base_url = c.base_url;
-                var sse = openai.SseCallback{
-                    .allocator = c.allocator,
-                    .callback = callback,
-                    .observer = c.http_observer,
-                };
-                try openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, null);
-                break :blk {};
-            },
+            else
+                chatStreamingOpenAi(c, request, callback),
             .copilot => |*c| copilot.chatStreaming(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
         };
@@ -141,6 +106,67 @@ pub const Provider = union(enum) {
         }
     }
 };
+
+/// Bridges the app-wide cancellation flag onto a generated client's
+/// cancellation token so the generated SSE reader aborts an in-flight stream.
+const CancellationBridge = struct {
+    token: openai_runtime.CancellationToken,
+    io: std.Io,
+    stopped: std.atomic.Value(bool),
+
+    fn init(io: std.Io) CancellationBridge {
+        return .{
+            .token = openai_runtime.CancellationToken.init(),
+            .io = io,
+            .stopped = std.atomic.Value(bool).init(false),
+        };
+    }
+
+    fn start(self: *CancellationBridge) !std.Thread {
+        return std.Thread.spawn(.{}, run, .{self});
+    }
+
+    fn run(self: *CancellationBridge) void {
+        while (true) {
+            if (self.stopped.load(.seq_cst)) return;
+            if (cancel.isCancelled()) {
+                self.token.cancel();
+                return;
+            }
+            self.io.sleep(.{ .nanoseconds = 20 * std.time.ns_per_ms }, .awake) catch return;
+        }
+    }
+
+    fn stop(self: *CancellationBridge, thread: std.Thread) void {
+        self.stopped.store(true, .seq_cst);
+        thread.join();
+    }
+};
+
+/// Streams through the generated OpenAI client, mapping the hand-written
+/// client's base URL (which omits "/v1") onto the generated client and
+/// bridging the app-wide cancellation flag onto the generated token.
+fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    var generated = adapter.openAiClient(c);
+    defer generated.deinit();
+    const openai_base = try std.fmt.allocPrint(c.allocator, "{s}/v1", .{c.base_url});
+    defer c.allocator.free(openai_base);
+    generated.base_url = openai_base;
+
+    var bridge = CancellationBridge.init(c.io);
+    const bridge_thread = try bridge.start();
+    defer bridge.stop(bridge_thread);
+
+    var sse = openai.SseCallback{
+        .allocator = c.allocator,
+        .callback = callback,
+        .observer = c.http_observer,
+    };
+    openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, &bridge.token) catch |err| switch (err) {
+        error.Cancelled => return error.Canceled,
+        else => return err,
+    };
+}
 
 test "getProviderDisplayName maps known providers" {
     try std.testing.expectEqualStrings("LM Studio", getProviderDisplayName(.lmstudio));
@@ -281,6 +307,7 @@ const ProviderTestServer = struct {
     server: std.Io.net.Server,
     status: std.http.Status,
     body: []const u8,
+    request_path: std.ArrayList(u8) = .empty,
     thread: std.Thread = undefined,
 
     fn serve(self: *@This()) void {
@@ -294,6 +321,7 @@ const ProviderTestServer = struct {
 
         var http_server = std.http.Server.init(&reader.interface, &writer.interface);
         var request = http_server.receiveHead() catch return;
+        self.request_path.appendSlice(std.testing.allocator, request.head.target) catch {};
         request.respond(self.body, .{ .status = self.status }) catch return;
     }
 };
@@ -310,6 +338,7 @@ fn startProviderTestServer(status: std.http.Status, body: []const u8) !*Provider
 
 fn stopProviderTestServer(ctx: *ProviderTestServer) void {
     ctx.thread.join();
+    ctx.request_path.deinit(std.testing.allocator);
     ctx.server.deinit(std.testing.io);
     std.testing.allocator.destroy(ctx);
 }
@@ -340,6 +369,7 @@ test "Provider.listModels dispatches to the lmstudio provider" {
 
     var owned = try prov.listModels();
     defer owned.deinit();
+    try std.testing.expectEqualStrings("/api/v1/models", ctx.request_path.items);
     try expectModelIds(&owned, &.{"qwen2.5-7b"});
 }
 
@@ -358,6 +388,7 @@ test "Provider.listModels dispatches to the opencode provider" {
 
     var owned = try prov.listModels();
     defer owned.deinit();
+    try std.testing.expectEqualStrings("/v1/models", ctx.request_path.items);
     try expectModelIds(&owned, &.{"deepseek-v4-pro"});
 }
 
@@ -426,6 +457,7 @@ test "Provider.chatStreaming dispatches to the lmstudio provider" {
     };
     try prov.chatStreaming(request, rec.callback());
 
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.request_path.items);
     try std.testing.expectEqual(@as(usize, 2), rec.events.items.len);
     switch (rec.events.items[0]) {
         .content => |content| try std.testing.expectEqualStrings("Hi from LM", content),
