@@ -53,11 +53,7 @@ pub const Provider = union(enum) {
                 var owned = try lmstudio_shim.listModels(c);
                 break :blk try lmstudio_shim.toSharedModels(&owned);
             },
-            .opencode => |*c| blk: {
-                var owned = try openai_shim.listModels(c);
-                break :blk try openai_shim.toSharedModels(&owned);
-            },
-            .opencode_go => |*c| blk: {
+            .opencode, .opencode_go => |*c| blk: {
                 var owned = try openai_shim.listModels(c);
                 break :blk try openai_shim.toSharedModels(&owned);
             },
