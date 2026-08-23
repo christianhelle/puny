@@ -639,8 +639,7 @@
           "display_name",
           "size_bytes",
           "loaded_instances",
-          "max_context_length",
-          "format"
+          "max_context_length"
         ],
         "properties": {
           "type": {
@@ -661,23 +660,19 @@
             "description": "Human-readable model name"
           },
           "architecture": {
-            "type": "string",
-            "nullable": true,
+            "type": ["string", "null"],
             "description": "Model architecture (e.g., llama, mistral). Absent for embedding models"
           },
           "quantization": {
-            "type": "object",
-            "nullable": true,
-            "required": ["name", "bits_per_weight"],
+            "type": ["object", "null"],
+            "required": [],
             "properties": {
               "name": {
-                "type": "string",
-                "nullable": true,
+                "type": ["string", "null"],
                 "description": "Quantization method name"
               },
               "bits_per_weight": {
-                "type": "number",
-                "nullable": true,
+                "type": ["number", "null"],
                 "description": "Bits per weight for the quantization"
               }
             }
@@ -687,8 +682,7 @@
             "description": "Size of the model in bytes"
           },
           "params_string": {
-            "type": "string",
-            "nullable": true,
+            "type": ["string", "null"],
             "description": "Human-readable parameter count (e.g., 7B, 13B)"
           },
           "loaded_instances": {
@@ -703,9 +697,8 @@
             "description": "Maximum context length supported by the model in number of tokens"
           },
           "format": {
-            "type": "string",
-            "nullable": true,
-            "enum": ["gguf", "mlx", null],
+            "type": ["string", "null"],
+            "enum": ["gguf", "mlx"],
             "description": "Model file format"
           },
           "capabilities": {
@@ -743,8 +736,7 @@
             }
           },
           "description": {
-            "type": "string",
-            "nullable": true,
+            "type": ["string", "null"],
             "description": "Model description. Absent for embedding models"
           },
           "variants": {
