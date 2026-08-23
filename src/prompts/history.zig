@@ -371,13 +371,17 @@ test "save tolerates inaccessible history path" {
     const obstructing_path = try std.fs.path.join(allocator, &.{ cwd, "zig-out", "test-history-obstruction" });
     defer allocator.free(obstructing_path);
 
-    std.Io.Dir.cwd().deleteFile(io, obstructing_path) catch {};
+    // Simulate a leftover directory from an interrupted run: a stale fixture
+    // must not break the setup that creates the file obstruction.
+    std.Io.Dir.cwd().createDirPath(io, obstructing_path) catch {};
+
+    std.Io.Dir.cwd().deleteTree(io, obstructing_path) catch {};
 
     {
         var file = try std.Io.Dir.cwd().createFile(io, obstructing_path, .{});
         defer file.close(io);
     }
-    defer std.Io.Dir.cwd().deleteFile(io, obstructing_path) catch {};
+    defer std.Io.Dir.cwd().deleteTree(io, obstructing_path) catch {};
 
     const history_path = try std.fs.path.join(allocator, &.{ obstructing_path, "prompt_history.json" });
     defer allocator.free(history_path);
