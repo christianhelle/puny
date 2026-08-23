@@ -9,17 +9,33 @@ pub const Message = message.Message;
 pub const ToolDefinition = openai.ToolDefinition;
 
 /// Creates a generated OpenAI Client with its own HTTP client but sharing
-/// allocator, io, and config from the hand-written client. The caller must
-/// call `generated.deinit()` when done to free HTTP client resources.
+/// allocator, io, base URL, and observer from the hand-written client. The
+/// caller must call `generated.deinit()` when done to free HTTP resources.
 pub fn openAiClient(c: *client.Client) generated_openai.Client {
-    return generated_openai.Client.init(c.allocator, c.io, c.api_key);
+    var generated = generated_openai.Client.init(c.allocator, c.io, c.api_key);
+    generated.base_url = c.base_url;
+    generated.http_observer = if (c.http_observer) |obs| .{
+        .ctx = obs.ctx,
+        .onRequest = obs.onRequest,
+        .onResponse = obs.onResponse,
+        .onError = obs.onError,
+    } else null;
+    return generated;
 }
 
 /// Creates a generated LM Studio Client with its own HTTP client but sharing
-/// allocator, io, and config from the hand-written client. The caller must
-/// call `generated.deinit()` when done to free HTTP client resources.
+/// allocator, io, base URL, and observer from the hand-written client. The
+/// caller must call `generated.deinit()` when done to free HTTP resources.
 pub fn lmStudioClient(c: *client.Client) generated_lmstudio.Client {
-    return generated_lmstudio.Client.init(c.allocator, c.io, c.api_key);
+    var generated = generated_lmstudio.Client.init(c.allocator, c.io, c.api_key);
+    generated.base_url = c.base_url;
+    generated.http_observer = if (c.http_observer) |obs| .{
+        .ctx = obs.ctx,
+        .onRequest = obs.onRequest,
+        .onResponse = obs.onResponse,
+        .onError = obs.onError,
+    } else null;
+    return generated;
 }
 
 /// Adapter struct that wraps ChatRequest and provides jsonStringify for use with
@@ -148,7 +164,7 @@ const LmStudioInputItem = struct {
     }
 };
 
-// ΓöÇΓöÇ Tests ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── Tests ────────────────────────────────────────────────────────────
 
 const testing = std.testing;
 
