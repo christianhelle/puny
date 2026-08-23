@@ -14,6 +14,7 @@ const panic = std.debug.panic;
 
 pub const std_options: std.Options = .{
     .logFn = log,
+    .unexpected_error_tracing = false,
 };
 
 var log_err_count: usize = 0;

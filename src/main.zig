@@ -707,6 +707,10 @@ test "test runner suppresses warning logs" {
     try std.testing.expectEqual(std.log.Level.err, std.testing.log_level);
 }
 
+test "test runner suppresses unexpected error stack traces" {
+    try std.testing.expect(!std.options.unexpected_error_tracing);
+}
+
 test "include all module tests" {
     _ = @import("test_runner.zig");
 }
