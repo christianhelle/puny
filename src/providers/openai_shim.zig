@@ -68,6 +68,7 @@ pub fn listModels(c: *Client) !client.Owned(ListModelsResponse) {
 pub fn toSharedModels(owned: *client.Owned(ListModelsResponse)) !client.Owned(client.ModelsList) {
     const allocator = owned.allocator;
     const source = owned.value();
+    defer owned.deinit();
     var arena = try allocator.create(std.heap.ArenaAllocator);
     errdefer {
         arena.deinit();
@@ -84,7 +85,6 @@ pub fn toSharedModels(owned: *client.Owned(ListModelsResponse)) !client.Owned(cl
             .context_length = 0,
         };
     }
-    owned.deinit();
     return .{
         .allocator = allocator,
         .body = try allocator.dupe(u8, ""),

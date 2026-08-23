@@ -35,6 +35,7 @@ pub fn listModels(http_client: *client.Client) !client.Owned(ModelsList) {
 pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.ModelsList) {
     const allocator = owned.allocator;
     const source = owned.value();
+    defer owned.deinit();
 
     var arena = try allocator.create(std.heap.ArenaAllocator);
     errdefer {
@@ -57,8 +58,6 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
             .context_length = m.max_context_length,
         };
     }
-
-    owned.deinit();
 
     return .{
         .allocator = allocator,
