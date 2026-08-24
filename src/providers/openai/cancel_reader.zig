@@ -30,3 +30,22 @@ pub const CancelableReader = struct {
         return self.inner.stream(w, limit);
     }
 };
+
+test "CancelableReader passes through when not cancelled and fails when cancelled" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    cancel.reset();
+    var fixed = std.Io.Reader.fixed("hello");
+    var buffer: [1]u8 = undefined;
+    var reader = CancelableReader.init(&fixed, &buffer);
+    _ = try reader.reader.streamRemaining(&out.writer);
+    try std.testing.expectEqualStrings("hello", out.written());
+
+    cancel.setCancelled();
+    defer cancel.reset();
+    var fixed2 = std.Io.Reader.fixed("hello");
+    var buffer2: [1]u8 = undefined;
+    var reader2 = CancelableReader.init(&fixed2, &buffer2);
+    try std.testing.expectError(error.ReadFailed, reader2.reader.streamRemaining(&out.writer));
+}
