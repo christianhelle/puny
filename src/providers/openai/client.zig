@@ -20,6 +20,11 @@ const parseSseBytesTyped = runtime.parseSseBytesTyped;
 const parseSseReaderTyped = runtime.parseSseReaderTyped;
 const TypedSseCallback = runtime.TypedSseCallback;
 
+// Hand-wired (not generated): inline cancellation for the streaming SSE
+// reader, mirroring the hand-written openai.CancelableReader.
+const app_cancel = @import("../../core/cancel.zig");
+const cancel_reader = @import("cancel_reader.zig");
+
 pub const Client = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -252,9 +257,13 @@ fn streamJson(client: *Client, path: []const u8, requestBody: anytype, callback:
     }
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
-    const reader = response.reader(&transfer_buffer);
-    parseSseReader(allocator, reader, callback, cancellation_token) catch |err| switch (err) {
-        error.ReadFailed => return response.bodyErr() orelse err,
+    var cancelable_buffer: [1]u8 = undefined;
+    var cancelable_reader = cancel_reader.CancelableReader.init(response.reader(&transfer_buffer), &cancelable_buffer);
+    parseSseReader(allocator, &cancelable_reader.reader, callback, cancellation_token) catch |err| switch (err) {
+        error.ReadFailed => {
+            if (app_cancel.isCancelled()) return error.Canceled;
+            return response.bodyErr() orelse err;
+        },
         else => return err,
     };
 }
