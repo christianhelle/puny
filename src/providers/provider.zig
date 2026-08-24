@@ -1,5 +1,4 @@
 const std = @import("std");
-const cancel = @import("../core/cancel.zig");
 const client = @import("client.zig");
 const openai = @import("openai.zig");
 const mock = @import("mock.zig");
@@ -12,7 +11,6 @@ const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const adapter = @import("adapter.zig");
 const openai_client = @import("openai/client.zig");
-const openai_runtime = @import("openai/runtime.zig");
 
 pub const ModelProvider = enum {
     lmstudio,
@@ -103,45 +101,11 @@ pub const Provider = union(enum) {
     }
 };
 
-/// Bridges the app-wide cancellation flag onto a generated client's
-/// cancellation token so the generated SSE reader aborts an in-flight stream.
-const CancellationBridge = struct {
-    token: openai_runtime.CancellationToken,
-    io: std.Io,
-    stopped: std.atomic.Value(bool),
-
-    fn init(io: std.Io) CancellationBridge {
-        return .{
-            .token = openai_runtime.CancellationToken.init(),
-            .io = io,
-            .stopped = std.atomic.Value(bool).init(false),
-        };
-    }
-
-    fn start(self: *CancellationBridge) !std.Thread {
-        return std.Thread.spawn(.{}, run, .{self});
-    }
-
-    fn run(self: *CancellationBridge) void {
-        while (true) {
-            if (self.stopped.load(.seq_cst)) return;
-            if (cancel.isCancelled()) {
-                self.token.cancel();
-                return;
-            }
-            self.io.sleep(.{ .nanoseconds = 20 * std.time.ns_per_ms }, .awake) catch return;
-        }
-    }
-
-    fn stop(self: *CancellationBridge, thread: std.Thread) void {
-        self.stopped.store(true, .seq_cst);
-        thread.join();
-    }
-};
-
 /// Streams through the generated OpenAI client, mapping the hand-written
-/// client's base URL (which omits "/v1") onto the generated client and
-/// bridging the app-wide cancellation flag onto the generated token.
+/// client's base URL (which omits "/v1") onto the generated client. The
+/// generated streamJson wraps its response reader in a CancelableReader, so
+/// the app-wide cancel flag aborts an in-flight stream inline (no polling
+/// thread), mirroring the hand-written openai.chatStreaming.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     var generated = adapter.openAiClient(c);
     defer generated.deinit();
@@ -149,17 +113,13 @@ fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback:
     defer c.allocator.free(openai_base);
     generated.base_url = openai_base;
 
-    var bridge = CancellationBridge.init(c.io);
-    const bridge_thread = try bridge.start();
-    defer bridge.stop(bridge_thread);
-
     var sse = openai.SseCallback{
         .allocator = c.allocator,
         .callback = callback,
         .observer = c.http_observer,
     };
-    openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, &bridge.token) catch |err| switch (err) {
-        error.Cancelled => return error.Canceled,
+    openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, null) catch |err| switch (err) {
+        error.Cancelled, error.Canceled => return error.Canceled,
         else => return err,
     };
 }
