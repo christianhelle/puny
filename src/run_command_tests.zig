@@ -100,9 +100,14 @@ test "runCommandTimed kills a grandchild that keeps the pipes open" {
     // stdout pipe would keep the drain blocked unless the process-group kill
     // reaches the whole tree. The call must still return within the grace
     // period and must not abandon the worker.
+    // On Windows the grandchild is spawned with -NoNewWindow so it is a direct
+    // child (CreateProcess parenting) that the taskkill /T tree kill reliably
+    // reaches; plain Start-Process goes through ShellExecuteEx, opens its own
+    // console window, and can orphan the grandchild from the kill. Its output
+    // is redirected to NUL so the shared console is not spammed.
     const before = run_command.test_run_command_worker_detached;
     const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
-        &.{ "powershell", "-NoProfile", "-Command", "Start-Process powershell -ArgumentList '-NoProfile','-Command','while ($true) { Write-Output x; Start-Sleep -Milliseconds 10 }'; while ($true) { Start-Sleep -Milliseconds 10 }" }
+        &.{ "powershell", "-NoProfile", "-Command", "Start-Process powershell -NoNewWindow -RedirectStandardOutput NUL -ArgumentList '-NoProfile','-Command','while ($true) { Write-Output x; Start-Sleep -Milliseconds 10 }'; while ($true) { Start-Sleep -Milliseconds 10 }" }
     else
         &.{ "sh", "-c", "sh -c 'while true; do echo x; sleep 0.01; done' & while true; do sleep 0.01; done" };
 
