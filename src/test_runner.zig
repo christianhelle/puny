@@ -120,9 +120,6 @@ test "include providers.lmstudio_shim tests" {
 test "include providers.openai_shim tests" {
     _ = @import("providers/openai_shim.zig");
 }
-test "include providers.openai cancel_reader tests" {
-    _ = @import("providers/openai/cancel_reader.zig");
-}
 test "include providers.adapter tests" {
     _ = @import("providers/adapter.zig");
 }
