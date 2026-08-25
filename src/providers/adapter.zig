@@ -29,6 +29,22 @@ pub fn openAiClient(c: *client.Client) generated_openai.Client {
 /// Adapter struct that wraps ChatRequest and provides jsonStringify for use with
 /// generated OpenAI client's streamJson(). Produces the same JSON format as the
 /// hand-written requestPayload().
+/// Maps an OpenAI ReasoningEffort to the LM Studio native `reasoning` enum
+/// (off/low/medium/high/on in openapi/lmstudio.json). Used when streaming
+/// via the native LM Studio endpoint; the OpenAI-compatible path forwards
+/// `reasoning_effort` verbatim and does not use this mapping.
+pub fn lmStudioReasoningFromEffort(effort: openai.ReasoningEffort) ?[]const u8 {
+    return switch (effort) {
+        .default => null,
+        .none => "off",
+        .minimal => "low",
+        .low => "low",
+        .medium => "medium",
+        .high => "high",
+        .xhigh => "on",
+    };
+}
+
 pub const OpenAiStreamingRequest = struct {
     request: openai.ChatRequest,
 
@@ -268,4 +284,14 @@ test "openAiClient propagates organization project and default_headers" {
     try testing.expectEqual(@as(usize, 1), generated.default_headers.len);
     try testing.expectEqualStrings("X-Custom", generated.default_headers[0].name);
     try testing.expectEqualStrings("my-org", generated.organization.?);
+}
+
+test "lmStudioReasoningFromEffort maps OpenAI effort to LM Studio enum" {
+    try testing.expect(lmStudioReasoningFromEffort(.default) == null);
+    try testing.expectEqualStrings("off", lmStudioReasoningFromEffort(.none).?);
+    try testing.expectEqualStrings("low", lmStudioReasoningFromEffort(.minimal).?);
+    try testing.expectEqualStrings("low", lmStudioReasoningFromEffort(.low).?);
+    try testing.expectEqualStrings("medium", lmStudioReasoningFromEffort(.medium).?);
+    try testing.expectEqualStrings("high", lmStudioReasoningFromEffort(.high).?);
+    try testing.expectEqualStrings("on", lmStudioReasoningFromEffort(.xhigh).?);
 }
