@@ -88,9 +88,10 @@ pub fn checkCancellation(token: ?*CancellationToken) !void {
 /// Wraps an underlying reader and checks an optional cancel predicate before
 /// every read of the underlying reader. When the predicate returns true, the
 /// read fails with error.ReadFailed; callers translate that into
-/// error.Cancelled. Cancellation is only observed at read boundaries: a read
-/// already blocked inside the underlying reader (e.g. waiting for the next SSE
-/// chunk on the socket) is not aborted until that read returns.
+/// error.Cancelled. A companion watcher thread in the generated client
+/// (see Client.CancelWatcher) also closes the underlying socket when the
+/// predicate fires, so a read already blocked waiting for the next SSE chunk
+/// is unblocked within ~10ms rather than hanging until the next chunk.
 pub const CancelableReader = struct {
     inner: *std.Io.Reader,
     reader: std.Io.Reader,
