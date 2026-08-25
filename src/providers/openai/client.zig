@@ -75,7 +75,11 @@ const CancelWatcher = struct {
                     // Shutting down the underlying stream unblocks a thread stuck in
                     // response_reader.stream(). Best-effort: ignore errors and
                     // handle both plain and TLS cases.
-                    conn.stream_reader.stream.shutdown(self.io, .both) catch {};
+                    if (comptime @import("builtin").os.tag == .windows) {
+                        conn.stream_reader.stream.close(self.io);
+                    } else {
+                        conn.stream_reader.stream.shutdown(self.io, .both) catch {};
+                    }
                 }
                 return;
             }

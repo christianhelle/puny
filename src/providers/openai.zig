@@ -208,7 +208,11 @@ const CancelWatcher = struct {
             if (cancel.isCancelled()) {
                 if (self.connection) |conn| {
                     conn.closing = true;
-                    conn.stream_reader.stream.shutdown(self.io, .both) catch {};
+                    if (comptime @import("builtin").os.tag == .windows) {
+                        conn.stream_reader.stream.close(self.io);
+                    } else {
+                        conn.stream_reader.stream.shutdown(self.io, .both) catch {};
+                    }
                 }
                 return;
             }
