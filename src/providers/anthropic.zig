@@ -868,13 +868,14 @@ fn startTestServer(status: std.http.Status, body: []const u8) !*TestServer {
     const ctx = try std.testing.allocator.create(TestServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, TestServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopTestServer(ctx: *TestServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
@@ -909,6 +910,7 @@ test "chatStreaming reports response head failures to the http observer" {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
     var ctx = GarbageServer{ .io = std.testing.io, .server = server };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, GarbageServer.serve, .{&ctx});
 
     const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
