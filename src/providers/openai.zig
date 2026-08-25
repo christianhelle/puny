@@ -768,13 +768,14 @@ fn startChatServer(status: std.http.Status, body: []const u8) !*ChatServer {
     const ctx = try std.testing.allocator.create(ChatServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, ChatServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopChatServer(ctx: *ChatServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
@@ -884,13 +885,14 @@ fn startGarbageResponseServer() !*GarbageResponseServer {
     const ctx = try std.testing.allocator.create(GarbageResponseServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, GarbageResponseServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopGarbageResponseServer(ctx: *GarbageResponseServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 

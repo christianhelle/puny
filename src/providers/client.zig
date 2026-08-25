@@ -852,13 +852,14 @@ fn startHttpTestServer(status: std.http.Status, body: []const u8) !*HttpTestServ
     const ctx = try std.testing.allocator.create(HttpTestServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, HttpTestServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopHttpTestServer(ctx: *HttpTestServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 

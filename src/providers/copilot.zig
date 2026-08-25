@@ -1211,13 +1211,14 @@ fn startCopilotServer(status: std.http.Status, body: []const u8) !*CopilotServer
     const ctx = try std.testing.allocator.create(CopilotServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, CopilotServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopCopilotServer(ctx: *CopilotServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
@@ -1443,13 +1444,14 @@ fn startCopilotGarbageServer() !*CopilotGarbageServer {
     const ctx = try std.testing.allocator.create(CopilotGarbageServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, CopilotGarbageServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopCopilotGarbageServer(ctx: *CopilotGarbageServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
