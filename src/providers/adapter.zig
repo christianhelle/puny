@@ -8,11 +8,15 @@ pub const Message = message.Message;
 pub const ToolDefinition = openai.ToolDefinition;
 
 /// Creates a generated OpenAI Client with its own HTTP client but sharing
-/// allocator, io, base URL, and observer from the hand-written client. The
-/// caller must call `generated.deinit()` when done to free HTTP resources.
+/// allocator, io, base URL, organization, project, default headers, and
+/// observer from the hand-written client. The caller must call
+/// `generated.deinit()` when done to free HTTP resources.
 pub fn openAiClient(c: *client.Client) generated_openai.Client {
     var generated = generated_openai.Client.init(c.allocator, c.io, c.api_key);
     generated.base_url = c.base_url;
+    generated.organization = c.organization;
+    generated.project = c.project;
+    generated.default_headers = c.default_headers;
     generated.http_observer = if (c.http_observer) |obs| .{
         .ctx = obs.ctx,
         .onRequest = obs.onRequest,
@@ -244,4 +248,24 @@ test "OpenAiStreamingRequest serializes tools" {
     const tool = tools.items[0].object;
     try testing.expectEqualStrings("function", tool.get("type").?.string);
     try testing.expectEqualStrings("read_file", tool.get("function").?.object.get("name").?.string);
+}
+
+test "openAiClient propagates organization project and default_headers" {
+    var c = client.Client.init(testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.base_url = "https://api.example.com";
+    c.organization = "my-org";
+    c.project = "my-proj";
+    const hdrs = [_]std.http.Header{.{ .name = "X-Custom", .value = "1" }};
+    c.default_headers = &hdrs;
+
+    var generated = openAiClient(&c);
+    defer generated.deinit();
+
+    try testing.expectEqualStrings("https://api.example.com", generated.base_url);
+    try testing.expectEqualStrings("my-org", generated.organization.?);
+    try testing.expectEqualStrings("my-proj", generated.project.?);
+    try testing.expectEqual(@as(usize, 1), generated.default_headers.len);
+    try testing.expectEqualStrings("X-Custom", generated.default_headers[0].name);
+    try testing.expectEqualStrings("my-org", generated.organization.?);
 }
