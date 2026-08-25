@@ -198,6 +198,25 @@ pub const CancelableReader = struct {
     }
 };
 
+const CancelWatcher = struct {
+    connection: ?*std.http.Client.Connection,
+    io: std.Io,
+    done: *std.atomic.Value(bool),
+
+    fn run(self: *CancelWatcher) void {
+        while (!self.done.load(.acquire)) {
+            if (cancel.isCancelled()) {
+                if (self.connection) |conn| {
+                    conn.closing = true;
+                    conn.stream_reader.stream.close(self.io);
+                }
+                return;
+            }
+            self.io.sleep(.{ .nanoseconds = 10 * std.time.ns_per_ms }, .awake) catch {};
+        }
+    }
+};
+
 pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback: StreamCallback) !void {
     const allocator = chat_client.allocator;
     const payload = try requestPayload(allocator, request);
@@ -246,6 +265,14 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
 
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
+
+    var done = std.atomic.Value(bool).init(false);
+    var watcher_ctx = CancelWatcher{ .connection = req.connection, .io = chat_client.io, .done = &done };
+    const watcher_thread: ?std.Thread = std.Thread.spawn(.{}, CancelWatcher.run, .{&watcher_ctx}) catch null;
+    defer if (watcher_thread) |t| {
+        done.store(true, .release);
+        t.join();
+    };
 
     var cancelable_reader_buffer: [1]u8 = undefined;
     var cancelable_reader = CancelableReader.init(response_reader, &cancelable_reader_buffer);
