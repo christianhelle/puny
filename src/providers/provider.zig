@@ -104,15 +104,17 @@ pub const Provider = union(enum) {
 
 /// Streams through the generated OpenAI client, mapping the hand-written
 /// client's base URL (which omits "/v1") onto the generated client. The
-/// generated streamJson wraps its response reader in a CancelableReader, so
-/// the app-wide cancel flag aborts an in-flight stream inline (no polling
-/// thread), mirroring the hand-written openai.chatStreaming.
+/// generated streamJson wraps its response reader in a CancelableReader keyed
+/// off the Client.cancel_check predicate, so the app-wide cancel flag aborts
+/// an in-flight stream inline (no polling thread), mirroring the hand-written
+/// openai.chatStreaming.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     var generated = adapter.openAiClient(c);
     defer generated.deinit();
     const openai_base = try std.fmt.allocPrint(c.allocator, "{s}/v1", .{c.base_url});
     defer c.allocator.free(openai_base);
     generated.base_url = openai_base;
+    generated.cancel_check = cancel.isCancelled;
 
     var sse = openai.SseCallback{
         .allocator = c.allocator,
