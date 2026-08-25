@@ -118,6 +118,10 @@ pub const CancelableReader = struct {
 
     fn stream(ctx: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
         const self: *CancelableReader = @fieldParentPtr("reader", ctx);
+        // Intentionally collapses cancellation into error.ReadFailed because
+        // std.Io.Reader.StreamError cannot carry a provider-specific
+        // cancellation error. Callers must re-check the cancel predicate and
+        // translate error.ReadFailed back to error.Cancelled when appropriate.
         if (self.should_cancel) |pred| {
             if (pred()) return error.ReadFailed;
         }
@@ -298,6 +302,10 @@ pub fn TypedSseCallback(comptime T: type, comptime Callback: type) type {
         allocator: std.mem.Allocator,
         callback: *Callback,
 
+        /// Borrowing contract: `parsed.value` and all nested slices are valid
+        /// only for the duration of `callback.event`. The parsed arena is
+        /// deinitialized after the call, so callbacks that retain fields must
+        /// copy them before returning.
         pub fn event(self: *@This(), data: []const u8) !void {
             var parsed = try std.json.parseFromSlice(T, self.allocator, data, .{ .ignore_unknown_fields = true });
             defer parsed.deinit();
