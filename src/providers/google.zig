@@ -876,13 +876,14 @@ fn startGoogleServer(status: std.http.Status, body: []const u8) !*GoogleServer {
     const ctx = try std.testing.allocator.create(GoogleServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, GoogleServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopGoogleServer(ctx: *GoogleServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
@@ -991,13 +992,14 @@ fn startGoogleGarbageServer() !*GoogleGarbageServer {
     const ctx = try std.testing.allocator.create(GoogleGarbageServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, GoogleGarbageServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopGoogleGarbageServer(ctx: *GoogleGarbageServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
