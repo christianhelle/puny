@@ -72,10 +72,10 @@ const CancelWatcher = struct {
             if (self.pred()) {
                 if (self.connection) |conn| {
                     conn.closing = true;
-                    // Closing the underlying stream unblocks a thread stuck in
+                    // Shutting down the underlying stream unblocks a thread stuck in
                     // response_reader.stream(). Best-effort: ignore errors and
                     // handle both plain and TLS cases.
-                    conn.stream_reader.stream.close(self.io);
+                    conn.stream_reader.stream.shutdown(self.io, .both) catch {};
                 }
                 return;
             }

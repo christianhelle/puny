@@ -72,7 +72,7 @@ const CancelWatcher = struct {
             if (self.pred()) {
                 if (self.connection) |conn| {
                     conn.closing = true;
-                    conn.stream_reader.stream.close(self.io);
+                    conn.stream_reader.stream.shutdown(self.io, .both) catch {};
                 }
                 return;
             }
