@@ -292,13 +292,14 @@ fn startModelsServer(status: std.http.Status, body: []const u8) !*ModelsServer {
     const ctx = try std.testing.allocator.create(ModelsServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, ModelsServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopModelsServer(ctx: *ModelsServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
