@@ -103,10 +103,14 @@ pub const Provider = union(enum) {
 };
 
 /// Streams through the generated OpenAI client, mapping the hand-written
-/// client's base URL (which omits "/v1") onto the generated client. The
-/// generated streamJson wraps its response reader in a CancelableReader keyed
-/// off the Client.cancel_check predicate, so the app-wide cancel flag aborts
-/// an in-flight stream inline (no polling thread), mirroring the hand-written
+/// client's base URL (which omits "/v1") onto the generated client. This
+/// intentionally routes LM Studio, OpenCode Zen/Go via the OpenAI-compatible
+/// `/v1/chat/completions` endpoint (the native LM Studio `/api/v1/chat`
+/// uses a distinct `reasoning` enum; see `adapter.lmStudioReasoningFromEffort`
+/// for the native mapping, which is unused on this path). The generated
+/// streamJson wraps its response reader in a CancelableReader keyed off the
+/// Client.cancel_check predicate, so the app-wide cancel flag aborts an
+/// in-flight stream inline (no polling thread), mirroring the hand-written
 /// openai.chatStreaming.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     var generated = adapter.openAiClient(c);
