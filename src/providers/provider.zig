@@ -689,3 +689,94 @@ test "chatStreaming aborts an in-flight stream when the app cancel flag fires mi
     };
     try std.testing.expectError(error.Canceled, prov.chatStreaming(request, rec.callback()));
 }
+
+const StallServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        var chunk_buf: [1024]u8 = undefined;
+        var body = request.respondStreaming(&chunk_buf, .{
+            .respond_options = .{ .status = .ok },
+        }) catch return;
+        defer body.end() catch {};
+
+        body.writer.writeAll("data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n") catch return;
+        body.flush() catch return;
+        // Stall for 5s - the watcher must interrupt the blocked read promptly
+        self.io.sleep(.{ .nanoseconds = 5000 * std.time.ns_per_ms }, .awake) catch {};
+        body.writer.writeAll("data: [DONE]\n\n") catch return;
+        body.flush() catch return;
+    }
+};
+
+fn startStallServer() !*StallServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(StallServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server };
+    errdefer ctx.server.deinit(std.testing.io);
+    ctx.thread = try std.Thread.spawn(.{}, StallServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopStallServer(ctx: *StallServer) void {
+    ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
+    std.testing.allocator.destroy(ctx);
+}
+
+fn stallServerUrl(ctx: *StallServer) ![]u8 {
+    return std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+}
+
+const CancelTrigger = struct {
+    fn run() void {
+        std.testing.io.sleep(.{ .nanoseconds = 20 * std.time.ns_per_ms }, .awake) catch {};
+        cancel.setCancelled();
+    }
+};
+
+test "chatStreaming aborts promptly when server stalls mid-stream after cancel" {
+    const ctx = try startStallServer();
+    defer stopStallServer(ctx);
+    const url = try stallServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    cancel.reset();
+    defer cancel.reset();
+
+    var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const trigger = try std.Thread.spawn(.{}, CancelTrigger.run, .{});
+    defer trigger.join();
+
+    const request = openai.ChatRequest{
+        .model = "qwen2.5-7b",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    const start = std.Io.Clock.awake.now(std.testing.io);
+    try std.testing.expectError(error.Canceled, prov.chatStreaming(request, rec.callback()));
+    const elapsed = start.untilNow(std.testing.io, .awake).nanoseconds;
+    // Must abort well before the 5s stall completes - watcher closes socket within ~10ms
+    try std.testing.expect(elapsed < 2000 * std.time.ns_per_ms);
+}
