@@ -11,6 +11,7 @@ const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const adapter = @import("adapter.zig");
 const openai_client = @import("openai/client.zig");
+const cancel = @import("../core/cancel.zig");
 
 pub const ModelProvider = enum {
     lmstudio,
@@ -484,4 +485,116 @@ test "Provider.chatStreaming dispatches to the anthropic transport for claude mo
         .content => |content| try std.testing.expectEqualStrings("Hello Claude", content),
         else => return error.ExpectedContentEvent,
     }
+}
+
+const CancelStreamingServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        var chunk_buf: [1024]u8 = undefined;
+        var body = request.respondStreaming(&chunk_buf, .{
+            .respond_options = .{ .status = .ok },
+        }) catch return;
+        defer body.end() catch {};
+
+        // Send the first event, then trip the app-wide cancel flag while the
+        // client is waiting for the next chunk. A subsequent read must abort
+        // the stream with error.Canceled instead of hanging or draining the
+        // rest of the body.
+        body.writer.writeAll("data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n") catch return;
+        body.flush() catch return;
+
+        cancel.setCancelled();
+
+        self.io.sleep(.{ .nanoseconds = 200 * std.time.ns_per_ms }, .awake) catch {};
+        body.writer.writeAll("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n") catch return;
+        body.writer.writeAll("data: [DONE]\n\n") catch return;
+        body.flush() catch return;
+    }
+};
+
+fn startCancelStreamingServer() !*CancelStreamingServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(CancelStreamingServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server };
+    ctx.thread = try std.Thread.spawn(.{}, CancelStreamingServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopCancelStreamingServer(ctx: *CancelStreamingServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+fn cancelStreamingServerUrl(ctx: *CancelStreamingServer) ![]u8 {
+    return std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+}
+
+test "chatStreaming aborts the stream when the app cancel flag is already set" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    cancel.setCancelled();
+    defer cancel.reset();
+
+    const request = openai.ChatRequest{
+        .model = "qwen2.5-7b",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.Canceled, prov.chatStreaming(request, rec.callback()));
+    try std.testing.expectEqual(@as(usize, 0), rec.events.items.len);
+}
+
+test "chatStreaming aborts an in-flight stream when the app cancel flag fires mid-stream" {
+    const ctx = try startCancelStreamingServer();
+    defer stopCancelStreamingServer(ctx);
+    const url = try cancelStreamingServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    cancel.reset();
+    defer cancel.reset();
+
+    var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "qwen2.5-7b",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.Canceled, prov.chatStreaming(request, rec.callback()));
 }
