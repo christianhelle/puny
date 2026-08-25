@@ -698,7 +698,7 @@
           },
           "format": {
             "type": ["string", "null"],
-            "enum": ["gguf", "mlx"],
+            "enum": ["gguf", "mlx", null],
             "description": "Model file format"
           },
           "capabilities": {
