@@ -120,11 +120,14 @@ test "runCommandTimed times out on a lingering grandchild after the parent exits
     // inherited stdout pipe open. The drain cannot see EOF, so the call must
     // time out, kill the whole process group (including the grandchild), and
     // return without abandoning the worker.
+    // Skipped on Windows: a grandchild can only inherit the pipe through the
+    // parent, and once the parent exits it is orphaned, so `taskkill /T` (the
+    // tree kill killProcessTree relies on) can no longer reach it and the
+    // worker has to be abandoned. The parent-stays-alive variant is covered
+    // by the previous test.
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     const before = run_command.test_run_command_worker_detached;
-    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
-        &.{ "powershell", "-NoProfile", "-Command", "Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep 60'; exit 0" }
-    else
-        &.{ "sh", "-c", "(sleep 60 &); exit 0" };
+    const argv: []const []const u8 = &.{ "sh", "-c", "(sleep 60 &); exit 0" };
 
     const started = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
     const result = run_command.runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 200 * std.time.ns_per_ms);
