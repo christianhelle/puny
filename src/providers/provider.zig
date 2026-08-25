@@ -267,7 +267,14 @@ const ProviderTestServer = struct {
     status: std.http.Status,
     body: []const u8,
     request_path: std.ArrayList(u8) = .empty,
+    request_path_mutex: std.atomic.Mutex = .unlocked,
     thread: std.Thread = undefined,
+
+    fn lockMutex(m: *std.atomic.Mutex) void {
+        while (!m.tryLock()) {
+            std.Thread.yield() catch {};
+        }
+    }
 
     fn serve(self: *@This()) void {
         var stream = self.server.accept(self.io) catch return;
@@ -280,8 +287,18 @@ const ProviderTestServer = struct {
 
         var http_server = std.http.Server.init(&reader.interface, &writer.interface);
         var request = http_server.receiveHead() catch return;
-        self.request_path.appendSlice(std.testing.allocator, request.head.target) catch {};
+        {
+            lockMutex(&self.request_path_mutex);
+            defer self.request_path_mutex.unlock();
+            self.request_path.appendSlice(std.testing.allocator, request.head.target) catch {};
+        }
         request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+
+    fn getRequestPath(self: *@This()) []const u8 {
+        lockMutex(&self.request_path_mutex);
+        defer self.request_path_mutex.unlock();
+        return self.request_path.items;
     }
 };
 
@@ -291,14 +308,15 @@ fn startProviderTestServer(status: std.http.Status, body: []const u8) !*Provider
     const ctx = try std.testing.allocator.create(ProviderTestServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, ProviderTestServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopProviderTestServer(ctx: *ProviderTestServer) void {
+    ctx.server.deinit(std.testing.io);
     ctx.thread.join();
     ctx.request_path.deinit(std.testing.allocator);
-    ctx.server.deinit(std.testing.io);
     std.testing.allocator.destroy(ctx);
 }
 
@@ -328,7 +346,7 @@ test "Provider.listModels dispatches to the lmstudio provider" {
 
     var owned = try prov.listModels();
     defer owned.deinit();
-    try std.testing.expectEqualStrings("/api/v1/models", ctx.request_path.items);
+    try std.testing.expectEqualStrings("/api/v1/models", ctx.getRequestPath());
     try expectModelIds(&owned, &.{"qwen2.5-7b"});
 }
 
@@ -347,7 +365,7 @@ test "Provider.listModels dispatches to the opencode provider" {
 
     var owned = try prov.listModels();
     defer owned.deinit();
-    try std.testing.expectEqualStrings("/v1/models", ctx.request_path.items);
+    try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
     try expectModelIds(&owned, &.{"deepseek-v4-pro"});
 }
 
@@ -416,7 +434,7 @@ test "Provider.chatStreaming dispatches to the lmstudio provider" {
     };
     try prov.chatStreaming(request, rec.callback());
 
-    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.request_path.items);
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
     try std.testing.expectEqual(@as(usize, 2), rec.events.items.len);
     switch (rec.events.items[0]) {
         .content => |content| try std.testing.expectEqualStrings("Hi from LM", content),
@@ -489,6 +507,72 @@ test "Provider.chatStreaming dispatches to the anthropic transport for claude mo
     }
 }
 
+test "Provider.chatStreaming dispatches to the opencode OpenAI fallback" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hi from OpenAI\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "gpt-4o",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 2), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hi from OpenAI", content),
+        else => return error.ExpectedContentEvent,
+    }
+}
+
+test "Provider.chatStreaming dispatches to the opencode_go OpenAI fallback" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hi from Go\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "deepseek-v4-pro",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 2), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hi from Go", content),
+        else => return error.ExpectedContentEvent,
+    }
+}
+
 const CancelStreamingServer = struct {
     io: std.Io,
     server: std.Io.net.Server,
@@ -533,13 +617,14 @@ fn startCancelStreamingServer() !*CancelStreamingServer {
     const ctx = try std.testing.allocator.create(CancelStreamingServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, CancelStreamingServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopCancelStreamingServer(ctx: *CancelStreamingServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
