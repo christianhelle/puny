@@ -47,6 +47,7 @@ pub fn listModels(c: *Client) !client.Owned(ListModelsResponse) {
         if (item != .object) continue;
         const id_val = item.object.get("id") orelse continue;
         if (id_val != .string) continue;
+        if (id_val.string.len == 0) continue;
         const owned_by = if (item.object.get("owned_by")) |v| if (v == .string) v.string else "opencode" else "opencode";
         const object = if (item.object.get("object")) |v| if (v == .string) v.string else "model" else "model";
         const created = if (item.object.get("created")) |v| if (v == .integer) v.integer else 0 else 0;
@@ -76,15 +77,17 @@ pub fn toSharedModels(owned: *client.Owned(ListModelsResponse)) !client.Owned(cl
     }
     arena.* = std.heap.ArenaAllocator.init(allocator);
     const arena_alloc = arena.allocator();
-    var models = try arena_alloc.alloc(client.Model, source.data.len);
-    for (source.data, 0..) |m, i| {
-        models[i] = .{
+    var models_list: std.ArrayList(client.Model) = .empty;
+    for (source.data) |m| {
+        if (m.id.len == 0) continue;
+        try models_list.append(arena_alloc, .{
             .id = try arena_alloc.dupe(u8, m.id),
             .display_name = try arena_alloc.dupe(u8, m.id),
             .provider = try arena_alloc.dupe(u8, m.owned_by),
             .context_length = 0,
-        };
+        });
     }
+    const models = try models_list.toOwnedSlice(arena_alloc);
     return .{
         .allocator = allocator,
         .body = try allocator.dupe(u8, ""),
@@ -134,13 +137,14 @@ fn startTestServer(status: std.http.Status, body: []const u8) !*TestServer {
     const ctx = try std.testing.allocator.create(TestServer);
     errdefer std.testing.allocator.destroy(ctx);
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, TestServer.serve, .{ctx});
     return ctx;
 }
 
 fn stopTestServer(ctx: *TestServer) void {
-    ctx.thread.join();
     ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
     std.testing.allocator.destroy(ctx);
 }
 
@@ -193,4 +197,24 @@ test "listModels fallback skips malformed items and keeps valid ones" {
     try std.testing.expectEqual(@as(usize, 2), owned.value().data.len);
     try std.testing.expectEqualStrings("ok", owned.value().data[0].id);
     try std.testing.expectEqualStrings("kept", owned.value().data[1].id);
+}
+
+test "listModels fallback skips empty ids" {
+    var owned = try listModelsFrom("{\"data\":[{\"id\":\"\"},{\"id\":\"kept\"}]}");
+    defer owned.deinit();
+    try std.testing.expectEqual(@as(usize, 1), owned.value().data.len);
+    try std.testing.expectEqualStrings("kept", owned.value().data[0].id);
+}
+
+test "toSharedModels skips empty openai ids" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"object":"list","data":[{"id":"","object":"model","created":123,"owned_by":"opencode"},{"id":"kept","object":"model","created":123,"owned_by":"opencode"}]}
+    ;
+    const parsed = try std.json.parseFromSlice(ListModelsResponse, allocator, json, .{ .ignore_unknown_fields = true });
+    var owned = client.Owned(ListModelsResponse){ .allocator = allocator, .body = try allocator.dupe(u8, json), .parsed = parsed };
+    var shared = try toSharedModels(&owned);
+    defer shared.deinit();
+    try std.testing.expectEqual(@as(usize, 1), shared.value().models.len);
+    try std.testing.expectEqualStrings("kept", shared.value().models[0].id);
 }
