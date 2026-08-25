@@ -1,0 +1,13 @@
+# Generated OpenAPI clients - exclude from language stats and review
+src/providers/openapi/*.json linguist-generated=true
+src/providers/openai/client.zig linguist-generated=true
+src/providers/openai/contracts.zig linguist-generated=true
+src/providers/openai/models.zig linguist-generated=true
+src/providers/openai/runtime.zig linguist-generated=true
+src/providers/lmstudio/client.zig linguist-generated=true
+src/providers/lmstudio/contracts.zig linguist-generated=true
+src/providers/lmstudio/runtime.zig linguist-generated=true
+src/providers/anthropic/client.zig linguist-generated=true
+src/providers/anthropic/contracts.zig linguist-generated=true
+src/providers/anthropic/models.zig linguist-generated=true
+src/providers/anthropic/runtime.zig linguist-generated=true
