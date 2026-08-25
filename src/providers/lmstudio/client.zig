@@ -33,13 +33,13 @@ pub const Client = struct {
     http_observer: ?HttpObserver = null,
 
     /// Optional predicate called before every read of a streaming response
-    /// body. When it returns true, the in-flight SSE stream aborts with
-    /// error.Cancelled at the next read boundary. Cancellation is observed
-    /// between reads: a read already blocked waiting for the next chunk is
-    /// not interrupted until that read returns. Point it at an app-level
-    /// cancel flag and pass null for the CancellationToken to streaming
-    /// calls. When null (default) streaming reads cannot be interrupted
-    /// until the next chunk arrives.
+    /// body. When it returns true, the next read fails with error.ReadFailed
+    /// which callers translate to error.Cancelled. A background watcher also
+    /// closes the underlying socket when the predicate fires, so a read already
+    /// blocked waiting for the next SSE chunk is unblocked within ~10ms rather
+    /// than hanging until the next chunk arrives. Point it at an app-level
+    /// cancel flag and pass null for the CancellationToken to streaming calls.
+    /// When null (default) streaming reads cannot be interrupted.
     cancel_check: ?*const fn () bool = null,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8) Client {
@@ -58,6 +58,26 @@ pub const Client = struct {
 
     pub fn withBaseUrl(self: *Client, base_url: []const u8) void {
         self.base_url = base_url;
+    }
+};
+
+const CancelWatcher = struct {
+    connection: ?*std.http.Client.Connection,
+    io: std.Io,
+    pred: *const fn () bool,
+    done: *std.atomic.Value(bool),
+
+    fn run(self: *CancelWatcher) void {
+        while (!self.done.load(.acquire)) {
+            if (self.pred()) {
+                if (self.connection) |conn| {
+                    conn.closing = true;
+                    conn.stream_reader.stream.close(self.io);
+                }
+                return;
+            }
+            self.io.sleep(.{ .nanoseconds = 10 * std.time.ns_per_ms }, .awake) catch {};
+        }
     }
 };
 
@@ -265,6 +285,13 @@ fn streamJson(client: *Client, path: []const u8, requestBody: anytype, callback:
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
     if (client.cancel_check) |pred| {
+        var done = std.atomic.Value(bool).init(false);
+        var watcher_ctx = CancelWatcher{ .connection = req.connection, .io = client.io, .pred = pred, .done = &done };
+        const watcher_thread: ?std.Thread = std.Thread.spawn(.{}, CancelWatcher.run, .{&watcher_ctx}) catch null;
+        defer if (watcher_thread) |t| {
+            done.store(true, .release);
+            t.join();
+        };
         var cancelable_buffer: [1]u8 = undefined;
         var cancelable_reader = CancelableReader.init(response_reader, &cancelable_buffer, pred);
         parseSseReader(allocator, &cancelable_reader.reader, callback, cancellation_token) catch |err| switch (err) {
