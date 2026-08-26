@@ -108,10 +108,11 @@ pub const Provider = union(enum) {
 /// `/v1/chat/completions` endpoint (the native LM Studio `/api/v1/chat`
 /// uses a distinct `reasoning` enum; see `adapter.lmStudioReasoningFromEffort`
 /// for the native mapping, which is unused on this path). The generated
-/// streamJson wraps its response reader in a CancelableReader keyed off the
-/// Client.cancel_check predicate, so the app-wide cancel flag aborts an
-/// in-flight stream inline (no polling thread), mirroring the hand-written
-/// openai.chatStreaming.
+/// streamJson wraps its response reader in a CancelableReader and spawns a
+/// CancelWatcher thread polling Client.cancel_check every ~10ms to
+/// close (Windows) / shutdown (POSIX) the underlying socket, so a blocked
+/// SSE read is unblocked promptly; cancellation is surfaced as
+/// error.Cancelled and translated to error.Canceled.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     var generated = adapter.openAiClient(c);
     defer generated.deinit();
