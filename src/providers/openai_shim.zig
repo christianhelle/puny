@@ -1,6 +1,6 @@
 const std = @import("std");
 const client = @import("client.zig");
-const openai_models = @import("openai/models.zig");
+const openai_models = @import("openai/contracts.zig");
 
 pub const Model = openai_models.Model;
 pub const ListModelsResponse = openai_models.ListModelsResponse;
