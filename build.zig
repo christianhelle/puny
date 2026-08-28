@@ -168,6 +168,10 @@ pub fn build(b: *std.Build) !void {
     run_integration.addFileArg(b.path("tests/integration.json"));
     const test_integration_step = b.step("test-integration", "Run integration tests against all provider/model combos");
     test_integration_step.dependOn(&run_integration.step);
+
+    const regenerate_step = b.step("re-generate-providers", "Re-generate provider clients from OpenAPI specs");
+    const regenerate = RegenerateProvidersStep.create(b);
+    regenerate_step.dependOn(&regenerate.step);
 }
 
 fn addPunyExecutable(
@@ -297,6 +301,29 @@ const InstallReleaseStep = struct {
         const dest_path = b.pathResolve(&.{ self.dest_dir, self.dest_name });
         const p = try step.installFile(self.source, dest_path);
         step.result_cached = p == .fresh;
+    }
+};
+
+const RegenerateProvidersStep = struct {
+    step: std.Build.Step,
+
+    fn create(b: *std.Build) *RegenerateProvidersStep {
+        const self = b.allocator.create(RegenerateProvidersStep) catch @panic("OOM");
+        self.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = "re-generate providers",
+                .owner = b,
+                .makeFn = make,
+            }),
+        };
+        return self;
+    }
+
+    fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
+        _ = options;
+        _ = step;
+        std.log.info("re-generate-providers: scaffold - not yet implemented", .{});
     }
 };
 
