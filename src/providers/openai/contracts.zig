@@ -121,7 +121,8 @@ pub const RealtimeBetaResponseCreateParamsMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -562,7 +563,8 @@ pub const CreateFineTuningJobRequestHyperparametersLearningRateMultiplier = unio
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -588,7 +590,8 @@ pub const CreateFineTuningJobRequestHyperparametersNEpochs = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -614,7 +617,8 @@ pub const CreateFineTuningJobRequestHyperparametersBatchSize = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -2002,7 +2006,8 @@ pub const RealtimeResponseMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -2716,7 +2721,8 @@ pub const FineTuneSupervisedHyperparametersLearningRateMultiplier = union(enum) 
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -2742,7 +2748,8 @@ pub const FineTuneSupervisedHyperparametersNEpochs = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -2768,7 +2775,8 @@ pub const FineTuneSupervisedHyperparametersBatchSize = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -4734,7 +4742,8 @@ pub const RealtimeSessionCreateResponseMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -5007,7 +5016,8 @@ pub const RealtimeSessionCreateRequestMaxResponseOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -7678,7 +7688,8 @@ pub const FineTuneReinforcementHyperparametersEvalInterval = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -7704,7 +7715,8 @@ pub const FineTuneReinforcementHyperparametersEvalSamples = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -7730,7 +7742,8 @@ pub const FineTuneReinforcementHyperparametersLearningRateMultiplier = union(enu
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -7756,7 +7769,8 @@ pub const FineTuneReinforcementHyperparametersNEpochs = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -7782,7 +7796,8 @@ pub const FineTuneReinforcementHyperparametersBatchSize = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -7808,7 +7823,8 @@ pub const FineTuneReinforcementHyperparametersComputeMultiplier = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -9240,7 +9256,8 @@ pub const FineTuneDpohyperparametersLearningRateMultiplier = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -9266,7 +9283,8 @@ pub const FineTuneDpohyperparametersBeta = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -9292,7 +9310,8 @@ pub const FineTuneDpohyperparametersBatchSize = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -9318,7 +9337,8 @@ pub const FineTuneDpohyperparametersNEpochs = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -10170,7 +10190,8 @@ pub const FineTuningJobHyperparametersLearningRateMultiplier = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -10196,7 +10217,8 @@ pub const FineTuningJobHyperparametersNEpochs = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .integer => |value| .{ .integer = value },
             else => .{ .raw = source },
         };
@@ -10392,7 +10414,8 @@ pub const RealtimeSessionCreateRequestGaMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -10594,7 +10617,8 @@ pub const RealtimeSessionCreateResponseGaMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -10811,7 +10835,8 @@ pub const RealtimeCallCreateRequestSessionMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -14441,7 +14466,8 @@ pub const ComparisonFilterValueVariant3Item = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .string => |value| .{ .string = value },
+        return switch (source) {
+            .string => |value| .{ .string = value },
             .float => |value| .{ .number = value },
             else => .{ .raw = source },
         };
@@ -15126,7 +15152,8 @@ pub const RealtimeBetaResponseMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -16029,7 +16056,8 @@ pub const RealtimeSessionMaxResponseOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -16213,7 +16241,8 @@ pub const RealtimeResponseCreateParamsMaxOutputTokens = union(enum) {
     }
 
     pub fn jsonParseFromValue(_: std.mem.Allocator, source: std.json.Value, _: std.json.ParseOptions) !@This() {
-        return switch (source) {            .integer => |value| .{ .integer = value },
+        return switch (source) {
+            .integer => |value| .{ .integer = value },
             .string => |value| .{ .string = value },
             else => .{ .raw = source },
         };
@@ -16709,4 +16738,3 @@ pub const ChatkitWorkflowStateVariable = union(enum) {
 };
 
 pub const ChatkitWorkflowStateVariables = std.json.ArrayHashMap(ChatkitWorkflowStateVariable);
-

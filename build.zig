@@ -351,38 +351,51 @@ const RegenerateProvidersStep = struct {
         // 1. Generate shared runtime (mirrors `openapi2zig generate -o ../runtime.zig --runtime-only` in generate.ps1)
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
-            "-o", "src/providers/runtime.zig",
+            "-o",
+            "src/providers/runtime.zig",
             "--runtime-only",
         });
 
         // 2. Generate openai with shared runtime
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
-            "-i", "src/providers/openapi/openai.json",
-            "-o", "src/providers/openai/",
+            "-i",
+            "src/providers/openapi/openai.json",
+            "-o",
+            "src/providers/openai/",
             "--multiple-files",
-            "--file-name", "models=contracts.zig",
-            "--runtime-module", "../runtime.zig",
+            "--file-name",
+            "models=contracts.zig",
+            "--runtime-module",
+            "../runtime.zig",
         });
 
         // 3. Generate lmstudio with shared runtime
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
-            "-i", "src/providers/openapi/lmstudio.json",
-            "-o", "src/providers/lmstudio",
+            "-i",
+            "src/providers/openapi/lmstudio.json",
+            "-o",
+            "src/providers/lmstudio",
             "--multiple-files",
-            "--file-name", "models=contracts.zig",
-            "--runtime-module", "../runtime.zig",
+            "--file-name",
+            "models=contracts.zig",
+            "--runtime-module",
+            "../runtime.zig",
         });
 
         // 4. Generate anthropic with shared runtime
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
-            "-i", "src/providers/openapi/anthropic.json",
-            "-o", "src/providers/anthropic/",
+            "-i",
+            "src/providers/openapi/anthropic.json",
+            "-o",
+            "src/providers/anthropic/",
             "--multiple-files",
-            "--file-name", "models=contracts.zig",
-            "--runtime-module", "../runtime.zig",
+            "--file-name",
+            "models=contracts.zig",
+            "--runtime-module",
+            "../runtime.zig",
         });
 
         std.log.info("re-generate-providers: done", .{});
