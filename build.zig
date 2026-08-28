@@ -348,30 +348,14 @@ const RegenerateProvidersStep = struct {
         };
         std.log.info("using openapi2zig: {s}", .{openapi2zig_exe});
 
-        // 1. Generate openai once to extract shared runtime.zig (mirrors first openapi2zig call in generate.ps1)
+        // 1. Generate shared runtime (mirrors `openapi2zig generate -o ../runtime.zig --runtime-only` in generate.ps1)
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
-            "-i", "src/providers/openapi/openai.json",
-            "-o", "src/providers/openai/",
-            "--multiple-files",
-            "--file-name", "models=contracts.zig",
+            "-o", "src/providers/runtime.zig",
+            "--runtime-only",
         });
 
-        // Move generated runtime.zig to shared location (mirrors Move-Item in generate.ps1)
-        cwd.deleteFile(io, "src/providers/runtime.zig") catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => {
-                std.log.err("failed to remove existing runtime.zig: {s}", .{@errorName(err)});
-                return err;
-            },
-        };
-        cwd.rename("src/providers/openai/runtime.zig", cwd, "src/providers/runtime.zig", io) catch |err| {
-            std.log.err("failed to move runtime.zig: {s}", .{@errorName(err)});
-            return err;
-        };
-        std.log.info("moved src/providers/openai/runtime.zig -> src/providers/runtime.zig", .{});
-
-        // 2. Re-generate openai with shared runtime (mirrors second openapi2zig call)
+        // 2. Generate openai with shared runtime
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
             "-i", "src/providers/openapi/openai.json",
