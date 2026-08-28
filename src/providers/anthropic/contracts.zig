@@ -11688,4 +11688,3 @@ pub const ResponseDocumentBlock = struct {
     type: []const u8,
     title: ?[]const u8,
 };
-
