@@ -322,8 +322,130 @@ const RegenerateProvidersStep = struct {
 
     fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
         _ = options;
-        _ = step;
-        std.log.info("re-generate-providers: scaffold - not yet implemented", .{});
+        const b = step.owner;
+        const allocator = b.allocator;
+        const io = b.graph.io;
+        const cwd = std.Io.Dir.cwd();
+
+        // Remove existing provider output directories (mirrors generate.ps1 Remove-Item)
+        for ([_][]const u8{
+            "src/providers/openai",
+            "src/providers/lmstudio",
+            "src/providers/anthropic",
+        }) |dir| {
+            cwd.deleteTree(io, dir) catch |err| {
+                std.log.err("failed to remove {s}: {s}", .{ dir, @errorName(err) });
+                return err;
+            };
+            std.log.info("removed {s}", .{dir});
+        }
+
+        const openapi2zig_exe = b.findProgram(&.{"openapi2zig"}, &.{}) catch |err| switch (err) {
+            error.FileNotFound => blk: {
+                std.log.warn("openapi2zig not found via build search, trying PATH", .{});
+                break :blk "openapi2zig";
+            },
+        };
+        std.log.info("using openapi2zig: {s}", .{openapi2zig_exe});
+
+        // 1. Generate openai once to extract shared runtime.zig (mirrors first openapi2zig call in generate.ps1)
+        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
+            "generate",
+            "-i", "src/providers/openapi/openai.json",
+            "-o", "src/providers/openai/",
+            "--multiple-files",
+            "--file-name", "models=contracts.zig",
+        });
+
+        // Move generated runtime.zig to shared location (mirrors Move-Item in generate.ps1)
+        cwd.deleteFile(io, "src/providers/runtime.zig") catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => {
+                std.log.err("failed to remove existing runtime.zig: {s}", .{@errorName(err)});
+                return err;
+            },
+        };
+        cwd.rename("src/providers/openai/runtime.zig", cwd, "src/providers/runtime.zig", io) catch |err| {
+            std.log.err("failed to move runtime.zig: {s}", .{@errorName(err)});
+            return err;
+        };
+        std.log.info("moved src/providers/openai/runtime.zig -> src/providers/runtime.zig", .{});
+
+        // 2. Re-generate openai with shared runtime (mirrors second openapi2zig call)
+        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
+            "generate",
+            "-i", "src/providers/openapi/openai.json",
+            "-o", "src/providers/openai/",
+            "--multiple-files",
+            "--file-name", "models=contracts.zig",
+            "--runtime-module", "../runtime.zig",
+        });
+
+        // 3. Generate lmstudio with shared runtime
+        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
+            "generate",
+            "-i", "src/providers/openapi/lmstudio.json",
+            "-o", "src/providers/lmstudio",
+            "--multiple-files",
+            "--file-name", "models=contracts.zig",
+            "--runtime-module", "../runtime.zig",
+        });
+
+        // 4. Generate anthropic with shared runtime
+        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
+            "generate",
+            "-i", "src/providers/openapi/anthropic.json",
+            "-o", "src/providers/anthropic/",
+            "--multiple-files",
+            "--file-name", "models=contracts.zig",
+            "--runtime-module", "../runtime.zig",
+        });
+
+        std.log.info("re-generate-providers: done", .{});
+    }
+
+    fn runOpenApi2Zig(
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        exe: []const u8,
+        args: []const []const u8,
+    ) !void {
+        var argv: std.ArrayList([]const u8) = .empty;
+        defer argv.deinit(allocator);
+        try argv.append(allocator, exe);
+        for (args) |a| try argv.append(allocator, a);
+
+        const joined = try std.mem.join(allocator, " ", argv.items);
+        defer allocator.free(joined);
+        std.log.info("running: {s}", .{joined});
+
+        const result = std.process.run(allocator, io, .{
+            .argv = argv.items,
+            .stdout_limit = .limited(4 * 1024 * 1024),
+            .stderr_limit = .limited(4 * 1024 * 1024),
+        }) catch |err| {
+            std.log.err("failed to spawn openapi2zig: {s}", .{@errorName(err)});
+            return err;
+        };
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+
+        if (result.stdout.len > 0) std.log.info("{s}", .{result.stdout});
+        if (result.stderr.len > 0) std.log.info("{s}", .{result.stderr});
+
+        switch (result.term) {
+            .exited => |code| {
+                if (code != 0) {
+                    std.log.err("openapi2zig exited with code {d}", .{code});
+                    if (result.stderr.len > 0) std.log.err("stderr: {s}", .{result.stderr});
+                    return error.OpenApi2ZigFailed;
+                }
+            },
+            else => {
+                std.log.err("openapi2zig terminated abnormally: {any}", .{result.term});
+                return error.OpenApi2ZigFailed;
+            },
+        }
     }
 };
 
