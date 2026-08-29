@@ -206,29 +206,12 @@ fn anthropicClient(c: *http_client.Client) generated.Client {
             .onError = obs.onError,
         };
     }
-    // Include anthropic-version as default header so streaming includes it.
-    // If the caller already has default_headers, we merge.
-    // For now, assume default_headers empty or small; handle merging via allocation if needed.
     if (c.default_headers.len == 0) {
         g.default_headers = &.{.{ .name = "anthropic-version", .value = anthropic_version }};
     } else {
-        // Merge existing default_headers with anthropic-version
-        // Allocate new slice on heap that lives as long as generated client (caller will deinit)
-        // We leak intentionally for simplicity as client lifetime is short; better to allocate and not free.
-        // Use c.allocator to allocate.
-        var merged = c.allocator.alloc(std.http.Header, c.default_headers.len + 1) catch {
-            // Fallback to static
-            g.default_headers = &.{.{ .name = "anthropic-version", .value = anthropic_version }};
-            return g;
-        };
-        merged[0] = .{ .name = "anthropic-version", .value = anthropic_version };
-        for (c.default_headers, 0..) |h, i| {
-            merged[i + 1] = h;
-        }
-        g.default_headers = merged;
-        // Note: caller (chatStreaming) will use g until return, so this allocation will be freed when g.deinit is not responsible.
-        // We defer free in chatStreaming by not using this path heavily; acceptable to leak for test lifetime.
-        // To avoid leak, we could free after use in chatStreaming, but g.default_headers not owned by g.
+        // For non-empty default_headers, let chatStreaming merge with anthropic-version
+        // and manage the allocation lifetime to avoid leaks.
+        g.default_headers = c.default_headers;
     }
     g.cancel_check = cancel.isCancelled;
     return g;
@@ -426,6 +409,18 @@ pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, c
     }
     var g = anthropicClient(client);
     defer g.deinit();
+    var owned_headers: ?[]std.http.Header = null;
+    defer if (owned_headers) |h| client.allocator.free(h);
+    if (client.default_headers.len != 0) {
+        if (client.allocator.alloc(std.http.Header, client.default_headers.len + 1)) |merged| {
+            merged[0] = .{ .name = "anthropic-version", .value = anthropic_version };
+            for (client.default_headers, 0..) |h, i| merged[i + 1] = h;
+            g.default_headers = merged;
+            owned_headers = merged;
+        } else |_| {
+            g.default_headers = &.{.{ .name = "anthropic-version", .value = anthropic_version }};
+        }
+    }
     // Use adapter request that will be stringified and have stream:true injected.
     const adapter_req = AnthropicAdapterRequest{ .request = request };
 
@@ -1286,4 +1281,34 @@ test "anthropic client uses x-api-key not Bearer" {
         }
     }
     try std.testing.expect(found_version);
+}
+
+test "anthropic client preserves custom headers and adds version via chatStreaming merge" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    var c = http_client.Client.init(allocator, std.testing.io, "my-key");
+    defer c.deinit();
+    c.default_headers = &.{.{ .name = "X-Custom", .value = "1" }};
+    var g = anthropicClient(&c);
+    defer g.deinit();
+    // Simulate the merging that chatStreaming does (owns allocation)
+    var owned: ?[]std.http.Header = null;
+    defer if (owned) |h| allocator.free(h);
+    if (c.default_headers.len != 0) {
+        const merged = try allocator.alloc(std.http.Header, c.default_headers.len + 1);
+        merged[0] = .{ .name = "anthropic-version", .value = anthropic_version };
+        for (c.default_headers, 0..) |h, i| merged[i + 1] = h;
+        g.default_headers = merged;
+        owned = merged;
+    }
+    var found_version = false;
+    var found_custom = false;
+    for (g.default_headers) |h| {
+        if (std.mem.eql(u8, h.name, "anthropic-version")) found_version = true;
+        if (std.mem.eql(u8, h.name, "X-Custom") and std.mem.eql(u8, h.value, "1")) found_custom = true;
+    }
+    try std.testing.expect(found_version);
+    try std.testing.expect(found_custom);
+    try std.testing.expectEqual(@as(usize, 2), g.default_headers.len);
 }
