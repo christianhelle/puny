@@ -79,6 +79,9 @@ pub const OpenAiStreamingRequest = struct {
             }
         }
 
+        try jw.objectField("stream");
+        try jw.write(true);
+
         // Stream options are always included for usage tracking
         try jw.objectField("stream_options");
         try jw.write(.{ .include_usage = true });
@@ -124,6 +127,7 @@ test "OpenAiStreamingRequest includes stream_options" {
     defer parsed.deinit();
 
     const root = parsed.value.object;
+    try testing.expectEqual(true, root.get("stream").?.bool);
     const stream_options = root.get("stream_options").?.object;
     try testing.expectEqual(true, stream_options.get("include_usage").?.bool);
 }
