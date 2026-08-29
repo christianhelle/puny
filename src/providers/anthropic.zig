@@ -1206,7 +1206,7 @@ test "chatStreaming propagates SSE parse errors from a local server" {
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
 }
 
-test "AnthropicAdapterRequest produces same payload as requestPayload" {
+test "AnthropicAdapterRequest matches requestPayload core fields except stream" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -1234,10 +1234,21 @@ test "AnthropicAdapterRequest produces same payload as requestPayload" {
     defer exp_parsed.deinit();
     const got_parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, got, .{});
     defer got_parsed.deinit();
-    // Both should have same model and system
+    // Both should have same core fields; stream is injected later by generated client
     try std.testing.expectEqualStrings(exp_parsed.value.object.get("model").?.string, got_parsed.value.object.get("model").?.string);
     try std.testing.expectEqualStrings(exp_parsed.value.object.get("system").?.string, got_parsed.value.object.get("system").?.string);
     try std.testing.expectEqual(exp_parsed.value.object.get("messages").?.array.items.len, got_parsed.value.object.get("messages").?.array.items.len);
+    try std.testing.expectEqual(exp_parsed.value.object.get("max_tokens").?.integer, got_parsed.value.object.get("max_tokens").?.integer);
+    try std.testing.expectEqual(exp_parsed.value.object.get("temperature").?.float, got_parsed.value.object.get("temperature").?.float);
+    try std.testing.expectEqual(exp_parsed.value.object.get("tools").?.array.items.len, got_parsed.value.object.get("tools").?.array.items.len);
+    try std.testing.expectEqualStrings(exp_parsed.value.object.get("tools").?.array.items[0].object.get("name").?.string, got_parsed.value.object.get("tools").?.array.items[0].object.get("name").?.string);
+    // Adapter omits stream; generated helper injects it
+    try std.testing.expect(exp_parsed.value.object.get("stream") != null);
+    try std.testing.expect(got_parsed.value.object.get("stream") == null);
+    // Messages content should match
+    const exp_msg_content = exp_parsed.value.object.get("messages").?.array.items[0].object.get("content").?.array.items[0].object.get("text").?.string;
+    const got_msg_content = got_parsed.value.object.get("messages").?.array.items[0].object.get("content").?.array.items[0].object.get("text").?.string;
+    try std.testing.expectEqualStrings(exp_msg_content, got_msg_content);
 }
 
 test "AnthropicAdapterRequest fails on invalid tool arguments" {
