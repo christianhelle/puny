@@ -1207,7 +1207,7 @@ const CopilotServer = struct {
 
 fn startCopilotServer(status: std.http.Status, body: []const u8) !*CopilotServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
-    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
     const ctx = std.testing.allocator.create(CopilotServer) catch |err| {
         server.deinit(std.testing.io);
         return err;
@@ -1445,7 +1445,7 @@ const CopilotGarbageServer = struct {
 
 fn startCopilotGarbageServer() !*CopilotGarbageServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
-    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
     const ctx = std.testing.allocator.create(CopilotGarbageServer) catch |err| {
         server.deinit(std.testing.io);
         return err;

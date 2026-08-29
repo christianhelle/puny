@@ -288,7 +288,7 @@ const ModelsServer = struct {
 
 fn startModelsServer(status: std.http.Status, body: []const u8) !*ModelsServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
-    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
     const ctx = std.testing.allocator.create(ModelsServer) catch |err| {
         server.deinit(std.testing.io);
         return err;
