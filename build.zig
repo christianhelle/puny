@@ -334,6 +334,10 @@ const RegenerateProvidersStep = struct {
             "src/providers/anthropic",
         }) |dir| {
             cwd.deleteTree(io, dir) catch |err| {
+                if (err == error.FileNotFound) {
+                    std.log.info("skipping missing {s}", .{dir});
+                    continue;
+                }
                 std.log.err("failed to remove {s}: {s}", .{ dir, @errorName(err) });
                 return err;
             };
