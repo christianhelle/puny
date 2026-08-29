@@ -873,10 +873,15 @@ const GoogleServer = struct {
 fn startGoogleServer(status: std.http.Status, body: []const u8) !*GoogleServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
-    const ctx = try std.testing.allocator.create(GoogleServer);
-    errdefer std.testing.allocator.destroy(ctx);
+    const ctx = std.testing.allocator.create(GoogleServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
-    errdefer ctx.server.deinit(std.testing.io);
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
     ctx.thread = try std.Thread.spawn(.{}, GoogleServer.serve, .{ctx});
     return ctx;
 }
@@ -989,10 +994,15 @@ const GoogleGarbageServer = struct {
 fn startGoogleGarbageServer() !*GoogleGarbageServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
-    const ctx = try std.testing.allocator.create(GoogleGarbageServer);
-    errdefer std.testing.allocator.destroy(ctx);
+    const ctx = std.testing.allocator.create(GoogleGarbageServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
     ctx.* = .{ .io = std.testing.io, .server = server };
-    errdefer ctx.server.deinit(std.testing.io);
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
     ctx.thread = try std.Thread.spawn(.{}, GoogleGarbageServer.serve, .{ctx});
     return ctx;
 }

@@ -865,10 +865,15 @@ const TestServer = struct {
 fn startTestServer(status: std.http.Status, body: []const u8) !*TestServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
-    const ctx = try std.testing.allocator.create(TestServer);
-    errdefer std.testing.allocator.destroy(ctx);
+    const ctx = std.testing.allocator.create(TestServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
-    errdefer ctx.server.deinit(std.testing.io);
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
     ctx.thread = try std.Thread.spawn(.{}, TestServer.serve, .{ctx});
     return ctx;
 }

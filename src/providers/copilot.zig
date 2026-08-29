@@ -1208,10 +1208,15 @@ const CopilotServer = struct {
 fn startCopilotServer(status: std.http.Status, body: []const u8) !*CopilotServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
-    const ctx = try std.testing.allocator.create(CopilotServer);
-    errdefer std.testing.allocator.destroy(ctx);
+    const ctx = std.testing.allocator.create(CopilotServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
     ctx.* = .{ .io = std.testing.io, .server = server, .status = status, .body = body };
-    errdefer ctx.server.deinit(std.testing.io);
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
     ctx.thread = try std.Thread.spawn(.{}, CopilotServer.serve, .{ctx});
     return ctx;
 }
@@ -1441,10 +1446,15 @@ const CopilotGarbageServer = struct {
 fn startCopilotGarbageServer() !*CopilotGarbageServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
-    const ctx = try std.testing.allocator.create(CopilotGarbageServer);
-    errdefer std.testing.allocator.destroy(ctx);
+    const ctx = std.testing.allocator.create(CopilotGarbageServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
     ctx.* = .{ .io = std.testing.io, .server = server };
-    errdefer ctx.server.deinit(std.testing.io);
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
     ctx.thread = try std.Thread.spawn(.{}, CopilotGarbageServer.serve, .{ctx});
     return ctx;
 }
