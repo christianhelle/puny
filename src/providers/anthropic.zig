@@ -197,8 +197,6 @@ const AnthropicSseCallback = struct {
 fn anthropicClient(c: *http_client.Client) generated.Client {
     var g = generated.Client.init(c.allocator, c.io, c.api_key);
     g.base_url = c.base_url;
-    g.organization = c.organization;
-    g.project = c.project;
     // Forward observer (without on_chunk which runtime observer doesn't have)
     if (c.http_observer) |obs| {
         g.http_observer = .{
@@ -1273,9 +1271,13 @@ test "anthropic client uses x-api-key not Bearer" {
     const allocator = arena_state.allocator();
     var c = http_client.Client.init(allocator, std.testing.io, "my-key");
     defer c.deinit();
+    c.organization = "my-org";
+    c.project = "my-proj";
     var g = anthropicClient(&c);
     defer g.deinit();
     try std.testing.expectEqualStrings("my-key", g.api_key);
+    try std.testing.expect(g.organization == null);
+    try std.testing.expect(g.project == null);
     // g should have anthropic-version in default_headers
     var found_version = false;
     for (g.default_headers) |h| {
