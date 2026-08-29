@@ -251,12 +251,9 @@ const AnthropicAdapterRequest = struct {
 
         // system handling: first system message only
         var system: ?[]const u8 = null;
-        var messages_count: usize = 0;
         for (req.messages) |msg| {
             if (msg == .system) {
                 if (system == null) system = msg.system;
-            } else {
-                messages_count += 1;
             }
         }
 
