@@ -360,7 +360,7 @@ const RegenerateProvidersStep = struct {
             "--runtime-only",
         });
 
-        // 2. Generate openai with shared runtime
+        // 2. Generate openai with shared runtime – only Chat + Models are used (provider.zig, openai_shim.zig)
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
             "-i",
@@ -372,9 +372,13 @@ const RegenerateProvidersStep = struct {
             "models=contracts.zig",
             "--runtime-module",
             "../runtime.zig",
+            "--tag",
+            "Chat",
+            "--tag",
+            "Models",
         });
 
-        // 3. Generate lmstudio with shared runtime
+        // 3. Generate lmstudio with shared runtime – only Models is used via lmstudio_shim.zig
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
             "-i",
@@ -386,9 +390,13 @@ const RegenerateProvidersStep = struct {
             "models=contracts.zig",
             "--runtime-module",
             "../runtime.zig",
+            "--tag",
+            "Models",
         });
 
-        // 4. Generate anthropic with shared runtime
+        // 4. Generate anthropic with shared runtime – spec has no tagged operations (131 untagged),
+        // so --tag filtering would drop the only used op (POST /v1/messages). Keep unfiltered until
+        // anthropic.zig is wired to the generated client and/or the spec gains tags.
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
             "-i",
