@@ -43,6 +43,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Message"
                 }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
               }
             }
           },
@@ -66,7 +71,10 @@
             }
           },
           "required": true
-        }
+        },
+        "tags": [
+          "Messages"
+        ]
       }
     },
     "/v1/complete": {
@@ -60949,6 +60957,13 @@
         "description": "Per-iteration token usage breakdown.\n\nEach entry represents one sampling iteration, with its own input/output token counts and cache statistics. This allows you to:\n- Determine which iterations exceeded long context thresholds (>=200k tokens)\n- Calculate the true context window size from the last iteration\n- Understand token accumulation across server-side tool use loops",
         "title": "Iterations"
       }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
     }
   },
   "servers": [
@@ -61713,5 +61728,16 @@
         }
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "Messages",
+      "description": "Anthropic Messages API - create and stream messages"
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ]
 }
