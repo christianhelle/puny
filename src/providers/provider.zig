@@ -114,10 +114,14 @@ pub const Provider = union(enum) {
 /// SSE read is unblocked promptly; cancellation is surfaced as
 /// error.Cancelled and translated to error.Canceled.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    const trimmed = std.mem.trimEnd(u8, c.base_url, "/");
+    const openai_base = if (std.mem.endsWith(u8, trimmed, "/v1"))
+        try c.allocator.dupe(u8, trimmed)
+    else
+        try std.fmt.allocPrint(c.allocator, "{s}/v1", .{trimmed});
+    defer c.allocator.free(openai_base);
     var generated = adapter.openAiClient(c);
     defer generated.deinit();
-    const openai_base = try std.fmt.allocPrint(c.allocator, "{s}/v1", .{c.base_url});
-    defer c.allocator.free(openai_base);
     generated.base_url = openai_base;
     generated.cancel_check = cancel.isCancelled;
 
@@ -780,4 +784,36 @@ test "chatStreaming aborts promptly when server stalls mid-stream after cancel" 
     const elapsed = start.untilNow(std.testing.io, .awake).nanoseconds;
     // Must abort well before the 5s stall completes - watcher closes socket within ~10ms
     try std.testing.expect(elapsed < 2000 * std.time.ns_per_ms);
+}
+
+test "chatStreamingOpenAi normalizes trailing slash in base_url" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const base_urls = [_][]const u8{ "", "/", "/v1", "/v1/" };
+    for (base_urls) |suffix| {
+        const ctx = try startProviderTestServer(.ok, body);
+        defer stopProviderTestServer(ctx);
+        const base = try providerTestUrl(ctx);
+        defer std.testing.allocator.free(base);
+        const url = try std.fmt.allocPrint(std.testing.allocator, "{s}{s}", .{ base, suffix });
+        defer std.testing.allocator.free(url);
+
+        var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+        defer prov.deinit();
+        prov.setConfig(.{ .base_url = url });
+
+        var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer rec_state.deinit();
+        var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+        const request = openai.ChatRequest{
+            .model = "qwen2.5-7b",
+            .messages = &.{.{ .user = "hi" }},
+            .tools = &.{},
+        };
+        try prov.chatStreaming(request, rec.callback());
+        try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
+    }
 }
