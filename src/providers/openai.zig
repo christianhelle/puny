@@ -202,15 +202,28 @@ const CancelWatcher = struct {
     connection: ?*std.http.Client.Connection,
     io: std.Io,
     done: *std.atomic.Value(bool),
+    replacement_handle: ?std.Io.net.Socket.Handle = null,
+    interrupted: bool = false,
+
+    const Windows = if (@import("builtin").os.tag == .windows) struct {
+        extern "kernel32" fn CreateEventW(event_attributes: ?*anyopaque, manual_reset: std.os.windows.BOOL, initial_state: std.os.windows.BOOL, name: ?[*:0]const u16) callconv(.winapi) ?std.os.windows.HANDLE;
+    } else struct {};
 
     fn run(self: *CancelWatcher) void {
         while (!self.done.load(.acquire)) {
             if (cancel.isCancelled()) {
                 if (self.connection) |conn| {
-                    conn.closing = true;
                     if (comptime @import("builtin").os.tag == .windows) {
-                        conn.stream_reader.stream.close(self.io);
+                        if (Windows.CreateEventW(null, .FALSE, .FALSE, null)) |replacement| {
+                            self.replacement_handle = replacement;
+                            self.interrupted = true;
+                            conn.stream_reader.stream.close(self.io);
+                        } else {
+                            self.interrupted = true;
+                            conn.stream_reader.stream.shutdown(self.io, .both) catch {};
+                        }
                     } else {
+                        self.interrupted = true;
                         conn.stream_reader.stream.shutdown(self.io, .both) catch {};
                     }
                 }
@@ -276,6 +289,16 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
     defer if (watcher_thread) |t| {
         done.store(true, .release);
         t.join();
+        if (watcher_ctx.interrupted) {
+            const conn = watcher_ctx.connection.?;
+            if (comptime @import("builtin").os.tag == .windows) {
+                if (watcher_ctx.replacement_handle) |handle| {
+                    conn.stream_reader.stream.socket.handle = handle;
+                    conn.stream_writer.stream.socket.handle = handle;
+                }
+            }
+            conn.closing = true;
+        }
     };
 
     var cancelable_reader_buffer: [1]u8 = undefined;
