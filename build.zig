@@ -394,9 +394,7 @@ const RegenerateProvidersStep = struct {
             "Models",
         });
 
-        // 4. Generate anthropic with shared runtime – spec has no tagged operations (131 untagged),
-        // so --tag filtering would drop the only used op (POST /v1/messages). Keep unfiltered until
-        // anthropic.zig is wired to the generated client and/or the spec gains tags.
+        // 4. Generate anthropic with shared runtime – only Messages is used (anthropic.zig + provider.zig)
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
             "-i",
@@ -408,6 +406,8 @@ const RegenerateProvidersStep = struct {
             "models=contracts.zig",
             "--runtime-module",
             "../runtime.zig",
+            "--tag",
+            "Messages",
         });
 
         std.log.info("re-generate-providers: done", .{});
