@@ -317,13 +317,7 @@ const AnthropicAdapterRequest = struct {
                                     try jw.write(tc.function.name);
                                     try jw.objectField("input");
                                     if (std.mem.trim(u8, tc.function.arguments, " \t\r\n").len > 0) {
-                                        const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, tc.function.arguments, .{}) catch {
-                                            try jw.beginObject();
-                                            try jw.endObject();
-                                            try jw.endObject();
-                                            first_block = false;
-                                            continue;
-                                        };
+                                        const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, tc.function.arguments, .{}) catch return error.WriteFailed;
                                         defer parsed.deinit();
                                         try jw.write(parsed.value);
                                     } else {
@@ -1251,6 +1245,26 @@ test "AnthropicAdapterRequest produces same payload as requestPayload" {
     try std.testing.expectEqualStrings(exp_parsed.value.object.get("model").?.string, got_parsed.value.object.get("model").?.string);
     try std.testing.expectEqualStrings(exp_parsed.value.object.get("system").?.string, got_parsed.value.object.get("system").?.string);
     try std.testing.expectEqual(exp_parsed.value.object.get("messages").?.array.items.len, got_parsed.value.object.get("messages").?.array.items.len);
+}
+
+test "AnthropicAdapterRequest fails on invalid tool arguments" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{
+            .{ .assistant = .{
+                .tool_calls = &.{
+                    .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "not json" } },
+                },
+            } },
+        },
+        .tools = &.{},
+    };
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    try std.testing.expectError(error.WriteFailed, std.json.Stringify.value(AnthropicAdapterRequest{ .request = request }, .{}, &buf.writer));
 }
 
 test "anthropic client uses x-api-key not Bearer" {
