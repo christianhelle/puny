@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Use generated OpenAPI clients for LM Studio and OpenAI (hybrid) ([#161](https://github.com/christianhelle/puny/pull/161)) ([@christianhelle](https://github.com/christianhelle/))
 - Quiet provider test output in failure-path checks ([#156](https://github.com/christianhelle/puny/pull/156)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor opencode_zen.zig and helpers.zig into smaller modules ([#155](https://github.com/christianhelle/puny/pull/155)) ([@christianhelle](https://github.com/christianhelle/))
 - Add code coverage collection for Codecov ([#154](https://github.com/christianhelle/puny/pull/154)) ([@christianhelle](https://github.com/christianhelle/))
