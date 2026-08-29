@@ -1,5 +1,4 @@
 # Generated OpenAPI clients - exclude from language stats and review
-src/providers/openapi/*.json linguist-generated=true
 src/providers/runtime.zig linguist-generated=true
 src/providers/openai/client.zig linguist-generated=true
 src/providers/openai/contracts.zig linguist-generated=true
