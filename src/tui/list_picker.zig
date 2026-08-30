@@ -136,6 +136,25 @@ test "computeColumnWidth accounts for the longest label" {
     try std.testing.expectEqual(@as(usize, "a much longer label".len + column_padding), computeColumnWidth(&items));
 }
 
+/// Lines the picker prints above the list: two blank lines plus the title.
+const header_rows = 3;
+
+/// Rows actually available to the list once the picker's header is
+/// accounted for, never less than one.
+pub fn usableRows(terminal_height: usize) usize {
+    return @max(terminal_height -| header_rows, 1);
+}
+
+test "usableRows subtracts the header the picker prints above the list" {
+    try std.testing.expectEqual(@as(usize, 21), usableRows(24));
+}
+
+test "usableRows never drops below one row" {
+    try std.testing.expectEqual(@as(usize, 1), usableRows(3));
+    try std.testing.expectEqual(@as(usize, 1), usableRows(1));
+    try std.testing.expectEqual(@as(usize, 1), usableRows(0));
+}
+
 /// Default rows/columns assumed when the terminal size can't be determined,
 /// matching the fallback pattern used by `terminal.terminalWidth()`.
 const default_available_rows = 20;
