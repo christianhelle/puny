@@ -614,6 +614,18 @@ fn joinedContent(arena: std.mem.Allocator, events: []const openai.StreamEvent) !
     return out.toOwnedSlice(arena);
 }
 
+fn joinedReasoning(arena: std.mem.Allocator, events: []const openai.StreamEvent) ![]const u8 {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(arena);
+    for (events) |ev| {
+        switch (ev) {
+            .reasoning => |text| try out.appendSlice(arena, text),
+            else => {},
+        }
+    }
+    return out.toOwnedSlice(arena);
+}
+
 // ── Helper tests ────────────────────────────────────────────────────
 
 test "containsWord matches case-insensitively at word boundaries" {
@@ -777,6 +789,30 @@ test "chatStreaming echoes the user message in echo mode" {
     defer arena_state.deinit();
     const content = try joinedContent(arena_state.allocator(), rec.events.items);
     try std.testing.expect(std.mem.indexOf(u8, content, "Echo: echo hello world") != null);
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming emits verbose reasoning before content in reasoning mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "respond with reasoning" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const reasoning = try joinedReasoning(arena_state.allocator(), rec.events.items);
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, reasoning, "step by step") != null);
+    try std.testing.expect(reasoning.len > 200);
+    try std.testing.expect(std.mem.indexOf(u8, content, "mock response") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "You said: respond with reasoning") != null);
     try expectFinish(rec.events.items, "stop");
 }
 
