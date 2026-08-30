@@ -136,6 +136,11 @@ test "computeColumnWidth accounts for the longest label" {
     try std.testing.expectEqual(@as(usize, "a much longer label".len + column_padding), computeColumnWidth(&items));
 }
 
+/// Default rows/columns assumed when the terminal size can't be determined,
+/// matching the fallback pattern used by `terminal.terminalWidth()`.
+const default_available_rows = 20;
+const default_terminal_width = 80;
+
 pub fn selectFromList(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -157,53 +162,44 @@ pub fn selectFromList(
 
     var selected: usize = 0;
 
+    const available_rows = terminal.terminalHeight() orelse default_available_rows;
+    const terminal_width = terminal.terminalWidth() orelse default_terminal_width;
+    const column_width = computeColumnWidth(items);
+    const grid = computeGrid(items.len, available_rows, terminal_width, column_width);
+
     try stdout_writer.print("\r\n\r\n{s}\r\n", .{title});
-    for (items, 0..) |item, i| {
-        if (i == selected) {
-            try stdout_writer.print("{s}> {s}{s}\r\n", .{ ansi.bright, item.label, ansi.reset });
-        } else {
-            try stdout_writer.print("  {s}\r\n", .{item.label});
-        }
-    }
+    try renderGrid(stdout_writer, items, grid, selected, column_width, true);
     try stdout_writer.flush();
 
     while (true) {
         const key = readKey(io) catch .unknown;
+        const dir: ?GridDir = switch (key) {
+            .up => .up,
+            .down => .down,
+            .left => .left,
+            .right => .right,
+            else => null,
+        };
+        if (dir) |d| {
+            selected = gridStep(selected, items.len, grid, d);
+            try stdout_writer.print(terminal.cursor_up, .{grid.rows});
+            try renderGrid(stdout_writer, items, grid, selected, column_width, true);
+            continue;
+        }
         switch (key) {
-            .up => {
-                selected = if (selected == 0) items.len - 1 else selected - 1;
-                try redrawList(stdout_writer, items, selected);
-            },
-            .down => {
-                selected = if (selected < items.len - 1) selected + 1 else 0;
-                try redrawList(stdout_writer, items, selected);
-            },
             .enter => {
-                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
+                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
                 try stdout_writer.flush();
                 return try arena.dupe(u8, items[selected].value);
             },
             .quit, .escape => {
-                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
+                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
                 try stdout_writer.flush();
                 return null;
             },
             else => {},
         }
     }
-}
-
-fn redrawList(stdout_writer: *std.Io.Writer, items: []const Item, selected: usize) !void {
-    try stdout_writer.print(terminal.cursor_up, .{items.len});
-    for (items, 0..) |item, i| {
-        try stdout_writer.print(terminal.clear_line ++ "\r", .{});
-        if (i == selected) {
-            try stdout_writer.print("{s}> {s}{s}\n", .{ ansi.bright, item.label, ansi.reset });
-        } else {
-            try stdout_writer.print("  {s}\n", .{item.label});
-        }
-    }
-    try stdout_writer.flush();
 }
 
 /// Direction of a single grid navigation step.
@@ -281,8 +277,9 @@ test "gridStep is a no-op for a single-item grid" {
 /// Each cell is padded to `column_width` unless it's the last populated
 /// column in its row, so single-column layouts render identically to the
 /// original one-item-per-line output.
-fn renderGrid(stdout_writer: *std.Io.Writer, items: []const Item, grid: Grid, selected: usize, column_width: usize) !void {
+fn renderGrid(stdout_writer: *std.Io.Writer, items: []const Item, grid: Grid, selected: usize, column_width: usize, clear: bool) !void {
     for (0..grid.rows) |r| {
+        if (clear) try stdout_writer.print(terminal.clear_line ++ "\r", .{});
         for (0..grid.cols) |c| {
             const idx = c * grid.rows + r;
             if (idx >= items.len) continue;
@@ -312,7 +309,7 @@ test "renderGrid renders a single column identically to one item per line" {
         .{ .value = "one", .label = "One" },
         .{ .value = "two", .label = "Two" },
     };
-    try renderGrid(&out.writer, &items, .{ .rows = 2, .cols = 1 }, 1, computeColumnWidth(&items));
+    try renderGrid(&out.writer, &items, .{ .rows = 2, .cols = 1 }, 1, computeColumnWidth(&items), false);
 
     const text = out.written();
     try std.testing.expect(std.mem.indexOf(u8, text, "> Two") != null);
@@ -332,7 +329,7 @@ test "renderGrid lays out multiple columns and pads non-final cells" {
         .{ .value = "c", .label = "C" },
     };
     const grid = Grid{ .rows = 2, .cols = 2 };
-    try renderGrid(&out.writer, &items, grid, 0, computeColumnWidth(&items));
+    try renderGrid(&out.writer, &items, grid, 0, computeColumnWidth(&items), false);
 
     const text = out.written();
     const lines = std.mem.count(u8, text, "\n");
@@ -575,24 +572,6 @@ test "Item struct has expected fields" {
     const item = Item{ .value = "test", .label = "Test Item" };
     try std.testing.expectEqualStrings("test", item.value);
     try std.testing.expectEqualStrings("Test Item", item.label);
-}
-
-test "redrawList renders items with the selection highlighted" {
-    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer out.deinit();
-
-    const items = [_]Item{
-        .{ .value = "one", .label = "One" },
-        .{ .value = "two", .label = "Two" },
-    };
-    try redrawList(&out.writer, &items, 1);
-
-    const text = out.written();
-    try std.testing.expect(std.mem.startsWith(u8, text, "\x1b[2A"));
-    try std.testing.expect(std.mem.indexOf(u8, text, "> Two") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, ansi.bright) != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "  One") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, ansi.reset) != null);
 }
 
 test "readKeyPosix interprets key bytes from the pending buffer" {
