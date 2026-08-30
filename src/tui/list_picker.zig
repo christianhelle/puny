@@ -22,6 +22,93 @@ const Key = enum {
 var pending_buf: [8]u8 = undefined;
 var pending_len: usize = 0;
 
+/// Row/column dimensions of a column-major item grid.
+pub const Grid = struct {
+    rows: usize,
+    cols: usize,
+
+    /// Number of populated rows in `col` (the last column may be partial
+    /// when `items_len` isn't an exact multiple of `rows`).
+    pub fn rowsInCol(self: Grid, items_len: usize, col: usize) usize {
+        if (self.cols == 0) return 0;
+        if (col + 1 < self.cols) return self.rows;
+        const full_cols_items = (self.cols - 1) * self.rows;
+        return items_len - full_cols_items;
+    }
+};
+
+/// Computes a column-major grid layout for `items_len` items.
+///
+/// Stays single-column (matching prior behavior) while everything fits in
+/// `available_rows`. Once the item count overflows the available rows, it
+/// grows into as many columns as needed to fit vertically, then shrinks
+/// that column count back down if it wouldn't fit within `terminal_width`
+/// (each column occupying `column_width` characters).
+pub fn computeGrid(items_len: usize, available_rows: usize, terminal_width: usize, column_width: usize) Grid {
+    if (items_len == 0) return .{ .rows = 0, .cols = 0 };
+
+    const rows_cap = @max(available_rows, 1);
+    if (items_len <= rows_cap) return .{ .rows = items_len, .cols = 1 };
+
+    var cols = std.math.divCeil(usize, items_len, rows_cap) catch 1;
+
+    const width_cap = if (column_width == 0) cols else @max(terminal_width / column_width, 1);
+    if (cols > width_cap) cols = width_cap;
+
+    const rows = std.math.divCeil(usize, items_len, cols) catch items_len;
+    return .{ .rows = rows, .cols = cols };
+}
+
+test "computeGrid keeps a single column when items fit available rows" {
+    const g = computeGrid(5, 20, 80, 10);
+    try std.testing.expectEqual(@as(usize, 5), g.rows);
+    try std.testing.expectEqual(@as(usize, 1), g.cols);
+}
+
+test "computeGrid keeps a single column when items exactly fill available rows" {
+    const g = computeGrid(20, 20, 80, 10);
+    try std.testing.expectEqual(@as(usize, 20), g.rows);
+    try std.testing.expectEqual(@as(usize, 1), g.cols);
+}
+
+test "computeGrid grows into multiple columns on overflow" {
+    const g = computeGrid(50, 20, 80, 10);
+    try std.testing.expectEqual(@as(usize, 3), g.cols);
+    try std.testing.expectEqual(@as(usize, 17), g.rows);
+}
+
+test "computeGrid clamps columns to fit terminal width" {
+    // 50 items, 20 rows would need 3 columns, but width only fits 2.
+    const g = computeGrid(50, 20, 25, 12);
+    try std.testing.expectEqual(@as(usize, 2), g.cols);
+    try std.testing.expectEqual(@as(usize, 25), g.rows);
+}
+
+test "computeGrid returns zero grid for an empty item list" {
+    const g = computeGrid(0, 20, 80, 10);
+    try std.testing.expectEqual(@as(usize, 0), g.rows);
+    try std.testing.expectEqual(@as(usize, 0), g.cols);
+}
+
+test "computeGrid treats zero available rows as one row" {
+    const g = computeGrid(3, 0, 80, 10);
+    try std.testing.expectEqual(@as(usize, 3), g.cols);
+    try std.testing.expectEqual(@as(usize, 1), g.rows);
+}
+
+test "Grid.rowsInCol reports the partial last column" {
+    // 7 items, 3 rows, 3 cols -> columns hold 3, 3, 1.
+    const g = Grid{ .rows = 3, .cols = 3 };
+    try std.testing.expectEqual(@as(usize, 3), g.rowsInCol(7, 0));
+    try std.testing.expectEqual(@as(usize, 3), g.rowsInCol(7, 1));
+    try std.testing.expectEqual(@as(usize, 1), g.rowsInCol(7, 2));
+}
+
+test "Grid.rowsInCol handles a single full column" {
+    const g = Grid{ .rows = 5, .cols = 1 };
+    try std.testing.expectEqual(@as(usize, 5), g.rowsInCol(5, 0));
+}
+
 pub fn selectFromList(
     arena: std.mem.Allocator,
     io: std.Io,
