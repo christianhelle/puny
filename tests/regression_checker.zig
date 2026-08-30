@@ -177,6 +177,119 @@ const IsolatedEnv = struct {
     }
 };
 
+const GitFixtureKind = enum {
+    feature,
+    empty,
+    main,
+    missing_origin,
+};
+
+const GitFixture = struct {
+    allocator: std.mem.Allocator,
+    root: []const u8,
+    remote: []const u8,
+    worktree: []const u8,
+
+    fn init(
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        environ_map: *const std.process.Environ.Map,
+        kind: GitFixtureKind,
+    ) !GitFixture {
+        const root = try makeTempDir(allocator, io, environ_map);
+        errdefer {
+            std.Io.Dir.cwd().deleteTree(io, root) catch {};
+            allocator.free(root);
+        }
+        const remote = try std.fs.path.join(allocator, &.{ root, "remote.git" });
+        errdefer allocator.free(remote);
+        const worktree = try std.fs.path.join(allocator, &.{ root, "worktree" });
+        errdefer allocator.free(worktree);
+
+        try runGitOk(allocator, io, null, &.{ "init", "--bare", remote });
+        try runGitOk(allocator, io, null, &.{ "init", "-b", "main", worktree });
+        try runGitOk(allocator, io, worktree, &.{ "config", "user.email", "puny@example.test" });
+        try runGitOk(allocator, io, worktree, &.{ "config", "user.name", "Puny Test" });
+        const initial_path = try std.fs.path.join(allocator, &.{ worktree, "initial.txt" });
+        defer allocator.free(initial_path);
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = initial_path, .data = "initial\n" });
+        try runGitOk(allocator, io, worktree, &.{ "add", "initial.txt" });
+        try runGitOk(allocator, io, worktree, &.{ "commit", "-m", "initial" });
+        try runGitOk(allocator, io, worktree, &.{ "remote", "add", "origin", remote });
+        try runGitOk(allocator, io, worktree, &.{ "push", "-u", "origin", "main" });
+
+        switch (kind) {
+            .main => {},
+            .empty => try runGitOk(allocator, io, worktree, &.{ "checkout", "-b", "feature/empty" }),
+            .feature, .missing_origin => {
+                try runGitOk(allocator, io, worktree, &.{ "checkout", "-b", "feature/review" });
+                const feature_path = try std.fs.path.join(allocator, &.{ worktree, "feature.txt" });
+                defer allocator.free(feature_path);
+                try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = feature_path, .data = "feature\n" });
+                try runGitOk(allocator, io, worktree, &.{ "add", "feature.txt" });
+                try runGitOk(allocator, io, worktree, &.{ "commit", "-m", "feature" });
+                if (kind == .missing_origin) {
+                    try runGitOk(allocator, io, worktree, &.{ "remote", "remove", "origin" });
+                }
+            },
+        }
+
+        return .{
+            .allocator = allocator,
+            .root = root,
+            .remote = remote,
+            .worktree = worktree,
+        };
+    }
+
+    fn deinit(self: *GitFixture, io: std.Io) void {
+        std.Io.Dir.cwd().deleteTree(io, self.root) catch {};
+        self.allocator.free(self.worktree);
+        self.allocator.free(self.remote);
+        self.allocator.free(self.root);
+        self.* = undefined;
+    }
+};
+
+fn runGitOk(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    cwd: ?[]const u8,
+    args: []const []const u8,
+) !void {
+    const output = try gitOutput(allocator, io, cwd, args);
+    allocator.free(output);
+}
+
+fn gitOutput(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    cwd: ?[]const u8,
+    args: []const []const u8,
+) ![]const u8 {
+    const argv = try allocator.alloc([]const u8, args.len + 1);
+    defer allocator.free(argv);
+    argv[0] = "git";
+    @memcpy(argv[1..], args);
+    const result = try std.process.run(allocator, io, .{
+        .argv = argv,
+        .cwd = if (cwd) |path| .{ .path = path } else .inherit,
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(1024 * 1024),
+    });
+    defer allocator.free(result.stderr);
+    const succeeded = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!succeeded) {
+        std.debug.print("git fixture command failed: {s}\n", .{result.stderr});
+        allocator.free(result.stdout);
+        return error.GitFixtureFailed;
+    }
+    return result.stdout;
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const allocator = init.gpa;
     const arena = init.arena.allocator();
@@ -585,4 +698,19 @@ test "isolated env redirects the config dir to a temp dir and cleans up" {
     defer std.testing.allocator.free(temp_dir_path);
     isolated.deinit(std.testing.io);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openDir(std.testing.io, temp_dir_path, .{}));
+}
+
+test "review git fixture creates an isolated committed feature branch" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const parent = try testTempParentDirPath();
+    defer std.testing.allocator.free(parent);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, parent) catch {};
+    try env.put("TMPDIR", parent);
+
+    var fixture = try GitFixture.init(std.testing.allocator, std.testing.io, &env, .feature);
+    defer fixture.deinit(std.testing.io);
+    const branch = try gitOutput(std.testing.allocator, std.testing.io, fixture.worktree, &.{ "branch", "--show-current" });
+    defer std.testing.allocator.free(branch);
+    try std.testing.expectEqualStrings("feature/review", std.mem.trim(u8, branch, &std.ascii.whitespace));
 }
