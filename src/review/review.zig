@@ -538,6 +538,29 @@ const Fixture = struct {
         try runFixtureGit(self.worktree, &.{ "commit", "-m", "feature" });
     }
 
+    fn advanceRemoteMain(self: Fixture) ![]const u8 {
+        const updater = try std.fs.path.join(std.testing.allocator, &.{ self.root, "updater" });
+        defer std.testing.allocator.free(updater);
+        try runFixtureGit(null, &.{ "clone", self.remote, updater });
+        try runFixtureGit(updater, &.{ "checkout", "-b", "main", "origin/main" });
+        try runFixtureGit(updater, &.{ "config", "user.email", "puny@example.test" });
+        try runFixtureGit(updater, &.{ "config", "user.name", "Puny Test" });
+        const upstream_path = try std.fs.path.join(std.testing.allocator, &.{ updater, "upstream.txt" });
+        defer std.testing.allocator.free(upstream_path);
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = upstream_path, .data = "upstream\n" });
+        try runFixtureGit(updater, &.{ "add", "upstream.txt" });
+        try runFixtureGit(updater, &.{ "commit", "-m", "upstream" });
+        try runFixtureGit(updater, &.{ "push", "origin", "main" });
+        const result = try runGit(std.testing.allocator, std.testing.io, updater, &.{ "rev-parse", "HEAD" }, 30 * std.time.ns_per_s);
+        return switch (result) {
+            .ok => |sha| sha,
+            .failed => |message| {
+                std.debug.print("failed to resolve updater HEAD: {s}\n", .{message});
+                return error.GitFixtureFailed;
+            },
+        };
+    }
+
     fn deinit(self: *Fixture) void {
         std.testing.allocator.free(self.worktree);
         std.testing.allocator.free(self.remote);
@@ -610,6 +633,24 @@ test "prepareAt excludes the generated report from dirty worktree details" {
         },
         else => return error.ExpectedReadyReview,
     }
+}
+
+test "prepareAt fetches the latest origin main before fixing scope" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    try fixture.addFeatureCommit();
+    const expected_base = try fixture.advanceRemoteMain();
+    defer std.testing.allocator.free(expected_base);
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const prepared = try prepareAt(arena_state.allocator(), std.testing.io, fixture.worktree);
+    const scope = switch (prepared) {
+        .ready => |value| value,
+        else => return error.ExpectedReadyReview,
+    };
+    try std.testing.expectEqualStrings(expected_base, scope.base_sha);
+    try std.testing.expect(!std.mem.eql(u8, scope.base_sha, scope.merge_base_sha));
 }
 
 test "writeReport forces a canonical rejection when evidence is incomplete" {
