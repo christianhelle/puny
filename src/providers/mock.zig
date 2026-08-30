@@ -42,6 +42,8 @@ pub const MockKeyword = enum {
     search,
     /// Trigger a tool call for shell execution.
     shell,
+    /// Save a deterministic merge-worthy branch review.
+    review,
     /// Generate a markdown table with realistic data.
     table,
     /// Generate complex markdown with headings, code blocks, lists, blockquotes, etc.
@@ -154,6 +156,16 @@ pub const MockClient = struct {
         }
 
         // Check for tool call keywords
+        if (isKeyword(last_content, .review)) {
+            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_review_call", .name = "save_review_results" } });
+            try callback.emit(.{ .tool_call_delta = .{
+                .index = 0,
+                .arguments = "{\"analysis_markdown\":\"## Change Summary\\nMock branch changes reviewed.\\n\\n## Quality and Regression Assessment\\nNo degradation or regression found.\\n\\n## Validation Performed\\nMock validation completed.\\n\\n## Findings\\nNo material findings.\",\"conclusion\":\"The mock branch is safe to merge.\",\"evidence_complete\":true,\"merge_worthy\":true}",
+            } });
+            try callback.emit(.{ .finish = "tool_calls" });
+            return;
+        }
+
         if (isKeyword(last_content, .read)) {
             for (0..toolCallCount) |i| {
                 try callback.emit(.{ .tool_call_start = .{ .index = i, .id = "mock_call_1", .name = "read_file" } });
@@ -292,6 +304,7 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .read => "read",
         .search => "search",
         .shell => "shell",
+        .review => "review",
         .table => "table",
         .markdown => "markdown",
         .reasoning => "reasoning",
@@ -1043,6 +1056,26 @@ test "chatStreaming emits shell tool calls" {
     try std.testing.expectEqual(@as(usize, toolCallCount), countTag(rec.events.items, .tool_call_start));
     switch (rec.events.items[0]) {
         .tool_call_start => |tc| try std.testing.expectEqualStrings("execute_shell", tc.name),
+        else => return error.ExpectedToolCallStart,
+    }
+    try expectFinish(rec.events.items, "tool_calls");
+}
+
+test "chatStreaming saves a merge-worthy report in review mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "Perform the branch review now and save the final review results." }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 1), countTag(rec.events.items, .tool_call_start));
+    switch (rec.events.items[0]) {
+        .tool_call_start => |tc| try std.testing.expectEqualStrings("save_review_results", tc.name),
         else => return error.ExpectedToolCallStart,
     }
     try expectFinish(rec.events.items, "tool_calls");
