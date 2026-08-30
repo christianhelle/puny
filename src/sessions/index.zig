@@ -139,7 +139,7 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
             // One unreadable session.json must not fail the whole listing; fall
             // back to a default entry like the missing/oversized cases do.
             std.log.warn("failed to read session meta at {s}: {s}", .{ meta_path, @errorName(err) });
-            break :blk core_session.SessionMeta{ .planning_mode = false, .first_prompt = null };
+            break :blk core_session.SessionMeta{ .planning_mode = false, .review_mode = false, .first_prompt = null };
         };
 
         const first_prompt = if (meta.first_prompt) |p| try truncateFirstPrompt(arena, p) else null;
@@ -167,6 +167,7 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
             .has_prd = has_prd,
             .has_conversation = has_conversation,
             .planning_mode = meta.planning_mode,
+            .review_mode = meta.review_mode,
             .first_prompt = first_prompt,
             .last_modified = last_modified,
         });
@@ -214,6 +215,7 @@ pub fn upsertSessionInfo(arena: std.mem.Allocator, io: std.Io, base_dir: []const
         .has_prd = info.has_prd,
         .has_conversation = info.has_conversation,
         .planning_mode = info.planning_mode,
+        .review_mode = info.review_mode,
         .first_prompt = first_prompt,
         .last_modified = info.last_modified,
     };
@@ -354,6 +356,7 @@ test "testBaseDir wipes leftovers from an interrupted run" {
         .has_prd = false,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -788,6 +791,7 @@ test "upsertSessionInfo adds a new entry and reads it back" {
         .has_prd = true,
         .has_conversation = true,
         .planning_mode = true,
+        .review_mode = false,
         .first_prompt = "hello",
         .last_modified = 100,
     });
@@ -824,6 +828,7 @@ test "upsertSessionInfo updates an existing entry and refreshes last_modified" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = "one",
         .last_modified = 100,
     });
@@ -832,6 +837,7 @@ test "upsertSessionInfo updates an existing entry and refreshes last_modified" {
         .has_prd = true,
         .has_conversation = true,
         .planning_mode = true,
+        .review_mode = false,
         .first_prompt = "two",
         .last_modified = 200,
     });
@@ -840,6 +846,7 @@ test "upsertSessionInfo updates an existing entry and refreshes last_modified" {
         .has_prd = true,
         .has_conversation = true,
         .planning_mode = true,
+        .review_mode = false,
         .first_prompt = "two",
         .last_modified = 300,
     });
@@ -875,6 +882,7 @@ test "upsertSessionInfo keeps the index sorted by id" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -883,6 +891,7 @@ test "upsertSessionInfo keeps the index sorted by id" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 2,
     });
@@ -917,6 +926,7 @@ test "upsertSessionInfo truncates first_prompt beyond 1024 chars and preserves n
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = &long_prompt,
         .last_modified = 1,
     });
@@ -925,6 +935,7 @@ test "upsertSessionInfo truncates first_prompt beyond 1024 chars and preserves n
         .has_prd = false,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 2,
     });
@@ -964,6 +975,7 @@ test "removeSessionFromIndex removes a single entry" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -972,6 +984,7 @@ test "removeSessionFromIndex removes a single entry" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 2,
     });
@@ -1007,6 +1020,7 @@ test "upsert writes the index with owner-only permissions" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -1031,6 +1045,7 @@ test "upsert leaves no temp file behind" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -1061,6 +1076,7 @@ test "pruneSessions removes all but current and rebuilds the index" {
         .has_prd = true,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -1069,6 +1085,7 @@ test "pruneSessions removes all but current and rebuilds the index" {
         .has_prd = true,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 2,
     });
@@ -1077,6 +1094,7 @@ test "pruneSessions removes all but current and rebuilds the index" {
         .has_prd = false,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 3,
     });
@@ -1120,6 +1138,7 @@ test "pruneSessions removes orphaned directories absent from the index" {
         .has_prd = true,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -1223,6 +1242,7 @@ test "upsertSessionInfo writes the index even when the sessions directory is mis
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -1248,6 +1268,7 @@ test "removeSessionFromIndex leaves the index untouched for an unknown id" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });

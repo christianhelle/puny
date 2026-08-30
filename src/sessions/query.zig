@@ -159,6 +159,7 @@ test "findLatestSession prefers the most recently modified conversation" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 100,
     });
@@ -167,6 +168,7 @@ test "findLatestSession prefers the most recently modified conversation" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 200,
     });
@@ -175,6 +177,7 @@ test "findLatestSession prefers the most recently modified conversation" {
         .has_prd = false,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 300,
     });
@@ -204,6 +207,7 @@ test "findLatestSession returns null when no session has a conversation" {
         .has_prd = false,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 1,
     });
@@ -212,6 +216,7 @@ test "findLatestSession returns null when no session has a conversation" {
         .has_prd = true,
         .has_conversation = false,
         .planning_mode = false,
+        .review_mode = false,
         .first_prompt = null,
         .last_modified = 2,
     });

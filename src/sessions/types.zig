@@ -5,6 +5,7 @@ pub const SessionInfo = struct {
     has_prd: bool,
     has_conversation: bool,
     planning_mode: bool,
+    review_mode: bool,
     first_prompt: ?[]const u8,
     last_modified: u64,
 };
@@ -18,6 +19,7 @@ pub fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
         .has_prd = s.has_prd,
         .has_conversation = s.has_conversation,
         .planning_mode = s.planning_mode,
+        .review_mode = s.review_mode,
         .first_prompt = first_prompt,
         .last_modified = s.last_modified,
     };
@@ -34,6 +36,7 @@ test "dupeSessionInfo copies id and first_prompt into the arena" {
         .has_prd = true,
         .has_conversation = false,
         .planning_mode = true,
+        .review_mode = false,
         .first_prompt = "hello",
         .last_modified = 42,
     };
@@ -49,12 +52,13 @@ test "dupeSessionInfo copies id and first_prompt into the arena" {
     try std.testing.expect(copy.has_prd);
     try std.testing.expect(!copy.has_conversation);
     try std.testing.expect(copy.planning_mode);
+    try std.testing.expect(!copy.review_mode);
     try std.testing.expectEqual(@as(u64, 42), copy.last_modified);
 }
 
 test "lessThan orders session ids" {
-    const a = SessionInfo{ .id = "aaa", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
-    const b = SessionInfo{ .id = "bbb", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
+    const a = SessionInfo{ .id = "aaa", .has_prd = false, .has_conversation = false, .planning_mode = false, .review_mode = false, .first_prompt = null, .last_modified = 0 };
+    const b = SessionInfo{ .id = "bbb", .has_prd = false, .has_conversation = false, .planning_mode = false, .review_mode = false, .first_prompt = null, .last_modified = 0 };
     try std.testing.expect(lessThan({}, a, b));
     try std.testing.expect(!lessThan({}, b, a));
     try std.testing.expect(!lessThan({}, a, a));
@@ -67,6 +71,7 @@ test "dupeSessionInfo copies fields when first_prompt is null" {
         .has_prd = false,
         .has_conversation = true,
         .planning_mode = false,
+        .review_mode = true,
         .first_prompt = null,
         .last_modified = 7,
     };
@@ -79,12 +84,13 @@ test "dupeSessionInfo copies fields when first_prompt is null" {
     try std.testing.expect(!copy.has_prd);
     try std.testing.expect(copy.has_conversation);
     try std.testing.expect(!copy.planning_mode);
+    try std.testing.expect(copy.review_mode);
     try std.testing.expectEqual(@as(u64, 7), copy.last_modified);
 }
 
 test "lessThan treats an id prefix as smaller" {
-    const a = SessionInfo{ .id = "ab", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
-    const b = SessionInfo{ .id = "abc", .has_prd = false, .has_conversation = false, .planning_mode = false, .first_prompt = null, .last_modified = 0 };
+    const a = SessionInfo{ .id = "ab", .has_prd = false, .has_conversation = false, .planning_mode = false, .review_mode = false, .first_prompt = null, .last_modified = 0 };
+    const b = SessionInfo{ .id = "abc", .has_prd = false, .has_conversation = false, .planning_mode = false, .review_mode = false, .first_prompt = null, .last_modified = 0 };
     try std.testing.expect(lessThan({}, a, b));
     try std.testing.expect(!lessThan({}, b, a));
     try std.testing.expect(!lessThan({}, b, b));

@@ -181,6 +181,7 @@ pub fn main(init: std.process.Init) !void {
     var session_restored = false;
     var restore_incomplete = false;
     var planning_mode = false;
+    var review_mode = false;
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
@@ -324,6 +325,7 @@ pub fn main(init: std.process.Init) !void {
         .planning_tool_definitions = &planning_tool_definitions,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .restore_incomplete = restore_incomplete,
         .session = &current_session,
         .session_stats = &session_stats,

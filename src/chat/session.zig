@@ -91,11 +91,12 @@ pub const ChatSession = struct {
                 .stdout_writer = ctx.stdout_writer,
                 .messages = ctx.messages,
                 .planning_mode = ctx.planning_mode,
+                .review_mode = ctx.review_mode,
                 .oneshot = ctx.parsed.oneshot,
                 .cfg = ctx.cfg,
                 .session_prd_path = ctx.session.prd_path,
             });
-            core_session.setWriteBlocked(ctx.planning_mode.*);
+            core_session.setWriteBlocked(ctx.planning_mode.* or ctx.review_mode.*);
 
             if (command == .prompt) {
                 try maybeLoadTriggeredSkills(ctx, user_message, &loaded_skills);
@@ -131,6 +132,7 @@ pub const ChatSession = struct {
                     _ = ctx.messages_arena.reset(.free_all);
                     ctx.messages.* = .empty;
                     ctx.planning_mode.* = false;
+                    ctx.review_mode.* = false;
                     core_session.setWriteBlocked(false);
                     const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
@@ -233,7 +235,8 @@ pub const ChatSession = struct {
                         try persistence.loadMessagesIntoContext(ctx, dir);
 
                         ctx.planning_mode.* = s.planning_mode;
-                        core_session.setWriteBlocked(ctx.planning_mode.*);
+                        ctx.review_mode.* = s.review_mode;
+                        core_session.setWriteBlocked(ctx.planning_mode.* or ctx.review_mode.*);
 
                         ctx.session.* = try core_session.Session.fromDir(
                             ctx.arena,
@@ -461,7 +464,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     var turn_in: i64 = 0;
     var turn_out: i64 = 0;
     while (!turn_complete) {
-        const active_tool_definitions = if (ctx.planning_mode.*) ctx.planning_tool_definitions.items else ctx.full_tool_definitions.items;
+        const active_tool_definitions = if (ctx.planning_mode.*) ctx.planning_tool_definitions.items else if (ctx.review_mode.*) ctx.planning_tool_definitions.items else ctx.full_tool_definitions.items;
 
         var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
         try thinking_indicator.show(ctx.stdout_writer);
@@ -824,6 +827,7 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
         .has_prd = core_session.sessionHasPlan(ctx.io, ctx.session.dir),
         .has_conversation = sessionHasContent(ctx.messages.items),
         .planning_mode = ctx.planning_mode.*,
+        .review_mode = ctx.review_mode.*,
         .first_prompt = persistence.firstUserPrompt(ctx.messages.items),
         .last_modified = now_ns,
     }) catch |err| {

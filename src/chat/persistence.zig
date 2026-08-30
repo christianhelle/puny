@@ -57,9 +57,10 @@ pub fn saveSessionMeta(ctx: *ChatLoopContext) !void {
 
     const MetaStruct = struct {
         planning_mode: bool,
+        review_mode: bool,
         first_prompt: ?[]const u8,
     };
-    const meta = MetaStruct{ .planning_mode = ctx.planning_mode.*, .first_prompt = first_prompt };
+    const meta = MetaStruct{ .planning_mode = ctx.planning_mode.*, .review_mode = ctx.review_mode.*, .first_prompt = first_prompt };
 
     const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), meta, .{ .whitespace = .indent_2 });
     defer ctx.messages_arena.allocator().free(buffer);
@@ -113,6 +114,7 @@ fn testContext(
     messages_arena: *std.heap.ArenaAllocator,
     messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
+    review_mode: *bool,
     stdout_writer: *std.Io.Writer,
 ) ChatLoopContext {
     return .{
@@ -134,6 +136,7 @@ fn testContext(
         .planning_tool_definitions = undefined,
         .messages = messages,
         .planning_mode = planning_mode,
+        .review_mode = review_mode,
         .session = session,
         .session_stats = undefined,
         .debug_log = null,
@@ -183,6 +186,7 @@ test "saveMessages and loadMessagesIntoContext round-trip" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "persist-1",
         .base = "",
@@ -190,7 +194,7 @@ test "saveMessages and loadMessagesIntoContext round-trip" {
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveMessages(&ctx);
 
     // Load into a fresh arena and message list to prove the file round-trips.
@@ -198,7 +202,7 @@ test "saveMessages and loadMessagesIntoContext round-trip" {
     defer loaded_arena.deinit();
     var loaded = std.ArrayList(openai.Message).empty;
     defer loaded.deinit(loaded_arena.allocator());
-    var load_ctx = testContext(std.testing.io, &session, &loaded_arena, &loaded, &planning_mode, &out.writer);
+    var load_ctx = testContext(std.testing.io, &session, &loaded_arena, &loaded, &planning_mode, &review_mode, &out.writer);
     try loadMessagesIntoContext(&load_ctx, dir);
 
     try std.testing.expectEqual(@as(usize, 3), loaded.items.len);
@@ -223,6 +227,7 @@ test "saveSessionMeta persists planning mode and the first prompt" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = true;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "persist-meta",
         .base = "",
@@ -230,7 +235,7 @@ test "saveSessionMeta persists planning mode and the first prompt" {
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveSessionMeta(&ctx);
 
     const meta_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "session.json" });
@@ -257,6 +262,7 @@ test "saveSessionMeta writes a null first prompt when there are no user messages
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "persist-meta-null",
         .base = "",
@@ -264,7 +270,7 @@ test "saveSessionMeta writes a null first prompt when there are no user messages
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveSessionMeta(&ctx);
 
     const meta_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "session.json" });
@@ -285,6 +291,7 @@ test "loadMessagesIntoContext reports a missing conversation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "missing",
         .base = "",
@@ -292,7 +299,7 @@ test "loadMessagesIntoContext reports a missing conversation" {
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try loadMessagesIntoContext(&ctx, "puny-test-missing-session-dir");
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Session has no saved conversation.") != null);
@@ -317,6 +324,7 @@ test "saveMessages tolerates an unwritable session directory" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "save-fail",
         .base = "",
@@ -324,7 +332,7 @@ test "saveMessages tolerates an unwritable session directory" {
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveMessages(&ctx);
 }
 
@@ -344,6 +352,7 @@ test "saveSessionMeta tolerates an unwritable session directory" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = true;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "save-meta-fail",
         .base = "",
@@ -351,7 +360,7 @@ test "saveSessionMeta tolerates an unwritable session directory" {
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveSessionMeta(&ctx);
 }
 
@@ -373,6 +382,7 @@ test "loadMessagesIntoContext propagates non-missing-file read errors" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "load-fail",
         .base = "",
@@ -380,7 +390,7 @@ test "loadMessagesIntoContext propagates non-missing-file read errors" {
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try std.testing.expectError(error.NotDir, loadMessagesIntoContext(&ctx, file_path));
     try std.testing.expectEqual(@as(usize, 0), messages.items.len);
 }
@@ -399,6 +409,7 @@ test "saveMessages round-trips an empty conversation and cleans up the temp file
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
     var session = core_session.Session{
         .id = "persist-empty",
         .base = "",
@@ -406,7 +417,7 @@ test "saveMessages round-trips an empty conversation and cleans up the temp file
         .prd_path = "",
         .html_path = "",
     };
-    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &out.writer);
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveMessages(&ctx);
 
     const msg_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "messages.json" });
@@ -421,7 +432,7 @@ test "saveMessages round-trips an empty conversation and cleans up the temp file
     defer loaded_arena.deinit();
     var loaded = std.ArrayList(openai.Message).empty;
     defer loaded.deinit(loaded_arena.allocator());
-    var load_ctx = testContext(std.testing.io, &session, &loaded_arena, &loaded, &planning_mode, &out.writer);
+    var load_ctx = testContext(std.testing.io, &session, &loaded_arena, &loaded, &planning_mode, &review_mode, &out.writer);
     try loadMessagesIntoContext(&load_ctx, dir);
 
     try std.testing.expectEqual(@as(usize, 0), loaded.items.len);

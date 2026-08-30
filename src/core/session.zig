@@ -68,6 +68,7 @@ pub const save_prd_tool = Tool{
 
 pub const SessionMeta = struct {
     planning_mode: bool,
+    review_mode: bool,
     first_prompt: ?[]const u8,
 };
 
@@ -140,10 +141,10 @@ pub fn sessionMetaPath(allocator: std.mem.Allocator, sessions_dir: []const u8, i
 
 pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !SessionMeta {
     const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| switch (err) {
-        error.FileNotFound => return SessionMeta{ .planning_mode = false, .first_prompt = null },
+        error.FileNotFound => return SessionMeta{ .planning_mode = false, .review_mode = false, .first_prompt = null },
         error.StreamTooLong => {
             std.log.warn("session meta at {s} exceeds the read limit", .{path});
-            return SessionMeta{ .planning_mode = false, .first_prompt = null };
+            return SessionMeta{ .planning_mode = false, .review_mode = false, .first_prompt = null };
         },
         else => |e| return e,
     };
@@ -151,15 +152,19 @@ pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []con
 
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, data, .{}) catch |err| {
         std.log.warn("failed to parse session meta at {s}: {s}", .{ path, @errorName(err) });
-        return SessionMeta{ .planning_mode = false, .first_prompt = null };
+        return SessionMeta{ .planning_mode = false, .review_mode = false, .first_prompt = null };
     };
     defer parsed.deinit();
 
     const obj = switch (parsed.value) {
         .object => |o| o,
-        else => return SessionMeta{ .planning_mode = false, .first_prompt = null },
+        else => return SessionMeta{ .planning_mode = false, .review_mode = false, .first_prompt = null },
     };
     const planning_mode = if (obj.get("planning_mode")) |v| switch (v) {
+        .bool => |b| b,
+        else => false,
+    } else false;
+    const review_mode = if (obj.get("review_mode")) |v| switch (v) {
         .bool => |b| b,
         else => false,
     } else false;
@@ -169,7 +174,7 @@ pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []con
         else => null,
     } else null;
 
-    return SessionMeta{ .planning_mode = planning_mode, .first_prompt = first_prompt };
+    return SessionMeta{ .planning_mode = planning_mode, .review_mode = review_mode, .first_prompt = first_prompt };
 }
 
 pub fn hasFile(io: std.Io, path: []const u8) bool {
