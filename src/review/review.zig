@@ -190,7 +190,7 @@ fn runGit(
 
     const succeeded = std.mem.startsWith(u8, output, "Exit code: 0");
     const content = commandSection(output, if (succeeded) "STDOUT:\n" else "STDERR:\n");
-    const detail = if (content.len > 0) content else output;
+    const detail = if (succeeded or content.len > 0) content else output;
     return if (succeeded)
         .{ .ok = try allocator.dupe(u8, std.mem.trim(u8, detail, &std.ascii.whitespace)) }
     else
@@ -343,6 +343,31 @@ pub fn finish(
     );
     active_review.?.saved = saved;
     return saved;
+}
+
+pub fn writeNoChanges(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    scope: Scope,
+) !SavedReport {
+    return writeReport(allocator, io, scope, .{
+        .analysis_markdown =
+        \\## Change Summary
+        \\The branch has no committed file changes relative to `origin/main`.
+        \\
+        \\## Quality and Regression Assessment
+        \\The branch introduces no assessable code-quality change or regression.
+        \\
+        \\## Validation Performed
+        \\Git fetch, branch resolution, merge-base calculation, and committed diff inspection completed.
+        \\
+        \\## Findings
+        \\There is nothing to merge.
+        ,
+        .conclusion = "The branch is not merge worthy because it contains no committed changes.",
+        .evidence_complete = true,
+        .merge_worthy = false,
+    });
 }
 
 fn writeFallbackReport(
@@ -575,5 +600,27 @@ test "finish writes an operational failure report when the model does not save" 
     try std.testing.expectEqual(@as(u8, 2), saved.outcome.exitCode());
     const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, saved.path, arena, .limited(64 * 1024));
     try std.testing.expect(std.mem.indexOf(u8, content, "The model returned without saving a report.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
+}
+
+test "writeNoChanges rejects a branch with no committed changes" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    try runFixtureGit(fixture.worktree, &.{ "checkout", "-b", "feature/empty" });
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const prepared = try prepareAt(arena, std.testing.io, fixture.worktree);
+    const scope = switch (prepared) {
+        .no_changes => |value| value,
+        else => return error.ExpectedNoChangesReview,
+    };
+    const saved = try writeNoChanges(arena, std.testing.io, scope);
+
+    try std.testing.expectEqual(Outcome.rejected, saved.outcome);
+    try std.testing.expectEqual(@as(u8, 1), saved.outcome.exitCode());
+    const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, saved.path, arena, .limited(64 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, content, "no committed changes") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
 }
