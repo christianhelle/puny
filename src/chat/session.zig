@@ -25,6 +25,7 @@ const instructions = @import("../agents/instructions.zig");
 const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
 const tools = @import("../tools/root.zig");
+const branch_review = @import("../review/review.zig");
 const help = @import("../tui/help.zig");
 
 pub const ReconfigurePrompt = session_commands.ReconfigurePrompt;
@@ -392,10 +393,71 @@ pub const ChatSession = struct {
                         },
                     }
                 },
+                .begin_review => {
+                    const prepared = try branch_review.prepare(ctx.messages_arena.allocator(), ctx.io);
+                    switch (prepared) {
+                        .invalid => |failure| {
+                            try ctx.stdout_writer.print("\nReview could not start: {s}\n", .{failure.message});
+                            try ctx.stdout_writer.flush();
+                            continue;
+                        },
+                        .operational_failure => |failure| {
+                            ctx.mode.* = .review;
+                            core_session.setWriteBlocked(true);
+                            const saved = try branch_review.writeOperationalFailure(ctx.messages_arena.allocator(), ctx.io, failure);
+                            ctx.review_outcome.* = saved.outcome;
+                            try printReviewResult(ctx.stdout_writer, saved);
+                            try persistence.saveSessionMeta(ctx);
+                            upsertCurrentSession(ctx);
+                            continue;
+                        },
+                        .no_changes => |scope| {
+                            ctx.mode.* = .review;
+                            core_session.setWriteBlocked(true);
+                            const saved = try branch_review.writeNoChanges(ctx.messages_arena.allocator(), ctx.io, scope);
+                            ctx.review_outcome.* = saved.outcome;
+                            try printReviewResult(ctx.stdout_writer, saved);
+                            try persistence.saveSessionMeta(ctx);
+                            upsertCurrentSession(ctx);
+                            continue;
+                        },
+                        .ready => |scope| {
+                            ctx.mode.* = .review;
+                            core_session.setWriteBlocked(true);
+                            branch_review.begin(scope);
+                            const review_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "review", prompts.review);
+                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = review_prompt });
+                            const review_context = try branch_review.buildPromptContext(ctx.messages_arena.allocator(), scope);
+                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = review_context });
+                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = branch_review.request_prompt });
+                            try ctx.stdout_writer.print("\n{s}Reviewing {s} against {s}.{s}\n", .{ ansi.bright, scope.branch, scope.base_ref, ansi.reset });
+                            try ctx.stdout_writer.flush();
+                        },
+                    }
+                },
                 .run_chat_turn => {},
             }
 
-            const turn_result = try runChatTurn(ctx);
+            const turn_result = runChatTurn(ctx) catch |err| {
+                if (!branch_review.isActive()) return err;
+                const reason = try std.fmt.allocPrint(
+                    ctx.messages_arena.allocator(),
+                    "Review execution failed: {s}",
+                    .{@errorName(err)},
+                );
+                const saved = try branch_review.finish(ctx.messages_arena.allocator(), ctx.io, reason);
+                branch_review.reset();
+                ctx.review_outcome.* = saved.outcome;
+                try printReviewResult(ctx.stdout_writer, saved);
+                try persistence.saveMessages(ctx);
+                try persistence.saveSessionMeta(ctx);
+                upsertCurrentSession(ctx);
+                if (ctx.parsed.oneshot) {
+                    finalizeSession(ctx);
+                    return;
+                }
+                continue;
+            };
             if (turn_result == .exit) return;
         }
     }
@@ -461,7 +523,11 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     var turn_in: i64 = 0;
     var turn_out: i64 = 0;
     while (!turn_complete) {
-        const active_tool_definitions = if (ctx.mode.* == .planning) ctx.planning_tool_definitions.items else ctx.full_tool_definitions.items;
+        const active_tool_definitions = switch (ctx.mode.*) {
+            .build => ctx.full_tool_definitions.items,
+            .planning => ctx.planning_tool_definitions.items,
+            .review => ctx.review_tool_definitions.items,
+        };
 
         var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
         try thinking_indicator.show(ctx.stdout_writer);
@@ -515,6 +581,17 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
         try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens());
     }
 
+    if (branch_review.isActive()) {
+        const saved = try branch_review.finish(
+            ctx.messages_arena.allocator(),
+            ctx.io,
+            "The model returned without saving valid review results.",
+        );
+        branch_review.reset();
+        ctx.review_outcome.* = saved.outcome;
+        try printReviewResult(ctx.stdout_writer, saved);
+    }
+
     try persistence.saveMessages(ctx);
     try persistence.saveSessionMeta(ctx);
     upsertCurrentSession(ctx);
@@ -526,6 +603,15 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     }
 
     return .continue_loop;
+}
+
+fn printReviewResult(stdout_writer: *std.Io.Writer, saved: branch_review.SavedReport) !void {
+    const verdict = if (saved.outcome == .merge_worthy) "YES" else "NO";
+    try stdout_writer.print(
+        "\nReview report: {s}\nMERGE WORTHY: {s}\n",
+        .{ saved.path, verdict },
+    );
+    try stdout_writer.flush();
 }
 
 fn printExit(

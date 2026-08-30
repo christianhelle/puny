@@ -4,6 +4,7 @@ const atomic_write = @import("../sessions/atomic_write.zig");
 
 pub const base_ref = "origin/main";
 pub const report_filename = "review-results.md";
+pub const request_prompt = "Perform the branch review now and save the final review results.";
 
 pub const Scope = struct {
     repo_root: []const u8,
@@ -358,6 +359,10 @@ pub fn begin(scope: Scope) void {
 
 pub fn reset() void {
     active_review = null;
+}
+
+pub fn isActive() bool {
+    return active_review != null;
 }
 
 pub fn saveActiveReport(
