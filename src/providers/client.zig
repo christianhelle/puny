@@ -60,6 +60,11 @@ pub const RawResponse = struct {
     }
 };
 
+pub const HttpFailure = struct {
+    status: std.http.Status,
+    body: []u8,
+};
+
 pub const ParseErrorResponse = struct {
     raw: RawResponse,
     error_name: []const u8,
@@ -105,6 +110,7 @@ pub const Client = struct {
     project: ?[]const u8 = null,
     default_headers: []const std.http.Header = &.{},
     http_observer: ?HttpObserver = null,
+    last_http_failure: ?HttpFailure = null,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8) Client {
         return .{
@@ -117,6 +123,7 @@ pub const Client = struct {
     }
 
     pub fn deinit(self: *Client) void {
+        self.clearLastHttpFailure();
         self.http.deinit();
     }
 
@@ -128,6 +135,86 @@ pub const Client = struct {
         if (config.base_url) |url| self.withBaseUrl(url);
         if (config.api_key) |key| self.api_key = key;
         if (config.http_observer) |obs| self.http_observer = obs;
+    }
+
+    pub fn clearLastHttpFailure(self: *Client) void {
+        if (self.last_http_failure) |failure| self.allocator.free(failure.body);
+        self.last_http_failure = null;
+    }
+
+    pub fn lastHttpFailure(self: *const Client) ?*const HttpFailure {
+        return if (self.last_http_failure) |*failure| failure else null;
+    }
+};
+
+pub const HttpFailureCapture = struct {
+    allocator: std.mem.Allocator,
+    downstream: ?HttpObserver,
+    failure: ?HttpFailure = null,
+    capture_error: ?anyerror = null,
+
+    pub fn init(client: *Client) HttpFailureCapture {
+        return .{
+            .allocator = client.allocator,
+            .downstream = client.http_observer,
+        };
+    }
+
+    pub fn deinit(self: *HttpFailureCapture) void {
+        if (self.failure) |failure| self.allocator.free(failure.body);
+    }
+
+    pub fn observer(self: *HttpFailureCapture) HttpObserver {
+        return .{
+            .ctx = self,
+            .onRequest = onRequest,
+            .onResponse = onResponse,
+            .onError = onError,
+            .on_chunk = onChunk,
+        };
+    }
+
+    pub fn commit(self: *HttpFailureCapture, client: *Client) !void {
+        if (self.capture_error) |err| return err;
+        client.clearLastHttpFailure();
+        client.last_http_failure = self.failure;
+        self.failure = null;
+    }
+
+    fn onRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+        const self: *HttpFailureCapture = @ptrCast(@alignCast(ctx.?));
+        if (self.downstream) |downstream| {
+            if (downstream.onRequest) |callback| callback(downstream.ctx, method, url, headers, body);
+        }
+    }
+
+    fn onResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, status: std.http.Status, headers: []const std.http.Header, body: []const u8, duration_ns: u64) void {
+        const self: *HttpFailureCapture = @ptrCast(@alignCast(ctx.?));
+        if (status.class() != .success and self.capture_error == null) {
+            const owned_body = self.allocator.dupe(u8, body) catch |err| {
+                self.capture_error = err;
+                return;
+            };
+            if (self.failure) |failure| self.allocator.free(failure.body);
+            self.failure = .{ .status = status, .body = owned_body };
+        }
+        if (self.downstream) |downstream| {
+            if (downstream.onResponse) |callback| callback(downstream.ctx, method, url, status, headers, body, duration_ns);
+        }
+    }
+
+    fn onError(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, err_name: []const u8) void {
+        const self: *HttpFailureCapture = @ptrCast(@alignCast(ctx.?));
+        if (self.downstream) |downstream| {
+            if (downstream.onError) |callback| callback(downstream.ctx, method, url, err_name);
+        }
+    }
+
+    fn onChunk(ctx: ?*anyopaque, data: []const u8) void {
+        const self: *HttpFailureCapture = @ptrCast(@alignCast(ctx.?));
+        if (self.downstream) |downstream| {
+            if (downstream.on_chunk) |callback| callback(downstream.ctx, data);
+        }
     }
 };
 

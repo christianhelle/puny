@@ -377,9 +377,20 @@ fn streamJsonWithExtraHeaders(client: *Client, path: []const u8, requestBody: an
         return err;
     };
     const elapsed_ns = @as(u64, @intCast(start.untilNow(client.io, .awake).nanoseconds));
+    var transfer_buffer: [8 * 1024]u8 = undefined;
+    const response_reader = response.reader(&transfer_buffer);
+
     if (response.head.status.class() != .success) {
+        var response_body: std.Io.Writer.Allocating = .init(allocator);
+        defer response_body.deinit();
+        _ = response_reader.streamRemaining(&response_body.writer) catch |err| {
+            if (client.http_observer) |obs| {
+                if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+            }
+            return response.bodyErr() orelse err;
+        };
         if (client.http_observer) |obs| {
-            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
+            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, response_body.written(), elapsed_ns);
         }
         return error.ResponseError;
     }
@@ -388,8 +399,6 @@ fn streamJsonWithExtraHeaders(client: *Client, path: []const u8, requestBody: an
         if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
     }
 
-    var transfer_buffer: [8 * 1024]u8 = undefined;
-    const response_reader = response.reader(&transfer_buffer);
     if (client.cancel_check) |pred| {
         var done = std.atomic.Value(bool).init(false);
         var watcher_ctx = Client.CancelWatcher{ .connection = req.connection, .io = client.io, .pred = pred, .done = &done };
