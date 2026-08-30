@@ -16,6 +16,7 @@ and stays out of your way.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Session management**: each run, `/new`, or `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
+- **Branch review mode**: review committed branch changes against the latest `origin/main` and produce an automation-ready merge-worthiness report.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
 - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
@@ -268,6 +269,37 @@ Run a single prompt and exit. Useful for scripts or quick tasks:
 ```bash
 puny --prompt "List all source files" --oneshot
 ```
+
+### Review a branch
+
+Run one autonomous review of the current branch and exit:
+
+```bash
+puny --review
+```
+
+Puny fetches `origin/main`, fixes the review scope to
+`merge-base(origin/main, HEAD)..HEAD`, reviews committed changes, and writes
+`review-results.md` in the repository root. Staged, modified, and untracked
+work is reported separately and does not affect the branch verdict. Existing
+build, test, and lint checks run in the current worktree, so their generated
+artifacts are allowed, but review mode does not expose generic file writing.
+
+The report always includes review scope, change summary, quality and regression
+assessment, validation performed, findings, and a binary conclusion:
+`MERGE WORTHY: YES` or `MERGE WORTHY: NO`. Incomplete evidence forces `NO`.
+A branch with no committed changes also receives `NO`.
+
+| Exit code | Meaning |
+| --------- | ------- |
+| `0` | Review completed and the branch is merge worthy |
+| `1` | Review completed and the branch is not merge worthy |
+| `2` | Retryable operational failure; a `NO` fallback report is written when possible |
+
+Review mode rejects `main`, detached HEAD, and directories outside a Git
+repository. Invoking it on `main` exits with code `2` without writing a report.
+This release performs one review pass; automatic fixes, repeated review loops,
+commits, and merges are not included yet.
 
 
 ### Prompt from a file or URL
@@ -548,6 +580,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
 | `--prompt-file <file-or-url>` | Read first prompt from a file or URL (10 MiB limit) |
 | `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                              |
+| `--review`               | Review the current branch against the latest `origin/main`, write `review-results.md`, and exit       |
 | `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
 | `--reconfigure`         | Re-run first-run setup and update config                                                  |
 | `--show-thinking`       | Show reasoning/thinking output from the model                                             |
@@ -584,6 +617,7 @@ While in a chat session:
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`
 - `/build [task]` — switch to build mode (optionally with a task description)
+- `/review` — review committed changes against the latest `origin/main`; remain in read-only review mode afterward
 - `/model [id]` — switch to another model; shows the model picker if no ID is given
 - `/provider [name]` — switch to another provider without reconfiguring everything; shows the provider picker if no name is given, then opens the model picker for the new provider
 - `/thinking [level]` — change the reasoning effort of the current model; shows the effort picker if no level is given (valid levels: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`)
@@ -619,7 +653,7 @@ use `$XDG_CONFIG_HOME/puny` when set on Linux/macOS, and on Windows fall back to
 | `plan.md`       | PRD markdown produced by the model during `/plan` mode          |
 | `plan.html`     | HTML version of the PRD                                         |
 | `messages.json` | Full conversation history, saved automatically after every turn |
-| `session.json`  | Session metadata (planning mode, first user prompt)             |
+| `session.json`  | Session metadata (agent mode, first user prompt)                 |
 
 #### Conversation persistence
 
@@ -649,7 +683,7 @@ You can resume a previous session in several ways:
 - **In-session restore**: Calling `/resume` replaces the current conversation
   with the saved one, keeping the same provider and model configuration.
 
-When a session is restored, the system prompt, skills blocks, and planning mode
+When a session is restored, the system prompt, skills blocks, and agent mode
 are restored exactly as they were saved — the conversation picks up where it
 left off.
 
@@ -661,6 +695,13 @@ write the final PRD. When the user confirms readiness, the model calls
 `save_prd` with markdown and HTML content, which writes both `plan.md` and
 `plan.html` to the session folder. Planning mode state is persisted in
 `session.json` and restored when the session is resumed.
+
+#### Review mode
+
+Run `/review` inside a chat to perform the same branch review as `--review`
+without exiting Puny. After the report is written, the session remains in
+read-only review mode for follow-up questions. Use `/build` to allow source
+changes again or `/plan` to enter planning mode.
 
 ## Development / testing
 
