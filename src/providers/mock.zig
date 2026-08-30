@@ -46,6 +46,9 @@ pub const MockKeyword = enum {
     table,
     /// Generate complex markdown with headings, code blocks, lists, blockquotes, etc.
     markdown,
+    /// Stream a large amount of reasoning output before the final content, to
+    /// verify --show-thinking rendering.
+    reasoning,
 };
 
 pub const MockClient = struct {
@@ -189,6 +192,11 @@ pub const MockClient = struct {
         if (isKeyword(last_content, .fast)) speed = .instant;
         if (isKeyword(last_content, .slow)) speed = .slow;
 
+        // Check for reasoning mode
+        if (isKeyword(last_content, .reasoning)) {
+            return respondWithReasoning(callback, last_content, speed, self.io);
+        }
+
         // Check for echo mode
         if (isKeyword(last_content, .echo)) {
             return respondWithEcho(callback, last_content, speed, self.io);
@@ -286,6 +294,7 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .shell => "shell",
         .table => "table",
         .markdown => "markdown",
+        .reasoning => "reasoning",
     };
 }
 
@@ -319,6 +328,42 @@ fn respondWithEcho(callback: openai.StreamCallback, user_message: []const u8, sp
 }
 
 fn respondWithEmpty(callback: openai.StreamCallback) !void {
+    try callback.emit(.{ .finish = "stop" });
+}
+
+fn respondWithReasoning(callback: openai.StreamCallback, user_message: []const u8, speed: MockSpeed, io: std.Io) !void {
+    // A verbose, multi-step internal monologue, streamed before the final
+    // answer, so --show-thinking has substantial reasoning output to render.
+    const reasoning_chunks = [_][]const u8{
+        "Let me think through this step by step.\n",
+        "First, I need to understand what the user is asking for.\n",
+        "The request seems to be about testing the reasoning display.\n",
+        "I should consider a few different approaches before answering.\n",
+        "One option is to give a short, direct answer.\n",
+        "Another option is to explain my reasoning in more detail first.\n",
+        "I'll weigh the tradeoffs of each approach.\n",
+        "A more detailed answer is probably more helpful here.\n",
+        "Let me also double-check that I'm not missing any context.\n",
+        "I don't see any missing context, so I can proceed.\n",
+        "Now let me draft the final response.\n",
+        "I think I have enough reasoning to produce a good answer now.\n",
+    };
+
+    for (reasoning_chunks) |chunk| {
+        try callback.emit(.{ .reasoning = chunk });
+        try emitDelay(speed, io);
+    }
+
+    const content_chunks = [_][]const u8{
+        "This is a **mock response**.\n\n",
+        "You said: ",
+        user_message,
+        "\n\nThe reasoning above was mock output for verifying --show-thinking rendering.",
+    };
+    for (content_chunks) |chunk| {
+        try callback.emit(.{ .content = chunk });
+        try emitDelay(speed, io);
+    }
     try callback.emit(.{ .finish = "stop" });
 }
 
