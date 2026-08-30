@@ -8,6 +8,7 @@ const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const core_sess = @import("core/session.zig");
+const AgentMode = @import("core/mode.zig").AgentMode;
 const git_root = @import("core/git_root.zig");
 const sessions = @import("sessions/sessions.zig");
 const prompt_history = @import("prompts/history.zig");
@@ -180,7 +181,7 @@ pub fn main(init: std.process.Init) !void {
 
     var session_restored = false;
     var restore_incomplete = false;
-    var planning_mode = false;
+    var agent_mode: AgentMode = .build;
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
@@ -245,7 +246,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (restore_target) |s| {
         const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
-        const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &planning_mode, &messages, stdout_writer);
+        const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &agent_mode, &messages, stdout_writer);
         const now = std.Io.Clock.Timestamp.now(init.io, .awake);
         const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
         session_restored = restore_result.restored;
@@ -323,7 +324,7 @@ pub fn main(init: std.process.Init) !void {
         .full_tool_definitions = &full_tool_definitions,
         .planning_tool_definitions = &planning_tool_definitions,
         .messages = &messages,
-        .planning_mode = &planning_mode,
+        .mode = &agent_mode,
         .restore_incomplete = restore_incomplete,
         .session = &current_session,
         .session_stats = &session_stats,
@@ -388,7 +389,7 @@ fn loadRestoredSession(
     io: std.Io,
     base_dir: []const u8,
     s: sessions.SessionInfo,
-    planning_mode: *bool,
+    agent_mode: *AgentMode,
     messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
 ) !RestoreResult {
@@ -425,7 +426,7 @@ fn loadRestoredSession(
         try stdout_writer.flush();
     }
 
-    planning_mode.* = s.planning_mode;
+    agent_mode.* = s.mode;
     return .{ .restored = true, .incomplete = restore_incomplete };
 }
 
