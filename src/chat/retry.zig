@@ -184,7 +184,7 @@ fn sanitizeMessage(allocator: std.mem.Allocator, message: []const u8) !?[]u8 {
         }
 
         const required = sequence_len + @intFromBool(pending_space);
-        if (output.items.len + required > max_len - 3) {
+        if (output.items.len + required > max_len) {
             truncated = true;
             break;
         }
@@ -197,6 +197,13 @@ fn sanitizeMessage(allocator: std.mem.Allocator, message: []const u8) !?[]u8 {
     }
 
     if (truncated) {
+        // Make room for the ellipsis by dropping whole trailing UTF-8
+        // sequences (never splitting a multi-byte codepoint).
+        while (output.items.len + 3 > max_len) {
+            var start = output.items.len - 1;
+            while (start > 0 and (output.items[start] & 0xc0) == 0x80) : (start -= 1) {}
+            output.shrinkRetainingCapacity(start);
+        }
         try output.appendSlice(allocator, "...");
     }
     if (output.items.len == 0) return null;
@@ -263,6 +270,37 @@ test "formatHttpFailure drops invalid Unicode sequences" {
 
     try std.testing.expect(std.unicode.utf8ValidateSlice(formatted));
     try std.testing.expectEqualStrings("HTTP 502 Bad Gateway: bad: ok", formatted);
+}
+
+test "formatHttpFailure does not truncate a message that fits without ellipsis" {
+    var body: [510]u8 = undefined;
+    @memset(&body, 'a');
+    const failure = http_client.HttpFailure{
+        .status = .bad_gateway,
+        .body = &body,
+    };
+
+    const formatted = try formatHttpFailure(std.testing.allocator, &failure);
+    defer std.testing.allocator.free(formatted);
+
+    try std.testing.expect(!std.mem.endsWith(u8, formatted, "..."));
+    try std.testing.expectEqual(@as(usize, 510), formatted.len - "HTTP 502 Bad Gateway: ".len);
+}
+
+test "formatHttpFailure truncates an oversized message within the 512-byte limit" {
+    var body: [600]u8 = undefined;
+    @memset(&body, 'a');
+    const failure = http_client.HttpFailure{
+        .status = .bad_gateway,
+        .body = &body,
+    };
+
+    const formatted = try formatHttpFailure(std.testing.allocator, &failure);
+    defer std.testing.allocator.free(formatted);
+
+    const message_len = formatted.len - "HTTP 502 Bad Gateway: ".len;
+    try std.testing.expect(message_len <= 512);
+    try std.testing.expect(std.mem.endsWith(u8, formatted, "..."));
 }
 
 test "formatHttpFailure drops Unicode terminal control characters" {
