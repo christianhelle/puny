@@ -69,19 +69,29 @@ pub const Provider = union(enum) {
 
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
-            .lmstudio => |*c| chatStreamingOpenAi(c, request, callback),
+            .lmstudio => |*c| chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
             .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
-                anthropic.chatStreaming(c, request, callback)
+                chatStreamingCaptured(c, request, callback, anthropic.chatStreaming)
             else if (google.isGoogleModel(request.model))
-                google.chatStreamingGoogle(c, request, callback)
+                chatStreamingCaptured(c, request, callback, google.chatStreamingGoogle)
             else
-                chatStreamingOpenAi(c, request, callback),
+                chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
             .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
-                anthropic.chatStreaming(c, request, callback)
+                chatStreamingCaptured(c, request, callback, anthropic.chatStreaming)
             else
-                chatStreamingOpenAi(c, request, callback),
-            .copilot => |*c| copilot.chatStreaming(c, request, callback),
+                chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
+            .copilot => |*c| chatStreamingCopilotCaptured(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
+        };
+    }
+
+    pub fn lastHttpFailure(self: *const Provider) ?*const client.HttpFailure {
+        return switch (self.*) {
+            .lmstudio => |*c| c.lastHttpFailure(),
+            .opencode => |*c| c.lastHttpFailure(),
+            .opencode_go => |*c| c.lastHttpFailure(),
+            .copilot => |*c| c.inner.lastHttpFailure(),
+            .mock => null,
         };
     }
 
@@ -101,6 +111,43 @@ pub const Provider = union(enum) {
         }
     }
 };
+
+fn chatStreamingCaptured(
+    c: *client.Client,
+    request: openai.ChatRequest,
+    callback: openai.StreamCallback,
+    comptime stream: fn (*client.Client, openai.ChatRequest, openai.StreamCallback) anyerror!void,
+) !void {
+    c.clearLastHttpFailure();
+    var capture = client.HttpFailureCapture.init(c);
+    defer capture.deinit();
+
+    const original_observer = c.http_observer;
+    c.http_observer = capture.observer();
+    defer c.http_observer = original_observer;
+
+    stream(c, request, callback) catch |err| {
+        try capture.commit(c);
+        return err;
+    };
+    try capture.commit(c);
+}
+
+fn chatStreamingCopilotCaptured(c: *copilot.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    c.inner.clearLastHttpFailure();
+    var capture = client.HttpFailureCapture.init(&c.inner);
+    defer capture.deinit();
+
+    const original_observer = c.inner.http_observer;
+    c.inner.http_observer = capture.observer();
+    defer c.inner.http_observer = original_observer;
+
+    copilot.chatStreaming(c, request, callback) catch |err| {
+        try capture.commit(&c.inner);
+        return err;
+    };
+    try capture.commit(&c.inner);
+}
 
 /// Streams through the generated OpenAI client, mapping the hand-written
 /// client's base URL (which omits "/v1") onto the generated client. This
@@ -449,6 +496,33 @@ test "Provider.chatStreaming dispatches to the lmstudio provider" {
         .content => |content| try std.testing.expectEqualStrings("Hi from LM", content),
         else => return error.ExpectedContentEvent,
     }
+}
+
+test "Provider.chatStreaming preserves OpenAI-compatible HTTP error details" {
+    const body = "{\"error\":{\"message\":\"model is temporarily unavailable\"}}";
+    const ctx = try startProviderTestServer(.internal_server_error, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "test-key") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "muse-spark-1.2-contributor",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, rec.callback()));
+
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(std.http.Status.internal_server_error, failure.status);
+    try std.testing.expectEqualStrings(body, failure.body);
 }
 
 test "Provider.chatStreaming dispatches to the google transport for gemini models" {
