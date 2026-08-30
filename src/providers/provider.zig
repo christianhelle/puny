@@ -525,6 +525,33 @@ test "Provider.chatStreaming preserves OpenAI-compatible HTTP error details" {
     try std.testing.expectEqualStrings(body, failure.body);
 }
 
+test "Provider.chatStreaming preserves Anthropic HTTP error details" {
+    const body = "{\"type\":\"error\",\"error\":{\"message\":\"upstream unavailable\"}}";
+    const ctx = try startProviderTestServer(.bad_gateway, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "test-key") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "qwen3.7-max",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, rec.callback()));
+
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(std.http.Status.bad_gateway, failure.status);
+    try std.testing.expectEqualStrings(body, failure.body);
+}
+
 test "Provider.chatStreaming dispatches to the google transport for gemini models" {
     const body =
         "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello Gemini\"}]}}]}\n\n" ++

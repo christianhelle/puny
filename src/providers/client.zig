@@ -191,12 +191,12 @@ pub const HttpFailureCapture = struct {
     fn onResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, status: std.http.Status, headers: []const std.http.Header, body: []const u8, duration_ns: u64) void {
         const self: *HttpFailureCapture = @ptrCast(@alignCast(ctx.?));
         if (status.class() != .success and self.capture_error == null) {
-            const owned_body = self.allocator.dupe(u8, body) catch |err| {
+            if (self.allocator.dupe(u8, body)) |owned_body| {
+                if (self.failure) |failure| self.allocator.free(failure.body);
+                self.failure = .{ .status = status, .body = owned_body };
+            } else |err| {
                 self.capture_error = err;
-                return;
-            };
-            if (self.failure) |failure| self.allocator.free(failure.body);
-            self.failure = .{ .status = status, .body = owned_body };
+            }
         }
         if (self.downstream) |downstream| {
             if (downstream.onResponse) |callback| callback(downstream.ctx, method, url, status, headers, body, duration_ns);
