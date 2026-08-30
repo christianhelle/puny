@@ -2,6 +2,7 @@
 //! (`zig build test-regression`) so that `zig build test` stays fast.
 const std = @import("std");
 const chat_retry = @import("chat/retry.zig");
+const http_client = @import("providers/client.zig");
 const openai = @import("providers/openai.zig");
 
 const TestChatProvider = struct {
@@ -69,7 +70,7 @@ test "runChatWithRetry resets callback state between attempts" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    const outcome = try chat_retry.runChatWithRetry(&provider, request, state.callback(), std.testing.io, random, &output.writer);
+    const outcome = try chat_retry.runChatWithRetry(&provider, std.testing.allocator, request, state.callback(), std.testing.io, random, &output.writer);
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome.success, outcome);
     try std.testing.expectEqual(@as(usize, 2), provider.attempts);
     try std.testing.expectEqual(@as(usize, 1), state.resets);
@@ -100,7 +101,7 @@ test "runChatWithRetry silently retries transient failures" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    const outcome = try chat_retry.runChatWithRetry(&prov, request, callback, std.testing.io, random, &output.writer);
+    const outcome = try chat_retry.runChatWithRetry(&prov, std.testing.allocator, request, callback, std.testing.io, random, &output.writer);
     try std.testing.expectEqual(@as(usize, 3), prov.calls);
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome.success, outcome);
     try std.testing.expectEqualStrings("", output.written());
@@ -138,7 +139,7 @@ test "runChatWithRetry returns cancelled without retrying" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    const outcome = try chat_retry.runChatWithRetry(&prov, request, callback, std.testing.io, random, &output.writer);
+    const outcome = try chat_retry.runChatWithRetry(&prov, std.testing.allocator, request, callback, std.testing.io, random, &output.writer);
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome.cancelled, outcome);
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
 }
@@ -167,10 +168,62 @@ test "runChatWithRetry reports non-transient failures immediately" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    const outcome = try chat_retry.runChatWithRetry(&prov, request, callback, std.testing.io, random, &output.writer);
+    const outcome = try chat_retry.runChatWithRetry(&prov, std.testing.allocator, request, callback, std.testing.io, random, &output.writer);
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome{ .failed = error.OutOfMemory }, outcome);
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Chat failed") != null);
+}
+
+test "runChatWithRetry reports HTTP status and API message" {
+    const FailingProvider = struct {
+        failure: http_client.HttpFailure = .{
+            .status = .internal_server_error,
+            .body = @constCast("{\"error\":{\"message\":\"model is temporarily unavailable\"}}"),
+        },
+
+        pub fn chatStreaming(_: *@This(), _: openai.ChatRequest, _: openai.StreamCallback) !void {
+            return error.ResponseError;
+        }
+
+        pub fn lastHttpFailure(self: *const @This()) ?*const http_client.HttpFailure {
+            return &self.failure;
+        }
+    };
+    var prov = FailingProvider{};
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var callback_context: u8 = 0;
+    const callback = openai.StreamCallback{
+        .context = &callback_context,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(_: *anyopaque, _: openai.StreamEvent) anyerror!void {}
+            }.event,
+        },
+    };
+    const request = openai.ChatRequest{
+        .model = "test",
+        .messages = &.{},
+        .tools = &.{},
+    };
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+
+    const outcome = try chat_retry.runChatWithRetry(
+        &prov,
+        std.testing.allocator,
+        request,
+        callback,
+        std.testing.io,
+        random_source.interface(),
+        &output.writer,
+    );
+
+    try std.testing.expectEqual(chat_retry.ChatRetryOutcome{ .failed = error.ResponseError }, outcome);
+    try std.testing.expectEqualStrings(
+        "\nChat failed: HTTP 500 Internal Server Error: model is temporarily unavailable\n",
+        output.written(),
+    );
 }
 
 test "runChatWithRetry gives up after max retries" {
@@ -197,7 +250,7 @@ test "runChatWithRetry gives up after max retries" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    const outcome = try chat_retry.runChatWithRetry(&prov, request, callback, std.testing.io, random, &output.writer);
+    const outcome = try chat_retry.runChatWithRetry(&prov, std.testing.allocator, request, callback, std.testing.io, random, &output.writer);
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome{ .failed = error.ConnectionRefused }, outcome);
     try std.testing.expectEqual(@as(usize, 5), prov.calls);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Chat failed after 5 retries") != null);
