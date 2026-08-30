@@ -370,6 +370,28 @@ pub fn writeNoChanges(
     });
 }
 
+pub fn writeOperationalFailure(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    failure: Failure,
+) !SavedReport {
+    const repo_root = failure.repo_root orelse return error.ReviewRepositoryUnavailable;
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = failure.branch orelse "unavailable",
+        .base_ref = base_ref,
+        .base_sha = "unavailable",
+        .head_sha = "unavailable",
+        .merge_base_sha = "unavailable",
+        .commit_count = 0,
+        .changed_files = "Unavailable because review preflight failed.",
+        .diff_stat = "Unavailable because review preflight failed.",
+        .dirty_worktree = "Unavailable because review preflight failed.",
+    };
+    const reason = try std.fmt.allocPrint(allocator, "Operational failure: {s}", .{failure.message});
+    return writeFallbackReport(allocator, io, scope, reason);
+}
+
 fn writeFallbackReport(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -622,5 +644,28 @@ test "writeNoChanges rejects a branch with no committed changes" {
     try std.testing.expectEqual(@as(u8, 1), saved.outcome.exitCode());
     const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, saved.path, arena, .limited(64 * 1024));
     try std.testing.expect(std.mem.indexOf(u8, content, "no committed changes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
+}
+
+test "writeOperationalFailure records a retryable fetch failure" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    try fixture.addFeatureCommit();
+    try runFixtureGit(fixture.worktree, &.{ "remote", "remove", "origin" });
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const prepared = try prepareAt(arena, std.testing.io, fixture.worktree);
+    const failure = switch (prepared) {
+        .operational_failure => |value| value,
+        else => return error.ExpectedOperationalFailure,
+    };
+    const saved = try writeOperationalFailure(arena, std.testing.io, failure);
+
+    try std.testing.expectEqual(Outcome.operational_failure, saved.outcome);
+    try std.testing.expectEqual(@as(u8, 2), saved.outcome.exitCode());
+    const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, saved.path, arena, .limited(64 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, content, "Operational failure") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
 }
