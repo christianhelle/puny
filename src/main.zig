@@ -25,6 +25,7 @@ const welcome = @import("tui/welcome.zig");
 const ansi = @import("tui/ansi.zig");
 const vt = @import("tui/vt.zig");
 const update_check = @import("update_check.zig");
+const review = @import("review/review.zig");
 
 comptime {
     // Keep the module analyzed so its tests run under `zig build test`.
@@ -309,6 +310,23 @@ pub fn main(init: std.process.Init) !void {
         try messages.append(messages_arena, .{ .system = review_prompt });
         core_sess.setReviewPath(current_session.review_path);
         core_sess.setWriteBlocked(true);
+
+        // Capture git scope and inject as context for the model
+        const scope = review.captureScope(messages_arena, init.io) catch |err| {
+            const reason = switch (err) {
+                error.NotInGitRepo => "not inside a git repository",
+                error.OnMainBranch => "cannot review the main branch",
+                error.DetachedHead => "HEAD is detached",
+                error.NoCommitsInScope => "no commits found between HEAD and origin/main",
+                error.FetchFailed => "failed to fetch or resolve git state",
+                error.OutOfMemory => "out of memory",
+            };
+            const fallback = review.fallbackReport(messages_arena, reason) catch "Review failed (fallback generation error)";
+            try messages.append(messages_arena, .{ .user = fallback });
+            return;
+        };
+        const ctx_str = try review.buildContextString(messages_arena, scope);
+        try messages.append(messages_arena, .{ .user = ctx_str });
     }
 
     var session_stats = stats.SessionStats.init(arena, init.io);

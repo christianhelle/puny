@@ -184,7 +184,12 @@ pub fn captureScope(allocator: std.mem.Allocator, io: std.Io) ReviewError!Review
     // 6. Count commits in scope (merge-base..HEAD)
     const count_raw = try runGit(allocator, io, &.{ "git", "rev-list", "--count", "merge-base..HEAD" });
     defer allocator.free(count_raw);
-    const commit_count = std.fmt.parseInt(u32, std.mem.trimRight(u8, count_raw, &.{ '\n', '\r', ' ' }), 10) catch 0;
+    // Trim trailing whitespace/newlines manually (std.mem.trimRight not available in 0.16)
+    var count_end = count_raw.len;
+    while (count_end > 0 and (count_raw[count_end - 1] == '\n' or count_raw[count_end - 1] == '\r' or count_raw[count_end - 1] == ' ')) {
+        count_end -= 1;
+    }
+    const commit_count = std.fmt.parseInt(u32, count_raw[0..count_end], 10) catch 0;
 
     // 7. Changed files summary (stat)
     const files_raw = try runGit(allocator, io, &.{ "git", "diff", "--stat", "merge-base..HEAD" });
