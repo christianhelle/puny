@@ -20,6 +20,46 @@
     }
   },
   {
+    "name": "Review mode rejects a branch with no committed changes",
+    "args": ["--mock", "--model", "mock-model", "--review"],
+    "expect": ["Review report:", "MERGE WORTHY: NO"],
+    "not_expect": ["MERGE WORTHY: YES"],
+    "exit_code": 1,
+    "git_fixture": "empty",
+    "evidence": {
+      "file_contains": {
+        "path": "review-results.md",
+        "patterns": ["no committed changes", "**MERGE WORTHY: NO**"]
+      }
+    }
+  },
+  {
+    "name": "Review mode rejects main without writing a report",
+    "args": ["--mock", "--model", "mock-model", "--review"],
+    "expect": [],
+    "not_expect": ["Review report:"],
+    "expect_stderr": ["Review could not start:", "cannot run on main"],
+    "exit_code": 2,
+    "git_fixture": "main",
+    "evidence": {
+      "file_not_exists": ["review-results.md"]
+    }
+  },
+  {
+    "name": "Review mode writes a retryable fetch failure report",
+    "args": ["--mock", "--model", "mock-model", "--review"],
+    "expect": ["Review report:", "MERGE WORTHY: NO"],
+    "not_expect": ["MERGE WORTHY: YES"],
+    "exit_code": 2,
+    "git_fixture": "missing_origin",
+    "evidence": {
+      "file_contains": {
+        "path": "review-results.md",
+        "patterns": ["Operational failure", "**MERGE WORTHY: NO**"]
+      }
+    }
+  },
+  {
     "name": "Tool call: read_file",
     "args": ["--mock", "--model", "mock-model", "--prompt", "read the code", "--oneshot"],
     "expect": ["Reading", "Tool executed"],

@@ -13,6 +13,7 @@ const SkillFixture = struct {
 
 const Evidence = struct {
     file_exists: []const []const u8 = &.{},
+    file_not_exists: []const []const u8 = &.{},
     file_contains: ?FileContains = null,
 };
 
@@ -369,6 +370,9 @@ fn removeEvidenceFiles(dir: std.Io.Dir, allocator: std.mem.Allocator, io: std.Io
         for (evidence.file_exists) |path| {
             dir.deleteFile(io, path) catch {};
         }
+        for (evidence.file_not_exists) |path| {
+            dir.deleteFile(io, path) catch {};
+        }
         if (evidence.file_contains) |fc| {
             dir.deleteFile(io, fc.path) catch {};
         }
@@ -544,6 +548,19 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
                 return false;
             };
             file.close(io);
+        }
+        for (evidence.file_not_exists) |path| {
+            if (target_dir.openFile(io, path, .{})) |file| {
+                file.close(io);
+                std.debug.print("FAILED\n    unexpected evidence file found: '{s}'\n", .{path});
+                return false;
+            } else |err| switch (err) {
+                error.FileNotFound => {},
+                else => {
+                    std.debug.print("FAILED\n    could not inspect absent evidence file: '{s}'\n", .{path});
+                    return false;
+                },
+            }
         }
         if (evidence.file_contains) |fc| {
             const content = target_dir.readFileAlloc(io, fc.path, allocator, .limited(1024 * 1024)) catch {
