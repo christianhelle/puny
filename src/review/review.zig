@@ -1,0 +1,271 @@
+const std = @import("std");
+const helpers = @import("../tools/helpers.zig");
+
+pub const base_ref = "origin/main";
+pub const report_filename = "review-results.md";
+
+pub const Scope = struct {
+    repo_root: []const u8,
+    branch: []const u8,
+    base_ref: []const u8,
+    base_sha: []const u8,
+    head_sha: []const u8,
+    merge_base_sha: []const u8,
+    commit_count: usize,
+    changed_files: []const u8,
+    diff_stat: []const u8,
+    dirty_worktree: []const u8,
+};
+
+pub const Failure = struct {
+    repo_root: ?[]const u8 = null,
+    branch: ?[]const u8 = null,
+    message: []const u8,
+};
+
+pub const Preparation = union(enum) {
+    ready: Scope,
+    no_changes: Scope,
+    invalid: Failure,
+    operational_failure: Failure,
+};
+
+const GitResult = union(enum) {
+    ok: []const u8,
+    failed: []const u8,
+};
+
+pub fn prepare(allocator: std.mem.Allocator, io: std.Io) !Preparation {
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    return prepareAt(allocator, io, cwd);
+}
+
+pub fn prepareAt(allocator: std.mem.Allocator, io: std.Io, start_dir: []const u8) !Preparation {
+    const root_result = try runGit(allocator, io, start_dir, &.{ "rev-parse", "--show-toplevel" }, 30 * std.time.ns_per_s);
+    const repo_root = switch (root_result) {
+        .ok => |value| value,
+        .failed => return .{ .invalid = .{ .message = "Review mode requires a Git repository." } },
+    };
+
+    const branch_result = try runGit(allocator, io, repo_root, &.{ "symbolic-ref", "--quiet", "--short", "HEAD" }, 30 * std.time.ns_per_s);
+    const branch = switch (branch_result) {
+        .ok => |value| value,
+        .failed => return .{ .invalid = .{
+            .repo_root = repo_root,
+            .message = "Review mode requires a named branch; detached HEAD is not supported.",
+        } },
+    };
+    if (std.mem.eql(u8, branch, "main")) {
+        return .{ .invalid = .{
+            .repo_root = repo_root,
+            .branch = branch,
+            .message = "Review mode cannot run on main.",
+        } };
+    }
+
+    const fetch_result = try runGit(allocator, io, repo_root, &.{ "fetch", "--quiet", "origin", "main" }, 120 * std.time.ns_per_s);
+    if (fetch_result == .failed) {
+        return .{ .operational_failure = .{
+            .repo_root = repo_root,
+            .branch = branch,
+            .message = fetch_result.failed,
+        } };
+    }
+
+    const base_result = try runGit(allocator, io, repo_root, &.{ "rev-parse", "--verify", "refs/remotes/origin/main" }, 30 * std.time.ns_per_s);
+    const base_sha = switch (base_result) {
+        .ok => |value| value,
+        .failed => |message| return operationalFailure(repo_root, branch, message),
+    };
+    const head_result = try runGit(allocator, io, repo_root, &.{ "rev-parse", "--verify", "HEAD" }, 30 * std.time.ns_per_s);
+    const head_sha = switch (head_result) {
+        .ok => |value| value,
+        .failed => |message| return operationalFailure(repo_root, branch, message),
+    };
+    const merge_base_result = try runGit(allocator, io, repo_root, &.{ "merge-base", base_sha, head_sha }, 30 * std.time.ns_per_s);
+    const merge_base_sha = switch (merge_base_result) {
+        .ok => |value| value,
+        .failed => |message| return operationalFailure(repo_root, branch, message),
+    };
+
+    const revision_range = try std.fmt.allocPrint(allocator, "{s}..{s}", .{ merge_base_sha, head_sha });
+    const commit_count_result = try runGit(allocator, io, repo_root, &.{ "rev-list", "--count", revision_range }, 30 * std.time.ns_per_s);
+    const commit_count_text = switch (commit_count_result) {
+        .ok => |value| value,
+        .failed => |message| return operationalFailure(repo_root, branch, message),
+    };
+    const commit_count = std.fmt.parseInt(usize, commit_count_text, 10) catch {
+        return operationalFailure(repo_root, branch, "Git returned an invalid commit count.");
+    };
+
+    const files_result = try runGit(allocator, io, repo_root, &.{ "diff", "--name-status", "--find-renames", revision_range }, 30 * std.time.ns_per_s);
+    const changed_files = switch (files_result) {
+        .ok => |value| value,
+        .failed => |message| return operationalFailure(repo_root, branch, message),
+    };
+    const stat_result = try runGit(allocator, io, repo_root, &.{ "diff", "--stat", revision_range }, 30 * std.time.ns_per_s);
+    const diff_stat = switch (stat_result) {
+        .ok => |value| value,
+        .failed => |message| return operationalFailure(repo_root, branch, message),
+    };
+    const status_result = try runGit(allocator, io, repo_root, &.{ "status", "--porcelain=v1", "--untracked-files=all" }, 30 * std.time.ns_per_s);
+    const dirty_worktree = switch (status_result) {
+        .ok => |value| value,
+        .failed => |message| return operationalFailure(repo_root, branch, message),
+    };
+
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = branch,
+        .base_ref = base_ref,
+        .base_sha = base_sha,
+        .head_sha = head_sha,
+        .merge_base_sha = merge_base_sha,
+        .commit_count = commit_count,
+        .changed_files = changed_files,
+        .diff_stat = diff_stat,
+        .dirty_worktree = dirty_worktree,
+    };
+    return if (changed_files.len == 0) .{ .no_changes = scope } else .{ .ready = scope };
+}
+
+fn operationalFailure(repo_root: []const u8, branch: []const u8, message: []const u8) Preparation {
+    return .{ .operational_failure = .{
+        .repo_root = repo_root,
+        .branch = branch,
+        .message = message,
+    } };
+}
+
+fn runGit(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    cwd: []const u8,
+    args: []const []const u8,
+    timeout_ns: i96,
+) !GitResult {
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.append(allocator, "git");
+    try argv.appendSlice(allocator, args);
+
+    const output = helpers.runCommandTimed(allocator, io, argv.items, cwd, timeout_ns) catch |err| {
+        return .{ .failed = try std.fmt.allocPrint(allocator, "Git command failed: {s}", .{@errorName(err)}) };
+    };
+    defer allocator.free(output);
+
+    const succeeded = std.mem.startsWith(u8, output, "Exit code: 0");
+    const content = commandSection(output, if (succeeded) "STDOUT:\n" else "STDERR:\n");
+    const detail = if (content.len > 0) content else output;
+    return if (succeeded)
+        .{ .ok = try allocator.dupe(u8, std.mem.trim(u8, detail, &std.ascii.whitespace)) }
+    else
+        .{ .failed = try allocator.dupe(u8, std.mem.trim(u8, detail, &std.ascii.whitespace)) };
+}
+
+fn commandSection(output: []const u8, marker: []const u8) []const u8 {
+    const start_index = std.mem.indexOf(u8, output, marker) orelse return "";
+    const start = start_index + marker.len;
+    const end = if (std.mem.indexOfPos(u8, output, start, "\nSTDERR:\n")) |index| index else output.len;
+    return output[start..end];
+}
+
+const Fixture = struct {
+    tmp: std.testing.TmpDir,
+    root: []const u8,
+    remote: []const u8,
+    worktree: []const u8,
+
+    fn init() !Fixture {
+        var tmp = std.testing.tmpDir(.{});
+        errdefer tmp.cleanup();
+
+        const allocator = std.testing.allocator;
+        const cwd = try std.process.currentPathAlloc(std.testing.io, allocator);
+        defer allocator.free(cwd);
+        const root = try std.fs.path.join(allocator, &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+        errdefer allocator.free(root);
+        const remote = try std.fs.path.join(allocator, &.{ root, "remote.git" });
+        errdefer allocator.free(remote);
+        const worktree = try std.fs.path.join(allocator, &.{ root, "worktree" });
+        errdefer allocator.free(worktree);
+
+        try runFixtureGit(null, &.{ "init", "--bare", remote });
+        try runFixtureGit(null, &.{ "init", "-b", "main", worktree });
+        try runFixtureGit(worktree, &.{ "config", "user.email", "puny@example.test" });
+        try runFixtureGit(worktree, &.{ "config", "user.name", "Puny Test" });
+
+        const initial_path = try std.fs.path.join(allocator, &.{ worktree, "initial.txt" });
+        defer allocator.free(initial_path);
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = initial_path, .data = "initial\n" });
+        try runFixtureGit(worktree, &.{ "add", "initial.txt" });
+        try runFixtureGit(worktree, &.{ "commit", "-m", "initial" });
+        try runFixtureGit(worktree, &.{ "remote", "add", "origin", remote });
+        try runFixtureGit(worktree, &.{ "push", "-u", "origin", "main" });
+
+        return .{
+            .tmp = tmp,
+            .root = root,
+            .remote = remote,
+            .worktree = worktree,
+        };
+    }
+
+    fn addFeatureCommit(self: Fixture) !void {
+        try runFixtureGit(self.worktree, &.{ "checkout", "-b", "feature/review" });
+        const feature_path = try std.fs.path.join(std.testing.allocator, &.{ self.worktree, "feature.txt" });
+        defer std.testing.allocator.free(feature_path);
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = feature_path, .data = "feature\n" });
+        try runFixtureGit(self.worktree, &.{ "add", "feature.txt" });
+        try runFixtureGit(self.worktree, &.{ "commit", "-m", "feature" });
+    }
+
+    fn deinit(self: *Fixture) void {
+        std.testing.allocator.free(self.worktree);
+        std.testing.allocator.free(self.remote);
+        std.testing.allocator.free(self.root);
+        self.tmp.cleanup();
+        self.* = undefined;
+    }
+};
+
+fn runFixtureGit(cwd: ?[]const u8, args: []const []const u8) !void {
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(std.testing.allocator);
+    try argv.append(std.testing.allocator, "git");
+    try argv.appendSlice(std.testing.allocator, args);
+    const output = try helpers.runCommandTimed(
+        std.testing.allocator,
+        std.testing.io,
+        argv.items,
+        cwd,
+        30 * std.time.ns_per_s,
+    );
+    defer std.testing.allocator.free(output);
+    if (!std.mem.startsWith(u8, output, "Exit code: 0")) {
+        std.debug.print("git fixture command failed: {s}\n", .{output});
+        return error.GitFixtureFailed;
+    }
+}
+
+test "prepareAt captures a committed feature branch scope" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    try fixture.addFeatureCommit();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const result = try prepareAt(arena_state.allocator(), std.testing.io, fixture.worktree);
+    switch (result) {
+        .ready => |scope| {
+            try std.testing.expectEqualStrings("feature/review", scope.branch);
+            try std.testing.expectEqualStrings("origin/main", scope.base_ref);
+            try std.testing.expectEqual(@as(usize, 1), scope.commit_count);
+            try std.testing.expect(std.mem.indexOf(u8, scope.changed_files, "feature.txt") != null);
+            try std.testing.expectEqual(@as(usize, 40), scope.base_sha.len);
+            try std.testing.expectEqual(@as(usize, 40), scope.head_sha.len);
+            try std.testing.expectEqual(@as(usize, 40), scope.merge_base_sha.len);
+        },
+        else => return error.ExpectedReadyReview,
+    }
+}
