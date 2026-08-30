@@ -9,8 +9,6 @@ const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
-const adapter = @import("adapter.zig");
-const openai_client = @import("openai/client.zig");
 const cancel = @import("../core/cancel.zig");
 
 pub const ModelProvider = enum {
@@ -149,38 +147,13 @@ fn chatStreamingCopilotCaptured(c: *copilot.Client, request: openai.ChatRequest,
     try capture.commit(&c.inner);
 }
 
-/// Streams through the generated OpenAI client, mapping the hand-written
-/// client's base URL (which omits "/v1") onto the generated client. This
+/// Streams through the hand-written OpenAI-compatible transport. This
 /// intentionally routes LM Studio, OpenCode Zen/Go via the OpenAI-compatible
 /// `/v1/chat/completions` endpoint (the native LM Studio `/api/v1/chat`
 /// uses a distinct `reasoning` enum; see `adapter.lmStudioReasoningFromEffort`
-/// for the native mapping, which is unused on this path). The generated
-/// streamJson wraps its response reader in a CancelableReader and spawns a
-/// CancelWatcher thread polling Client.cancel_check every ~10ms to
-/// close (Windows) / shutdown (POSIX) the underlying socket, so a blocked
-/// SSE read is unblocked promptly; cancellation is surfaced as
-/// error.Cancelled and translated to error.Canceled.
+/// for the native mapping, which is unused on this path).
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
-    const trimmed = std.mem.trimEnd(u8, c.base_url, "/");
-    const openai_base = if (std.mem.endsWith(u8, trimmed, "/v1"))
-        try c.allocator.dupe(u8, trimmed)
-    else
-        try std.fmt.allocPrint(c.allocator, "{s}/v1", .{trimmed});
-    defer c.allocator.free(openai_base);
-    var generated = adapter.openAiClient(c);
-    defer generated.deinit();
-    generated.base_url = openai_base;
-    generated.cancel_check = cancel.isCancelled;
-
-    var sse = openai.SseCallback{
-        .allocator = c.allocator,
-        .callback = callback,
-        .observer = c.http_observer,
-    };
-    openai_client.createChatCompletionStreaming(&generated, adapter.OpenAiStreamingRequest{ .request = request }, &sse, null) catch |err| switch (err) {
-        error.Cancelled, error.Canceled => return error.Canceled,
-        else => return err,
-    };
+    return openai.chatStreaming(c, request, callback);
 }
 
 test "getProviderDisplayName maps known providers" {

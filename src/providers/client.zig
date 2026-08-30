@@ -352,6 +352,55 @@ pub const CancellationToken = struct {
     }
 };
 
+pub const CancelWatcher = struct {
+    connection: ?*std.http.Client.Connection,
+    io: std.Io,
+    pred: *const fn () bool,
+    done: *std.atomic.Value(bool),
+    replacement_handle: ?std.Io.net.Socket.Handle = null,
+    interrupted: bool = false,
+
+    const Windows = if (builtin.os.tag == .windows) struct {
+        extern "kernel32" fn CreateEventW(event_attributes: ?*anyopaque, manual_reset: std.os.windows.BOOL, initial_state: std.os.windows.BOOL, name: ?[*:0]const u16) callconv(.winapi) ?std.os.windows.HANDLE;
+    } else struct {};
+
+    pub fn run(self: *CancelWatcher) void {
+        while (!self.done.load(.acquire)) {
+            if (self.pred()) {
+                if (self.connection) |conn| {
+                    if (comptime builtin.os.tag == .windows) {
+                        if (Windows.CreateEventW(null, .FALSE, .FALSE, null)) |replacement| {
+                            self.replacement_handle = replacement;
+                            self.interrupted = true;
+                            conn.stream_reader.stream.close(self.io);
+                        } else {
+                            self.interrupted = true;
+                            conn.stream_reader.stream.shutdown(self.io, .both) catch {};
+                        }
+                    } else {
+                        self.interrupted = true;
+                        conn.stream_reader.stream.shutdown(self.io, .both) catch {};
+                    }
+                }
+                return;
+            }
+            self.io.sleep(.{ .nanoseconds = 10 * std.time.ns_per_ms }, .awake) catch {};
+        }
+    }
+
+    pub fn restoreConnection(self: *CancelWatcher) void {
+        if (!self.interrupted) return;
+        const conn = self.connection.?;
+        if (comptime builtin.os.tag == .windows) {
+            if (self.replacement_handle) |handle| {
+                conn.stream_reader.stream.socket.handle = handle;
+                conn.stream_writer.stream.socket.handle = handle;
+            }
+        }
+        conn.closing = true;
+    }
+};
+
 fn checkCancellation(token: ?*CancellationToken) !void {
     if (token) |t| {
         if (t.isCancelled()) return error.Cancelled;

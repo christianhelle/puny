@@ -198,48 +198,12 @@ pub const CancelableReader = struct {
     }
 };
 
-const CancelWatcher = struct {
-    connection: ?*std.http.Client.Connection,
-    io: std.Io,
-    done: *std.atomic.Value(bool),
-    replacement_handle: ?std.Io.net.Socket.Handle = null,
-    interrupted: bool = false,
-
-    const Windows = if (@import("builtin").os.tag == .windows) struct {
-        extern "kernel32" fn CreateEventW(event_attributes: ?*anyopaque, manual_reset: std.os.windows.BOOL, initial_state: std.os.windows.BOOL, name: ?[*:0]const u16) callconv(.winapi) ?std.os.windows.HANDLE;
-    } else struct {};
-
-    fn run(self: *CancelWatcher) void {
-        while (!self.done.load(.acquire)) {
-            if (cancel.isCancelled()) {
-                if (self.connection) |conn| {
-                    if (comptime @import("builtin").os.tag == .windows) {
-                        if (Windows.CreateEventW(null, .FALSE, .FALSE, null)) |replacement| {
-                            self.replacement_handle = replacement;
-                            self.interrupted = true;
-                            conn.stream_reader.stream.close(self.io);
-                        } else {
-                            self.interrupted = true;
-                            conn.stream_reader.stream.shutdown(self.io, .both) catch {};
-                        }
-                    } else {
-                        self.interrupted = true;
-                        conn.stream_reader.stream.shutdown(self.io, .both) catch {};
-                    }
-                }
-                return;
-            }
-            self.io.sleep(.{ .nanoseconds = 10 * std.time.ns_per_ms }, .awake) catch {};
-        }
-    }
-};
-
 pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback: StreamCallback) !void {
     const allocator = chat_client.allocator;
     const payload = try requestPayload(allocator, request);
     defer allocator.free(payload);
 
-    const url = try std.fmt.allocPrint(allocator, "{s}/v1/chat/completions", .{chat_client.base_url});
+    const url = try chatCompletionsUrl(allocator, chat_client.base_url);
     defer allocator.free(url);
 
     var headers = std.ArrayList(std.http.Header).empty;
@@ -284,21 +248,12 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
     const response_reader = response.reader(&transfer_buffer);
 
     var done = std.atomic.Value(bool).init(false);
-    var watcher_ctx = CancelWatcher{ .connection = req.connection, .io = chat_client.io, .done = &done };
-    const watcher_thread: ?std.Thread = std.Thread.spawn(.{}, CancelWatcher.run, .{&watcher_ctx}) catch null;
+    var watcher_ctx = client.CancelWatcher{ .connection = req.connection, .io = chat_client.io, .pred = cancel.isCancelled, .done = &done };
+    const watcher_thread: ?std.Thread = std.Thread.spawn(.{}, client.CancelWatcher.run, .{&watcher_ctx}) catch null;
     defer if (watcher_thread) |t| {
         done.store(true, .release);
         t.join();
-        if (watcher_ctx.interrupted) {
-            const conn = watcher_ctx.connection.?;
-            if (comptime @import("builtin").os.tag == .windows) {
-                if (watcher_ctx.replacement_handle) |handle| {
-                    conn.stream_reader.stream.socket.handle = handle;
-                    conn.stream_writer.stream.socket.handle = handle;
-                }
-            }
-            conn.closing = true;
-        }
+        watcher_ctx.restoreConnection();
     };
 
     var cancelable_reader_buffer: [1]u8 = undefined;
@@ -308,7 +263,13 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
     if (response.head.status.class() != .success) {
         var body_alloc: std.Io.Writer.Allocating = .init(allocator);
         defer body_alloc.deinit();
-        _ = reader.streamRemaining(&body_alloc.writer) catch {};
+        _ = reader.streamRemaining(&body_alloc.writer) catch |err| {
+            if (chat_client.http_observer) |obs| {
+                if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+            }
+            if (cancel.isCancelled()) return error.Canceled;
+            return response.bodyErr() orelse err;
+        };
 
         if (chat_client.http_observer) |obs| {
             if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
@@ -344,6 +305,14 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
         },
         else => return err,
     };
+}
+
+fn chatCompletionsUrl(allocator: std.mem.Allocator, base_url: []const u8) ![]u8 {
+    const trimmed = std.mem.trimEnd(u8, base_url, "/");
+    if (std.mem.endsWith(u8, trimmed, "/v1")) {
+        return std.fmt.allocPrint(allocator, "{s}/chat/completions", .{trimmed});
+    }
+    return std.fmt.allocPrint(allocator, "{s}/v1/chat/completions", .{trimmed});
 }
 
 pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 {

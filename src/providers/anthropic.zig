@@ -2,7 +2,6 @@ const std = @import("std");
 const cancel = @import("../core/cancel.zig");
 const http_client = @import("client.zig");
 const openai = @import("openai.zig");
-const generated = @import("anthropic/client.zig");
 
 pub const anthropic_version = "2023-06-01";
 pub const default_max_tokens = 4096;
@@ -194,217 +193,10 @@ const AnthropicSseCallback = struct {
     }
 };
 
-fn anthropicClient(c: *http_client.Client) generated.Client {
-    var g = generated.Client.init(c.allocator, c.io, c.api_key);
-    g.base_url = c.base_url;
-    // Forward observer (without on_chunk which runtime observer doesn't have)
-    if (c.http_observer) |obs| {
-        g.http_observer = .{
-            .ctx = obs.ctx,
-            .onRequest = obs.onRequest,
-            .onResponse = obs.onResponse,
-            .onError = obs.onError,
-        };
-    }
-    if (c.default_headers.len == 0) {
-        g.default_headers = &.{.{ .name = "anthropic-version", .value = anthropic_version }};
-    } else {
-        // For non-empty default_headers, let chatStreaming merge with anthropic-version
-        // and manage the allocation lifetime to avoid leaks.
-        g.default_headers = c.default_headers;
-    }
-    g.cancel_check = cancel.isCancelled;
-    return g;
-}
-
-/// Adapter that turns an OpenAI ChatRequest into Anthropic JSON.
-/// This mirrors requestPayload logic but via jsonStringify so the generated
-/// client's stringifyStreamRequest can add stream:true.
-const AnthropicAdapterRequest = struct {
-    request: openai.ChatRequest,
-
-    pub fn jsonStringify(self: @This(), jw: *std.json.Stringify) !void {
-        const req = self.request;
-        try jw.beginObject();
-
-        try jw.objectField("model");
-        try jw.write(req.model);
-
-        // system handling: first system message only
-        var system: ?[]const u8 = null;
-        for (req.messages) |msg| {
-            if (msg == .system) {
-                if (system == null) system = msg.system;
-            }
-        }
-
-        try jw.objectField("messages");
-        try jw.beginArray();
-        var first = true;
-        for (req.messages) |msg| {
-            switch (msg) {
-                .system => continue,
-                else => {
-                    if (!first) {
-                        // handled by array
-                    }
-                    // We need to write the message as raw JSON object matching writeAnthropicMessage.
-                    // To avoid duplicating logic, we write via temporary allocation and then write as Value.
-                    // However we have jw directly, we can manually write the object.
-                    // For maintainability, we duplicate the writer logic here using jw.
-                    switch (msg) {
-                        .user => |content| {
-                            try jw.beginObject();
-                            try jw.objectField("role");
-                            try jw.write("user");
-                            try jw.objectField("content");
-                            try jw.beginArray();
-                            try jw.beginObject();
-                            try jw.objectField("type");
-                            try jw.write("text");
-                            try jw.objectField("text");
-                            try jw.write(content);
-                            try jw.endObject();
-                            try jw.endArray();
-                            try jw.endObject();
-                        },
-                        .assistant => |assistant| {
-                            try jw.beginObject();
-                            try jw.objectField("role");
-                            try jw.write("assistant");
-                            try jw.objectField("content");
-                            try jw.beginArray();
-                            var first_block = true;
-                            if (assistant.content) |content| {
-                                try jw.beginObject();
-                                try jw.objectField("type");
-                                try jw.write("text");
-                                try jw.objectField("text");
-                                try jw.write(content);
-                                try jw.endObject();
-                                first_block = false;
-                            }
-                            if (assistant.tool_calls) |tool_calls| {
-                                for (tool_calls) |tc| {
-                                    if (!first_block) {
-                                        // comma handled by array
-                                    }
-                                    try jw.beginObject();
-                                    try jw.objectField("type");
-                                    try jw.write("tool_use");
-                                    try jw.objectField("id");
-                                    try jw.write(tc.id);
-                                    try jw.objectField("name");
-                                    try jw.write(tc.function.name);
-                                    try jw.objectField("input");
-                                    if (std.mem.trim(u8, tc.function.arguments, " \t\r\n").len > 0) {
-                                        const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, tc.function.arguments, .{}) catch return error.WriteFailed;
-                                        defer parsed.deinit();
-                                        try jw.write(parsed.value);
-                                    } else {
-                                        try jw.beginObject();
-                                        try jw.endObject();
-                                    }
-                                    try jw.endObject();
-                                    first_block = false;
-                                }
-                            }
-                            try jw.endArray();
-                            try jw.endObject();
-                        },
-                        .tool => |tool| {
-                            try jw.beginObject();
-                            try jw.objectField("role");
-                            try jw.write("user");
-                            try jw.objectField("content");
-                            try jw.beginArray();
-                            try jw.beginObject();
-                            try jw.objectField("type");
-                            try jw.write("tool_result");
-                            try jw.objectField("tool_use_id");
-                            try jw.write(tool.tool_call_id);
-                            try jw.objectField("content");
-                            try jw.write(tool.content);
-                            try jw.endObject();
-                            try jw.endArray();
-                            try jw.endObject();
-                        },
-                        else => {},
-                    }
-                    first = false;
-                },
-            }
-        }
-        try jw.endArray();
-
-        try jw.objectField("max_tokens");
-        try jw.write(default_max_tokens);
-
-        // stream is injected by generated stringifyStreamRequest, but we include for completeness
-        // The generated helper will force stream=true regardless, so we omit here.
-
-        if (system) |value| {
-            try jw.objectField("system");
-            try jw.write(value);
-        }
-
-        if (req.tools.len > 0) {
-            try jw.objectField("tools");
-            try jw.beginArray();
-            for (req.tools) |tool| {
-                const function = tool.function.object;
-                const name_val = function.get("name") orelse continue;
-                const name = name_val.string;
-                const description = if (function.get("description")) |v| v.string else "";
-                try jw.beginObject();
-                try jw.objectField("name");
-                try jw.write(name);
-                try jw.objectField("description");
-                try jw.write(description);
-                try jw.objectField("input_schema");
-                if (function.get("parameters")) |params| {
-                    try jw.write(params);
-                } else {
-                    try jw.beginObject();
-                    try jw.endObject();
-                }
-                try jw.endObject();
-            }
-            try jw.endArray();
-        }
-
-        if (req.temperature) |temp| {
-            try jw.objectField("temperature");
-            try jw.write(temp);
-        }
-
-        if (req.reasoning_effort) |effort| {
-            if (effort != .default) {
-                const effort_str = switch (effort) {
-                    .xhigh => "max",
-                    else => @tagName(effort),
-                };
-                try jw.objectField("thinking");
-                try jw.beginObject();
-                try jw.objectField("type");
-                try jw.write("enabled");
-                try jw.endObject();
-                try jw.objectField("output_config");
-                try jw.beginObject();
-                try jw.objectField("effort");
-                try jw.write(effort_str);
-                try jw.endObject();
-            }
-        }
-
-        try jw.endObject();
-    }
-};
-
 /// Merges `anthropic-version` into `default_headers`, deduplicating a
 /// caller-supplied `anthropic-version` header (case-insensitive) instead of
-/// sending it twice on the wire. Returns the full owned buffer (for freeing)
-/// and the used sub-slice (for use as `default_headers`).
+/// sending it twice on the wire. Returns the full owned buffer and the used
+/// sub-slice.
 fn mergeAnthropicHeaders(allocator: std.mem.Allocator, default_headers: []const std.http.Header) !struct {
     buffer: []std.http.Header,
     used: []std.http.Header,
@@ -423,42 +215,135 @@ fn mergeAnthropicHeaders(allocator: std.mem.Allocator, default_headers: []const 
     return .{ .buffer = merged, .used = merged[0..n] };
 }
 
+fn appendAnthropicHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), client: *http_client.Client) !void {
+    try headers.append(allocator, .{ .name = "Content-Type", .value = "application/json" });
+    try headers.append(allocator, .{ .name = "Accept", .value = "text/event-stream" });
+    if (client.default_headers.len == 0) {
+        try headers.append(allocator, .{ .name = "anthropic-version", .value = anthropic_version });
+    } else {
+        const merged = try mergeAnthropicHeaders(allocator, client.default_headers);
+        defer allocator.free(merged.buffer);
+        try headers.appendSlice(allocator, merged.used);
+    }
+    if (client.api_key.len > 0) {
+        try headers.append(allocator, .{ .name = "x-api-key", .value = client.api_key });
+    }
+}
+
 pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
-    // Validate tools upfront to match requestPayload behavior
     for (request.tools) |tool| {
         const function = tool.function.object;
         if (function.get("name") == null) return error.MissingToolName;
     }
-    var g = anthropicClient(client);
-    defer g.deinit();
-    var owned_headers: ?[]std.http.Header = null;
-    defer if (owned_headers) |h| client.allocator.free(h);
-    if (client.default_headers.len != 0) {
-        if (mergeAnthropicHeaders(client.allocator, client.default_headers)) |merged| {
-            g.default_headers = merged.used;
-            owned_headers = merged.buffer;
-        } else |_| {
-            // On allocation failure, preserve the caller's headers as-is
-            // rather than silently dropping them.
-            g.default_headers = client.default_headers;
-        }
+
+    const allocator = client.allocator;
+    var streaming_request = request;
+    streaming_request.stream = true;
+    const payload = try requestPayload(allocator, streaming_request);
+    defer allocator.free(payload);
+
+    const url = try std.fmt.allocPrint(allocator, "{s}/v1/messages", .{client.base_url});
+    defer allocator.free(url);
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    try appendAnthropicHeaders(allocator, &headers, client);
+
+    if (client.http_observer) |obs| {
+        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
     }
-    // Use adapter request that will be stringified and have stream:true injected.
-    const adapter_req = AnthropicAdapterRequest{ .request = request };
+
+    const uri = try std.Uri.parse(url);
+
+    const start = std.Io.Clock.awake.now(client.io);
+    var req = client.http.request(.POST, uri, .{
+        .redirect_behavior = .unhandled,
+        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .extra_headers = headers.items,
+    }) catch |err| {
+        if (client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
+    defer req.deinit();
+
+    req.transfer_encoding = .{ .content_length = payload.len };
+    var body = try req.sendBodyUnflushed(&.{});
+    try body.writer.writeAll(payload);
+    try body.end();
+    try req.connection.?.flush();
+
+    var response = req.receiveHead(&.{}) catch |err| {
+        if (client.http_observer) |obs| {
+            if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+        }
+        return err;
+    };
+    const elapsed_ns = @as(u64, @intCast(start.untilNow(client.io, .awake).nanoseconds));
+
+    var transfer_buffer: [8 * 1024]u8 = undefined;
+    const response_reader = response.reader(&transfer_buffer);
+
+    var done = std.atomic.Value(bool).init(false);
+    var watcher_ctx = http_client.CancelWatcher{ .connection = req.connection, .io = client.io, .pred = cancel.isCancelled, .done = &done };
+    const watcher_thread: ?std.Thread = std.Thread.spawn(.{}, http_client.CancelWatcher.run, .{&watcher_ctx}) catch null;
+    defer if (watcher_thread) |thread| {
+        done.store(true, .release);
+        thread.join();
+        watcher_ctx.restoreConnection();
+    };
+
+    var cancelable_reader_buffer: [1]u8 = undefined;
+    var cancelable_reader = openai.CancelableReader.init(response_reader, &cancelable_reader_buffer);
+    const reader = &cancelable_reader.reader;
+
+    if (response.head.status.class() != .success) {
+        var body_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer body_alloc.deinit();
+        _ = reader.streamRemaining(&body_alloc.writer) catch |err| {
+            if (client.http_observer) |obs| {
+                if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+            }
+            if (cancel.isCancelled()) return error.Canceled;
+            return response.bodyErr() orelse err;
+        };
+
+        if (client.http_observer) |obs| {
+            if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
+        }
+
+        if (response.head.status == .unauthorized or response.head.status == .forbidden) {
+            http_client.printAuthHint(client.io);
+        }
+
+        http_client.emitDiagnostic("Anthropic chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
+            url,
+            @intFromEnum(response.head.status),
+            payload,
+            body_alloc.written(),
+        });
+        return error.ResponseError;
+    }
+
+    if (client.http_observer) |obs| {
+        if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
+    }
 
     const block_types: std.ArrayList(BlockType) = .empty;
     var sse = AnthropicSseCallback{
-        .allocator = client.allocator,
+        .allocator = allocator,
         .callback = callback,
         .block_types = block_types,
         .observer = client.http_observer,
     };
-    defer sse.block_types.deinit(client.allocator);
+    defer sse.block_types.deinit(allocator);
 
-    // The generated client will handle headers (x-api-key via api_key, anthropic-version via default_headers)
-    // and SSE parsing. It will inject stream:true.
-    generated.messages_postStreaming(&g, adapter_req, &sse, null) catch |err| switch (err) {
-        error.Cancelled, error.Canceled => return error.Canceled,
+    http_client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
+        error.ReadFailed => {
+            if (cancel.isCancelled()) return error.Canceled;
+            return err;
+        },
         else => return err,
     };
 }
@@ -1228,72 +1113,7 @@ test "chatStreaming propagates SSE parse errors from a local server" {
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
 }
 
-test "AnthropicAdapterRequest matches requestPayload core fields except stream" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const allocator = arena_state.allocator();
-    const schema = try sampleToolSchema(allocator);
-    const request = openai.ChatRequest{
-        .model = "claude-sonnet-4.6",
-        .messages = &.{
-            .{ .system = "You are helpful." },
-            .{ .user = "Hello" },
-        },
-        .tools = &.{
-            .{ .function = schema },
-        },
-        .stream = true,
-        .temperature = 0.5,
-    };
-    const expected = try requestPayload(allocator, request);
-    defer allocator.free(expected);
-    var buf: std.Io.Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-    try std.json.Stringify.value(AnthropicAdapterRequest{ .request = request }, .{}, &buf.writer);
-    const got = buf.written();
-    // Parse both as Values ignoring field order differences
-    const exp_parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, expected, .{});
-    defer exp_parsed.deinit();
-    const got_parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, got, .{});
-    defer got_parsed.deinit();
-    // Both should have same core fields; stream is injected later by generated client
-    try std.testing.expectEqualStrings(exp_parsed.value.object.get("model").?.string, got_parsed.value.object.get("model").?.string);
-    try std.testing.expectEqualStrings(exp_parsed.value.object.get("system").?.string, got_parsed.value.object.get("system").?.string);
-    try std.testing.expectEqual(exp_parsed.value.object.get("messages").?.array.items.len, got_parsed.value.object.get("messages").?.array.items.len);
-    try std.testing.expectEqual(exp_parsed.value.object.get("max_tokens").?.integer, got_parsed.value.object.get("max_tokens").?.integer);
-    try std.testing.expectEqual(exp_parsed.value.object.get("temperature").?.float, got_parsed.value.object.get("temperature").?.float);
-    try std.testing.expectEqual(exp_parsed.value.object.get("tools").?.array.items.len, got_parsed.value.object.get("tools").?.array.items.len);
-    try std.testing.expectEqualStrings(exp_parsed.value.object.get("tools").?.array.items[0].object.get("name").?.string, got_parsed.value.object.get("tools").?.array.items[0].object.get("name").?.string);
-    // Adapter omits stream; generated helper injects it
-    try std.testing.expect(exp_parsed.value.object.get("stream") != null);
-    try std.testing.expect(got_parsed.value.object.get("stream") == null);
-    // Messages content should match
-    const exp_msg_content = exp_parsed.value.object.get("messages").?.array.items[0].object.get("content").?.array.items[0].object.get("text").?.string;
-    const got_msg_content = got_parsed.value.object.get("messages").?.array.items[0].object.get("content").?.array.items[0].object.get("text").?.string;
-    try std.testing.expectEqualStrings(exp_msg_content, got_msg_content);
-}
-
-test "AnthropicAdapterRequest fails on invalid tool arguments" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const allocator = arena_state.allocator();
-    const request = openai.ChatRequest{
-        .model = "claude-sonnet-4.6",
-        .messages = &.{
-            .{ .assistant = .{
-                .tool_calls = &.{
-                    .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "not json" } },
-                },
-            } },
-        },
-        .tools = &.{},
-    };
-    var buf: std.Io.Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-    try std.testing.expectError(error.WriteFailed, std.json.Stringify.value(AnthropicAdapterRequest{ .request = request }, .{}, &buf.writer));
-}
-
-test "anthropic client uses x-api-key not Bearer" {
+test "appendAnthropicHeaders uses x-api-key not Bearer" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -1301,43 +1121,50 @@ test "anthropic client uses x-api-key not Bearer" {
     defer c.deinit();
     c.organization = "my-org";
     c.project = "my-proj";
-    var g = anthropicClient(&c);
-    defer g.deinit();
-    try std.testing.expectEqualStrings("my-key", g.api_key);
-    try std.testing.expect(g.organization == null);
-    try std.testing.expect(g.project == null);
-    // g should have anthropic-version in default_headers
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    try appendAnthropicHeaders(allocator, &headers, &c);
+
     var found_version = false;
-    for (g.default_headers) |h| {
+    var found_api_key = false;
+    var found_bearer = false;
+    for (headers.items) |h| {
         if (std.mem.eql(u8, h.name, "anthropic-version") and std.mem.eql(u8, h.value, anthropic_version)) {
             found_version = true;
         }
+        if (std.mem.eql(u8, h.name, "x-api-key") and std.mem.eql(u8, h.value, "my-key")) {
+            found_api_key = true;
+        }
+        if (std.mem.eql(u8, h.name, "Authorization")) {
+            found_bearer = true;
+        }
     }
     try std.testing.expect(found_version);
+    try std.testing.expect(found_api_key);
+    try std.testing.expect(!found_bearer);
 }
 
-test "anthropic client preserves custom headers and adds version via chatStreaming merge" {
+test "appendAnthropicHeaders preserves custom headers and adds version" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
     var c = http_client.Client.init(allocator, std.testing.io, "my-key");
     defer c.deinit();
     c.default_headers = &.{.{ .name = "X-Custom", .value = "1" }};
-    var g = anthropicClient(&c);
-    defer g.deinit();
-    // Use the real merge helper (same one chatStreaming uses).
-    const merged = try mergeAnthropicHeaders(allocator, c.default_headers);
-    defer allocator.free(merged.buffer);
-    g.default_headers = merged.used;
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    try appendAnthropicHeaders(allocator, &headers, &c);
+
     var found_version = false;
     var found_custom = false;
-    for (g.default_headers) |h| {
+    for (headers.items) |h| {
         if (std.mem.eql(u8, h.name, "anthropic-version")) found_version = true;
         if (std.mem.eql(u8, h.name, "X-Custom") and std.mem.eql(u8, h.value, "1")) found_custom = true;
     }
     try std.testing.expect(found_version);
     try std.testing.expect(found_custom);
-    try std.testing.expectEqual(@as(usize, 2), g.default_headers.len);
 }
 
 test "mergeAnthropicHeaders deduplicates a caller-supplied anthropic-version header" {
@@ -1362,24 +1189,4 @@ test "mergeAnthropicHeaders deduplicates a caller-supplied anthropic-version hea
     try std.testing.expectEqual(@as(usize, 1), version_count);
     try std.testing.expect(found_custom);
     try std.testing.expectEqual(@as(usize, 2), merged.used.len);
-}
-
-test "chatStreaming preserves custom headers verbatim when header merge allocation fails" {
-    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
-    const allocator = failing.allocator();
-    const custom_headers: []const std.http.Header = &.{.{ .name = "X-Custom", .value = "1" }};
-    // Directly exercise the OOM fallback path that chatStreaming takes when
-    // mergeAnthropicHeaders fails: it must fall back to the caller's
-    // original default_headers instead of dropping them.
-    var g_default_headers: []const std.http.Header = &.{};
-    if (mergeAnthropicHeaders(allocator, custom_headers)) |merged| {
-        g_default_headers = merged.used;
-    } else |_| {
-        g_default_headers = custom_headers;
-    }
-    var found_custom = false;
-    for (g_default_headers) |h| {
-        if (std.mem.eql(u8, h.name, "X-Custom") and std.mem.eql(u8, h.value, "1")) found_custom = true;
-    }
-    try std.testing.expect(found_custom);
 }
