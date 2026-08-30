@@ -325,12 +325,6 @@ pub fn parseSseBytesTyped(comptime T: type, allocator: std.mem.Allocator, bytes:
     try parseSseBytes(allocator, bytes, &typed_callback, cancellation_token);
 }
 
-pub fn parseSseReaderTyped(comptime T: type, allocator: std.mem.Allocator, reader: *std.Io.Reader, callback: anytype, cancellation_token: ?*CancellationToken) !void {
-    const Callback = @TypeOf(callback.*);
-    var typed_callback: TypedSseCallback(T, Callback) = .{ .allocator = allocator, .callback = callback };
-    try parseSseReader(allocator, reader, &typed_callback, cancellation_token);
-}
-
 fn processSseLine(event_data: *std.Io.Writer.Allocating, raw_line: []const u8, callback: anytype) !bool {
     const line = std.mem.trimEnd(u8, raw_line, "\r");
     if (line.len == 0) return try dispatchSseEvent(event_data, callback);
