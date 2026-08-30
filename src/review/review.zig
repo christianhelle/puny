@@ -1,5 +1,6 @@
 const std = @import("std");
 const helpers = @import("../tools/helpers.zig");
+const atomic_write = @import("../sessions/atomic_write.zig");
 
 pub const base_ref = "origin/main";
 pub const report_filename = "review-results.md";
@@ -28,6 +29,32 @@ pub const Preparation = union(enum) {
     no_changes: Scope,
     invalid: Failure,
     operational_failure: Failure,
+};
+
+pub const Outcome = enum {
+    merge_worthy,
+    rejected,
+    operational_failure,
+
+    pub fn exitCode(self: Outcome) u8 {
+        return switch (self) {
+            .merge_worthy => 0,
+            .rejected => 1,
+            .operational_failure => 2,
+        };
+    }
+};
+
+pub const ReportInput = struct {
+    analysis_markdown: []const u8,
+    conclusion: []const u8,
+    evidence_complete: bool,
+    merge_worthy: bool,
+};
+
+pub const SavedReport = struct {
+    path: []const u8,
+    outcome: Outcome,
 };
 
 const GitResult = union(enum) {
@@ -184,6 +211,97 @@ fn withoutGeneratedReport(allocator: std.mem.Allocator, status: []const u8) ![]c
     return helpers.ownedSliceOrEmpty(&filtered, allocator);
 }
 
+pub fn writeReport(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    scope: Scope,
+    input: ReportInput,
+) !SavedReport {
+    const analysis = std.mem.trim(u8, input.analysis_markdown, &std.ascii.whitespace);
+    const conclusion = std.mem.trim(u8, input.conclusion, &std.ascii.whitespace);
+    if (analysis.len == 0) return error.EmptyReviewAnalysis;
+    if (conclusion.len == 0) return error.EmptyReviewConclusion;
+    const required_sections = [_][]const u8{
+        "## Change Summary",
+        "## Quality and Regression Assessment",
+        "## Validation Performed",
+        "## Findings",
+    };
+    for (required_sections) |heading| {
+        if (std.mem.indexOf(u8, analysis, heading) == null) return error.MissingReviewSection;
+    }
+    if (std.mem.indexOf(u8, analysis, "# Review Results") != null or
+        std.mem.indexOf(u8, analysis, "## Review Scope") != null or
+        std.mem.indexOf(u8, analysis, "## Conclusion") != null or
+        std.mem.indexOf(u8, analysis, "MERGE WORTHY:") != null)
+    {
+        return error.ReservedReviewSection;
+    }
+
+    const outcome: Outcome = if (input.merge_worthy and input.evidence_complete) .merge_worthy else .rejected;
+    const verdict = if (outcome == .merge_worthy) "YES" else "NO";
+    const dirty = if (scope.dirty_worktree.len == 0) "Clean (excluding the generated review report)." else scope.dirty_worktree;
+
+    var rendered = std.Io.Writer.Allocating.init(allocator);
+    defer rendered.deinit();
+    try rendered.writer.print(
+        \\# Review Results
+        \\
+        \\## Review Scope
+        \\
+        \\- **Branch:** `{s}`
+        \\- **Base ref:** `{s}`
+        \\- **Base SHA:** `{s}`
+        \\- **Merge base:** `{s}`
+        \\- **HEAD SHA:** `{s}`
+        \\- **Commits reviewed:** {d}
+        \\- **Changed files:**
+        \\
+        \\```text
+        \\{s}
+        \\```
+        \\
+        \\- **Diff stat:**
+        \\
+        \\```text
+        \\{s}
+        \\```
+        \\
+        \\- **Worktree outside review scope:**
+        \\
+        \\```text
+        \\{s}
+        \\```
+        \\
+        \\{s}
+        \\
+        \\## Conclusion
+        \\
+        \\{s}
+        \\
+        \\**MERGE WORTHY: {s}**
+    , .{
+        scope.branch,
+        scope.base_ref,
+        scope.base_sha,
+        scope.merge_base_sha,
+        scope.head_sha,
+        scope.commit_count,
+        scope.changed_files,
+        scope.diff_stat,
+        dirty,
+        analysis,
+        conclusion,
+        verdict,
+    });
+
+    try atomic_write.writeAtomically(io, allocator, scope.repo_root, report_filename, rendered.written(), .{});
+    return .{
+        .path = try std.fs.path.join(allocator, &.{ scope.repo_root, report_filename }),
+        .outcome = outcome,
+    };
+}
+
 const Fixture = struct {
     tmp: std.testing.TmpDir,
     root: []const u8,
@@ -306,4 +424,50 @@ test "prepareAt excludes the generated report from dirty worktree details" {
         },
         else => return error.ExpectedReadyReview,
     }
+}
+
+test "writeReport forces a canonical rejection when evidence is incomplete" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const cwd = try std.process.currentPathAlloc(std.testing.io, arena);
+    const repo_root = try std.fs.path.join(arena, &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = "feature/report",
+        .base_ref = base_ref,
+        .base_sha = "1111111111111111111111111111111111111111",
+        .head_sha = "2222222222222222222222222222222222222222",
+        .merge_base_sha = "1111111111111111111111111111111111111111",
+        .commit_count = 1,
+        .changed_files = "M\tfeature.zig",
+        .diff_stat = " feature.zig | 1 +",
+        .dirty_worktree = "",
+    };
+    const analysis =
+        \\## Change Summary
+        \\Added review behavior.
+        \\## Quality and Regression Assessment
+        \\No known degradation, but validation is incomplete.
+        \\## Validation Performed
+        \\Tests could not run.
+        \\## Findings
+        \\No code finding; missing validation blocks approval.
+    ;
+
+    const saved = try writeReport(arena, std.testing.io, scope, .{
+        .analysis_markdown = analysis,
+        .conclusion = "Approval requires complete validation.",
+        .evidence_complete = false,
+        .merge_worthy = true,
+    });
+
+    try std.testing.expectEqual(Outcome.rejected, saved.outcome);
+    const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, saved.path, arena, .limited(64 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, content, "# Review Results") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "## Review Scope") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: YES**") == null);
 }
