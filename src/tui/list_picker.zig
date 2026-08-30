@@ -574,6 +574,43 @@ test "Item struct has expected fields" {
     try std.testing.expectEqualStrings("Test Item", item.label);
 }
 
+test "large item lists overflow into a bounded multi-column grid instead of one line per item" {
+    // Regression test for the original bug: a picker with more items than
+    // terminal rows must not render one line per item (which would scroll
+    // the title off-screen and desync the redraw cursor math). It should
+    // instead spread across a small, bounded number of rows using columns.
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var items: std.ArrayList(Item) = .empty;
+    for (0..60) |i| {
+        try items.append(arena, .{
+            .value = try std.fmt.allocPrint(arena, "model-{d}", .{i}),
+            .label = try std.fmt.allocPrint(arena, "Model {d}", .{i}),
+        });
+    }
+
+    const available_rows = 20;
+    const terminal_width = 80;
+    const column_width = computeColumnWidth(items.items);
+    const grid = computeGrid(items.items.len, available_rows, terminal_width, column_width);
+
+    // Multiple columns were needed, and the row count stays within what the
+    // terminal can actually display.
+    try std.testing.expect(grid.cols > 1);
+    try std.testing.expect(grid.rows <= available_rows);
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try renderGrid(&out.writer, items.items, grid, 0, column_width, false);
+
+    // The rendered output uses exactly `grid.rows` lines, not one per item.
+    const lines = std.mem.count(u8, out.written(), "\n");
+    try std.testing.expectEqual(grid.rows, lines);
+    try std.testing.expect(lines < items.items.len);
+}
+
 test "readKeyPosix interprets key bytes from the pending buffer" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     const cases = [_]struct {
