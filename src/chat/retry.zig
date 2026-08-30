@@ -170,12 +170,14 @@ fn sanitizeMessage(allocator: std.mem.Allocator, message: []const u8) !?[]u8 {
                 index += 1;
                 continue;
             };
-        if (index + sequence_len > formatted.text.len or
-            std.unicode.utf8Decode(formatted.text[index..][0..sequence_len]) == error.Utf8ExpectedContinuation)
-        {
+        if (index + sequence_len > formatted.text.len) {
             index += 1;
             continue;
         }
+        _ = std.unicode.utf8Decode(formatted.text[index..][0..sequence_len]) catch {
+            index += 1;
+            continue;
+        };
 
         const required = sequence_len + @intFromBool(pending_space);
         if (output.items.len + required > max_len - 3) {
@@ -243,4 +245,18 @@ test "formatHttpFailure keeps truncated Unicode messages valid UTF-8" {
     try std.testing.expect(std.unicode.utf8ValidateSlice(formatted));
     try std.testing.expect(formatted.len <= 512 + "HTTP 502 Bad Gateway: ".len);
     try std.testing.expect(std.mem.endsWith(u8, formatted, "..."));
+}
+
+test "formatHttpFailure drops invalid Unicode sequences" {
+    var body = [_]u8{ 'b', 'a', 'd', ':', ' ', 0xed, 0xa0, 0x80, ' ', 'o', 'k' };
+    const failure = http_client.HttpFailure{
+        .status = .bad_gateway,
+        .body = &body,
+    };
+
+    const formatted = try formatHttpFailure(std.testing.allocator, &failure);
+    defer std.testing.allocator.free(formatted);
+
+    try std.testing.expect(std.unicode.utf8ValidateSlice(formatted));
+    try std.testing.expectEqualStrings("HTTP 502 Bad Gateway: bad: ok", formatted);
 }
