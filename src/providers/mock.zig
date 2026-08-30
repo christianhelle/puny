@@ -332,27 +332,61 @@ fn respondWithEmpty(callback: openai.StreamCallback) !void {
 }
 
 fn respondWithReasoning(callback: openai.StreamCallback, user_message: []const u8, speed: MockSpeed, io: std.Io) !void {
-    // A verbose, multi-step internal monologue, streamed before the final
-    // answer, so --show-thinking has substantial reasoning output to render.
-    const reasoning_chunks = [_][]const u8{
-        "Let me think through this step by step.\n",
-        "First, I need to understand what the user is asking for.\n",
-        "The request seems to be about testing the reasoning display.\n",
-        "I should consider a few different approaches before answering.\n",
-        "One option is to give a short, direct answer.\n",
-        "Another option is to explain my reasoning in more detail first.\n",
-        "I'll weigh the tradeoffs of each approach.\n",
-        "A more detailed answer is probably more helpful here.\n",
-        "Let me also double-check that I'm not missing any context.\n",
-        "I don't see any missing context, so I can proceed.\n",
-        "Now let me draft the final response.\n",
-        "I think I have enough reasoning to produce a good answer now.\n",
+    // Stream a long, word-by-word internal monologue as .reasoning events
+    // (mirroring respondWithLong's streaming style) so --show-thinking has
+    // substantial, visibly-streamed reasoning output before the final answer.
+    const word_pool = [_][]const u8{
+        "let",       "me",        "think",     "through",    "this",       "step",      "by",        "step",
+        "first",     "i",         "need",      "to",         "understand", "what",      "the",       "user",
+        "is",        "asking",    "for",       "the",        "request",    "seems",     "to",        "be",
+        "about",     "verifying", "reasoning", "output",     "rendering",  "i",         "should",    "consider",
+        "a",         "few",       "different", "approaches", "before",     "answering", "one",       "option",
+        "is",        "to",        "give",      "a",          "short",      "direct",    "answer",    "another",
+        "option",    "is",        "to",        "explain",    "my",         "reasoning", "in",        "more",
+        "detail",    "first",     "i",         "will",       "weigh",      "the",       "tradeoffs", "of",
+        "each",      "approach",  "a",         "more",       "detailed",   "answer",    "is",        "probably",
+        "more",      "helpful",   "here",      "let",        "me",         "also",      "double",    "check",
+        "that",      "i",         "am",        "not",        "missing",    "any",       "context",   "i",
+        "do",        "not",       "see",       "any",        "missing",    "context",   "so",        "i",
+        "can",       "proceed",   "now",       "let",        "me",         "draft",     "the",       "final",
+        "response",  "i",         "think",     "i",          "have",       "enough",    "reasoning", "to",
+        "produce",   "a",         "good",      "answer",     "now",        "this",      "streamed",  "reasoning",
+        "simulates", "the",       "kind",      "of",         "internal",   "monologue", "a",         "real",
+        "model",     "might",     "produce",   "before",     "committing", "to",        "a",         "final",
+        "reply",     "and",       "it",        "is",         "long",       "enough",    "to",        "verify",
+        "that",      "show",      "thinking",  "renders",    "it",         "gradually", "instead",   "of",
+        "all",       "at",        "once",
     };
 
-    for (reasoning_chunks) |chunk| {
-        try callback.emit(.{ .reasoning = chunk });
+    var word_idx: usize = 0;
+    var sentence_len: usize = 0;
+    var total_words: usize = 0;
+
+    while (total_words < 300) : (total_words += 1) {
+        const word = word_pool[word_idx % word_pool.len];
+        if (total_words == 0) {
+            // Capitalize first letter: emit the first char separately to avoid
+            // slice concatenation (Zig 0.16 requires comptime-known slices)
+            try callback.emit(.{ .reasoning = &.{std.ascii.toUpper(word[0])} });
+            try callback.emit(.{ .reasoning = word[1..] });
+        } else if (sentence_len == 0) {
+            try callback.emit(.{ .reasoning = ". " });
+            try callback.emit(.{ .reasoning = word });
+        } else {
+            try callback.emit(.{ .reasoning = " " });
+            try callback.emit(.{ .reasoning = word });
+        }
+        sentence_len += 1;
+        word_idx += 1;
+
+        // End sentence every 12-18 words
+        if (sentence_len >= 12 + (total_words % 7)) {
+            sentence_len = 0;
+        }
+
         try emitDelay(speed, io);
     }
+    try callback.emit(.{ .reasoning = ".\n" });
 
     const content_chunks = [_][]const u8{
         "This is a **mock response**.\n\n",
