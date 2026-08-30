@@ -109,6 +109,31 @@ test "Grid.rowsInCol handles a single full column" {
     try std.testing.expectEqual(@as(usize, 5), g.rowsInCol(5, 0));
 }
 
+/// Extra characters reserved per column beyond the label itself: a 2-char
+/// "> "/"  " selection prefix plus a 2-space gap before the next column.
+const column_padding = 4;
+
+/// Widest column needed to render `items` without truncating any label,
+/// including room for the selection prefix and inter-column gap.
+pub fn computeColumnWidth(items: []const Item) usize {
+    var max_len: usize = 0;
+    for (items) |item| max_len = @max(max_len, item.label.len);
+    return max_len + column_padding;
+}
+
+test "computeColumnWidth returns padding only for an empty list" {
+    try std.testing.expectEqual(@as(usize, column_padding), computeColumnWidth(&.{}));
+}
+
+test "computeColumnWidth accounts for the longest label" {
+    const items = [_]Item{
+        .{ .value = "a", .label = "short" },
+        .{ .value = "b", .label = "a much longer label" },
+        .{ .value = "c", .label = "mid" },
+    };
+    try std.testing.expectEqual(@as(usize, "a much longer label".len + column_padding), computeColumnWidth(&items));
+}
+
 pub fn selectFromList(
     arena: std.mem.Allocator,
     io: std.Io,
