@@ -26,6 +26,7 @@ pub const Action = union(enum) {
     list_skills,
     load_skill: []const u8,
     load_prompt_file: []const u8,
+    begin_review,
     help,
 };
 
@@ -90,6 +91,8 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             try ctx.stdout_writer.flush();
             return .continue_;
         },
+
+        .review => return .begin_review,
 
         .model => |model_id| {
             if (ctx.oneshot) {
@@ -843,4 +846,29 @@ test "dispatch plan appends the PRD hint when a session PRD path is set" {
     try std.testing.expectEqual(@as(usize, 2), messages.items.len);
     try std.testing.expect(messages.items[1] == .system);
     try std.testing.expect(std.mem.indexOf(u8, messages.items[1].system, "Session PRD path: plan.md") != null);
+}
+
+test "dispatch review requests review preparation without changing mode" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+
+    const action = try dispatch(.review, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqual(Action.begin_review, action);
+    try std.testing.expectEqual(.build, mode);
 }
