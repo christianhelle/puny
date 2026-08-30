@@ -303,6 +303,14 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    if (parsed.review) {
+        review_mode = true;
+        const review_prompt = try cfg.resolvePrompt(messages_arena, "review", prompts.review);
+        try messages.append(messages_arena, .{ .system = review_prompt });
+        core_sess.setReviewPath(current_session.review_path);
+        core_sess.setWriteBlocked(true);
+    }
+
     var session_stats = stats.SessionStats.init(arena, init.io);
     session_stats.session_id = current_session.id;
     defer session_stats.deinit();

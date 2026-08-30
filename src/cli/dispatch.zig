@@ -25,7 +25,6 @@ pub const Action = union(enum) {
     list_skills,
     load_skill: []const u8,
     load_prompt_file: []const u8,
-    enter_review,
     help,
 };
 
