@@ -214,6 +214,7 @@ pub fn upsertSessionInfo(arena: std.mem.Allocator, io: std.Io, base_dir: []const
         .id = id,
         .has_prd = info.has_prd,
         .has_conversation = info.has_conversation,
+        .mode = info.mode,
         .planning_mode = info.planning_mode,
         .first_prompt = first_prompt,
         .last_modified = info.last_modified,
@@ -788,7 +789,8 @@ test "upsertSessionInfo adds a new entry and reads it back" {
         .id = "sess-1",
         .has_prd = true,
         .has_conversation = true,
-        .planning_mode = true,
+        .mode = .review,
+        .planning_mode = false,
         .first_prompt = "hello",
         .last_modified = 100,
     });
@@ -806,7 +808,8 @@ test "upsertSessionInfo adds a new entry and reads it back" {
     try std.testing.expectEqualStrings("sess-1", sessions[0].id);
     try std.testing.expect(sessions[0].has_prd);
     try std.testing.expect(sessions[0].has_conversation);
-    try std.testing.expect(sessions[0].planning_mode);
+    try std.testing.expectEqual(.review, sessions[0].mode);
+    try std.testing.expect(!sessions[0].planning_mode);
     try std.testing.expectEqualStrings("hello", sessions[0].first_prompt.?);
     try std.testing.expectEqual(@as(u64, 100), sessions[0].last_modified);
 }

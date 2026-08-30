@@ -6,6 +6,7 @@ const prompt_history = @import("../prompts/history.zig");
 const provider = @import("../providers/provider.zig");
 const openai = @import("../providers/openai.zig");
 const core_session = @import("../core/session.zig");
+const AgentMode = @import("../core/mode.zig").AgentMode;
 const stats = @import("stats.zig");
 const skills = @import("../skills/skills.zig");
 
@@ -39,7 +40,7 @@ pub const ChatLoopContext = struct {
     full_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     planning_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     messages: *std.ArrayList(openai.Message),
-    planning_mode: *bool,
+    mode: *AgentMode,
     restore_incomplete: bool = false,
     session: *core_session.Session,
     session_stats: *stats.SessionStats,
