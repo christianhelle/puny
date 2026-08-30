@@ -43,9 +43,11 @@ pub const Grid = struct {
 ///
 /// Stays single-column (matching prior behavior) while everything fits in
 /// `available_rows`. Once the item count overflows the available rows, it
-/// grows into as many columns as needed to fit vertically, then shrinks
-/// that column count back down if it wouldn't fit within `terminal_width`
-/// (each column occupying `column_width` characters).
+/// grows into as many columns as would be needed to fit vertically, then
+/// shrinks that column count back down to what fits within `terminal_width`
+/// (each column occupying `column_width` characters). Width always wins:
+/// on a narrow terminal the resulting `rows` can exceed `available_rows`,
+/// since truncating labels is worse than a taller grid.
 pub fn computeGrid(items_len: usize, available_rows: usize, terminal_width: usize, column_width: usize) Grid {
     if (items_len == 0) return .{ .rows = 0, .cols = 0 };
 
