@@ -2,10 +2,9 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
-- Filter generated providers to used OpenAPI tags ([#162](https://github.com/christianhelle/puny/pull/162)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Use generated Anthropic client with Messages filtering ([#163](https://github.com/christianhelle/puny/pull/163)) ([@christianhelle](https://github.com/christianhelle/))
+- Filter generated providers to only include used OpenAPI tags ([#162](https://github.com/christianhelle/puny/pull/162)) ([@christianhelle](https://github.com/christianhelle/))
 - Use generated OpenAPI clients for LM Studio and OpenAI (hybrid) ([#161](https://github.com/christianhelle/puny/pull/161)) ([@christianhelle](https://github.com/christianhelle/))
 - Quiet provider test output in failure-path checks ([#156](https://github.com/christianhelle/puny/pull/156)) ([@christianhelle](https://github.com/christianhelle/))
 - Refactor opencode_zen.zig and helpers.zig into smaller modules ([#155](https://github.com/christianhelle/puny/pull/155)) ([@christianhelle](https://github.com/christianhelle/))
