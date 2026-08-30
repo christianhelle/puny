@@ -41,7 +41,11 @@ pub fn main(init: std.process.Init) !u8 {
         if (!branch_review.isActive()) return err;
         const arena = init.arena.allocator();
         const reason = try std.fmt.allocPrint(arena, "Review execution failed: {s}", .{@errorName(err)});
-        const saved = try branch_review.finish(arena, init.io, reason);
+        const saved = branch_review.finish(arena, init.io, reason) catch |write_err| {
+            branch_review.reset();
+            printStandaloneReviewWriteError(init.io, write_err);
+            return 2;
+        };
         branch_review.reset();
         printStandaloneReviewResult(init.io, saved);
         return 2;
@@ -122,12 +126,18 @@ fn run(init: std.process.Init) !u8 {
                 return 2;
             },
             .operational_failure => |failure| {
-                const saved = try branch_review.writeOperationalFailure(arena, init.io, failure);
+                const saved = branch_review.writeOperationalFailure(arena, init.io, failure) catch |err| {
+                    printStandaloneReviewWriteError(init.io, err);
+                    return 2;
+                };
                 printStandaloneReviewResult(init.io, saved);
                 return saved.outcome.exitCode();
             },
             .no_changes => |scope| {
-                const saved = try branch_review.writeNoChanges(arena, init.io, scope);
+                const saved = branch_review.writeNoChanges(arena, init.io, scope) catch |err| {
+                    printStandaloneReviewWriteError(init.io, err);
+                    return 2;
+                };
                 printStandaloneReviewResult(init.io, saved);
                 return saved.outcome.exitCode();
             },
@@ -420,6 +430,13 @@ fn printStandaloneReviewResult(io: std.Io, saved: branch_review.SavedReport) voi
     var writer: std.Io.File.Writer = .init(.stdout(), io, &buffer);
     const verdict = if (saved.outcome == .merge_worthy) "YES" else "NO";
     writer.interface.print("Review report: {s}\nMERGE WORTHY: {s}\n", .{ saved.path, verdict }) catch {};
+    writer.interface.flush() catch {};
+}
+
+fn printStandaloneReviewWriteError(io: std.Io, err: anyerror) void {
+    var buffer: [1024]u8 = undefined;
+    var writer: std.Io.File.Writer = .init(.stderr(), io, &buffer);
+    writer.interface.print("Review report could not be written: {s}\n", .{@errorName(err)}) catch {};
     writer.interface.flush() catch {};
 }
 

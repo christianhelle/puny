@@ -183,6 +183,7 @@ const IsolatedEnv = struct {
 const GitFixtureKind = enum {
     feature,
     empty,
+    empty_blocked_report,
     main,
     missing_origin,
 };
@@ -223,7 +224,14 @@ const GitFixture = struct {
 
         switch (kind) {
             .main => {},
-            .empty => try runGitOk(allocator, io, worktree, &.{ "checkout", "-b", "feature/empty" }),
+            .empty, .empty_blocked_report => {
+                try runGitOk(allocator, io, worktree, &.{ "checkout", "-b", "feature/empty" });
+                if (kind == .empty_blocked_report) {
+                    const blocked_path = try std.fs.path.join(allocator, &.{ worktree, "review-results.md" });
+                    defer allocator.free(blocked_path);
+                    try std.Io.Dir.cwd().createDirPath(io, blocked_path);
+                }
+            },
             .feature, .missing_origin => {
                 try runGitOk(allocator, io, worktree, &.{ "checkout", "-b", "feature/review" });
                 const feature_path = try std.fs.path.join(allocator, &.{ worktree, "feature.txt" });
