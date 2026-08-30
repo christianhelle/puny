@@ -246,7 +246,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (restore_target) |s| {
         const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
-        const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &planning_mode, &messages, stdout_writer);
+        const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &planning_mode, &review_mode, &messages, stdout_writer);
         const now = std.Io.Clock.Timestamp.now(init.io, .awake);
         const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
         session_restored = restore_result.restored;
@@ -267,6 +267,8 @@ pub fn main(init: std.process.Init) !void {
 
     var planning_tool_definitions = try buildPlanningToolDefinitions(arena, parsed.no_skills);
     defer planning_tool_definitions.deinit(arena);
+    var review_tool_definitions = try buildReviewToolDefinitions(arena, parsed.no_skills);
+    defer review_tool_definitions.deinit(arena);
 
     var skill_registry = skills.Registry.init(arena);
     defer skill_registry.deinit();
@@ -323,6 +325,7 @@ pub fn main(init: std.process.Init) !void {
         .reasoning_effort = &reasoning_effort,
         .full_tool_definitions = &full_tool_definitions,
         .planning_tool_definitions = &planning_tool_definitions,
+        .review_tool_definitions = &review_tool_definitions,
         .messages = &messages,
         .planning_mode = &planning_mode,
         .review_mode = &review_mode,
@@ -391,6 +394,7 @@ fn loadRestoredSession(
     base_dir: []const u8,
     s: sessions.SessionInfo,
     planning_mode: *bool,
+    review_mode: *bool,
     messages: *std.ArrayList(openai.Message),
     stdout_writer: *std.Io.Writer,
 ) !RestoreResult {
@@ -428,6 +432,7 @@ fn loadRestoredSession(
     }
 
     planning_mode.* = s.planning_mode;
+    review_mode.* = s.review_mode;
     return .{ .restored = true, .incomplete = restore_incomplete };
 }
 
@@ -548,6 +553,17 @@ fn buildPlanningToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.
     var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
     errdefer definitions.deinit(arena);
     for (tools.planning_registry) |tool| {
+        if (no_skills and std.mem.eql(u8, tool.name, "load_skill")) continue;
+        const schema = try tool.schema(arena);
+        try definitions.append(arena, .{ .function = schema });
+    }
+    return definitions;
+}
+
+fn buildReviewToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.ArrayList(openai.ToolDefinition) {
+    var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
+    errdefer definitions.deinit(arena);
+    for (tools.review_registry) |tool| {
         if (no_skills and std.mem.eql(u8, tool.name, "load_skill")) continue;
         const schema = try tool.schema(arena);
         try definitions.append(arena, .{ .function = schema });

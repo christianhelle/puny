@@ -38,6 +38,7 @@ pub const ChatLoopContext = struct {
     reasoning_effort: *?openai.ReasoningEffort,
     full_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     planning_tool_definitions: *std.ArrayList(openai.ToolDefinition),
+    review_tool_definitions: *std.ArrayList(openai.ToolDefinition),
     messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
     review_mode: *bool,

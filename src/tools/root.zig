@@ -36,6 +36,9 @@ pub fn dispatch(name: []const u8) ?Tool {
     inline for (planning_registry) |tool| {
         if (std.mem.eql(u8, tool.name, name)) return tool;
     }
+    inline for (review_registry) |tool| {
+        if (std.mem.eql(u8, tool.name, name)) return tool;
+    }
     return null;
 }
 
@@ -76,6 +79,20 @@ pub const planning_registry = blk: {
     };
 };
 
+pub const review_registry = blk: {
+    @setEvalBranchQuota(10000);
+    break :blk &[_]Tool{
+        filesystem.read_file,
+        filesystem.list_directory,
+        search.grep_search,
+        web.web_fetch,
+        git.git_status,
+        git.git_diff,
+        core_session.save_review_tool,
+        skill_loader.load_skill,
+    };
+};
+
 test "dispatch returns known tools" {
     try std.testing.expect(dispatch("read_file") != null);
     try std.testing.expect(dispatch("write_file") != null);
@@ -86,6 +103,7 @@ test "dispatch returns known tools" {
     try std.testing.expect(dispatch("git_diff") != null);
     try std.testing.expect(dispatch("web_fetch") != null);
     try std.testing.expect(dispatch("save_prd") != null);
+    try std.testing.expect(dispatch("save_review") != null);
     try std.testing.expect(dispatch("load_skill") != null);
     try std.testing.expect(dispatch("unknown_tool") == null);
 }

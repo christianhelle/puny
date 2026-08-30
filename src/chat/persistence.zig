@@ -134,6 +134,7 @@ fn testContext(
         .reasoning_effort = undefined,
         .full_tool_definitions = undefined,
         .planning_tool_definitions = undefined,
+        .review_tool_definitions = undefined,
         .messages = messages,
         .planning_mode = planning_mode,
         .review_mode = review_mode,
@@ -193,6 +194,7 @@ test "saveMessages and loadMessagesIntoContext round-trip" {
         .dir = dir,
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveMessages(&ctx);
@@ -234,6 +236,7 @@ test "saveSessionMeta persists planning mode and the first prompt" {
         .dir = dir,
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveSessionMeta(&ctx);
@@ -269,6 +272,7 @@ test "saveSessionMeta writes a null first prompt when there are no user messages
         .dir = dir,
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveSessionMeta(&ctx);
@@ -298,6 +302,7 @@ test "loadMessagesIntoContext reports a missing conversation" {
         .dir = "puny-test-missing-session-dir",
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try loadMessagesIntoContext(&ctx, "puny-test-missing-session-dir");
@@ -331,6 +336,7 @@ test "saveMessages tolerates an unwritable session directory" {
         .dir = file_path,
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveMessages(&ctx);
@@ -359,6 +365,7 @@ test "saveSessionMeta tolerates an unwritable session directory" {
         .dir = file_path,
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveSessionMeta(&ctx);
@@ -389,6 +396,7 @@ test "loadMessagesIntoContext propagates non-missing-file read errors" {
         .dir = file_path,
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try std.testing.expectError(error.NotDir, loadMessagesIntoContext(&ctx, file_path));
@@ -416,6 +424,7 @@ test "saveMessages round-trips an empty conversation and cleans up the temp file
         .dir = dir,
         .prd_path = "",
         .html_path = "",
+        .review_path = "",
     };
     var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &planning_mode, &review_mode, &out.writer);
     try saveMessages(&ctx);

@@ -464,7 +464,7 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     var turn_in: i64 = 0;
     var turn_out: i64 = 0;
     while (!turn_complete) {
-        const active_tool_definitions = if (ctx.planning_mode.*) ctx.planning_tool_definitions.items else if (ctx.review_mode.*) ctx.planning_tool_definitions.items else ctx.full_tool_definitions.items;
+        const active_tool_definitions = if (ctx.planning_mode.*) ctx.planning_tool_definitions.items else if (ctx.review_mode.*) ctx.review_tool_definitions.items else ctx.full_tool_definitions.items;
 
         var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
         try thinking_indicator.show(ctx.stdout_writer);

@@ -7,6 +7,7 @@ const Tool = tool_schema.Tool;
 
 var prd_path_global: []const u8 = "";
 var html_path_global: []const u8 = "";
+var review_path_global: []const u8 = "";
 
 var write_blocked_global: bool = false;
 
@@ -21,6 +22,10 @@ pub fn isWriteBlocked() bool {
 pub fn setSessionPaths(prd: []const u8, html: []const u8) void {
     prd_path_global = prd;
     html_path_global = html;
+}
+
+pub fn setReviewPath(path: []const u8) void {
+    review_path_global = path;
 }
 
 const SavePrdParams = struct {
@@ -66,6 +71,34 @@ pub const save_prd_tool = Tool{
     }.exec,
 };
 
+const SaveReviewParams = struct {
+    report: []const u8,
+};
+
+fn saveReviewSchema(allocator: std.mem.Allocator) !std.json.Value {
+    return tool_schema.ToolDefinition("save_review", "Save the code review report. Call this when you have completed the review and are ready to save the final report.", SaveReviewParams).schema(allocator);
+}
+
+pub const save_review_tool = Tool{
+    .name = "save_review",
+    .description = "Save the code review report. Call this when you have completed the review and are ready to save the final report.",
+    .schema = saveReviewSchema,
+    .execute = struct {
+        pub fn exec(allocator: std.mem.Allocator, io: std.Io, args: std.json.Value) ![]const u8 {
+            const report = args.object.get("report") orelse return error.MissingReport;
+            var file = try std.Io.Dir.cwd().createFile(io, review_path_global, .{});
+            defer file.close(io);
+            try file.writeStreamingAll(io, report.string);
+            const abs = try resolvePath(allocator, io, review_path_global);
+            return std.fmt.allocPrint(
+                allocator,
+                "Review report saved to: {s}",
+                .{abs},
+            );
+        }
+    }.exec,
+};
+
 pub const SessionMeta = struct {
     planning_mode: bool,
     review_mode: bool,
@@ -78,33 +111,40 @@ pub const Session = struct {
     dir: []const u8,
     prd_path: []const u8,
     html_path: []const u8,
+    review_path: []const u8,
 
     pub fn init(arena: std.mem.Allocator, base_dir: []const u8, random: std.Random, io: std.Io) !Session {
         const id = try generateUuid(random, arena);
         const dir = try std.fs.path.join(arena, &.{ base_dir, "sessions", id });
         const prd_path = try std.fs.path.join(arena, &.{ dir, "plan.md" });
         const html_path = try std.fs.path.join(arena, &.{ dir, "plan.html" });
+        const review_path = try std.fs.path.join(arena, &.{ dir, "review.md" });
         try createSessionDir(io, dir);
         setSessionPaths(prd_path, html_path);
+        setReviewPath(review_path);
         return .{
             .id = id,
             .base = try arena.dupe(u8, base_dir),
             .dir = dir,
             .prd_path = prd_path,
             .html_path = html_path,
+            .review_path = review_path,
         };
     }
 
     pub fn fromDir(arena: std.mem.Allocator, id: []const u8, base_dir: []const u8, dir: []const u8, prd_path: []const u8, html_path: []const u8) !Session {
         const owned_prd = try arena.dupe(u8, prd_path);
         const owned_html = try arena.dupe(u8, html_path);
+        const owned_review = try std.fs.path.join(arena, &.{ dir, "review.md" });
         setSessionPaths(owned_prd, owned_html);
+        setReviewPath(owned_review);
         return .{
             .id = try arena.dupe(u8, id),
             .base = try arena.dupe(u8, base_dir),
             .dir = try arena.dupe(u8, dir),
             .prd_path = owned_prd,
             .html_path = owned_html,
+            .review_path = owned_review,
         };
     }
 };
@@ -266,6 +306,7 @@ test "Session.init creates directory with correct paths" {
         std.testing.allocator.free(session.dir);
         std.testing.allocator.free(session.prd_path);
         std.testing.allocator.free(session.html_path);
+        std.testing.allocator.free(session.review_path);
     }
 
     try std.testing.expectEqual(@as(usize, 36), session.id.len);
@@ -300,6 +341,7 @@ test "fromDir sets global session paths and does not create a directory" {
         std.testing.allocator.free(session.dir);
         std.testing.allocator.free(session.prd_path);
         std.testing.allocator.free(session.html_path);
+        std.testing.allocator.free(session.review_path);
     }
 
     try std.testing.expectEqualStrings(prd_path, prd_path_global);
