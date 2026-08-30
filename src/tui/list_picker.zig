@@ -206,6 +206,72 @@ fn redrawList(stdout_writer: *std.Io.Writer, items: []const Item, selected: usiz
     try stdout_writer.flush();
 }
 
+/// Renders `items` laid out column-major per `grid`, highlighting `selected`.
+/// Each cell is padded to `column_width` unless it's the last populated
+/// column in its row, so single-column layouts render identically to the
+/// original one-item-per-line output.
+fn renderGrid(stdout_writer: *std.Io.Writer, items: []const Item, grid: Grid, selected: usize, column_width: usize) !void {
+    for (0..grid.rows) |r| {
+        for (0..grid.cols) |c| {
+            const idx = c * grid.rows + r;
+            if (idx >= items.len) continue;
+            const item = items[idx];
+            const is_last_in_row = idx + grid.rows >= items.len or c == grid.cols - 1;
+            if (idx == selected) {
+                try stdout_writer.print("{s}> {s}{s}", .{ ansi.bright, item.label, ansi.reset });
+            } else {
+                try stdout_writer.print("  {s}", .{item.label});
+            }
+            if (!is_last_in_row) {
+                const printed = item.label.len + 2;
+                const pad = if (column_width > printed) column_width - printed else 0;
+                try stdout_writer.splatByteAll(' ', pad);
+            }
+        }
+        try stdout_writer.writeAll("\n");
+    }
+    try stdout_writer.flush();
+}
+
+test "renderGrid renders a single column identically to one item per line" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    const items = [_]Item{
+        .{ .value = "one", .label = "One" },
+        .{ .value = "two", .label = "Two" },
+    };
+    try renderGrid(&out.writer, &items, .{ .rows = 2, .cols = 1 }, 1, computeColumnWidth(&items));
+
+    const text = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, "> Two") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "  One") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, ansi.bright) != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, ansi.reset) != null);
+}
+
+test "renderGrid lays out multiple columns and pads non-final cells" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    // Column-major: col0 = [A, B], col1 = [C].
+    const items = [_]Item{
+        .{ .value = "a", .label = "A" },
+        .{ .value = "b", .label = "B" },
+        .{ .value = "c", .label = "C" },
+    };
+    const grid = Grid{ .rows = 2, .cols = 2 };
+    try renderGrid(&out.writer, &items, grid, 0, computeColumnWidth(&items));
+
+    const text = out.written();
+    const lines = std.mem.count(u8, text, "\n");
+    try std.testing.expectEqual(@as(usize, 2), lines);
+    // First row has both column0 ("A") and column1 ("C"); second row only column0 ("B").
+    try std.testing.expect(std.mem.indexOf(u8, text, "> A") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "C\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "  B\n") != null);
+}
+
 fn selectText(
     arena: std.mem.Allocator,
     io: std.Io,
