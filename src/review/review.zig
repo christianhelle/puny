@@ -104,7 +104,7 @@ pub fn prepareAt(allocator: std.mem.Allocator, io: std.Io, start_dir: []const u8
         return .{ .operational_failure = .{
             .repo_root = repo_root,
             .branch = branch,
-            .message = fetch_result.failed,
+            .message = "Failed to fetch origin/main.",
         } };
     }
 
@@ -799,6 +799,7 @@ test "writeOperationalFailure records a retryable fetch failure" {
         .operational_failure => |value| value,
         else => return error.ExpectedOperationalFailure,
     };
+    try std.testing.expectEqualStrings("Failed to fetch origin/main.", failure.message);
     const saved = try writeOperationalFailure(arena, std.testing.io, failure);
 
     try std.testing.expectEqual(Outcome.operational_failure, saved.outcome);
