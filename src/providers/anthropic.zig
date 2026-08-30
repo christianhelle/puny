@@ -401,6 +401,28 @@ const AnthropicAdapterRequest = struct {
     }
 };
 
+/// Merges `anthropic-version` into `default_headers`, deduplicating a
+/// caller-supplied `anthropic-version` header (case-insensitive) instead of
+/// sending it twice on the wire. Returns the full owned buffer (for freeing)
+/// and the used sub-slice (for use as `default_headers`).
+fn mergeAnthropicHeaders(allocator: std.mem.Allocator, default_headers: []const std.http.Header) !struct {
+    buffer: []std.http.Header,
+    used: []std.http.Header,
+} {
+    const merged = try allocator.alloc(std.http.Header, default_headers.len + 1);
+    merged[0] = .{ .name = "anthropic-version", .value = anthropic_version };
+    var n: usize = 1;
+    for (default_headers) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, "anthropic-version")) {
+            merged[0] = h;
+            continue;
+        }
+        merged[n] = h;
+        n += 1;
+    }
+    return .{ .buffer = merged, .used = merged[0..n] };
+}
+
 pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     // Validate tools upfront to match requestPayload behavior
     for (request.tools) |tool| {
@@ -412,13 +434,13 @@ pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, c
     var owned_headers: ?[]std.http.Header = null;
     defer if (owned_headers) |h| client.allocator.free(h);
     if (client.default_headers.len != 0) {
-        if (client.allocator.alloc(std.http.Header, client.default_headers.len + 1)) |merged| {
-            merged[0] = .{ .name = "anthropic-version", .value = anthropic_version };
-            for (client.default_headers, 0..) |h, i| merged[i + 1] = h;
-            g.default_headers = merged;
-            owned_headers = merged;
+        if (mergeAnthropicHeaders(client.allocator, client.default_headers)) |merged| {
+            g.default_headers = merged.used;
+            owned_headers = merged.buffer;
         } else |_| {
-            g.default_headers = &.{.{ .name = "anthropic-version", .value = anthropic_version }};
+            // On allocation failure, preserve the caller's headers as-is
+            // rather than silently dropping them.
+            g.default_headers = client.default_headers;
         }
     }
     // Use adapter request that will be stringified and have stream:true injected.
