@@ -36,6 +36,9 @@ pub fn dispatch(name: []const u8) ?Tool {
     inline for (planning_registry) |tool| {
         if (std.mem.eql(u8, tool.name, name)) return tool;
     }
+    inline for (review_registry) |tool| {
+        if (std.mem.eql(u8, tool.name, name)) return tool;
+    }
     return null;
 }
 
@@ -44,6 +47,7 @@ const shell = @import("shell.zig");
 const search = @import("search.zig");
 const git = @import("git.zig");
 const web = @import("web.zig");
+const review = @import("review.zig");
 const core_session = @import("../core/session.zig");
 const skill_loader = @import("skill_loader.zig");
 
@@ -76,6 +80,21 @@ pub const planning_registry = blk: {
     };
 };
 
+pub const review_registry = blk: {
+    @setEvalBranchQuota(10000);
+    break :blk &[_]Tool{
+        filesystem.read_file,
+        filesystem.list_directory,
+        shell.execute_shell,
+        search.grep_search,
+        git.git_status,
+        git.git_diff,
+        web.web_fetch,
+        review.save_review_results,
+        skill_loader.load_skill,
+    };
+};
+
 test "dispatch returns known tools" {
     try std.testing.expect(dispatch("read_file") != null);
     try std.testing.expect(dispatch("write_file") != null);
@@ -88,6 +107,23 @@ test "dispatch returns known tools" {
     try std.testing.expect(dispatch("save_prd") != null);
     try std.testing.expect(dispatch("load_skill") != null);
     try std.testing.expect(dispatch("unknown_tool") == null);
+}
+
+test "review registry permits checks and the report tool but not source writes" {
+    var has_shell = false;
+    var has_report = false;
+    var has_write_file = false;
+    var has_save_prd = false;
+    for (review_registry) |tool| {
+        has_shell = has_shell or std.mem.eql(u8, tool.name, "execute_shell");
+        has_report = has_report or std.mem.eql(u8, tool.name, "save_review_results");
+        has_write_file = has_write_file or std.mem.eql(u8, tool.name, "write_file");
+        has_save_prd = has_save_prd or std.mem.eql(u8, tool.name, "save_prd");
+    }
+    try std.testing.expect(has_shell);
+    try std.testing.expect(has_report);
+    try std.testing.expect(!has_write_file);
+    try std.testing.expect(!has_save_prd);
 }
 
 test "defineTool executes the handler with parsed JSON args" {
