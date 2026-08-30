@@ -310,6 +310,48 @@ pub fn writeReport(
     };
 }
 
+pub fn buildPromptContext(allocator: std.mem.Allocator, scope: Scope) ![]const u8 {
+    const dirty = if (scope.dirty_worktree.len == 0) "Clean." else scope.dirty_worktree;
+    return std.fmt.allocPrint(
+        allocator,
+        \\Review invocation context:
+        \\- Repository root: {s}
+        \\- Branch: {s}
+        \\- Base ref: {s}
+        \\- Base SHA: {s}
+        \\- Merge base SHA: {s}
+        \\- HEAD SHA: {s}
+        \\- Immutable review range: {s}..{s}
+        \\- Commits in scope: {d}
+        \\- Changed files:
+        \\{s}
+        \\- Diff stat:
+        \\{s}
+        \\- Worktree outside review scope:
+        \\{s}
+        \\
+        \\Review committed changes only in the immutable range above. Do not include
+        \\staged, modified, or untracked work in the merge-worthiness verdict.
+        \\Repository checks run in the current worktree, so disclose any way its
+        \\dirty state could affect their reliability. Do not edit source files.
+        \\Save the final report as {s} through the dedicated report tool.
+    , .{
+        scope.repo_root,
+        scope.branch,
+        scope.base_ref,
+        scope.base_sha,
+        scope.merge_base_sha,
+        scope.head_sha,
+        scope.merge_base_sha,
+        scope.head_sha,
+        scope.commit_count,
+        scope.changed_files,
+        scope.diff_stat,
+        dirty,
+        report_filename,
+    });
+}
+
 pub fn begin(scope: Scope) void {
     active_review = .{ .scope = scope };
 }
@@ -720,4 +762,26 @@ test "prepareAt rejects a directory outside a Git repository" {
         else => return error.ExpectedInvalidReview,
     };
     try std.testing.expect(std.mem.indexOf(u8, failure.message, "requires a Git repository") != null);
+}
+
+test "buildPromptContext fixes the model review to immutable commits" {
+    const scope = Scope{
+        .repo_root = "C:\\repo",
+        .branch = "feature/context",
+        .base_ref = base_ref,
+        .base_sha = "1111111111111111111111111111111111111111",
+        .head_sha = "2222222222222222222222222222222222222222",
+        .merge_base_sha = "3333333333333333333333333333333333333333",
+        .commit_count = 2,
+        .changed_files = "M\tsrc/main.zig",
+        .diff_stat = " src/main.zig | 4 ++--",
+        .dirty_worktree = " M README.md",
+    };
+
+    const context = try buildPromptContext(std.testing.allocator, scope);
+    defer std.testing.allocator.free(context);
+    try std.testing.expect(std.mem.indexOf(u8, context, "feature/context") != null);
+    try std.testing.expect(std.mem.indexOf(u8, context, "3333333333333333333333333333333333333333..2222222222222222222222222222222222222222") != null);
+    try std.testing.expect(std.mem.indexOf(u8, context, "committed changes only") != null);
+    try std.testing.expect(std.mem.indexOf(u8, context, "review-results.md") != null);
 }
