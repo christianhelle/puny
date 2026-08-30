@@ -6,6 +6,20 @@
     "not_expect": []
   },
   {
+    "name": "Review mode writes a merge-worthy report",
+    "args": ["--mock", "--model", "mock-model", "--review"],
+    "expect": ["Review report:", "MERGE WORTHY: YES"],
+    "not_expect": ["Review could not start"],
+    "git_fixture": "feature",
+    "evidence": {
+      "file_exists": ["review-results.md"],
+      "file_contains": {
+        "path": "review-results.md",
+        "patterns": ["# Review Results", "## Review Scope", "## Change Summary", "## Quality and Regression Assessment", "## Validation Performed", "## Findings", "## Conclusion", "**MERGE WORTHY: YES**"]
+      }
+    }
+  },
+  {
     "name": "Tool call: read_file",
     "args": ["--mock", "--model", "mock-model", "--prompt", "read the code", "--oneshot"],
     "expect": ["Reading", "Tool executed"],

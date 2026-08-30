@@ -33,6 +33,8 @@ const TestCase = struct {
     /// before the test runs, so the binary under test discovers them as
     /// repository skills. Removed after the test.
     skills: []const SkillFixture = &.{},
+    /// Optional isolated Git repository shape used by review-mode cases.
+    git_fixture: ?GitFixtureKind = null,
 };
 
 // Names of skill fixtures materialized by the harness, tracked so stale
@@ -362,16 +364,16 @@ pub fn main(init: std.process.Init) !u8 {
     return if (failed == 0) 0 else 1;
 }
 
-fn removeEvidenceFiles(allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) void {
+fn removeEvidenceFiles(dir: std.Io.Dir, allocator: std.mem.Allocator, io: std.Io, test_case: TestCase) void {
     if (test_case.evidence) |evidence| {
         for (evidence.file_exists) |path| {
-            std.Io.Dir.cwd().deleteFile(io, path) catch {};
+            dir.deleteFile(io, path) catch {};
         }
         if (evidence.file_contains) |fc| {
-            std.Io.Dir.cwd().deleteFile(io, fc.path) catch {};
+            dir.deleteFile(io, fc.path) catch {};
         }
     }
-    cleanupSkillFixtures(std.Io.Dir.cwd(), allocator, io);
+    cleanupSkillFixtures(dir, allocator, io);
 }
 
 fn skillDirPath(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
@@ -413,8 +415,21 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
     const allocator = params.allocator;
     const io = params.io;
 
-    removeEvidenceFiles(allocator, io, test_case);
-    try setupSkillFixtures(std.Io.Dir.cwd(), allocator, io, test_case);
+    var git_fixture: ?GitFixture = if (test_case.git_fixture) |kind|
+        try GitFixture.init(allocator, io, params.environ_map, kind)
+    else
+        null;
+    defer if (git_fixture) |*fixture| fixture.deinit(io);
+
+    var target_dir = if (git_fixture) |fixture|
+        try std.Io.Dir.cwd().openDir(io, fixture.worktree, .{})
+    else
+        std.Io.Dir.cwd();
+    defer if (git_fixture != null) target_dir.close(io);
+
+    removeEvidenceFiles(target_dir, allocator, io, test_case);
+    defer removeEvidenceFiles(target_dir, allocator, io, test_case);
+    try setupSkillFixtures(target_dir, allocator, io, test_case);
 
     // Optionally start an in-process HTTP server and substitute the port.
     var server_ctx: ?ServerCtx = null;
@@ -442,9 +457,18 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
         port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
     }
 
+    const binary_path = if (std.fs.path.isAbsolute(params.binary_path))
+        params.binary_path
+    else blk: {
+        const cwd = try std.process.currentPathAlloc(io, allocator);
+        defer allocator.free(cwd);
+        break :blk try std.fs.path.join(allocator, &.{ cwd, params.binary_path });
+    };
+    defer if (!std.fs.path.isAbsolute(params.binary_path)) allocator.free(binary_path);
+
     const child_argv = try allocator.alloc([]const u8, test_case.args.len + 1);
     defer allocator.free(child_argv);
-    child_argv[0] = params.binary_path;
+    child_argv[0] = binary_path;
     for (test_case.args, 0..) |arg, i| {
         if (port_str) |p| {
             child_argv[i + 1] = try std.mem.replaceOwned(u8, allocator, arg, "{port}", p);
@@ -459,6 +483,7 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
     const result = try std.process.run(allocator, io, .{
         .argv = child_argv,
         .environ_map = params.environ_map,
+        .cwd = if (git_fixture) |fixture| .{ .path = fixture.worktree } else .inherit,
         // Generous capture limits. Crossing the limit triggers the
         // StreamTooLong error path in std.process.run, which deadlocks on
         // Windows (the child blocks writing to a full pipe), so the limits
@@ -514,14 +539,14 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
 
     if (test_case.evidence) |evidence| {
         for (evidence.file_exists) |path| {
-            const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch {
+            const file = target_dir.openFile(io, path, .{}) catch {
                 std.debug.print("FAILED\n    evidence file not found: '{s}'\n", .{path});
                 return false;
             };
             file.close(io);
         }
         if (evidence.file_contains) |fc| {
-            const content = std.Io.Dir.cwd().readFileAlloc(io, fc.path, allocator, .limited(1024 * 1024)) catch {
+            const content = target_dir.readFileAlloc(io, fc.path, allocator, .limited(1024 * 1024)) catch {
                 std.debug.print("FAILED\n    could not read evidence file: '{s}'\n", .{fc.path});
                 return false;
             };
