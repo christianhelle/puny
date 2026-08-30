@@ -181,7 +181,7 @@ pub fn selectFromList(
 
     var selected: usize = 0;
 
-    const available_rows = terminal.terminalHeight() orelse default_available_rows;
+    const available_rows = if (terminal.terminalHeight()) |height| usableRows(height) else default_available_rows;
     const terminal_width = terminal.terminalWidth() orelse default_terminal_width;
     const column_width = computeColumnWidth(items);
     const grid = computeGrid(items.len, available_rows, terminal_width, column_width);
