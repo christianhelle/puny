@@ -110,7 +110,7 @@ pub fn prepareAt(allocator: std.mem.Allocator, io: std.Io, start_dir: []const u8
     };
     const status_result = try runGit(allocator, io, repo_root, &.{ "status", "--porcelain=v1", "--untracked-files=all" }, 30 * std.time.ns_per_s);
     const dirty_worktree = switch (status_result) {
-        .ok => |value| value,
+        .ok => |value| try withoutGeneratedReport(allocator, value),
         .failed => |message| return operationalFailure(repo_root, branch, message),
     };
 
@@ -168,6 +168,20 @@ fn commandSection(output: []const u8, marker: []const u8) []const u8 {
     const start = start_index + marker.len;
     const end = if (std.mem.indexOfPos(u8, output, start, "\nSTDERR:\n")) |index| index else output.len;
     return output[start..end];
+}
+
+fn withoutGeneratedReport(allocator: std.mem.Allocator, status: []const u8) ![]const u8 {
+    var filtered: std.ArrayList(u8) = .empty;
+    defer filtered.deinit(allocator);
+    var lines = std.mem.splitScalar(u8, status, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        const path = if (line.len > 3) std.mem.trim(u8, line[3..], &std.ascii.whitespace) else "";
+        if (std.mem.eql(u8, path, report_filename)) continue;
+        if (filtered.items.len > 0) try filtered.append(allocator, '\n');
+        try filtered.appendSlice(allocator, line);
+    }
+    return helpers.ownedSliceOrEmpty(&filtered, allocator);
 }
 
 const Fixture = struct {
@@ -265,6 +279,30 @@ test "prepareAt captures a committed feature branch scope" {
             try std.testing.expectEqual(@as(usize, 40), scope.base_sha.len);
             try std.testing.expectEqual(@as(usize, 40), scope.head_sha.len);
             try std.testing.expectEqual(@as(usize, 40), scope.merge_base_sha.len);
+        },
+        else => return error.ExpectedReadyReview,
+    }
+}
+
+test "prepareAt excludes the generated report from dirty worktree details" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    try fixture.addFeatureCommit();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const report_path = try std.fs.path.join(std.testing.allocator, &.{ fixture.worktree, report_filename });
+    defer std.testing.allocator.free(report_path);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = report_path, .data = "old report\n" });
+    const local_path = try std.fs.path.join(std.testing.allocator, &.{ fixture.worktree, "local.txt" });
+    defer std.testing.allocator.free(local_path);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = local_path, .data = "local\n" });
+
+    const result = try prepareAt(arena_state.allocator(), std.testing.io, fixture.worktree);
+    switch (result) {
+        .ready => |scope| {
+            try std.testing.expect(std.mem.indexOf(u8, scope.dirty_worktree, "local.txt") != null);
+            try std.testing.expect(std.mem.indexOf(u8, scope.dirty_worktree, report_filename) == null);
         },
         else => return error.ExpectedReadyReview,
     }
