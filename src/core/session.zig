@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const tool_schema = @import("../tools/schema.zig");
 const helpers = @import("../tools/helpers.zig");
+const AgentMode = @import("mode.zig").AgentMode;
 
 const Tool = tool_schema.Tool;
 
@@ -67,9 +68,14 @@ pub const save_prd_tool = Tool{
 };
 
 pub const SessionMeta = struct {
-    planning_mode: bool,
-    first_prompt: ?[]const u8,
+    mode: AgentMode = .build,
+    planning_mode: bool = false,
+    first_prompt: ?[]const u8 = null,
 };
+
+fn defaultSessionMeta() SessionMeta {
+    return .{ .mode = .build, .planning_mode = false, .first_prompt = null };
+}
 
 pub const Session = struct {
     id: []const u8,
@@ -140,10 +146,10 @@ pub fn sessionMetaPath(allocator: std.mem.Allocator, sessions_dir: []const u8, i
 
 pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !SessionMeta {
     const data = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| switch (err) {
-        error.FileNotFound => return SessionMeta{ .planning_mode = false, .first_prompt = null },
+        error.FileNotFound => return defaultSessionMeta(),
         error.StreamTooLong => {
             std.log.warn("session meta at {s} exceeds the read limit", .{path});
-            return SessionMeta{ .planning_mode = false, .first_prompt = null };
+            return defaultSessionMeta();
         },
         else => |e| return e,
     };
@@ -151,25 +157,34 @@ pub fn readSessionMetaJson(io: std.Io, allocator: std.mem.Allocator, path: []con
 
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, data, .{}) catch |err| {
         std.log.warn("failed to parse session meta at {s}: {s}", .{ path, @errorName(err) });
-        return SessionMeta{ .planning_mode = false, .first_prompt = null };
+        return defaultSessionMeta();
     };
     defer parsed.deinit();
 
     const obj = switch (parsed.value) {
         .object => |o| o,
-        else => return SessionMeta{ .planning_mode = false, .first_prompt = null },
+        else => return defaultSessionMeta(),
     };
     const planning_mode = if (obj.get("planning_mode")) |v| switch (v) {
         .bool => |b| b,
         else => false,
     } else false;
+    const legacy_mode: AgentMode = if (planning_mode) .planning else .build;
+    const mode = if (obj.get("mode")) |v| switch (v) {
+        .string => |name| std.meta.stringToEnum(AgentMode, name) orelse legacy_mode,
+        else => legacy_mode,
+    } else legacy_mode;
     const first_prompt = if (obj.get("first_prompt")) |v| switch (v) {
         .null => null,
         .string => |s| try allocator.dupe(u8, s),
         else => null,
     } else null;
 
-    return SessionMeta{ .planning_mode = planning_mode, .first_prompt = first_prompt };
+    return .{
+        .mode = mode,
+        .planning_mode = mode == .planning,
+        .first_prompt = first_prompt,
+    };
 }
 
 pub fn hasFile(io: std.Io, path: []const u8) bool {
@@ -581,6 +596,36 @@ test "readSessionMetaJson parses a valid meta file" {
     defer if (meta.first_prompt) |p| std.testing.allocator.free(p);
     try std.testing.expect(meta.planning_mode);
     try std.testing.expectEqualStrings("hello", meta.first_prompt.?);
+}
+
+test "readSessionMetaJson restores an explicit review mode" {
+    const path = "puny-test-meta-review.json";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    {
+        var f = try cwd.createFile(std.testing.io, path, .{});
+        defer f.close(std.testing.io);
+        try f.writeStreamingAll(std.testing.io, "{\"mode\":\"review\",\"first_prompt\":\"check it\"}");
+    }
+
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
+    defer if (meta.first_prompt) |p| std.testing.allocator.free(p);
+    try std.testing.expectEqual(.review, meta.mode);
+    try std.testing.expectEqualStrings("check it", meta.first_prompt.?);
+}
+
+test "readSessionMetaJson maps legacy planning mode to agent mode" {
+    const path = "puny-test-meta-legacy-plan.json";
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    {
+        var f = try cwd.createFile(std.testing.io, path, .{});
+        defer f.close(std.testing.io);
+        try f.writeStreamingAll(std.testing.io, "{\"planning_mode\":true,\"first_prompt\":null}");
+    }
+
+    const meta = try readSessionMetaJson(std.testing.io, std.testing.allocator, path);
+    try std.testing.expectEqual(.planning, meta.mode);
 }
 
 test "readSessionMetaJson tolerates invalid JSON" {
