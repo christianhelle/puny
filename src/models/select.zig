@@ -2,7 +2,6 @@ const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
-const input = @import("../tui/input.zig");
 const client = @import("../providers/client.zig");
 const model_picker = @import("../tui/model_picker.zig");
 const openai = @import("../providers/openai.zig");
@@ -73,39 +72,6 @@ fn selectModelInteractive(
     _ = init;
     model_picker.setModels(models);
     return model_picker.pickModel(arena, io);
-}
-
-fn selectModelText(
-    models: []const client.Model,
-    arena: std.mem.Allocator,
-    io: std.Io,
-) !?[]const u8 {
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
-
-    try stdout_writer.print("\nAvailable models:\n", .{});
-    for (models, 0..) |m, i| {
-        try stdout_writer.print("  {d}. {s} — {s}\n", .{ i + 1, m.id, m.display_name });
-    }
-    try stdout_writer.print("\nEnter model number or key: ", .{});
-    try stdout_writer.flush();
-
-    var line_alloc: std.Io.Writer.Allocating = .init(arena);
-    defer line_alloc.deinit();
-    var stdin_buffer: [4096]u8 = undefined;
-    const line = try input.readLineSimple(io, &line_alloc, &stdin_buffer) orelse return null;
-    if (line.len == 0) return null;
-
-    const idx = std.fmt.parseInt(usize, line, 10) catch null;
-    if (idx) |i| {
-        if (i > 0 and i <= models.len) return try arena.dupe(u8, models[i - 1].id);
-        try stdout_writer.print("Invalid model number.\n", .{});
-        try stdout_writer.flush();
-        return null;
-    }
-
-    return try arena.dupe(u8, line);
 }
 
 pub fn switchModel(
