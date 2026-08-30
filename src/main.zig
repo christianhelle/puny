@@ -22,6 +22,7 @@ const sigint = @import("core/sigint.zig");
 const instructions = @import("agents/instructions.zig");
 const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
+const branch_review = @import("review/review.zig");
 const welcome = @import("tui/welcome.zig");
 const ansi = @import("tui/ansi.zig");
 const vt = @import("tui/vt.zig");
@@ -35,7 +36,19 @@ const ModelProvider = provider.ModelProvider;
 const DebugLog = session.DebugLog;
 const ChatLog = session.ChatLog;
 
-pub fn main(init: std.process.Init) !void {
+pub fn main(init: std.process.Init) !u8 {
+    return run(init) catch |err| {
+        if (!branch_review.isActive()) return err;
+        const arena = init.arena.allocator();
+        const reason = try std.fmt.allocPrint(arena, "Review execution failed: {s}", .{@errorName(err)});
+        const saved = try branch_review.finish(arena, init.io, reason);
+        branch_review.reset();
+        printStandaloneReviewResult(init.io, saved);
+        return 2;
+    };
+}
+
+fn run(init: std.process.Init) !u8 {
     vt.enableAnsi();
     vt.enableUtf8();
     const arena: std.mem.Allocator = init.arena.allocator();
@@ -51,7 +64,7 @@ pub fn main(init: std.process.Init) !void {
     if (parsed.upgrade) {
         try upgrade.runUpgrade(arena, init.io, init.environ_map, parsed.force_upgrade);
         update_check.clearFlag(init.io, arena, init.environ_map) catch {};
-        return;
+        return 0;
     }
 
     // Detached child process entry: run the update check and exit quietly.
@@ -61,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
     // and ignores the exit code, so failures stay silent here.
     if (std.mem.eql(u8, init.environ_map.get(update_check.check_env_var) orelse "", "1")) {
         _ = update_check.runCheck(init.io, arena, init.environ_map) catch {};
-        return;
+        return 0;
     }
 
     if (parsed.prune) {
@@ -76,7 +89,7 @@ pub fn main(init: std.process.Init) !void {
             try out.interface.print("Pruned all sessions.\n", .{});
         }
         try out.interface.flush();
-        return;
+        return 0;
     }
 
     // Load the prompt file up front so a missing file or URL fails fast,
@@ -96,6 +109,32 @@ pub fn main(init: std.process.Init) !void {
                 defer if (e.owned) arena.free(e.message);
                 printStartupError(init.io, source, e.message);
                 std.process.exit(1);
+            },
+        }
+    }
+
+    var startup_review_scope: ?branch_review.Scope = null;
+    if (parsed.review) {
+        const prepared = try branch_review.prepare(arena, init.io);
+        switch (prepared) {
+            .invalid => |failure| {
+                printStandaloneReviewError(init.io, failure.message);
+                return 2;
+            },
+            .operational_failure => |failure| {
+                const saved = try branch_review.writeOperationalFailure(arena, init.io, failure);
+                printStandaloneReviewResult(init.io, saved);
+                return saved.outcome.exitCode();
+            },
+            .no_changes => |scope| {
+                const saved = try branch_review.writeNoChanges(arena, init.io, scope);
+                printStandaloneReviewResult(init.io, saved);
+                return saved.outcome.exitCode();
+            },
+            .ready => |scope| {
+                startup_review_scope = scope;
+                branch_review.begin(scope);
+                parsed.prompt = branch_review.request_prompt;
             },
         }
     }
@@ -181,7 +220,8 @@ pub fn main(init: std.process.Init) !void {
 
     var session_restored = false;
     var restore_incomplete = false;
-    var agent_mode: AgentMode = .build;
+    var agent_mode: AgentMode = if (startup_review_scope != null) .review else .build;
+    var review_outcome: ?branch_review.Outcome = null;
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
@@ -268,6 +308,9 @@ pub fn main(init: std.process.Init) !void {
     var planning_tool_definitions = try buildPlanningToolDefinitions(arena, parsed.no_skills);
     defer planning_tool_definitions.deinit(arena);
 
+    var review_tool_definitions = try buildReviewToolDefinitions(arena, parsed.no_skills);
+    defer review_tool_definitions.deinit(arena);
+
     var skill_registry = skills.Registry.init(arena);
     defer skill_registry.deinit();
     if (!parsed.no_skills) {
@@ -299,6 +342,13 @@ pub fn main(init: std.process.Init) !void {
                 try messages.append(messages_arena, .{ .system = labeled });
             }
         }
+        if (startup_review_scope) |scope| {
+            core_sess.setWriteBlocked(true);
+            const review_prompt = try cfg.resolvePrompt(messages_arena, "review", prompts.review);
+            try messages.append(messages_arena, .{ .system = review_prompt });
+            const review_context = try branch_review.buildPromptContext(messages_arena, scope);
+            try messages.append(messages_arena, .{ .system = review_context });
+        }
     }
 
     var session_stats = stats.SessionStats.init(arena, init.io);
@@ -323,8 +373,10 @@ pub fn main(init: std.process.Init) !void {
         .reasoning_effort = &reasoning_effort,
         .full_tool_definitions = &full_tool_definitions,
         .planning_tool_definitions = &planning_tool_definitions,
+        .review_tool_definitions = &review_tool_definitions,
         .messages = &messages,
         .mode = &agent_mode,
+        .review_outcome = &review_outcome,
         .restore_incomplete = restore_incomplete,
         .session = &current_session,
         .session_stats = &session_stats,
@@ -345,6 +397,27 @@ pub fn main(init: std.process.Init) !void {
             stdout_writer.flush() catch {};
         }
     } else |_| {}
+
+    if (parsed.review) {
+        const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
+        return outcome.exitCode();
+    }
+    return 0;
+}
+
+fn printStandaloneReviewError(io: std.Io, message: []const u8) void {
+    var buffer: [1024]u8 = undefined;
+    var writer: std.Io.File.Writer = .init(.stderr(), io, &buffer);
+    writer.interface.print("Review could not start: {s}\n", .{message}) catch {};
+    writer.interface.flush() catch {};
+}
+
+fn printStandaloneReviewResult(io: std.Io, saved: branch_review.SavedReport) void {
+    var buffer: [1024]u8 = undefined;
+    var writer: std.Io.File.Writer = .init(.stdout(), io, &buffer);
+    const verdict = if (saved.outcome == .merge_worthy) "YES" else "NO";
+    writer.interface.print("Review report: {s}\nMERGE WORTHY: {s}\n", .{ saved.path, verdict }) catch {};
+    writer.interface.flush() catch {};
 }
 
 /// Prints `Failed to load prompt from <source>: <reason>` to stderr and flushes.
@@ -547,6 +620,17 @@ fn buildPlanningToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.
     var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
     errdefer definitions.deinit(arena);
     for (tools.planning_registry) |tool| {
+        if (no_skills and std.mem.eql(u8, tool.name, "load_skill")) continue;
+        const schema = try tool.schema(arena);
+        try definitions.append(arena, .{ .function = schema });
+    }
+    return definitions;
+}
+
+fn buildReviewToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.ArrayList(openai.ToolDefinition) {
+    var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
+    errdefer definitions.deinit(arena);
+    for (tools.review_registry) |tool| {
         if (no_skills and std.mem.eql(u8, tool.name, "load_skill")) continue;
         const schema = try tool.schema(arena);
         try definitions.append(arena, .{ .function = schema });
