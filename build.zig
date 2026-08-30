@@ -169,7 +169,7 @@ pub fn build(b: *std.Build) !void {
     const test_integration_step = b.step("test-integration", "Run integration tests against all provider/model combos");
     test_integration_step.dependOn(&run_integration.step);
 
-    const regenerate_step = b.step("re-generate-providers", "Re-generate provider clients from OpenAPI specs");
+    const regenerate_step = b.step("regenerate-providers", "Re-generate provider clients from OpenAPI specs");
     const regenerate = RegenerateProvidersStep.create(b);
     regenerate_step.dependOn(&regenerate.step);
 }
@@ -312,7 +312,7 @@ const RegenerateProvidersStep = struct {
         self.* = .{
             .step = std.Build.Step.init(.{
                 .id = .custom,
-                .name = "re-generate providers",
+                .name = "regenerate providers",
                 .owner = b,
                 .makeFn = make,
             }),
@@ -412,7 +412,7 @@ const RegenerateProvidersStep = struct {
             "Messages",
         });
 
-        std.log.info("re-generate-providers: done", .{});
+        std.log.info("regenerate-providers: done", .{});
     }
 
     fn runOpenApi2Zig(
