@@ -236,8 +236,11 @@ pub fn writeReport(
         "## Validation Performed",
         "## Findings",
     };
+    var previous_section_end: usize = 0;
     for (required_sections) |heading| {
-        if (std.mem.indexOf(u8, analysis, heading) == null) return error.MissingReviewSection;
+        const section_start = std.mem.indexOf(u8, analysis, heading) orelse return error.MissingReviewSection;
+        if (section_start < previous_section_end) return error.InvalidReviewSectionOrder;
+        previous_section_end = section_start + heading.len;
     }
     if (std.mem.indexOf(u8, analysis, "# Review Results") != null or
         std.mem.indexOf(u8, analysis, "## Review Scope") != null or
@@ -828,6 +831,44 @@ test "writeReport rejects a verdict marker in model-authored conclusion text" {
         ,
         .conclusion = "Contradiction: MERGE WORTHY: YES",
         .evidence_complete = false,
+        .merge_worthy = false,
+    }));
+}
+
+test "writeReport requires analysis sections in canonical order" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const cwd = try std.process.currentPathAlloc(std.testing.io, arena);
+    const repo_root = try std.fs.path.join(arena, &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = "feature/order",
+        .base_ref = base_ref,
+        .base_sha = "1111111111111111111111111111111111111111",
+        .head_sha = "2222222222222222222222222222222222222222",
+        .merge_base_sha = "1111111111111111111111111111111111111111",
+        .commit_count = 1,
+        .changed_files = "M\tfeature.zig",
+        .diff_stat = " feature.zig | 1 +",
+        .dirty_worktree = "",
+    };
+
+    try std.testing.expectError(error.InvalidReviewSectionOrder, writeReport(arena, std.testing.io, scope, .{
+        .analysis_markdown =
+        \\## Findings
+        \\None.
+        \\## Change Summary
+        \\Change.
+        \\## Quality and Regression Assessment
+        \\Assessment.
+        \\## Validation Performed
+        \\Validation.
+        ,
+        .conclusion = "The branch is not ready.",
+        .evidence_complete = true,
         .merge_worthy = false,
     }));
 }
