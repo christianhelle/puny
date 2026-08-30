@@ -226,6 +226,32 @@ fn windowsTerminalWidth() ?usize {
     return if (w > 0) @intCast(w) else null;
 }
 
+/// Terminal window height in rows, when it can be determined.
+pub fn terminalHeight() ?usize {
+    if (comptime builtin.os.tag == .windows) {
+        return windowsTerminalHeight();
+    }
+    if (comptime builtin.os.tag != .linux and builtin.os.tag != .macos) {
+        return null;
+    }
+    var ws: std.posix.winsize = undefined;
+    const rc = std.posix.system.ioctl(std.posix.STDOUT_FILENO, TIOCGWINSZ, @intFromPtr(&ws));
+    if (comptime builtin.os.tag == .linux) {
+        if (std.os.linux.errno(rc) != .SUCCESS) return null;
+    } else {
+        if (rc != 0) return null;
+    }
+    return if (ws.row > 0) ws.row else null;
+}
+
+fn windowsTerminalHeight() ?usize {
+    const h = windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
+    var info: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (windows.GetConsoleScreenBufferInfo(h, &info) == .FALSE) return null;
+    const rows: i32 = @as(i32, info.srWindow.Bottom) - @as(i32, info.srWindow.Top) + 1;
+    return if (rows > 0) @intCast(rows) else null;
+}
+
 /// Request code for TIOCGWINSZ, per-OS.
 const TIOCGWINSZ: c_int = switch (builtin.os.tag) {
     .linux => 0x5413,
@@ -266,6 +292,13 @@ test "terminalWidth returns a positive width or null" {
     const w = terminalWidth();
     if (w) |width| {
         try std.testing.expect(width >= 1);
+    }
+}
+
+test "terminalHeight returns a positive height or null" {
+    const h = terminalHeight();
+    if (h) |height| {
+        try std.testing.expect(height >= 1);
     }
 }
 
