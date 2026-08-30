@@ -15,11 +15,12 @@ pub fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
     const id = try arena.dupe(u8, s.id);
     errdefer arena.free(id);
     const first_prompt = if (s.first_prompt) |p| try arena.dupe(u8, p) else null;
+    const mode: AgentMode = if (s.mode == .build and s.planning_mode) .planning else s.mode;
     return .{
         .id = id,
         .has_prd = s.has_prd,
         .has_conversation = s.has_conversation,
-        .mode = s.mode,
+        .mode = mode,
         .planning_mode = s.planning_mode,
         .first_prompt = first_prompt,
         .last_modified = s.last_modified,
@@ -85,6 +86,21 @@ test "dupeSessionInfo copies fields when first_prompt is null" {
     try std.testing.expect(copy.has_conversation);
     try std.testing.expect(!copy.planning_mode);
     try std.testing.expectEqual(@as(u64, 7), copy.last_modified);
+}
+
+test "dupeSessionInfo maps a legacy planning index entry to planning mode" {
+    const original = SessionInfo{
+        .id = "legacy-plan",
+        .has_prd = true,
+        .has_conversation = true,
+        .planning_mode = true,
+        .first_prompt = null,
+        .last_modified = 9,
+    };
+
+    const copy = try dupeSessionInfo(std.testing.allocator, original);
+    defer std.testing.allocator.free(copy.id);
+    try std.testing.expectEqual(.planning, copy.mode);
 }
 
 test "lessThan treats an id prefix as smaller" {
