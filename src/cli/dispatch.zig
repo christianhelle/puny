@@ -25,6 +25,7 @@ pub const Action = union(enum) {
     list_skills,
     load_skill: []const u8,
     load_prompt_file: []const u8,
+    enter_review,
     help,
 };
 
@@ -36,6 +37,7 @@ pub const Context = struct {
     stdout_writer: *std.Io.Writer,
     messages: *std.ArrayList(openai.Message),
     planning_mode: *bool,
+    review_mode: *bool,
     oneshot: bool,
     cfg: *const config.Config,
     session_prd_path: []const u8 = "",
@@ -78,6 +80,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
 
         .build => |text| {
             ctx.planning_mode.* = false;
+            ctx.review_mode.* = false;
             try ctx.messages.append(ctx.messages_alloc, .{ .user = "Now implement the plan. Write all necessary code." });
             if (text) |t| {
                 try ctx.messages.append(ctx.messages_alloc, .{ .user = try ctx.messages_alloc.dupe(u8, t) });
@@ -86,6 +89,22 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
                 return .run_chat_turn;
             }
             try ctx.stdout_writer.print("\n{s}Switching to build mode.{s}\n", .{ ansi.bright, ansi.reset });
+            try ctx.stdout_writer.flush();
+            return .continue_;
+        },
+
+        .review => |text| {
+            ctx.planning_mode.* = false;
+            ctx.review_mode.* = true;
+            const review_prompt = try ctx.cfg.resolvePrompt(ctx.messages_alloc, "review", prompts.review);
+            try ctx.messages.append(ctx.messages_alloc, .{ .system = review_prompt });
+            if (text) |t| {
+                try ctx.messages.append(ctx.messages_alloc, .{ .user = try ctx.messages_alloc.dupe(u8, t) });
+                try ctx.stdout_writer.print("\n{s}Entering review mode: {s}{s}\n", .{ ansi.bright, t, ansi.reset });
+                try ctx.stdout_writer.flush();
+                return .run_chat_turn;
+            }
+            try ctx.stdout_writer.print("\n{s}Entering review mode.{s}\n", .{ ansi.bright, ansi.reset });
             try ctx.stdout_writer.flush();
             return .continue_;
         },
@@ -159,6 +178,7 @@ test "dispatch quit returns exit" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.quit, .{
         .arena = std.testing.allocator,
@@ -168,6 +188,7 @@ test "dispatch quit returns exit" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -182,6 +203,7 @@ test "dispatch reset returns full_reset action" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.reset, .{
         .arena = std.testing.allocator,
@@ -191,6 +213,7 @@ test "dispatch reset returns full_reset action" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -206,6 +229,7 @@ test "dispatch config returns reconfigure" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.config, .{
         .arena = std.testing.allocator,
@@ -215,6 +239,7 @@ test "dispatch config returns reconfigure" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -230,6 +255,7 @@ test "dispatch stats returns print_stats" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.stats, .{
         .arena = std.testing.allocator,
@@ -239,6 +265,7 @@ test "dispatch stats returns print_stats" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -254,6 +281,7 @@ test "dispatch plan without text enters planning mode and continues" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .plan = null }, .{
         .arena = std.testing.allocator,
@@ -263,6 +291,7 @@ test "dispatch plan without text enters planning mode and continues" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -281,6 +310,7 @@ test "dispatch plan with text enters planning mode and runs chat turn" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .plan = "do thing" }, .{
         .arena = std.testing.allocator,
@@ -290,6 +320,7 @@ test "dispatch plan with text enters planning mode and runs chat turn" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -309,6 +340,7 @@ test "dispatch build without text switches to build mode and continues" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = true;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .build = null }, .{
         .arena = std.testing.allocator,
@@ -318,6 +350,7 @@ test "dispatch build without text switches to build mode and continues" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -336,6 +369,7 @@ test "dispatch build with text switches to build mode and runs chat turn" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = true;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .build = "now" }, .{
         .arena = std.testing.allocator,
@@ -345,6 +379,7 @@ test "dispatch build with text switches to build mode and runs chat turn" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -364,6 +399,7 @@ test "dispatch model in oneshot mode rejects" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .model = "x" }, .{
         .arena = std.testing.allocator,
@@ -373,6 +409,7 @@ test "dispatch model in oneshot mode rejects" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = true,
         .cfg = &default_cfg,
     });
@@ -388,6 +425,7 @@ test "dispatch model returns switch model" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .model = "llama" }, .{
         .arena = std.testing.allocator,
@@ -397,6 +435,7 @@ test "dispatch model returns switch model" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -412,6 +451,7 @@ test "dispatch provider in oneshot mode rejects" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .provider = "opencode" }, .{
         .arena = std.testing.allocator,
@@ -421,6 +461,7 @@ test "dispatch provider in oneshot mode rejects" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = true,
         .cfg = &default_cfg,
     });
@@ -436,6 +477,7 @@ test "dispatch provider returns switch provider" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .provider = "opencode" }, .{
         .arena = std.testing.allocator,
@@ -445,6 +487,7 @@ test "dispatch provider returns switch provider" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -460,6 +503,7 @@ test "dispatch provider without text returns switch provider with null" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .provider = null }, .{
         .arena = std.testing.allocator,
@@ -469,6 +513,7 @@ test "dispatch provider without text returns switch provider with null" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -484,6 +529,7 @@ test "dispatch thinking in oneshot mode rejects" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .thinking = "high" }, .{
         .arena = std.testing.allocator,
@@ -493,6 +539,7 @@ test "dispatch thinking in oneshot mode rejects" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = true,
         .cfg = &default_cfg,
     });
@@ -508,6 +555,7 @@ test "dispatch thinking returns switch effort" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .thinking = "high" }, .{
         .arena = std.testing.allocator,
@@ -517,6 +565,7 @@ test "dispatch thinking returns switch effort" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -532,6 +581,7 @@ test "dispatch thinking without text returns switch effort with null" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .thinking = null }, .{
         .arena = std.testing.allocator,
@@ -541,6 +591,7 @@ test "dispatch thinking without text returns switch effort with null" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -556,6 +607,7 @@ test "dispatch sessions returns list_sessions" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.sessions, .{
         .arena = std.testing.allocator,
@@ -565,6 +617,7 @@ test "dispatch sessions returns list_sessions" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -580,6 +633,7 @@ test "dispatch prune returns prune_sessions" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.prune, .{
         .arena = std.testing.allocator,
@@ -589,6 +643,7 @@ test "dispatch prune returns prune_sessions" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -604,6 +659,7 @@ test "dispatch prompt appends user message and runs chat turn" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .prompt = "hello" }, .{
         .arena = std.testing.allocator,
@@ -613,6 +669,7 @@ test "dispatch prompt appends user message and runs chat turn" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -630,6 +687,7 @@ test "dispatch file without text prints usage and continues" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .file = null }, .{
         .arena = std.testing.allocator,
@@ -639,6 +697,7 @@ test "dispatch file without text prints usage and continues" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -655,6 +714,7 @@ test "dispatch file returns load_prompt_file action" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .file = "spec.md" }, .{
         .arena = std.testing.allocator,
@@ -664,6 +724,7 @@ test "dispatch file returns load_prompt_file action" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -679,6 +740,7 @@ test "dispatch file trims surrounding whitespace from the path" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .file = "  spec.md " }, .{
         .arena = std.testing.allocator,
@@ -688,6 +750,7 @@ test "dispatch file trims surrounding whitespace from the path" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -703,6 +766,7 @@ test "dispatch file with only whitespace prints usage and continues" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .file = "   " }, .{
         .arena = std.testing.allocator,
@@ -712,6 +776,7 @@ test "dispatch file with only whitespace prints usage and continues" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -728,6 +793,7 @@ test "dispatch resume_session in oneshot mode rejects" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .resume_session = "abc-1" }, .{
         .arena = std.testing.allocator,
@@ -737,6 +803,7 @@ test "dispatch resume_session in oneshot mode rejects" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = true,
         .cfg = &default_cfg,
     });
@@ -752,6 +819,7 @@ test "dispatch resume_session returns restore_session" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .resume_session = "abc-1" }, .{
         .arena = std.testing.allocator,
@@ -761,6 +829,7 @@ test "dispatch resume_session returns restore_session" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -776,6 +845,7 @@ test "dispatch skills returns list_skills" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.skills, .{
         .arena = std.testing.allocator,
@@ -785,6 +855,7 @@ test "dispatch skills returns list_skills" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -800,6 +871,7 @@ test "dispatch help returns help" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(.help, .{
         .arena = std.testing.allocator,
@@ -809,6 +881,7 @@ test "dispatch help returns help" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
     });
@@ -824,6 +897,7 @@ test "dispatch plan appends the PRD hint when a session PRD path is set" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var planning_mode = false;
+    var review_mode = false;
 
     const action = try dispatch(Command{ .plan = null }, .{
         .arena = std.testing.allocator,
@@ -833,6 +907,7 @@ test "dispatch plan appends the PRD hint when a session PRD path is set" {
         .io = std.testing.io,
         .messages = &messages,
         .planning_mode = &planning_mode,
+        .review_mode = &review_mode,
         .oneshot = false,
         .cfg = &default_cfg,
         .session_prd_path = "plan.md",

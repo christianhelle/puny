@@ -7,6 +7,7 @@ pub const Command = union(enum) {
     config,
     plan: ?[]const u8,
     build: ?[]const u8,
+    review: ?[]const u8,
     model: ?[]const u8,
     provider: ?[]const u8,
     thinking: ?[]const u8,
@@ -31,6 +32,7 @@ pub const command_tokens = [_][]const u8{
     "/config",
     "/plan",
     "/build",
+    "/review",
     "/model",
     "/provider",
     "/thinking",
@@ -89,6 +91,19 @@ pub fn parse(user_message: []const u8) Command {
             return .{ .build = user_message[":build ".len..] };
         }
         return .{ .build = null };
+    }
+
+    if (eqlIgnoreCase(user_message, "/review") or std.mem.startsWith(u8, user_message, "/review ")) {
+        if (user_message.len > "/review ".len) {
+            return .{ .review = user_message["/review ".len..] };
+        }
+        return .{ .review = null };
+    }
+    if (eqlIgnoreCase(user_message, ":review") or std.mem.startsWith(u8, user_message, ":review ")) {
+        if (user_message.len > ":review ".len) {
+            return .{ .review = user_message[":review ".len..] };
+        }
+        return .{ .review = null };
     }
 
     if (eqlIgnoreCase(user_message, "/model") or std.mem.startsWith(u8, user_message, "/model ")) {
@@ -193,6 +208,11 @@ test "parse recognizes all slash commands" {
 
     try std.testing.expectEqualDeep(Command{ .build = null }, parse("/build"));
     try std.testing.expectEqualDeep(Command{ .build = "code it" }, parse("/build code it"));
+
+    try std.testing.expectEqualDeep(Command{ .review = null }, parse("/review"));
+    try std.testing.expectEqualDeep(Command{ .review = "check this" }, parse("/review check this"));
+    try std.testing.expectEqualDeep(Command{ .review = null }, parse(":review"));
+    try std.testing.expectEqualDeep(Command{ .review = "check branch" }, parse(":review check branch"));
 
     try std.testing.expectEqualDeep(Command{ .model = null }, parse("/model"));
     try std.testing.expectEqualDeep(Command{ .model = "llama" }, parse("/model llama"));

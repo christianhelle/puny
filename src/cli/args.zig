@@ -22,6 +22,7 @@ pub const Options = struct {
     force_upgrade: bool = false,
     session: ?[]const u8 = null,
     do_resume: bool = false,
+    review: bool = false,
 };
 
 fn writeErr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
@@ -45,6 +46,10 @@ pub fn validate(opts: Options) !void {
     }
     if (opts.oneshot and opts.prompt == null and opts.prompt_file == null) {
         return error.OneshotRequiresPrompt;
+    }
+    if (opts.review) {
+        if (opts.prompt != null or opts.prompt_file != null) return error.ReviewIncompatibleWithPrompt;
+        if (opts.session != null or opts.do_resume) return error.ReviewIncompatibleWithSession;
     }
 }
 
@@ -114,6 +119,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.upgrade = true;
         } else if (std.mem.eql(u8, arg, "--force")) {
             opts.force_upgrade = true;
+        } else if (std.mem.eql(u8, arg, "--review")) {
+            opts.review = true;
         } else {
             fatal(io, "Unknown argument: {s}\n\n", .{arg});
         }
@@ -122,6 +129,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
     validate(opts) catch |err| switch (err) {
         error.ConflictingPrompts => fatal(io, "Cannot use both --prompt and --prompt-file\n\n", .{}),
         error.OneshotRequiresPrompt => fatal(io, "--oneshot requires --prompt or --prompt-file\n\n", .{}),
+        error.ReviewIncompatibleWithPrompt => fatal(io, "--review cannot be used with --prompt or --prompt-file\n\n", .{}),
+        error.ReviewIncompatibleWithSession => fatal(io, "--review cannot be used with --session or --resume\n\n", .{}),
     };
 
     if (opts.provider == null) {
@@ -192,6 +201,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --chat-log               Log conversation to puny_chat.log
         \\      --no-skills              Disable skill loading entirely
         \\      --debug                  Log HTTP requests and responses to puny_debug.log
+        \\      --review                 Start in autonomous review mode
         \\  -U, --upgrade                Upgrade to the latest release
         \\      --force                  Force upgrade even if same version (use with --upgrade)
         \\  -h, --help                   Show this help text
@@ -529,4 +539,37 @@ test "printHelp prints the version and usage" {
 test "printVersion prints the puny version line" {
     // printVersion writes to real stdout which is not drainable in test context.
     return error.SkipZigTest;
+}
+
+test "parseArgs sets review from flag" {
+    const argv = [_][:0]const u8{ "puny", "--review" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expect(opts.review);
+}
+
+test "validate rejects review with prompt" {
+    const opts = Options{ .review = true, .prompt = "hello" };
+    try std.testing.expectError(error.ReviewIncompatibleWithPrompt, validate(opts));
+}
+
+test "validate rejects review with prompt-file" {
+    const opts = Options{ .review = true, .prompt_file = "spec.md" };
+    try std.testing.expectError(error.ReviewIncompatibleWithPrompt, validate(opts));
+}
+
+test "validate rejects review with session" {
+    const opts = Options{ .review = true, .session = "abc-123" };
+    try std.testing.expectError(error.ReviewIncompatibleWithSession, validate(opts));
+}
+
+test "validate rejects review with resume" {
+    const opts = Options{ .review = true, .do_resume = true };
+    try std.testing.expectError(error.ReviewIncompatibleWithSession, validate(opts));
+}
+
+test "validate allows review alone" {
+    const opts = Options{ .review = true };
+    try validate(opts);
 }
