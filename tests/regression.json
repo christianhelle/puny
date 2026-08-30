@@ -92,14 +92,14 @@
   {
     "name": "Reasoning output rendered with --show-thinking",
     "args": ["--mock", "--model", "mock-model", "--prompt", "respond with reasoning", "--show-thinking", "--oneshot"],
-    "expect": ["step by step", "mock response"],
+    "expect": ["monologue", "mock response"],
     "not_expect": []
   },
   {
     "name": "Reasoning output hidden without --show-thinking",
     "args": ["--mock", "--model", "mock-model", "--prompt", "respond with reasoning", "--oneshot"],
     "expect": ["mock response"],
-    "not_expect": ["step by step"]
+    "not_expect": ["monologue"]
   },
   {
     "name": "Chat log creates file with user and assistant labels",
