@@ -166,6 +166,7 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
             .id = id,
             .has_prd = has_prd,
             .has_conversation = has_conversation,
+            .mode = meta.mode,
             .planning_mode = meta.planning_mode,
             .first_prompt = first_prompt,
             .last_modified = last_modified,

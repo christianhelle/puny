@@ -1,9 +1,11 @@
 const std = @import("std");
+const AgentMode = @import("../core/mode.zig").AgentMode;
 
 pub const SessionInfo = struct {
     id: []const u8,
     has_prd: bool,
     has_conversation: bool,
+    mode: AgentMode = .build,
     planning_mode: bool,
     first_prompt: ?[]const u8,
     last_modified: u64,
@@ -17,6 +19,7 @@ pub fn dupeSessionInfo(arena: std.mem.Allocator, s: SessionInfo) !SessionInfo {
         .id = id,
         .has_prd = s.has_prd,
         .has_conversation = s.has_conversation,
+        .mode = s.mode,
         .planning_mode = s.planning_mode,
         .first_prompt = first_prompt,
         .last_modified = s.last_modified,
@@ -33,6 +36,7 @@ test "dupeSessionInfo copies id and first_prompt into the arena" {
         .id = "abc",
         .has_prd = true,
         .has_conversation = false,
+        .mode = .review,
         .planning_mode = true,
         .first_prompt = "hello",
         .last_modified = 42,
@@ -48,6 +52,7 @@ test "dupeSessionInfo copies id and first_prompt into the arena" {
     try std.testing.expectEqualStrings("hello", copy.first_prompt.?);
     try std.testing.expect(copy.has_prd);
     try std.testing.expect(!copy.has_conversation);
+    try std.testing.expectEqual(.review, copy.mode);
     try std.testing.expect(copy.planning_mode);
     try std.testing.expectEqual(@as(u64, 42), copy.last_modified);
 }
