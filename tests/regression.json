@@ -33,6 +33,20 @@
     }
   },
   {
+    "name": "One-shot review command returns the rejection exit code",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/review", "--oneshot"],
+    "expect": ["Review report:", "MERGE WORTHY: NO"],
+    "not_expect": ["MERGE WORTHY: YES"],
+    "exit_code": 1,
+    "git_fixture": "empty",
+    "evidence": {
+      "file_contains": {
+        "path": "review-results.md",
+        "patterns": ["no committed changes", "**MERGE WORTHY: NO**"]
+      }
+    }
+  },
+  {
     "name": "Review mode rejects a branch with no committed changes",
     "args": ["--mock", "--model", "mock-model", "--review"],
     "expect": ["Review report:", "MERGE WORTHY: NO"],

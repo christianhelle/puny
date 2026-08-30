@@ -402,6 +402,9 @@ fn run(init: std.process.Init) !u8 {
         const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
         return outcome.exitCode();
     }
+    if (parsed.oneshot) {
+        if (review_outcome) |outcome| return outcome.exitCode();
+    }
     return 0;
 }
 
