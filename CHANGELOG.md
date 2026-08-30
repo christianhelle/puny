@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Merged Pull Requests
+- Add mock reasoning keyword to verify --show-thinking ([#168](https://github.com/christianhelle/puny/pull/168)) ([@christianhelle](https://github.com/christianhelle/))
 - Move provider streaming error handling out of generated clients ([#167](https://github.com/christianhelle/puny/pull/167)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
