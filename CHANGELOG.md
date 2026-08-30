@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Improve HTTP chat error reporting and debug logging ([#166](https://github.com/christianhelle/puny/pull/166)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove dead and unused code ([#165](https://github.com/christianhelle/puny/pull/165)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix model picker overflow with a column-major multi-column grid ([#164](https://github.com/christianhelle/puny/pull/164)) ([@christianhelle](https://github.com/christianhelle/))
 - Use generated Anthropic client with Messages filtering ([#163](https://github.com/christianhelle/puny/pull/163)) ([@christianhelle](https://github.com/christianhelle/))
