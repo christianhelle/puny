@@ -445,7 +445,7 @@ pub const ChatSession = struct {
                     "Review execution failed: {s}",
                     .{@errorName(err)},
                 );
-                const saved = try branch_review.finish(ctx.messages_arena.allocator(), ctx.io, reason);
+                const saved = try branch_review.failActive(ctx.messages_arena.allocator(), ctx.io, reason);
                 branch_review.reset();
                 ctx.review_outcome.* = saved.outcome;
                 try printReviewResult(ctx.stdout_writer, saved);
@@ -582,11 +582,18 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     }
 
     if (branch_review.isActive()) {
-        const saved = try branch_review.finish(
-            ctx.messages_arena.allocator(),
-            ctx.io,
-            "The model returned without saving valid review results.",
-        );
+        const saved = if (turn_cancelled or turn_had_error)
+            try branch_review.failActive(
+                ctx.messages_arena.allocator(),
+                ctx.io,
+                if (turn_cancelled) "Review execution was cancelled." else "The provider failed before the review completed.",
+            )
+        else
+            try branch_review.finish(
+                ctx.messages_arena.allocator(),
+                ctx.io,
+                "The model returned without saving valid review results.",
+            );
         branch_review.reset();
         ctx.review_outcome.* = saved.outcome;
         try printReviewResult(ctx.stdout_writer, saved);

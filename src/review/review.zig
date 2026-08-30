@@ -399,6 +399,17 @@ pub fn finish(
     return saved;
 }
 
+pub fn failActive(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    reason: []const u8,
+) !SavedReport {
+    if (active_review == null) return error.NoActiveReview;
+    const saved = try writeFallbackReport(allocator, io, active_review.?.scope, reason);
+    active_review.?.saved = saved;
+    return saved;
+}
+
 pub fn writeNoChanges(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -871,4 +882,51 @@ test "writeReport requires analysis sections in canonical order" {
         .evidence_complete = true,
         .merge_worthy = false,
     }));
+}
+
+test "failActive replaces an earlier approval with an operational rejection" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const cwd = try std.process.currentPathAlloc(std.testing.io, arena);
+    const repo_root = try std.fs.path.join(arena, &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = "feature/provider-failure",
+        .base_ref = base_ref,
+        .base_sha = "1111111111111111111111111111111111111111",
+        .head_sha = "2222222222222222222222222222222222222222",
+        .merge_base_sha = "1111111111111111111111111111111111111111",
+        .commit_count = 1,
+        .changed_files = "M\tfeature.zig",
+        .diff_stat = " feature.zig | 1 +",
+        .dirty_worktree = "",
+    };
+
+    begin(scope);
+    defer reset();
+    _ = try saveActiveReport(arena, std.testing.io, .{
+        .analysis_markdown =
+        \\## Change Summary
+        \\Change.
+        \\## Quality and Regression Assessment
+        \\No regression.
+        \\## Validation Performed
+        \\Checks passed.
+        \\## Findings
+        \\None.
+        ,
+        .conclusion = "Ready.",
+        .evidence_complete = true,
+        .merge_worthy = true,
+    });
+    const failed = try failActive(arena, std.testing.io, "Provider failed after the tool call.");
+
+    try std.testing.expectEqual(Outcome.operational_failure, failed.outcome);
+    const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, failed.path, arena, .limited(64 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, content, "Provider failed after the tool call.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: YES**") == null);
 }
