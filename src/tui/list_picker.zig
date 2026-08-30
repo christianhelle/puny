@@ -13,6 +13,8 @@ pub const Item = struct {
 const Key = enum {
     up,
     down,
+    left,
+    right,
     enter,
     escape,
     quit,
@@ -318,6 +320,8 @@ fn readKeyPosix(io: std.Io) !Key {
                 switch (seq[2]) {
                     'A' => result = .up,
                     'B' => result = .down,
+                    'C' => result = .right,
+                    'D' => result = .left,
                     else => result = .unknown,
                 }
             }
@@ -342,6 +346,8 @@ fn readKeyPosix(io: std.Io) !Key {
         'q', 'Q' => return .quit,
         'j', 'J' => return .down,
         'k', 'K' => return .up,
+        'h', 'H' => return .left,
+        'l', 'L' => return .right,
         else => {
             pending_len = 0;
             return .unknown;
@@ -368,6 +374,8 @@ fn readKeyWindows(io: std.Io) !Key {
         switch (vk) {
             win.VK_UP => return .up,
             win.VK_DOWN => return .down,
+            win.VK_LEFT => return .left,
+            win.VK_RIGHT => return .right,
             win.VK_RETURN => return .enter,
             win.VK_ESCAPE => return .escape,
             else => {
@@ -375,6 +383,8 @@ fn readKeyWindows(io: std.Io) !Key {
                 if (ch == 'q' or ch == 'Q') return .quit;
                 if (ch == 'j' or ch == 'J') return .down;
                 if (ch == 'k' or ch == 'K') return .up;
+                if (ch == 'h' or ch == 'H') return .left;
+                if (ch == 'l' or ch == 'L') return .right;
                 return .unknown;
             },
         }
@@ -389,6 +399,8 @@ const windows_api = if (is_windows) struct {
 
     pub const VK_UP: u16 = 0x26;
     pub const VK_DOWN: u16 = 0x28;
+    pub const VK_LEFT: u16 = 0x25;
+    pub const VK_RIGHT: u16 = 0x27;
     pub const VK_RETURN: u16 = 0x0D;
     pub const VK_ESCAPE: u16 = 0x1B;
     pub const KEY_EVENT: u16 = 0x0001;
@@ -454,6 +466,8 @@ test "readKeyPosix interprets key bytes from the pending buffer" {
     }{
         .{ .bytes = "\x1b[A", .expected = .up },
         .{ .bytes = "\x1b[B", .expected = .down },
+        .{ .bytes = "\x1b[C", .expected = .right },
+        .{ .bytes = "\x1b[D", .expected = .left },
         .{ .bytes = "\x1b", .expected = .escape },
         .{ .bytes = "\x1bC", .expected = .unknown },
         .{ .bytes = "\r", .expected = .enter },
@@ -461,6 +475,8 @@ test "readKeyPosix interprets key bytes from the pending buffer" {
         .{ .bytes = "q", .expected = .quit },
         .{ .bytes = "j", .expected = .down },
         .{ .bytes = "k", .expected = .up },
+        .{ .bytes = "h", .expected = .left },
+        .{ .bytes = "l", .expected = .right },
         .{ .bytes = "x", .expected = .unknown },
     };
     for (cases) |c| {
