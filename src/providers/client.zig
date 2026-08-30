@@ -131,45 +131,6 @@ pub const Client = struct {
     }
 };
 
-fn isQueryChar(c: u8) bool {
-    return std.ascii.isAlphanumeric(c) or switch (c) {
-        '-', '.', '_', '~' => true,
-        else => false,
-    };
-}
-
-fn writeQueryComponent(writer: *std.Io.Writer, value: []const u8) !void {
-    try std.Uri.Component.percentEncode(writer, value, isQueryChar);
-}
-
-fn writeQueryValue(writer: *std.Io.Writer, value: anytype) !void {
-    const T = @TypeOf(value);
-    switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (ptr.size == .slice and ptr.child == u8) {
-                try writeQueryComponent(writer, value);
-            } else {
-                try std.json.Stringify.value(value, .{}, writer);
-            }
-        },
-        .int, .comptime_int, .float, .comptime_float, .bool => try writer.print("{}", .{value}),
-        .@"enum" => try writeQueryComponent(writer, @tagName(value)),
-        else => try std.json.Stringify.value(value, .{}, writer),
-    }
-}
-
-fn appendQueryParam(writer: *std.Io.Writer, first_query: *bool, name: []const u8, value: anytype) !void {
-    if (first_query.*) {
-        try writer.writeByte('?');
-        first_query.* = false;
-    } else {
-        try writer.writeByte('&');
-    }
-    try writeQueryComponent(writer, name);
-    try writer.writeByte('=');
-    try writeQueryValue(writer, value);
-}
-
 pub fn requestRaw(client: *Client, method: std.http.Method, url: []const u8, payload: ?[]const u8) !RawResponse {
     return requestRawWithContentType(client, method, url, payload, "application/json");
 }
