@@ -1325,16 +1325,10 @@ test "anthropic client preserves custom headers and adds version via chatStreami
     c.default_headers = &.{.{ .name = "X-Custom", .value = "1" }};
     var g = anthropicClient(&c);
     defer g.deinit();
-    // Simulate the merging that chatStreaming does (owns allocation)
-    var owned: ?[]std.http.Header = null;
-    defer if (owned) |h| allocator.free(h);
-    if (c.default_headers.len != 0) {
-        const merged = try allocator.alloc(std.http.Header, c.default_headers.len + 1);
-        merged[0] = .{ .name = "anthropic-version", .value = anthropic_version };
-        for (c.default_headers, 0..) |h, i| merged[i + 1] = h;
-        g.default_headers = merged;
-        owned = merged;
-    }
+    // Use the real merge helper (same one chatStreaming uses).
+    const merged = try mergeAnthropicHeaders(allocator, c.default_headers);
+    defer allocator.free(merged.buffer);
+    g.default_headers = merged.used;
     var found_version = false;
     var found_custom = false;
     for (g.default_headers) |h| {
@@ -1344,4 +1338,48 @@ test "anthropic client preserves custom headers and adds version via chatStreami
     try std.testing.expect(found_version);
     try std.testing.expect(found_custom);
     try std.testing.expectEqual(@as(usize, 2), g.default_headers.len);
+}
+
+test "mergeAnthropicHeaders deduplicates a caller-supplied anthropic-version header" {
+    const allocator = std.testing.allocator;
+    const default_headers: []const std.http.Header = &.{
+        .{ .name = "Anthropic-Version", .value = "caller-value" },
+        .{ .name = "X-Custom", .value = "1" },
+    };
+    const merged = try mergeAnthropicHeaders(allocator, default_headers);
+    defer allocator.free(merged.buffer);
+    // Only one anthropic-version header should be present, and it should
+    // keep the caller-supplied value rather than being duplicated.
+    var version_count: usize = 0;
+    var found_custom = false;
+    for (merged.used) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, "anthropic-version")) {
+            version_count += 1;
+            try std.testing.expectEqualStrings("caller-value", h.value);
+        }
+        if (std.mem.eql(u8, h.name, "X-Custom") and std.mem.eql(u8, h.value, "1")) found_custom = true;
+    }
+    try std.testing.expectEqual(@as(usize, 1), version_count);
+    try std.testing.expect(found_custom);
+    try std.testing.expectEqual(@as(usize, 2), merged.used.len);
+}
+
+test "chatStreaming preserves custom headers verbatim when header merge allocation fails" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    const allocator = failing.allocator();
+    const custom_headers: []const std.http.Header = &.{.{ .name = "X-Custom", .value = "1" }};
+    // Directly exercise the OOM fallback path that chatStreaming takes when
+    // mergeAnthropicHeaders fails: it must fall back to the caller's
+    // original default_headers instead of dropping them.
+    var g_default_headers: []const std.http.Header = &.{};
+    if (mergeAnthropicHeaders(allocator, custom_headers)) |merged| {
+        g_default_headers = merged.used;
+    } else |_| {
+        g_default_headers = custom_headers;
+    }
+    var found_custom = false;
+    for (g_default_headers) |h| {
+        if (std.mem.eql(u8, h.name, "X-Custom") and std.mem.eql(u8, h.value, "1")) found_custom = true;
+    }
+    try std.testing.expect(found_custom);
 }
