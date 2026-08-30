@@ -20,6 +20,19 @@
     }
   },
   {
+    "name": "Interactive review command writes a report",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/review", "--oneshot"],
+    "expect": ["Reviewing feature/review against origin/main", "Review report:", "MERGE WORTHY: YES"],
+    "not_expect": ["Review could not start"],
+    "git_fixture": "feature",
+    "evidence": {
+      "file_contains": {
+        "path": "review-results.md",
+        "patterns": ["## Review Scope", "**MERGE WORTHY: YES**"]
+      }
+    }
+  },
+  {
     "name": "Review mode rejects a branch with no committed changes",
     "args": ["--mock", "--model", "mock-model", "--review"],
     "expect": ["Review report:", "MERGE WORTHY: NO"],
