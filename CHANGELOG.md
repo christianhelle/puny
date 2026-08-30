@@ -1,12 +1,10 @@
 # Changelog
 
-## [Unreleased Changes]
-
-### Merged Pull Requests
-- Add mock reasoning keyword to verify --show-thinking ([#168](https://github.com/christianhelle/puny/pull/168)) ([@christianhelle](https://github.com/christianhelle/))
-- Move provider streaming error handling out of generated clients ([#167](https://github.com/christianhelle/puny/pull/167)) ([@christianhelle](https://github.com/christianhelle/))
+## [v0.3.5](https://github.com/christianhelle/puny/releases/tag/v0.3.5) (2026-08-30)
 
 ### Features
+- Move provider streaming error handling out of generated clients ([#167](https://github.com/christianhelle/puny/pull/167)) ([@christianhelle](https://github.com/christianhelle/))
+- Add mock reasoning keyword to verify --show-thinking ([#168](https://github.com/christianhelle/puny/pull/168)) ([@christianhelle](https://github.com/christianhelle/))
 - Improve HTTP chat error reporting and debug logging ([#166](https://github.com/christianhelle/puny/pull/166)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove dead and unused code ([#165](https://github.com/christianhelle/puny/pull/165)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix model picker overflow with a column-major multi-column grid ([#164](https://github.com/christianhelle/puny/pull/164)) ([@christianhelle](https://github.com/christianhelle/))
