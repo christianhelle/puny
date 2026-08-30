@@ -204,14 +204,6 @@ pub fn parseRawResponse(comptime T: type, raw: RawResponse) !ApiResult(T) {
     return .{ .ok = .{ .allocator = raw.allocator, .body = raw.body, .parsed = parsed } };
 }
 
-pub fn getJsonResult(comptime T: type, client: *Client, path: []const u8) !ApiResult(T) {
-    return parseRawResponse(T, try getRaw(client, path));
-}
-
-pub fn postJsonResult(comptime T: type, client: *Client, path: []const u8, payload: anytype) !ApiResult(T) {
-    return parseRawResponse(T, try postJsonRaw(client, path, payload));
-}
-
 pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), client: *Client, content_type: ?[]const u8, accept: []const u8) !?[]u8 {
     if (content_type) |ct| {
         try headers.append(allocator, .{ .name = "Content-Type", .value = ct });
