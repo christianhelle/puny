@@ -373,6 +373,8 @@ test "runTurn reports a failed turn for a non-transient error" {
 
 test "runTurn reports a cancelled turn" {
     const cancel = @import("../core/cancel.zig");
+    cancel.reset();
+    defer cancel.reset();
     const mock = @import("../providers/mock.zig");
     var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
     defer prov.deinit();

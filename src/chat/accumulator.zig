@@ -376,6 +376,7 @@ test "OpenAiAccumulator keeps partial stats on cancellation" {
     try acc.onEvent(.{ .content = " output" });
 
     cancel.reset();
+    defer cancel.reset();
     cancel.setCancelled();
     const result = acc.onEvent(.{ .content = " ignored" });
     try std.testing.expectError(error.Canceled, result);
@@ -641,6 +642,7 @@ test "OpenAiAccumulator prints dimmed reasoning when show thinking is enabled" {
 
 test "OpenAiAccumulator cancellation clears content and tool calls" {
     cancel.reset();
+    defer cancel.reset();
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
     session_stats.beginTurn("model-a", 0);
