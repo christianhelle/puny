@@ -18,6 +18,7 @@ const input = @import("../tui/input.zig");
 const mock = @import("../providers/mock.zig");
 const openai = @import("../providers/openai.zig");
 const prompt_history = @import("../prompts/history.zig");
+const review = @import("../review/review.zig");
 const prompts = @import("../prompts/prompts.zig");
 const prompt_file = @import("../prompts/prompt_file.zig");
 const resolver = @import("../providers/resolver.zig");
@@ -52,7 +53,7 @@ pub const ChatSession = struct {
         return .{ .ctx = ctx };
     }
 
-    pub fn run(self: *ChatSession) !void {
+    pub fn run(self: *ChatSession) !u8 {
         const ctx = &self.ctx;
         var line_alloc = std.Io.Writer.Allocating.init(ctx.arena);
         defer line_alloc.deinit();
@@ -66,7 +67,7 @@ pub const ChatSession = struct {
         while (true) {
             if (sigint.isTriggered()) {
                 finalizeSession(ctx);
-                return;
+                return 0;
             }
 
             const prompt_file_source: ?[]const u8 = if (ctx.parsed.prompt_file != null and pending_prompt != null) ctx.parsed.prompt_file else null;
@@ -74,7 +75,7 @@ pub const ChatSession = struct {
             const user_message = switch (user_input) {
                 .message => |text| text,
                 .continue_loop => continue,
-                .exit => return,
+                .exit => return 0,
             };
             if (user_message.len == 0) continue;
 
@@ -112,7 +113,7 @@ pub const ChatSession = struct {
             switch (action) {
                 .exit => {
                     finalizeSession(ctx);
-                    return;
+                    return 0;
                 },
                 .help => {
                     try help.showHelp(ctx.stdout_writer);
@@ -289,7 +290,7 @@ pub const ChatSession = struct {
                             try ctx.stdout_writer.print("\n", .{});
                             try ctx.stdout_writer.flush();
                             finalizeSession(ctx);
-                            return;
+                            return 0;
                         }
                         continue;
                     }
@@ -312,7 +313,7 @@ pub const ChatSession = struct {
                         try ctx.stdout_writer.print("\n", .{});
                         try ctx.stdout_writer.flush();
                         finalizeSession(ctx);
-                        return;
+                        return 0;
                     }
                     try ctx.stdout_writer.print("\nUse /<skill-name> to load a skill.\n", .{});
                     try ctx.stdout_writer.flush();
@@ -332,7 +333,7 @@ pub const ChatSession = struct {
                                 try ctx.history.save(ctx.io);
                             }
                             const turn_result = try runChatTurn(ctx);
-                            if (turn_result == .exit) return;
+                            if (turn_result == .exit) return if (ctx.review_mode.*) ctx.review_exit_code.* else 0;
                             continue;
                         },
                         else => |e| return e,
@@ -357,7 +358,7 @@ pub const ChatSession = struct {
                         try ctx.stdout_writer.print(" {s}\n", .{user_text.?});
                         try ctx.stdout_writer.flush();
                         const turn_result = try runChatTurn(ctx);
-                        if (turn_result == .exit) return;
+                        if (turn_result == .exit) return if (ctx.review_mode.*) ctx.review_exit_code.* else 0;
                         continue;
                     }
 
@@ -366,7 +367,7 @@ pub const ChatSession = struct {
                     try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
                     try ctx.stdout_writer.flush();
                     const turn_result = try runChatTurn(ctx);
-                    if (turn_result == .exit) return;
+                    if (turn_result == .exit) return if (ctx.review_mode.*) ctx.review_exit_code.* else 0;
                     continue;
                 },
                 .load_prompt_file => |source| {
@@ -399,7 +400,7 @@ pub const ChatSession = struct {
             }
 
             const turn_result = try runChatTurn(ctx);
-            if (turn_result == .exit) return;
+            if (turn_result == .exit) return if (ctx.review_mode.*) ctx.review_exit_code.* else 0;
         }
     }
 };
@@ -522,13 +523,63 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     try persistence.saveSessionMeta(ctx);
     upsertCurrentSession(ctx);
 
+    // Validate the review report if in review mode and the turn completed successfully
+    if (ctx.review_mode.* and turn_complete and !turn_cancelled and !turn_had_error) {
+        validateReviewReport(ctx);
+    }
+
     if (ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});
         finalizeSession(ctx);
+        // For review mode oneshot, derive exit code from verdict in saved report
+        if (ctx.review_mode.*) {
+            const report_path = core_session.getReviewPath();
+            if (report_path) |path| {
+                const cwd = std.Io.Dir.cwd();
+                const data = cwd.readFileAlloc(ctx.io, path, ctx.messages_arena.allocator(), std.Io.Limit.limited(10 * 1024 * 1024)) catch null;
+                if (data) |d| {
+                    defer ctx.messages_arena.allocator().free(d);
+                    const result = review.validateReport(d);
+                    if (result.verdict == .yes) {
+                        ctx.review_exit_code.* = 0;
+                    } else {
+                        ctx.review_exit_code.* = 1;
+                    }
+                } else {
+                    // Report couldn't be read — operational failure
+                    ctx.review_exit_code.* = 2;
+                }
+            } else {
+                // No report path set — operational failure
+                ctx.review_exit_code.* = 2;
+            }
+        }
         return .exit;
     }
 
     return .continue_loop;
+}
+
+/// Validates the saved review report and overwrites with a forced NO if evidence is incomplete.
+fn validateReviewReport(ctx: *ChatLoopContext) void {
+    const report_path = core_session.getReviewPath() orelse return;
+
+    const cwd = std.Io.Dir.cwd();
+    const data = cwd.readFileAlloc(ctx.io, report_path, ctx.messages_arena.allocator(), std.Io.Limit.limited(10 * 1024 * 1024)) catch return;
+    defer ctx.messages_arena.allocator().free(data);
+
+    const result = review.validateReport(data);
+
+    // If required sections are missing or no conclusion marker, force NO
+    if (result.missing_sections.len > 0 or !result.has_conclusion_marker) {
+        var reason_buf: [512]u8 = undefined;
+        var reason: []const u8 = "incomplete report: missing required sections or conclusion marker";
+        if (result.missing_sections.len > 0) {
+            reason = std.fmt.bufPrint(&reason_buf, "incomplete report: missing {d} required section(s)", .{result.missing_sections.len}) catch reason;
+        }
+        const fallback = review.fallbackReport(ctx.messages_arena.allocator(), reason) catch return;
+        cwd.writeFile(ctx.io, .{ .sub_path = report_path, .data = fallback }) catch {};
+    }
 }
 
 fn printExit(

@@ -28,6 +28,10 @@ pub fn setReviewPath(path: []const u8) void {
     review_path_global = path;
 }
 
+pub fn getReviewPath() ?[]const u8 {
+    return if (review_path_global.len > 0) review_path_global else null;
+}
+
 const SavePrdParams = struct {
     markdown: []const u8,
     html: []const u8,

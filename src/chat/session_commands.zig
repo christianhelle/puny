@@ -356,6 +356,7 @@ fn testChatLoopContext(
         .full_tool_definitions = undefined,
         .planning_tool_definitions = undefined,
         .review_tool_definitions = undefined,
+        .review_exit_code = undefined,
         .messages = undefined,
         .planning_mode = undefined,
         .review_mode = undefined,

@@ -135,6 +135,7 @@ fn testContext(
         .full_tool_definitions = undefined,
         .planning_tool_definitions = undefined,
         .review_tool_definitions = undefined,
+        .review_exit_code = undefined,
         .messages = messages,
         .planning_mode = planning_mode,
         .review_mode = review_mode,

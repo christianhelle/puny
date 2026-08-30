@@ -270,6 +270,7 @@ pub fn main(init: std.process.Init) !void {
     defer planning_tool_definitions.deinit(arena);
     var review_tool_definitions = try buildReviewToolDefinitions(arena, parsed.no_skills);
     defer review_tool_definitions.deinit(arena);
+    var review_exit_code: u8 = 0;
 
     var skill_registry = skills.Registry.init(arena);
     defer skill_registry.deinit();
@@ -352,6 +353,7 @@ pub fn main(init: std.process.Init) !void {
         .full_tool_definitions = &full_tool_definitions,
         .planning_tool_definitions = &planning_tool_definitions,
         .review_tool_definitions = &review_tool_definitions,
+        .review_exit_code = &review_exit_code,
         .messages = &messages,
         .planning_mode = &planning_mode,
         .review_mode = &review_mode,
@@ -364,7 +366,12 @@ pub fn main(init: std.process.Init) !void {
     };
 
     var chat_session = session.ChatSession.init(ctx);
-    try chat_session.run();
+    const exit_code = try chat_session.run();
+
+    // For --review oneshot, exit with the review-specific code
+    if (parsed.review and parsed.oneshot) {
+        std.process.exit(exit_code);
+    }
 
     // After the interactive session ends, surface a pending update notice
     // written by the detached update-check child process. Clear stale flags
