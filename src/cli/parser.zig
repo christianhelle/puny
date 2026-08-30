@@ -7,6 +7,7 @@ pub const Command = union(enum) {
     config,
     plan: ?[]const u8,
     build: ?[]const u8,
+    review,
     model: ?[]const u8,
     provider: ?[]const u8,
     thinking: ?[]const u8,
@@ -31,6 +32,7 @@ pub const command_tokens = [_][]const u8{
     "/config",
     "/plan",
     "/build",
+    "/review",
     "/model",
     "/provider",
     "/thinking",
@@ -90,6 +92,9 @@ pub fn parse(user_message: []const u8) Command {
         }
         return .{ .build = null };
     }
+
+    if (eqlIgnoreCase(user_message, "/review") or eqlIgnoreCase(user_message, ":review"))
+        return .review;
 
     if (eqlIgnoreCase(user_message, "/model") or std.mem.startsWith(u8, user_message, "/model ")) {
         if (user_message.len > "/model ".len) {
@@ -193,6 +198,7 @@ test "parse recognizes all slash commands" {
 
     try std.testing.expectEqualDeep(Command{ .build = null }, parse("/build"));
     try std.testing.expectEqualDeep(Command{ .build = "code it" }, parse("/build code it"));
+    try std.testing.expectEqualDeep(Command.review, parse("/review"));
 
     try std.testing.expectEqualDeep(Command{ .model = null }, parse("/model"));
     try std.testing.expectEqualDeep(Command{ .model = "llama" }, parse("/model llama"));

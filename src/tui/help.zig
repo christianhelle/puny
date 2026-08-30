@@ -12,6 +12,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/config", "Reconfigure URL and API key");
     try printCommand(writer, "/plan [task]", "Enter planning mode");
     try printCommand(writer, "/build [task]", "Switch to build mode");
+    try printCommand(writer, "/review", "Review the current branch");
     try printCommand(writer, "/model [id]", "Switch to another model");
     try printCommand(writer, "/provider [name]", "Switch to another provider");
     try printCommand(writer, "/thinking [level]", "Change reasoning effort");
@@ -44,7 +45,8 @@ test "showHelp lists all commands" {
 
     const commands = [_][]const u8{
         "/quit, /exit",  "/new, /reset", "/stats",           "/config",           "/plan [task]",
-        "/build [task]", "/model [id]",  "/provider [name]", "/thinking [level]", "/sessions",
+        "/build [task]", "/review",      "/model [id]",      "/provider [name]", "/thinking [level]",
+        "/sessions",
         "/resume [id]",  "/prune",       "/skills",          "/file [path|url]",  "/help",
         "@path",
     };
