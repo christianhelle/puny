@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Fix model picker overflow with a column-major multi-column grid ([#164](https://github.com/christianhelle/puny/pull/164)) ([@christianhelle](https://github.com/christianhelle/))
 - Use generated Anthropic client with Messages filtering ([#163](https://github.com/christianhelle/puny/pull/163)) ([@christianhelle](https://github.com/christianhelle/))
 - Filter generated providers to only include used OpenAPI tags ([#162](https://github.com/christianhelle/puny/pull/162)) ([@christianhelle](https://github.com/christianhelle/))
 - Use generated OpenAPI clients for LM Studio and OpenAI (hybrid) ([#161](https://github.com/christianhelle/puny/pull/161)) ([@christianhelle](https://github.com/christianhelle/))
