@@ -248,7 +248,9 @@ pub fn writeReport(
         std.mem.indexOf(u8, analysis, "MERGE WORTHY:") != null or
         std.mem.indexOf(u8, conclusion, "# Review Results") != null or
         std.mem.indexOf(u8, conclusion, "## Conclusion") != null or
-        std.mem.indexOf(u8, conclusion, "MERGE WORTHY:") != null)
+        std.mem.indexOf(u8, conclusion, "MERGE WORTHY:") != null or
+        try containsFormattedVerdict(allocator, analysis) or
+        try containsFormattedVerdict(allocator, conclusion))
     {
         return error.ReservedReviewSection;
     }
@@ -315,6 +317,18 @@ pub fn writeReport(
         .path = try std.fs.path.join(allocator, &.{ scope.repo_root, report_filename }),
         .outcome = outcome,
     };
+}
+
+fn containsFormattedVerdict(allocator: std.mem.Allocator, text: []const u8) !bool {
+    var normalized: std.ArrayList(u8) = .empty;
+    defer normalized.deinit(allocator);
+    for (text) |char| {
+        if (std.ascii.isAlphanumeric(char)) {
+            try normalized.append(allocator, std.ascii.toLower(char));
+        }
+    }
+    return std.mem.indexOf(u8, normalized.items, "mergeworthyyes") != null or
+        std.mem.indexOf(u8, normalized.items, "mergeworthyno") != null;
 }
 
 pub fn buildPromptContext(allocator: std.mem.Allocator, scope: Scope) ![]const u8 {
@@ -882,6 +896,21 @@ test "writeReport rejects a verdict marker in model-authored conclusion text" {
         \\None.
         ,
         .conclusion = "Contradiction: MERGE WORTHY: YES",
+        .evidence_complete = false,
+        .merge_worthy = false,
+    }));
+    try std.testing.expectError(error.ReservedReviewSection, writeReport(arena, std.testing.io, scope, .{
+        .analysis_markdown =
+        \\## Change Summary
+        \\Change.
+        \\## Quality and Regression Assessment
+        \\Assessment.
+        \\## Validation Performed
+        \\Validation.
+        \\## Findings
+        \\None.
+        ,
+        .conclusion = "Contradiction: **Merge Worthy:** YES",
         .evidence_complete = false,
         .merge_worthy = false,
     }));
