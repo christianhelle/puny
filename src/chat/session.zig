@@ -407,8 +407,13 @@ pub const ChatSession = struct {
                             continue;
                         },
                         .operational_failure => |failure| {
-                            ctx.mode.* = .review;
-                            core_session.setWriteBlocked(true);
+                            try enterReviewMode(ctx);
+                            const failure_context = try std.fmt.allocPrint(
+                                ctx.messages_arena.allocator(),
+                                "Review preflight failed before an immutable scope could be established: {s}",
+                                .{failure.message},
+                            );
+                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = failure_context });
                             const saved = branch_review.writeOperationalFailure(ctx.messages_arena.allocator(), ctx.io, failure) catch |err| {
                                 ctx.review_outcome.* = .operational_failure;
                                 printReviewWriteError(ctx.io, err);
@@ -429,8 +434,9 @@ pub const ChatSession = struct {
                             continue;
                         },
                         .no_changes => |scope| {
-                            ctx.mode.* = .review;
-                            core_session.setWriteBlocked(true);
+                            try enterReviewMode(ctx);
+                            const review_context = try branch_review.buildPromptContext(ctx.messages_arena.allocator(), scope);
+                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = review_context });
                             const saved = branch_review.writeNoChanges(ctx.messages_arena.allocator(), ctx.io, scope) catch |err| {
                                 ctx.review_outcome.* = .operational_failure;
                                 printReviewWriteError(ctx.io, err);
@@ -451,11 +457,8 @@ pub const ChatSession = struct {
                             continue;
                         },
                         .ready => |scope| {
-                            ctx.mode.* = .review;
-                            core_session.setWriteBlocked(true);
+                            try enterReviewMode(ctx);
                             branch_review.begin(scope);
-                            const review_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "review", prompts.review);
-                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = review_prompt });
                             const review_context = try branch_review.buildPromptContext(ctx.messages_arena.allocator(), scope);
                             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = review_context });
                             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = branch_review.request_prompt });
@@ -667,6 +670,13 @@ fn printReviewWriteError(io: std.Io, err: anyerror) void {
     var writer: std.Io.File.Writer = .init(.stderr(), io, &buffer);
     writer.interface.print("Review report could not be written: {s}\n", .{@errorName(err)}) catch {};
     writer.interface.flush() catch {};
+}
+
+fn enterReviewMode(ctx: *ChatLoopContext) !void {
+    ctx.mode.* = .review;
+    core_session.setWriteBlocked(true);
+    const review_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "review", prompts.review);
+    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = review_prompt });
 }
 
 fn printExit(
