@@ -1,6 +1,5 @@
 const std = @import("std");
 const list_picker = @import("list_picker.zig");
-const input = @import("input.zig");
 const provider = @import("../providers/provider.zig");
 const ModelProvider = provider.ModelProvider;
 
@@ -47,40 +46,6 @@ fn getDefaultProviders() [5]ProviderOption {
         .{ .id = .copilot, .display_name = "GitHub Copilot" },
         .{ .id = .mock, .display_name = "Mock" },
     };
-}
-
-pub fn selectProviderText(
-    arena: std.mem.Allocator,
-    io: std.Io,
-) !?ModelProvider {
-    const default_providers = comptime getDefaultProviders();
-
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
-
-    try stdout_writer.print("\nAvailable providers:\n", .{});
-    for (default_providers, 0..) |p, i| {
-        try stdout_writer.print("  {d}. {s}\n", .{ i + 1, p.display_name });
-    }
-    try stdout_writer.print("\nEnter provider number or key: ", .{});
-    try stdout_writer.flush();
-
-    var line_alloc: std.Io.Writer.Allocating = .init(arena);
-    defer line_alloc.deinit();
-    var stdin_buffer: [4096]u8 = undefined;
-    const line = try input.readLineSimple(io, &line_alloc, &stdin_buffer) orelse return null;
-    if (line.len == 0) return null;
-
-    const idx = std.fmt.parseInt(usize, line, 10) catch null;
-    if (idx) |i| {
-        if (i > 0 and i <= default_providers.len) return default_providers[i - 1].id;
-        try stdout_writer.print("Invalid provider number.\n", .{});
-        try stdout_writer.flush();
-        return null;
-    }
-
-    return std.meta.stringToEnum(ModelProvider, line);
 }
 
 test "getDefaultProviders returns five known providers" {
