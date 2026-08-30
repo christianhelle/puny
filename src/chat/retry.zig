@@ -148,24 +148,49 @@ fn sanitizeMessage(allocator: std.mem.Allocator, message: []const u8) !?[]u8 {
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(allocator);
     var pending_space = false;
+    var truncated = false;
+    var index: usize = 0;
 
-    for (formatted.text) |byte| {
-        if (output.items.len >= max_len) break;
+    while (index < formatted.text.len) {
+        const byte = formatted.text[index];
         if (byte == '\n' or byte == '\r' or byte == '\t' or byte == ' ') {
             pending_space = output.items.len > 0;
+            index += 1;
             continue;
         }
-        if (byte < 0x20 or byte == 0x7f) continue;
+        if (byte < 0x20 or byte == 0x7f) {
+            index += 1;
+            continue;
+        }
+
+        const sequence_len = if (byte < 0x80)
+            1
+        else
+            std.unicode.utf8ByteSequenceLength(byte) catch {
+                index += 1;
+                continue;
+            };
+        if (index + sequence_len > formatted.text.len or
+            std.unicode.utf8Decode(formatted.text[index..][0..sequence_len]) == error.Utf8ExpectedContinuation)
+        {
+            index += 1;
+            continue;
+        }
+
+        const required = sequence_len + @intFromBool(pending_space);
+        if (output.items.len + required > max_len - 3) {
+            truncated = true;
+            break;
+        }
         if (pending_space) {
             try output.append(allocator, ' ');
             pending_space = false;
-            if (output.items.len >= max_len) break;
         }
-        try output.append(allocator, byte);
+        try output.appendSlice(allocator, formatted.text[index .. index + sequence_len]);
+        index += sequence_len;
     }
 
-    if (formatted.text.len > max_len and output.items.len >= 3) {
-        output.items.len -= 3;
+    if (truncated) {
         try output.appendSlice(allocator, "...");
     }
     if (output.items.len == 0) return null;
@@ -198,4 +223,24 @@ test "formatHttpFailure extracts and sanitizes an API error message" {
         "HTTP 500 Internal Server Error: failed api_key=************",
         formatted,
     );
+}
+
+test "formatHttpFailure keeps truncated Unicode messages valid UTF-8" {
+    var body: [600]u8 = undefined;
+    for (0..200) |i| {
+        body[i * 3] = 0xe2;
+        body[i * 3 + 1] = 0x82;
+        body[i * 3 + 2] = 0xac;
+    }
+    const failure = http_client.HttpFailure{
+        .status = .bad_gateway,
+        .body = &body,
+    };
+
+    const formatted = try formatHttpFailure(std.testing.allocator, &failure);
+    defer std.testing.allocator.free(formatted);
+
+    try std.testing.expect(std.unicode.utf8ValidateSlice(formatted));
+    try std.testing.expect(formatted.len <= 512 + "HTTP 502 Bad Gateway: ".len);
+    try std.testing.expect(std.mem.endsWith(u8, formatted, "..."));
 }
