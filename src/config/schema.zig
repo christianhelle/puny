@@ -42,17 +42,20 @@ pub const PromptOverride = struct {
 pub const PromptsConfig = struct {
     system: PromptOverride = .{},
     planning: PromptOverride = .{},
+    review: PromptOverride = .{},
 
     pub fn clone(self: PromptsConfig, allocator: std.mem.Allocator) std.mem.Allocator.Error!PromptsConfig {
         return .{
             .system = try self.system.clone(allocator),
             .planning = try self.planning.clone(allocator),
+            .review = try self.review.clone(allocator),
         };
     }
 
     pub fn deinit(self: *PromptsConfig, allocator: std.mem.Allocator) void {
         self.system.deinit(allocator);
         self.planning.deinit(allocator);
+        self.review.deinit(allocator);
     }
 };
 
@@ -227,6 +230,7 @@ pub const Config = struct {
         ) orelse @compileError("unknown prompt name: " ++ name)) {
             .system => .{ self.prompts.system.override, self.prompts.system.prefix, self.prompts.system.suffix },
             .planning => .{ self.prompts.planning.override, self.prompts.planning.prefix, self.prompts.planning.suffix },
+            .review => .{ self.prompts.review.override, self.prompts.review.prefix, self.prompts.review.suffix },
         };
         if (override) |value| return allocator.dupe(u8, value);
         if (prefix.len == 0 and suffix.len == 0) return allocator.dupe(u8, default_prompt);

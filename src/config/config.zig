@@ -81,6 +81,19 @@ test "resolvePrompt applies prefix, suffix, and override" {
     try std.testing.expectEqualStrings("overridden", planning);
 }
 
+test "resolvePrompt supports a dedicated review prompt" {
+    const allocator = std.testing.allocator;
+    const cfg = Config{
+        .prompts = .{
+            .review = .{ .override = "review override" },
+        },
+    };
+
+    const review = try cfg.resolvePrompt(allocator, "review", "default review");
+    defer allocator.free(review);
+    try std.testing.expectEqualStrings("review override", review);
+}
+
 test "isValidUtf8 rejects invalid bytes" {
     try std.testing.expect(isValidUtf8("ornith-1.0-35b"));
     try std.testing.expect(!isValidUtf8(&.{0xaa}));
