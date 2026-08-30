@@ -47,6 +47,9 @@ pub fn validate(opts: Options) !void {
     if (opts.review and (opts.session != null or opts.do_resume or opts.prune)) {
         return error.ReviewConflictsSession;
     }
+    if (opts.review and (opts.upgrade or opts.force_upgrade)) {
+        return error.ReviewConflictsOperation;
+    }
     if (opts.prompt != null and opts.prompt_file != null) {
         return error.ConflictingPrompts;
     }
@@ -132,6 +135,7 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
     validate(opts) catch |err| switch (err) {
         error.ReviewConflictsPrompt => fatal(io, "--review cannot be combined with --prompt or --prompt-file\n\n", .{}),
         error.ReviewConflictsSession => fatal(io, "--review cannot be combined with session or prune options\n\n", .{}),
+        error.ReviewConflictsOperation => fatal(io, "--review cannot be combined with upgrade options\n\n", .{}),
         error.ConflictingPrompts => fatal(io, "Cannot use both --prompt and --prompt-file\n\n", .{}),
         error.OneshotRequiresPrompt => fatal(io, "--oneshot requires --prompt or --prompt-file\n\n", .{}),
     };
@@ -454,6 +458,14 @@ test "validate rejects review with session operations" {
         .review = true,
         .oneshot = true,
         .do_resume = true,
+    }));
+}
+
+test "validate rejects review with upgrade" {
+    try std.testing.expectError(error.ReviewConflictsOperation, validate(.{
+        .review = true,
+        .oneshot = true,
+        .upgrade = true,
     }));
 }
 
