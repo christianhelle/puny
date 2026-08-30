@@ -1,5 +1,4 @@
 const std = @import("std");
-const core_session = @import("../core/session.zig");
 
 /// Returns a dedicated test directory under `zig-out/test-sessions-index` and
 /// wipes any leftovers from an interrupted run so tests start from a clean
