@@ -11,6 +11,7 @@ pub const Options = struct {
     prompt: ?[]const u8 = null,
     prompt_file: ?[]const u8 = null,
     oneshot: bool = false,
+    review: bool = false,
     mock: bool = false,
     reconfigure: bool = false,
     debug: bool = false,
@@ -40,10 +41,16 @@ fn fatal(io: std.Io, comptime fmt: []const u8, args: anytype) noreturn {
 /// Returns an error when the combination of options is invalid. Kept separate
 /// from `parseArgs` so it is testable without triggering a process exit.
 pub fn validate(opts: Options) !void {
+    if (opts.review and (opts.prompt != null or opts.prompt_file != null)) {
+        return error.ReviewConflictsPrompt;
+    }
+    if (opts.review and (opts.session != null or opts.do_resume or opts.prune)) {
+        return error.ReviewConflictsSession;
+    }
     if (opts.prompt != null and opts.prompt_file != null) {
         return error.ConflictingPrompts;
     }
-    if (opts.oneshot and opts.prompt == null and opts.prompt_file == null) {
+    if (opts.oneshot and !opts.review and opts.prompt == null and opts.prompt_file == null) {
         return error.OneshotRequiresPrompt;
     }
 }
@@ -84,6 +91,9 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.mock = true;
         } else if (std.mem.eql(u8, arg, "--oneshot") or std.mem.eql(u8, arg, "--one-shot") or std.mem.eql(u8, arg, "-1")) {
             opts.oneshot = true;
+        } else if (std.mem.eql(u8, arg, "--review")) {
+            opts.review = true;
+            opts.oneshot = true;
         } else if (std.mem.eql(u8, arg, "--prompt") or std.mem.eql(u8, arg, "-p")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -120,6 +130,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
     }
 
     validate(opts) catch |err| switch (err) {
+        error.ReviewConflictsPrompt => fatal(io, "--review cannot be combined with --prompt or --prompt-file\n\n", .{}),
+        error.ReviewConflictsSession => fatal(io, "--review cannot be combined with session or prune options\n\n", .{}),
         error.ConflictingPrompts => fatal(io, "Cannot use both --prompt and --prompt-file\n\n", .{}),
         error.OneshotRequiresPrompt => fatal(io, "--oneshot requires --prompt or --prompt-file\n\n", .{}),
     };
@@ -183,6 +195,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -p, --prompt <text>          Pre-fill prompt as first user message
         \\      --prompt-file <path|url> Read first prompt from a file or URL
         \\  -1, --oneshot, --one-shot    Exit after processing the prompt (requires --prompt or --prompt-file)
+        \\      --review                 Review the current branch against the latest origin/main and exit
         \\  -M, --mock                   Use mock provider (no network calls, for testing)
         \\      --reconfigure            Re-run first-run setup and update config
         \\      --show-thinking          Show reasoning/thinking output from the model
@@ -388,6 +401,16 @@ test "parseArgs sets prompt_file from flag" {
     try std.testing.expectEqualStrings("spec.md", opts.prompt_file.?);
 }
 
+test "parseArgs makes review an implicit oneshot operation" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const args = &[_][:0]const u8{ "puny", "--review" };
+    const opts = parseArgs(std.testing.io, &env, args);
+    try std.testing.expect(opts.review);
+    try std.testing.expect(opts.oneshot);
+    try std.testing.expect(opts.prompt == null);
+}
+
 test "validate rejects both prompt and prompt-file" {
     const opts = Options{ .prompt = "hello", .prompt_file = "spec.md" };
     try std.testing.expectError(error.ConflictingPrompts, validate(opts));
@@ -406,6 +429,32 @@ test "validate allows prompt with oneshot" {
 test "validate rejects oneshot without prompt or prompt-file" {
     const opts = Options{ .oneshot = true };
     try std.testing.expectError(error.OneshotRequiresPrompt, validate(opts));
+}
+
+test "validate rejects review with an explicit prompt" {
+    try std.testing.expectError(error.ReviewConflictsPrompt, validate(.{
+        .review = true,
+        .oneshot = true,
+        .prompt = "do something else",
+    }));
+    try std.testing.expectError(error.ReviewConflictsPrompt, validate(.{
+        .review = true,
+        .oneshot = true,
+        .prompt_file = "prompt.md",
+    }));
+}
+
+test "validate rejects review with session operations" {
+    try std.testing.expectError(error.ReviewConflictsSession, validate(.{
+        .review = true,
+        .oneshot = true,
+        .session = "abc",
+    }));
+    try std.testing.expectError(error.ReviewConflictsSession, validate(.{
+        .review = true,
+        .oneshot = true,
+        .do_resume = true,
+    }));
 }
 
 test "parseArgs sets url from short flag" {
