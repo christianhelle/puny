@@ -203,18 +203,18 @@ pub fn selectFromList(
         };
         if (dir) |d| {
             selected = gridStep(selected, items.len, grid, d);
-            try stdout_writer.print(terminal.cursor_up, .{grid.rows});
+            try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up, .{grid.rows});
             try renderGrid(stdout_writer, items, grid, selected, column_width, true);
             continue;
         }
         switch (key) {
             .enter => {
-                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
+                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
                 try stdout_writer.flush();
                 return try arena.dupe(u8, items[selected].value);
             },
             .quit, .escape => {
-                try stdout_writer.print(terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
+                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
                 try stdout_writer.flush();
                 return null;
             },
