@@ -380,15 +380,49 @@ fn streamJsonWithExtraHeaders(client: *Client, path: []const u8, requestBody: an
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
 
+    var done = std.atomic.Value(bool).init(false);
+    var watcher_ctx: Client.CancelWatcher = undefined;
+    var watcher_thread: ?std.Thread = null;
+    if (client.cancel_check) |pred| {
+        watcher_ctx = Client.CancelWatcher{ .connection = req.connection, .io = client.io, .pred = pred, .done = &done };
+        watcher_thread = std.Thread.spawn(.{}, Client.CancelWatcher.run, .{&watcher_ctx}) catch null;
+    }
+    defer if (watcher_thread) |thread| {
+        done.store(true, .release);
+        thread.join();
+        if (watcher_ctx.interrupted) {
+            const conn = watcher_ctx.connection.?;
+            if (comptime @import("builtin").os.tag == .windows) {
+                if (watcher_ctx.replacement_handle) |handle| {
+                    conn.stream_reader.stream.socket.handle = handle;
+                    conn.stream_writer.stream.socket.handle = handle;
+                }
+            }
+            conn.closing = true;
+        }
+    };
+
     if (response.head.status.class() != .success) {
         var response_body: std.Io.Writer.Allocating = .init(allocator);
         defer response_body.deinit();
-        _ = response_reader.streamRemaining(&response_body.writer) catch |err| {
-            if (client.http_observer) |obs| {
-                if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
-            }
-            return response.bodyErr() orelse err;
-        };
+        if (client.cancel_check) |pred| {
+            var cancelable_buffer: [1]u8 = undefined;
+            var cancelable_reader = CancelableReader.init(response_reader, &cancelable_buffer, pred);
+            _ = cancelable_reader.reader.streamRemaining(&response_body.writer) catch |err| {
+                if (client.http_observer) |obs| {
+                    if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+                }
+                if (pred()) return error.Cancelled;
+                return response.bodyErr() orelse err;
+            };
+        } else {
+            _ = response_reader.streamRemaining(&response_body.writer) catch |err| {
+                if (client.http_observer) |obs| {
+                    if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+                }
+                return response.bodyErr() orelse err;
+            };
+        }
         if (client.http_observer) |obs| {
             if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, response_body.written(), elapsed_ns);
         }
@@ -400,23 +434,6 @@ fn streamJsonWithExtraHeaders(client: *Client, path: []const u8, requestBody: an
     }
 
     if (client.cancel_check) |pred| {
-        var done = std.atomic.Value(bool).init(false);
-        var watcher_ctx = Client.CancelWatcher{ .connection = req.connection, .io = client.io, .pred = pred, .done = &done };
-        const watcher_thread: ?std.Thread = std.Thread.spawn(.{}, Client.CancelWatcher.run, .{&watcher_ctx}) catch null;
-        defer if (watcher_thread) |thread| {
-            done.store(true, .release);
-            thread.join();
-            if (watcher_ctx.interrupted) {
-                const conn = watcher_ctx.connection.?;
-                if (comptime @import("builtin").os.tag == .windows) {
-                    if (watcher_ctx.replacement_handle) |handle| {
-                        conn.stream_reader.stream.socket.handle = handle;
-                        conn.stream_writer.stream.socket.handle = handle;
-                    }
-                }
-                conn.closing = true;
-            }
-        };
         var cancelable_buffer: [1]u8 = undefined;
         var cancelable_reader = CancelableReader.init(response_reader, &cancelable_buffer, pred);
         parseSseReader(allocator, &cancelable_reader.reader, callback, cancellation_token) catch |err| switch (err) {
