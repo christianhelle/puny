@@ -1,5 +1,6 @@
 const std = @import("std");
 const http_client = @import("../providers/client.zig");
+const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const redact = @import("redact.zig");
 
@@ -428,4 +429,83 @@ test "attachHttpDebugObserver installs callbacks on the provider" {
         },
         else => unreachable,
     }
+}
+
+const ErrorResponseServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    body: []const u8,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        request.respond(self.body, .{ .status = .internal_server_error }) catch return;
+    }
+};
+
+fn startErrorResponseServer(body: []const u8) !*ErrorResponseServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(ErrorResponseServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server, .body = body };
+    errdefer ctx.server.deinit(std.testing.io);
+    ctx.thread = try std.Thread.spawn(.{}, ErrorResponseServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopErrorResponseServer(ctx: *ErrorResponseServer) void {
+    ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
+    std.testing.allocator.destroy(ctx);
+}
+
+test "debug observer logs complete sanitized streaming error response bodies" {
+    const body = "{\"error\":{\"message\":\"server exploded\"},\"api_key\":\"secret-value\"}";
+    const server = try startErrorResponseServer(body);
+    defer stopErrorResponseServer(server);
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+
+    var prov = provider.Provider{ .opencode_go = http_client.Client.init(std.testing.allocator, std.testing.io, "test-key") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var log = DebugLog{
+        .file = undefined,
+        .writer = &output.writer,
+        .allocator = std.testing.allocator,
+    };
+    attachHttpDebugObserver(&prov, &log);
+
+    var callback_context: u8 = 0;
+    const callback = openai.StreamCallback{
+        .context = &callback_context,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(_: *anyopaque, _: openai.StreamEvent) anyerror!void {}
+            }.event,
+        },
+    };
+    const request = openai.ChatRequest{
+        .model = "muse-spark-1.2-contributor",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, callback));
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Status: 500 (internal_server_error)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "server exploded") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"api_key\": \"***\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "secret-value") == null);
 }
