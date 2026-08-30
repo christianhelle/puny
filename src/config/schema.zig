@@ -25,11 +25,12 @@ pub const PromptOverride = struct {
     override: ?[]const u8 = null,
 
     pub fn clone(self: PromptOverride, allocator: std.mem.Allocator) std.mem.Allocator.Error!PromptOverride {
-        return .{
-            .prefix = try allocator.dupe(u8, self.prefix),
-            .suffix = try allocator.dupe(u8, self.suffix),
-            .override = if (self.override) |value| try allocator.dupe(u8, value) else null,
-        };
+        const prefix = try allocator.dupe(u8, self.prefix);
+        errdefer allocator.free(prefix);
+        const suffix = try allocator.dupe(u8, self.suffix);
+        errdefer allocator.free(suffix);
+        const override = if (self.override) |value| try allocator.dupe(u8, value) else null;
+        return .{ .prefix = prefix, .suffix = suffix, .override = override };
     }
 
     pub fn deinit(self: *PromptOverride, allocator: std.mem.Allocator) void {
@@ -45,11 +46,12 @@ pub const PromptsConfig = struct {
     review: PromptOverride = .{},
 
     pub fn clone(self: PromptsConfig, allocator: std.mem.Allocator) std.mem.Allocator.Error!PromptsConfig {
-        return .{
-            .system = try self.system.clone(allocator),
-            .planning = try self.planning.clone(allocator),
-            .review = try self.review.clone(allocator),
-        };
+        var system = try self.system.clone(allocator);
+        errdefer system.deinit(allocator);
+        var planning = try self.planning.clone(allocator);
+        errdefer planning.deinit(allocator);
+        const review = try self.review.clone(allocator);
+        return .{ .system = system, .planning = planning, .review = review };
     }
 
     pub fn deinit(self: *PromptsConfig, allocator: std.mem.Allocator) void {
@@ -286,17 +288,29 @@ test "PromptOverride clone handles a null override" {
     try std.testing.expectEqualStrings("", cloned.prefix);
 }
 
-test "PromptsConfig clone deep-copies both entries" {
+test "PromptsConfig clone deep-copies all entries" {
     const allocator = std.testing.allocator;
     const original = PromptsConfig{
         .system = .{ .prefix = "sys-pre" },
         .planning = .{ .override = "plan-over" },
+        .review = .{ .suffix = "review-suffix" },
     };
 
     var cloned = try original.clone(allocator);
     defer cloned.deinit(allocator);
     try std.testing.expectEqualStrings("sys-pre", cloned.system.prefix);
     try std.testing.expectEqualStrings("plan-over", cloned.planning.override.?);
+    try std.testing.expectEqualStrings("review-suffix", cloned.review.suffix);
+}
+
+test "PromptsConfig clone releases earlier entries when review cloning fails" {
+    const original = PromptsConfig{
+        .system = .{ .prefix = "a", .suffix = "b", .override = "c" },
+        .planning = .{ .prefix = "d", .suffix = "e", .override = "f" },
+        .review = .{ .prefix = "g", .suffix = "h", .override = "i" },
+    };
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 6 });
+    try std.testing.expectError(error.OutOfMemory, original.clone(failing.allocator()));
 }
 
 test "Provider clone deep-copies all fields" {
