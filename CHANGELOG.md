@@ -2,6 +2,9 @@
 
 ## [Unreleased Changes]
 
+### Merged Pull Requests
+- Move provider streaming error handling out of generated clients ([#167](https://github.com/christianhelle/puny/pull/167)) ([@christianhelle](https://github.com/christianhelle/))
+
 ### Features
 - Improve HTTP chat error reporting and debug logging ([#166](https://github.com/christianhelle/puny/pull/166)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove dead and unused code ([#165](https://github.com/christianhelle/puny/pull/165)) ([@christianhelle](https://github.com/christianhelle/))
