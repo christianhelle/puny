@@ -47,6 +47,15 @@
     }
   },
   {
+    "name": "One-shot review command returns operational report failures",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/review", "--oneshot"],
+    "expect": [],
+    "not_expect": ["MERGE WORTHY: YES"],
+    "expect_stderr": ["Review report could not be written"],
+    "exit_code": 2,
+    "git_fixture": "empty_blocked_report"
+  },
+  {
     "name": "Review mode rejects a branch with no committed changes",
     "args": ["--mock", "--model", "mock-model", "--review"],
     "expect": ["Review report:", "MERGE WORTHY: NO"],
