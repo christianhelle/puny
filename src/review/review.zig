@@ -194,7 +194,7 @@ fn runGit(
     const content = commandSection(output, if (succeeded) "STDOUT:\n" else "STDERR:\n");
     const detail = if (succeeded or content.len > 0) content else output;
     return if (succeeded)
-        .{ .ok = try allocator.dupe(u8, std.mem.trim(u8, detail, &std.ascii.whitespace)) }
+        .{ .ok = try allocator.dupe(u8, std.mem.trimEnd(u8, detail, &std.ascii.whitespace)) }
     else
         .{ .failed = try allocator.dupe(u8, std.mem.trim(u8, detail, &std.ascii.whitespace)) };
 }
@@ -647,6 +647,24 @@ test "prepareAt excludes the generated report from dirty worktree details" {
         },
         else => return error.ExpectedReadyReview,
     }
+}
+
+test "prepareAt preserves Git porcelain status columns" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    try fixture.addFeatureCommit();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const initial_path = try std.fs.path.join(std.testing.allocator, &.{ fixture.worktree, "initial.txt" });
+    defer std.testing.allocator.free(initial_path);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = initial_path, .data = "modified\n" });
+
+    const prepared = try prepareAt(arena_state.allocator(), std.testing.io, fixture.worktree);
+    const scope = switch (prepared) {
+        .ready => |value| value,
+        else => return error.ExpectedReadyReview,
+    };
+    try std.testing.expect(std.mem.startsWith(u8, scope.dirty_worktree, " M initial.txt"));
 }
 
 test "prepareAt fetches the latest origin main before fixing scope" {
