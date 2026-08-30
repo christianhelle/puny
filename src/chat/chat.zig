@@ -54,7 +54,7 @@ pub fn runTurn(
     errdefer session_stats.finalizeTurn(acc.usage, false);
     const callback = acc.streamCallback();
 
-    const outcome = try chat_retry.runChatWithRetry(prov, request, callback, io, random, stdout_writer);
+    const outcome = try chat_retry.runChatWithRetry(prov, arena, request, callback, io, random, stdout_writer);
 
     const provider_ttft = if (acc.usage) |u| u.time_to_first_token_seconds else null;
     const has_streamed_content = acc.has_streamed_output or acc.hasToolCalls();

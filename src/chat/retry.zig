@@ -2,6 +2,8 @@ const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const cancel = @import("../core/cancel.zig");
 const openai = @import("../providers/openai.zig");
+const http_client = @import("../providers/client.zig");
+const redact = @import("redact.zig");
 const retry = @import("../core/retry.zig");
 
 pub const ChatRetryOutcome = union(enum) {
@@ -12,6 +14,7 @@ pub const ChatRetryOutcome = union(enum) {
 
 pub fn runChatWithRetry(
     prov: anytype,
+    allocator: std.mem.Allocator,
     request: openai.ChatRequest,
     callback: openai.StreamCallback,
     io: std.Io,
@@ -42,14 +45,14 @@ pub fn runChatWithRetry(
             if (err == error.Canceled) return .cancelled;
 
             if (!retry.isTransientError(err)) {
-                try stdout_writer.print("\nChat failed: {}\n", .{err});
+                try printChatFailure(prov, allocator, stdout_writer, err, null);
                 try stdout_writer.flush();
                 return .{ .failed = err };
             }
 
             retry_count += 1;
             if (retry_count >= cfg.max_retries) {
-                try stdout_writer.print("\nChat failed after {d} retries: {}\n", .{ cfg.max_retries, err });
+                try printChatFailure(prov, allocator, stdout_writer, err, cfg.max_retries);
                 try stdout_writer.flush();
                 return .{ .failed = err };
             }
@@ -62,4 +65,137 @@ pub fn runChatWithRetry(
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
+}
+
+fn printChatFailure(prov: anytype, allocator: std.mem.Allocator, writer: *std.Io.Writer, err: anyerror, retries: ?usize) !void {
+    if (retries) |count| {
+        try writer.print("\nChat failed after {d} retries: ", .{count});
+    } else {
+        try writer.writeAll("\nChat failed: ");
+    }
+
+    if (err == error.ResponseError) {
+        if (lastHttpFailure(prov)) |failure| {
+            const message = try formatHttpFailure(allocator, failure);
+            defer allocator.free(message);
+            try writer.writeAll(message);
+            try writer.writeByte('\n');
+            return;
+        }
+    }
+
+    try writer.print("{}\n", .{err});
+}
+
+fn lastHttpFailure(prov: anytype) ?*const http_client.HttpFailure {
+    const ProviderType = @typeInfo(@TypeOf(prov)).pointer.child;
+    if (comptime @hasDecl(ProviderType, "lastHttpFailure")) {
+        return prov.lastHttpFailure();
+    }
+    return null;
+}
+
+fn formatHttpFailure(allocator: std.mem.Allocator, failure: *const http_client.HttpFailure) ![]u8 {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+
+    try output.writer.print("HTTP {d} ", .{@intFromEnum(failure.status)});
+    try writeStatusName(&output.writer, @tagName(failure.status));
+
+    if (try responseMessage(allocator, failure.body)) |message| {
+        defer allocator.free(message);
+        try output.writer.writeAll(": ");
+        try output.writer.writeAll(message);
+    }
+
+    return output.toOwnedSlice();
+}
+
+fn responseMessage(allocator: std.mem.Allocator, body: []const u8) !?[]u8 {
+    const trimmed = std.mem.trim(u8, body, " \t\r\n");
+    if (trimmed.len == 0) return null;
+
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, trimmed, .{}) catch
+        return sanitizeMessage(allocator, trimmed);
+    defer parsed.deinit();
+
+    const message = extractMessage(parsed.value) orelse trimmed;
+    return sanitizeMessage(allocator, message);
+}
+
+fn extractMessage(value: std.json.Value) ?[]const u8 {
+    if (value != .object) return null;
+    if (value.object.get("error")) |error_value| {
+        if (error_value == .object) {
+            if (error_value.object.get("message")) |message| {
+                if (message == .string) return message.string;
+            }
+        } else if (error_value == .string) {
+            return error_value.string;
+        }
+    }
+    if (value.object.get("message")) |message| {
+        if (message == .string) return message.string;
+    }
+    return null;
+}
+
+fn sanitizeMessage(allocator: std.mem.Allocator, message: []const u8) !?[]u8 {
+    const formatted = redact.formatBody(allocator, message);
+    defer if (formatted.owned) allocator.free(formatted.text);
+
+    const max_len = 512;
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+    var pending_space = false;
+
+    for (formatted.text) |byte| {
+        if (output.items.len >= max_len) break;
+        if (byte == '\n' or byte == '\r' or byte == '\t' or byte == ' ') {
+            pending_space = output.items.len > 0;
+            continue;
+        }
+        if (byte < 0x20 or byte == 0x7f) continue;
+        if (pending_space) {
+            try output.append(allocator, ' ');
+            pending_space = false;
+            if (output.items.len >= max_len) break;
+        }
+        try output.append(allocator, byte);
+    }
+
+    if (formatted.text.len > max_len and output.items.len >= 3) {
+        output.items.len -= 3;
+        try output.appendSlice(allocator, "...");
+    }
+    if (output.items.len == 0) return null;
+    return try output.toOwnedSlice(allocator);
+}
+
+fn writeStatusName(writer: *std.Io.Writer, status_name: []const u8) !void {
+    var capitalize = true;
+    for (status_name) |byte| {
+        if (byte == '_') {
+            try writer.writeByte(' ');
+            capitalize = true;
+        } else {
+            try writer.writeByte(if (capitalize) std.ascii.toUpper(byte) else byte);
+            capitalize = false;
+        }
+    }
+}
+
+test "formatHttpFailure extracts and sanitizes an API error message" {
+    const failure = http_client.HttpFailure{
+        .status = .internal_server_error,
+        .body = @constCast("{\"error\":{\"message\":\"failed\\napi_key=secret-value\"}}"),
+    };
+
+    const formatted = try formatHttpFailure(std.testing.allocator, &failure);
+    defer std.testing.allocator.free(formatted);
+
+    try std.testing.expectEqualStrings(
+        "HTTP 500 Internal Server Error: failed api_key=************",
+        formatted,
+    );
 }
