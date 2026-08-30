@@ -242,7 +242,10 @@ pub fn writeReport(
     if (std.mem.indexOf(u8, analysis, "# Review Results") != null or
         std.mem.indexOf(u8, analysis, "## Review Scope") != null or
         std.mem.indexOf(u8, analysis, "## Conclusion") != null or
-        std.mem.indexOf(u8, analysis, "MERGE WORTHY:") != null)
+        std.mem.indexOf(u8, analysis, "MERGE WORTHY:") != null or
+        std.mem.indexOf(u8, conclusion, "# Review Results") != null or
+        std.mem.indexOf(u8, conclusion, "## Conclusion") != null or
+        std.mem.indexOf(u8, conclusion, "MERGE WORTHY:") != null)
     {
         return error.ReservedReviewSection;
     }
@@ -789,4 +792,42 @@ test "buildPromptContext fixes the model review to immutable commits" {
     try std.testing.expect(std.mem.indexOf(u8, context, "3333333333333333333333333333333333333333..2222222222222222222222222222222222222222") != null);
     try std.testing.expect(std.mem.indexOf(u8, context, "committed changes only") != null);
     try std.testing.expect(std.mem.indexOf(u8, context, "review-results.md") != null);
+}
+
+test "writeReport rejects a verdict marker in model-authored conclusion text" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const cwd = try std.process.currentPathAlloc(std.testing.io, arena);
+    const repo_root = try std.fs.path.join(arena, &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = "feature/contradiction",
+        .base_ref = base_ref,
+        .base_sha = "1111111111111111111111111111111111111111",
+        .head_sha = "2222222222222222222222222222222222222222",
+        .merge_base_sha = "1111111111111111111111111111111111111111",
+        .commit_count = 1,
+        .changed_files = "M\tfeature.zig",
+        .diff_stat = " feature.zig | 1 +",
+        .dirty_worktree = "",
+    };
+
+    try std.testing.expectError(error.ReservedReviewSection, writeReport(arena, std.testing.io, scope, .{
+        .analysis_markdown =
+        \\## Change Summary
+        \\Change.
+        \\## Quality and Regression Assessment
+        \\Assessment.
+        \\## Validation Performed
+        \\Validation.
+        \\## Findings
+        \\None.
+        ,
+        .conclusion = "Contradiction: MERGE WORTHY: YES",
+        .evidence_complete = false,
+        .merge_worthy = false,
+    }));
 }
