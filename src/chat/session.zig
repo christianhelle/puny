@@ -409,7 +409,15 @@ pub const ChatSession = struct {
                         .operational_failure => |failure| {
                             ctx.mode.* = .review;
                             core_session.setWriteBlocked(true);
-                            const saved = try branch_review.writeOperationalFailure(ctx.messages_arena.allocator(), ctx.io, failure);
+                            const saved = branch_review.writeOperationalFailure(ctx.messages_arena.allocator(), ctx.io, failure) catch |err| {
+                                ctx.review_outcome.* = .operational_failure;
+                                printReviewWriteError(ctx.io, err);
+                                if (ctx.parsed.oneshot) {
+                                    finalizeSession(ctx);
+                                    return;
+                                }
+                                continue;
+                            };
                             ctx.review_outcome.* = saved.outcome;
                             try printReviewResult(ctx.stdout_writer, saved);
                             try persistence.saveSessionMeta(ctx);
@@ -423,7 +431,15 @@ pub const ChatSession = struct {
                         .no_changes => |scope| {
                             ctx.mode.* = .review;
                             core_session.setWriteBlocked(true);
-                            const saved = try branch_review.writeNoChanges(ctx.messages_arena.allocator(), ctx.io, scope);
+                            const saved = branch_review.writeNoChanges(ctx.messages_arena.allocator(), ctx.io, scope) catch |err| {
+                                ctx.review_outcome.* = .operational_failure;
+                                printReviewWriteError(ctx.io, err);
+                                if (ctx.parsed.oneshot) {
+                                    finalizeSession(ctx);
+                                    return;
+                                }
+                                continue;
+                            };
                             ctx.review_outcome.* = saved.outcome;
                             try printReviewResult(ctx.stdout_writer, saved);
                             try persistence.saveSessionMeta(ctx);
@@ -458,7 +474,19 @@ pub const ChatSession = struct {
                     "Review execution failed: {s}",
                     .{@errorName(err)},
                 );
-                const saved = try branch_review.failActive(ctx.messages_arena.allocator(), ctx.io, reason);
+                const saved = branch_review.failActive(ctx.messages_arena.allocator(), ctx.io, reason) catch |write_err| {
+                    branch_review.reset();
+                    ctx.review_outcome.* = .operational_failure;
+                    printReviewWriteError(ctx.io, write_err);
+                    try persistence.saveMessages(ctx);
+                    try persistence.saveSessionMeta(ctx);
+                    upsertCurrentSession(ctx);
+                    if (ctx.parsed.oneshot) {
+                        finalizeSession(ctx);
+                        return;
+                    }
+                    continue;
+                };
                 branch_review.reset();
                 ctx.review_outcome.* = saved.outcome;
                 try printReviewResult(ctx.stdout_writer, saved);
@@ -632,6 +660,13 @@ fn printReviewResult(stdout_writer: *std.Io.Writer, saved: branch_review.SavedRe
         .{ saved.path, verdict },
     );
     try stdout_writer.flush();
+}
+
+fn printReviewWriteError(io: std.Io, err: anyerror) void {
+    var buffer: [1024]u8 = undefined;
+    var writer: std.Io.File.Writer = .init(.stderr(), io, &buffer);
+    writer.interface.print("Review report could not be written: {s}\n", .{@errorName(err)}) catch {};
+    writer.interface.flush() catch {};
 }
 
 fn printExit(
