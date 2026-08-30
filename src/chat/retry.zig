@@ -174,10 +174,14 @@ fn sanitizeMessage(allocator: std.mem.Allocator, message: []const u8) !?[]u8 {
             index += 1;
             continue;
         }
-        _ = std.unicode.utf8Decode(formatted.text[index..][0..sequence_len]) catch {
+        const codepoint = std.unicode.utf8Decode(formatted.text[index..][0..sequence_len]) catch {
             index += 1;
             continue;
         };
+        if (codepoint >= 0x80 and codepoint <= 0x9f) {
+            index += sequence_len;
+            continue;
+        }
 
         const required = sequence_len + @intFromBool(pending_space);
         if (output.items.len + required > max_len - 3) {
@@ -259,4 +263,17 @@ test "formatHttpFailure drops invalid Unicode sequences" {
 
     try std.testing.expect(std.unicode.utf8ValidateSlice(formatted));
     try std.testing.expectEqualStrings("HTTP 502 Bad Gateway: bad: ok", formatted);
+}
+
+test "formatHttpFailure drops Unicode terminal control characters" {
+    var body = [_]u8{ 'b', 'a', 'd', ':', ' ', 0xc2, 0x9b, '2', 'J', ' ', 'o', 'k' };
+    const failure = http_client.HttpFailure{
+        .status = .bad_gateway,
+        .body = &body,
+    };
+
+    const formatted = try formatHttpFailure(std.testing.allocator, &failure);
+    defer std.testing.allocator.free(formatted);
+
+    try std.testing.expectEqualStrings("HTTP 502 Bad Gateway: bad: 2J ok", formatted);
 }
