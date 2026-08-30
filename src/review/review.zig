@@ -71,6 +71,7 @@ const GitResult = union(enum) {
 
 pub fn prepare(allocator: std.mem.Allocator, io: std.Io) !Preparation {
     const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
     return prepareAt(allocator, io, cwd);
 }
 
@@ -668,4 +669,55 @@ test "writeOperationalFailure records a retryable fetch failure" {
     const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, saved.path, arena, .limited(64 * 1024));
     try std.testing.expect(std.mem.indexOf(u8, content, "Operational failure") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
+}
+
+test "prepareAt rejects main without creating a report" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const prepared = try prepareAt(arena_state.allocator(), std.testing.io, fixture.worktree);
+    const failure = switch (prepared) {
+        .invalid => |value| value,
+        else => return error.ExpectedInvalidReview,
+    };
+    try std.testing.expect(std.mem.indexOf(u8, failure.message, "cannot run on main") != null);
+    const report_path = try std.fs.path.join(std.testing.allocator, &.{ fixture.worktree, report_filename });
+    defer std.testing.allocator.free(report_path);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, report_path, .{}));
+}
+
+test "prepareAt rejects detached HEAD" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    try fixture.addFeatureCommit();
+    try runFixtureGit(fixture.worktree, &.{ "checkout", "--detach" });
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const prepared = try prepareAt(arena_state.allocator(), std.testing.io, fixture.worktree);
+    const failure = switch (prepared) {
+        .invalid => |value| value,
+        else => return error.ExpectedInvalidReview,
+    };
+    try std.testing.expect(std.mem.indexOf(u8, failure.message, "detached HEAD") != null);
+}
+
+test "prepareAt rejects a directory outside a Git repository" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const cwd = try std.process.currentPathAlloc(std.testing.io, arena_state.allocator());
+    const path = try std.fs.path.join(arena_state.allocator(), &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+    const git_marker = try std.fs.path.join(arena_state.allocator(), &.{ path, ".git" });
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = git_marker, .data = "gitdir: missing\n" });
+
+    const prepared = try prepareAt(arena_state.allocator(), std.testing.io, path);
+    const failure = switch (prepared) {
+        .invalid => |value| value,
+        else => return error.ExpectedInvalidReview,
+    };
+    try std.testing.expect(std.mem.indexOf(u8, failure.message, "requires a Git repository") != null);
 }
