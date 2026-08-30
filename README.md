@@ -711,6 +711,14 @@ export PUNY_SHOW_THINKING=true
 puny
 ```
 
+To verify this works without a real backend, use the mock provider's `reasoning`
+keyword, which streams a large amount of dimmed reasoning output before the
+final answer:
+
+```bash
+zig build run -- --mock --model mock-model --prompt "respond with reasoning" --show-thinking --oneshot
+```
+
 ### HTTP debug logging
 
 To log all HTTP requests and responses to `puny_debug.log`, use `--debug`:
