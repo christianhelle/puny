@@ -5,6 +5,7 @@ const config = @import("../config/config.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");
 const parser = @import("parser.zig");
+const review = @import("../review/review.zig");
 
 const Command = parser.Command;
 const default_cfg = config.Config.default();
@@ -97,6 +98,26 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             ctx.review_mode.* = true;
             const review_prompt = try ctx.cfg.resolvePrompt(ctx.messages_alloc, "review", prompts.review);
             try ctx.messages.append(ctx.messages_alloc, .{ .system = review_prompt });
+
+            // Capture git scope and inject as context
+            const scope = review.captureScope(ctx.messages_alloc, ctx.io) catch |err| {
+                const reason = switch (err) {
+                    error.NotInGitRepo => "not inside a git repository",
+                    error.OnMainBranch => "cannot review the main branch",
+                    error.DetachedHead => "HEAD is detached",
+                    error.NoCommitsInScope => "no commits found between HEAD and origin/main",
+                    error.FetchFailed => "failed to fetch or resolve git state",
+                    error.OutOfMemory => "out of memory",
+                };
+                const fallback = review.fallbackReport(ctx.messages_alloc, reason) catch "Review failed (fallback generation error)";
+                try ctx.messages.append(ctx.messages_alloc, .{ .user = fallback });
+                try ctx.stdout_writer.print("\n{s}Review preflight failed: {s}{s}\n", .{ ansi.bright, reason, ansi.reset });
+                try ctx.stdout_writer.flush();
+                return .run_chat_turn;
+            };
+            const ctx_str = try review.buildContextString(ctx.messages_alloc, scope);
+            try ctx.messages.append(ctx.messages_alloc, .{ .user = ctx_str });
+
             if (text) |t| {
                 try ctx.messages.append(ctx.messages_alloc, .{ .user = try ctx.messages_alloc.dupe(u8, t) });
                 try ctx.stdout_writer.print("\n{s}Entering review mode: {s}{s}\n", .{ ansi.bright, t, ansi.reset });
@@ -105,7 +126,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             }
             try ctx.stdout_writer.print("\n{s}Entering review mode.{s}\n", .{ ansi.bright, ansi.reset });
             try ctx.stdout_writer.flush();
-            return .continue_;
+            return .run_chat_turn;
         },
 
         .model => |model_id| {
