@@ -57,6 +57,13 @@ pub const SavedReport = struct {
     outcome: Outcome,
 };
 
+const ActiveReview = struct {
+    scope: Scope,
+    saved: ?SavedReport = null,
+};
+
+var active_review: ?ActiveReview = null;
+
 const GitResult = union(enum) {
     ok: []const u8,
     failed: []const u8,
@@ -302,6 +309,73 @@ pub fn writeReport(
     };
 }
 
+pub fn begin(scope: Scope) void {
+    active_review = .{ .scope = scope };
+}
+
+pub fn reset() void {
+    active_review = null;
+}
+
+pub fn saveActiveReport(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    input: ReportInput,
+) !SavedReport {
+    if (active_review == null) return error.NoActiveReview;
+    const saved = try writeReport(allocator, io, active_review.?.scope, input);
+    active_review.?.saved = saved;
+    return saved;
+}
+
+pub fn finish(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    missing_report_reason: []const u8,
+) !SavedReport {
+    if (active_review == null) return error.NoActiveReview;
+    if (active_review.?.saved) |saved| return saved;
+    const saved = try writeFallbackReport(
+        allocator,
+        io,
+        active_review.?.scope,
+        missing_report_reason,
+    );
+    active_review.?.saved = saved;
+    return saved;
+}
+
+fn writeFallbackReport(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    scope: Scope,
+    reason: []const u8,
+) !SavedReport {
+    const analysis = try std.fmt.allocPrint(
+        allocator,
+        \\## Change Summary
+        \\The review could not complete, so the committed changes were not fully assessed.
+        \\
+        \\## Quality and Regression Assessment
+        \\Code-quality degradation and regressions could not be ruled out.
+        \\
+        \\## Validation Performed
+        \\{s}
+        \\
+        \\## Findings
+        \\Incomplete review evidence is a blocking finding.
+    ,
+        .{reason},
+    );
+    const rejected = try writeReport(allocator, io, scope, .{
+        .analysis_markdown = analysis,
+        .conclusion = "The branch is not merge worthy because the review did not complete.",
+        .evidence_complete = false,
+        .merge_worthy = false,
+    });
+    return .{ .path = rejected.path, .outcome = .operational_failure };
+}
+
 const Fixture = struct {
     tmp: std.testing.TmpDir,
     root: []const u8,
@@ -470,4 +544,36 @@ test "writeReport forces a canonical rejection when evidence is incomplete" {
     try std.testing.expect(std.mem.indexOf(u8, content, "## Review Scope") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: YES**") == null);
+}
+
+test "finish writes an operational failure report when the model does not save" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const cwd = try std.process.currentPathAlloc(std.testing.io, arena);
+    const repo_root = try std.fs.path.join(arena, &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = "feature/missing-report",
+        .base_ref = base_ref,
+        .base_sha = "1111111111111111111111111111111111111111",
+        .head_sha = "2222222222222222222222222222222222222222",
+        .merge_base_sha = "1111111111111111111111111111111111111111",
+        .commit_count = 1,
+        .changed_files = "M\tfeature.zig",
+        .diff_stat = " feature.zig | 1 +",
+        .dirty_worktree = "",
+    };
+
+    begin(scope);
+    defer reset();
+    const saved = try finish(arena, std.testing.io, "The model returned without saving a report.");
+
+    try std.testing.expectEqual(Outcome.operational_failure, saved.outcome);
+    try std.testing.expectEqual(@as(u8, 2), saved.outcome.exitCode());
+    const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, saved.path, arena, .limited(64 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, content, "The model returned without saving a report.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
 }
