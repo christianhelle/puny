@@ -318,9 +318,11 @@ pub fn writeReport(
         verdict,
     });
 
+    const report_path = try std.fs.path.join(allocator, &.{ scope.repo_root, report_filename });
+    errdefer allocator.free(report_path);
     try atomic_write.writeAtomically(io, allocator, scope.repo_root, report_filename, rendered.written(), .{});
     return .{
-        .path = try std.fs.path.join(allocator, &.{ scope.repo_root, report_filename }),
+        .path = report_path,
         .outcome = outcome,
     };
 }
