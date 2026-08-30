@@ -4,6 +4,9 @@
 test "include core session tests" {
     _ = @import("core/session.zig");
 }
+test "include core mode tests" {
+    _ = @import("core/mode.zig");
+}
 test "include core.git_root tests" {
     _ = @import("core/git_root.zig");
 }
