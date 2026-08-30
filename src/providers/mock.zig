@@ -3,6 +3,7 @@ const client = @import("client.zig");
 const openai = @import("openai.zig");
 
 const toolCallCount = 10; // Number of tool calls to simulate in mock mode.
+const review_request = "Perform the branch review now and save the final review results.";
 
 /// Mock mode controls the delay between token emissions.
 pub const MockSpeed = enum {
@@ -156,7 +157,7 @@ pub const MockClient = struct {
         }
 
         // Check for tool call keywords
-        if (isKeyword(last_content, .review)) {
+        if (isKeyword(last_content, .review) and std.mem.eql(u8, last_content, review_request)) {
             try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_review_call", .name = "save_review_results" } });
             try callback.emit(.{ .tool_call_delta = .{
                 .index = 0,
@@ -1079,6 +1080,22 @@ test "chatStreaming saves a merge-worthy report in review mode" {
         else => return error.ExpectedToolCallStart,
     }
     try expectFinish(rec.events.items, "tool_calls");
+}
+
+test "chatStreaming treats ordinary review requests as normal prompts" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "Please review this function." }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 0), countTag(rec.events.items, .tool_call_start));
+    try expectFinish(rec.events.items, "stop");
 }
 
 test "chatStreaming fails on timeout and fail keywords" {
