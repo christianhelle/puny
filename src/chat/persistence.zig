@@ -251,6 +251,38 @@ test "saveSessionMeta persists planning mode and the first prompt" {
     try std.testing.expectEqualStrings("hello", meta.first_prompt.?);
 }
 
+test "saveSessionMeta persists review mode" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try testSessionDir(tmp, "persist-review-meta");
+    defer std.testing.allocator.free(dir);
+
+    var messages_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena.allocator());
+    try messages.append(messages_arena.allocator(), .{ .user = "review branch" });
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .review;
+    var session = core_session.Session{
+        .id = "persist-review-meta",
+        .base = "",
+        .dir = dir,
+        .prd_path = "",
+        .html_path = "",
+    };
+    var ctx = testContext(std.testing.io, &session, &messages_arena, &messages, &mode, &out.writer);
+    try saveSessionMeta(&ctx);
+
+    const meta_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "session.json" });
+    defer std.testing.allocator.free(meta_path);
+    const meta = try core_session.readSessionMetaJson(std.testing.io, std.testing.allocator, meta_path);
+    defer if (meta.first_prompt) |p| std.testing.allocator.free(p);
+    try std.testing.expectEqual(.review, meta.mode);
+    try std.testing.expect(!meta.planning_mode);
+}
+
 test "saveSessionMeta writes a null first prompt when there are no user messages" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
