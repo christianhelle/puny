@@ -206,7 +206,78 @@ fn redrawList(stdout_writer: *std.Io.Writer, items: []const Item, selected: usiz
     try stdout_writer.flush();
 }
 
-/// Renders `items` laid out column-major per `grid`, highlighting `selected`.
+/// Direction of a single grid navigation step.
+pub const GridDir = enum { up, down, left, right };
+
+/// Computes the new selected linear index after moving `dir` within a
+/// column-major `grid` of `items_len` items, given the current `selected`
+/// linear index.
+///
+/// Up/Down wrap within the current column. Left/Right move to the same row
+/// in the adjacent column (wrapping around columns), clamping to the last
+/// valid row when the target column is shorter (a partial last column).
+pub fn gridStep(selected: usize, items_len: usize, grid: Grid, dir: GridDir) usize {
+    if (grid.rows == 0 or grid.cols == 0 or items_len == 0) return selected;
+
+    const row = selected % grid.rows;
+    const col = selected / grid.rows;
+
+    switch (dir) {
+        .up, .down => {
+            const rows_in_col = grid.rowsInCol(items_len, col);
+            const new_row = switch (dir) {
+                .up => if (row == 0) rows_in_col - 1 else row - 1,
+                .down => if (row + 1 >= rows_in_col) 0 else row + 1,
+                else => unreachable,
+            };
+            return col * grid.rows + new_row;
+        },
+        .left, .right => {
+            const new_col = switch (dir) {
+                .left => if (col == 0) grid.cols - 1 else col - 1,
+                .right => if (col + 1 >= grid.cols) 0 else col + 1,
+                else => unreachable,
+            };
+            const rows_in_new_col = grid.rowsInCol(items_len, new_col);
+            const new_row = @min(row, rows_in_new_col - 1);
+            return new_col * grid.rows + new_row;
+        },
+    }
+}
+
+test "gridStep up/down wrap within a single column" {
+    const grid = Grid{ .rows = 3, .cols = 1 };
+    try std.testing.expectEqual(@as(usize, 2), gridStep(0, 3, grid, .up));
+    try std.testing.expectEqual(@as(usize, 1), gridStep(0, 3, grid, .down));
+    try std.testing.expectEqual(@as(usize, 0), gridStep(2, 3, grid, .down));
+    try std.testing.expectEqual(@as(usize, 1), gridStep(2, 3, grid, .up));
+}
+
+test "gridStep left/right wrap across columns on the same row" {
+    // 6 items, 3 rows, 2 cols: col0=[0,1,2], col1=[3,4,5].
+    const grid = Grid{ .rows = 3, .cols = 2 };
+    try std.testing.expectEqual(@as(usize, 3), gridStep(0, 6, grid, .right));
+    try std.testing.expectEqual(@as(usize, 0), gridStep(3, 6, grid, .left));
+    try std.testing.expectEqual(@as(usize, 0), gridStep(3, 6, grid, .right));
+    try std.testing.expectEqual(@as(usize, 3), gridStep(0, 6, grid, .left));
+}
+
+test "gridStep left/right clamps to the last row of a partial column" {
+    // 5 items, 3 rows, 2 cols: col0=[0,1,2], col1=[3,4] (partial).
+    const grid = Grid{ .rows = 3, .cols = 2 };
+    // Selected row 2 (bottom) of col0 moving right lands on col1's last row (row 1).
+    try std.testing.expectEqual(@as(usize, 4), gridStep(2, 5, grid, .right));
+    // Moving left from that clamped position lands on col0's row 1 (row is preserved, not restored).
+    try std.testing.expectEqual(@as(usize, 1), gridStep(4, 5, grid, .left));
+}
+
+test "gridStep is a no-op for a single-item grid" {
+    const grid = Grid{ .rows = 1, .cols = 1 };
+    inline for ([_]GridDir{ .up, .down, .left, .right }) |dir| {
+        try std.testing.expectEqual(@as(usize, 0), gridStep(0, 1, grid, dir));
+    }
+}
+
 /// Each cell is padded to `column_width` unless it's the last populated
 /// column in its row, so single-column layouts render identically to the
 /// original one-item-per-line output.
