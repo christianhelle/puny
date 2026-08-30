@@ -99,7 +99,13 @@ pub fn prepareAt(allocator: std.mem.Allocator, io: std.Io, start_dir: []const u8
         } };
     }
 
-    const fetch_result = try runGit(allocator, io, repo_root, &.{ "fetch", "--quiet", "origin", "main" }, 120 * std.time.ns_per_s);
+    const fetch_result = try runGit(
+        allocator,
+        io,
+        repo_root,
+        &.{ "fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main" },
+        120 * std.time.ns_per_s,
+    );
     if (fetch_result == .failed) {
         return .{ .operational_failure = .{
             .repo_root = repo_root,
@@ -673,6 +679,8 @@ test "prepareAt fetches the latest origin main before fixing scope" {
     try fixture.addFeatureCommit();
     const expected_base = try fixture.advanceRemoteMain();
     defer std.testing.allocator.free(expected_base);
+    try runFixtureGit(fixture.worktree, &.{ "config", "--unset-all", "remote.origin.fetch" });
+    try runFixtureGit(fixture.worktree, &.{ "config", "--add", "remote.origin.fetch", "+refs/heads/unrelated:refs/remotes/origin/unrelated" });
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
