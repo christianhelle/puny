@@ -317,9 +317,27 @@ fn renderGrid(stdout_writer: *std.Io.Writer, items: []const Item, grid: Grid, se
                 try stdout_writer.splatByteAll(' ', pad);
             }
         }
-        try stdout_writer.writeAll("\n");
+        try stdout_writer.writeAll("\r\n");
     }
     try stdout_writer.flush();
+}
+
+test "renderGrid leaves the cursor at column 0 after every row" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    const items = [_]Item{
+        .{ .value = "one", .label = "One" },
+        .{ .value = "two", .label = "Two" },
+    };
+    try renderGrid(&out.writer, &items, .{ .rows = 2, .cols = 1 }, 0, computeColumnWidth(&items), false);
+
+    const text = out.written();
+    try std.testing.expect(std.mem.endsWith(u8, text, "\r\n"));
+    for (text, 0..) |ch, i| {
+        if (ch != '\n') continue;
+        try std.testing.expect(i > 0 and text[i - 1] == '\r');
+    }
 }
 
 test "renderGrid renders a single column identically to one item per line" {
@@ -357,8 +375,8 @@ test "renderGrid lays out multiple columns and pads non-final cells" {
     try std.testing.expectEqual(@as(usize, 2), lines);
     // First row has both column0 ("A") and column1 ("C"); second row only column0 ("B").
     try std.testing.expect(std.mem.indexOf(u8, text, "> A") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "C\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "  B\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "C\r\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "  B\r\n") != null);
 }
 
 fn selectText(
