@@ -399,6 +399,11 @@ pub const ChatSession = struct {
                         .invalid => |failure| {
                             try ctx.stdout_writer.print("\nReview could not start: {s}\n", .{failure.message});
                             try ctx.stdout_writer.flush();
+                            ctx.review_outcome.* = .operational_failure;
+                            if (ctx.parsed.oneshot) {
+                                finalizeSession(ctx);
+                                return;
+                            }
                             continue;
                         },
                         .operational_failure => |failure| {
@@ -409,6 +414,10 @@ pub const ChatSession = struct {
                             try printReviewResult(ctx.stdout_writer, saved);
                             try persistence.saveSessionMeta(ctx);
                             upsertCurrentSession(ctx);
+                            if (ctx.parsed.oneshot) {
+                                finalizeSession(ctx);
+                                return;
+                            }
                             continue;
                         },
                         .no_changes => |scope| {
@@ -419,6 +428,10 @@ pub const ChatSession = struct {
                             try printReviewResult(ctx.stdout_writer, saved);
                             try persistence.saveSessionMeta(ctx);
                             upsertCurrentSession(ctx);
+                            if (ctx.parsed.oneshot) {
+                                finalizeSession(ctx);
+                                return;
+                            }
                             continue;
                         },
                         .ready => |scope| {
