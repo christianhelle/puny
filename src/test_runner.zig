@@ -11,6 +11,10 @@ test "include core.git_root tests" {
     _ = @import("core/git_root.zig");
 }
 
+test "include review module tests" {
+    _ = @import("review/review.zig");
+}
+
 test "include sessions module tests" {
     _ = @import("sessions/sessions.zig");
     _ = @import("sessions/index.zig");
