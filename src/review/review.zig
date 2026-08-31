@@ -341,8 +341,7 @@ fn containsFormattedVerdict(allocator: std.mem.Allocator, text: []const u8) !boo
 
 pub fn buildPromptContext(allocator: std.mem.Allocator, scope: Scope) ![]const u8 {
     const dirty = if (scope.dirty_worktree.len == 0) "Clean." else scope.dirty_worktree;
-    return std.fmt.allocPrint(
-        allocator,
+    return std.fmt.allocPrint(allocator,
         \\Review invocation context:
         \\- Repository root: {s}
         \\- Branch: {s}

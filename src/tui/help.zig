@@ -44,11 +44,10 @@ test "showHelp lists all commands" {
     const text = output.written();
 
     const commands = [_][]const u8{
-        "/quit, /exit",  "/new, /reset", "/stats",           "/config",           "/plan [task]",
-        "/build [task]", "/review",      "/model [id]",      "/provider [name]", "/thinking [level]",
-        "/sessions",
-        "/resume [id]",  "/prune",       "/skills",          "/file [path|url]",  "/help",
-        "@path",
+        "/quit, /exit",  "/new, /reset", "/stats",      "/config",          "/plan [task]",
+        "/build [task]", "/review",      "/model [id]", "/provider [name]", "/thinking [level]",
+        "/sessions",     "/resume [id]", "/prune",      "/skills",          "/file [path|url]",
+        "/help",         "@path",
     };
     for (commands) |command| {
         try std.testing.expect(std.mem.indexOf(u8, text, command) != null);
