@@ -413,6 +413,22 @@ const RegenerateProvidersStep = struct {
             "Messages",
         });
 
+        // 5. Generate google with shared runtime – only Models is used (google.zig)
+        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
+            "generate",
+            "-i",
+            "src/providers/openapi/google.json",
+            "-o",
+            "src/providers/google/",
+            "--multiple-files",
+            "--file-name",
+            "models=contracts.zig",
+            "--runtime-module",
+            "../runtime.zig",
+            "--tag",
+            "models",
+        });
+
         std.log.info("regenerate-providers: done", .{});
     }
 
