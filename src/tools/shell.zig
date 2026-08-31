@@ -34,6 +34,7 @@ fn isAllowedReviewCommand(command: []const u8) bool {
     if (std.mem.indexOf(u8, trimmed, ";") != null) return false;
     if (std.mem.indexOf(u8, trimmed, "&&") != null) return false;
     if (std.mem.indexOf(u8, trimmed, "||") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "|") != null) return false;
     if (std.mem.indexOf(u8, trimmed, "`") != null) return false;
     if (std.mem.indexOf(u8, trimmed, "$(") != null) return false;
 
