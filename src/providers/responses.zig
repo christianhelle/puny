@@ -321,20 +321,62 @@ pub fn responsesRequestPayload(allocator: std.mem.Allocator, request: ChatReques
             try std.json.Stringify.value(d, .{}, w);
         }
         if (parameters) |p| {
-            // Ensure strict mode compliance: 'additionalProperties' must be false
-            if (p == .object and p.object.get("additionalProperties") == null) {
-                try w.writeAll(",\"parameters\":{");
-                var first = true;
-                var it = p.object.iterator();
-                while (it.next()) |entry| {
-                    if (!first) try w.writeByte(',');
-                    first = false;
-                    try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
-                    try w.writeByte(':');
-                    try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
+            // Ensure strict mode compliance: 'required' must include every property key and 'additionalProperties' false
+            if (p == .object) {
+                if (p.object.get("properties")) |props_val| {
+                    if (props_val == .object) {
+                        const props = props_val.object;
+                        try w.writeAll(",\"parameters\":{\"type\":\"object\",\"properties\":");
+                        try std.json.Stringify.value(std.json.Value{ .object = props }, .{}, w);
+                        try w.writeAll(",\"required\":[");
+                        var first_req = true;
+                        var prop_it = props.iterator();
+                        while (prop_it.next()) |entry| {
+                            if (!first_req) try w.writeByte(',');
+                            first_req = false;
+                            try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
+                        }
+                        try w.writeAll("],\"additionalProperties\":false}");
+                    } else {
+                        // properties not an object, fallback to ensure additionalProperties
+                        if (p.object.get("additionalProperties") == null) {
+                            try w.writeAll(",\"parameters\":{");
+                            var first = true;
+                            var it = p.object.iterator();
+                            while (it.next()) |entry| {
+                                if (!first) try w.writeByte(',');
+                                first = false;
+                                try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
+                                try w.writeByte(':');
+                                try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
+                            }
+                            if (!first) try w.writeByte(',');
+                            try w.writeAll("\"additionalProperties\":false}");
+                        } else {
+                            try w.writeAll(",\"parameters\":");
+                            try std.json.Stringify.value(p, .{}, w);
+                        }
+                    }
+                } else {
+                    // no properties, ensure additionalProperties
+                    if (p.object.get("additionalProperties") == null) {
+                        try w.writeAll(",\"parameters\":{");
+                        var first = true;
+                        var it = p.object.iterator();
+                        while (it.next()) |entry| {
+                            if (!first) try w.writeByte(',');
+                            first = false;
+                            try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
+                            try w.writeByte(':');
+                            try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
+                        }
+                        if (!first) try w.writeByte(',');
+                        try w.writeAll("\"additionalProperties\":false}");
+                    } else {
+                        try w.writeAll(",\"parameters\":");
+                        try std.json.Stringify.value(p, .{}, w);
+                    }
                 }
-                if (!first) try w.writeByte(',');
-                try w.writeAll("\"additionalProperties\":false}");
             } else {
                 try w.writeAll(",\"parameters\":");
                 try std.json.Stringify.value(p, .{}, w);
