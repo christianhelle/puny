@@ -53,10 +53,13 @@ fn isAllowedReviewCommand(command: []const u8) bool {
     if (std.mem.indexOf(u8, trimmed, "sh -c") != null) return false;
     if (std.mem.indexOf(u8, trimmed, "bash -c") != null) return false;
 
-    // Reject mutating git branch deletions even though "git branch" is allowlisted
+    // Reject mutating git branch/tag deletions even though "git branch"/"git tag" are allowlisted
     if (std.mem.indexOf(u8, trimmed, "git branch -d") != null) return false;
     if (std.mem.indexOf(u8, trimmed, "git branch --delete") != null) return false;
     if (std.mem.indexOf(u8, trimmed, "git branch -D") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "git tag -d") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "git tag --delete") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "git tag -D") != null) return false;
 
     const allowed_prefixes = [_][]const u8{
         "echo",
