@@ -86,7 +86,7 @@ pub const review_registry = blk: {
     break :blk &[_]Tool{
         filesystem.read_file,
         filesystem.list_directory,
-        shell.execute_shell,
+        shell.review_execute_shell,
         search.grep_search,
         git.git_status,
         git.git_diff,
