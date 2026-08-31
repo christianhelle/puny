@@ -183,8 +183,7 @@ fn printToolCall(
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
-    _ = mode;
-    const tool = tools.dispatch(tool_call.function.name) orelse {
+    const tool = tools.dispatchForMode(tool_call.function.name, mode) orelse {
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
     };
 
