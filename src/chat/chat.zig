@@ -9,6 +9,7 @@ const tools = @import("../tools/root.zig");
 const tool_display = @import("display.zig");
 const usage_estimator = @import("usage.zig");
 const accumulator = @import("accumulator.zig");
+const AgentMode = @import("../core/mode.zig").AgentMode;
 
 pub const OpenAiAccumulator = accumulator.OpenAiAccumulator;
 
@@ -34,6 +35,40 @@ pub fn runTurn(
     tool_definitions: []const openai.ToolDefinition,
     indicator_opt: ?*indicator.ThinkingIndicator,
     chat_log: ?*std.Io.Writer,
+) !TurnResult {
+    return runTurnWithMode(
+        prov,
+        arena,
+        io,
+        stdout_writer,
+        session_stats,
+        show_thinking,
+        random,
+        model_key,
+        reasoning_effort,
+        messages,
+        tool_definitions,
+        indicator_opt,
+        chat_log,
+        .build,
+    );
+}
+
+pub fn runTurnWithMode(
+    prov: *provider.Provider,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    session_stats: *stats.SessionStats,
+    show_thinking: bool,
+    random: std.Random,
+    model_key: []const u8,
+    reasoning_effort: ?openai.ReasoningEffort,
+    messages: *std.ArrayList(openai.Message),
+    tool_definitions: []const openai.ToolDefinition,
+    indicator_opt: ?*indicator.ThinkingIndicator,
+    chat_log: ?*std.Io.Writer,
+    mode: AgentMode,
 ) !TurnResult {
     const effective_effort = if (reasoning_effort) |e| e else if (show_thinking or chat_log != null) openai.ReasoningEffort.high else null;
     const request = openai.ChatRequest{
@@ -107,7 +142,7 @@ pub fn runTurn(
             try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
             tool_output_lines += 1;
-            const result = try executeTool(arena, io, tc);
+            const result = try executeTool(arena, io, tc, mode);
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
                 log.print("[TOOL_CALL]\n{s}\n{s}\n\n", .{ tc.function.name, tc.function.arguments }) catch {};
@@ -147,7 +182,8 @@ fn printToolCall(
     try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
 }
 
-fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ![]const u8 {
+fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
+    _ = mode;
     const tool = tools.dispatch(tool_call.function.name) orelse {
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
     };
@@ -193,6 +229,7 @@ test "executeTool reports unknown tools" {
         arena_state.allocator(),
         std.testing.io,
         .{ .id = "call_1", .function = .{ .name = "definitely_not_a_tool", .arguments = "{}" } },
+        .build,
     );
     try std.testing.expectEqualStrings("Unknown tool: definitely_not_a_tool", result);
 }
@@ -205,6 +242,7 @@ test "executeTool reports failures for a missing file" {
         arena_state.allocator(),
         std.testing.io,
         .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"puny-test-chat-missing.txt\"}" } },
+        .build,
     );
     try std.testing.expectEqualStrings("Tool read_file failed: error.FileNotFound", result);
 }
@@ -223,6 +261,7 @@ test "executeTool runs read_file on a real file" {
         arena_state.allocator(),
         std.testing.io,
         .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"puny-test-chat-read.txt\"}" } },
+        .build,
     );
     try std.testing.expectEqualStrings("hello chat", result);
 }
@@ -238,8 +277,62 @@ test "executeTool runs write_file on a real file" {
         arena_state.allocator(),
         std.testing.io,
         .{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-write.txt\",\"content\":\"written\"}" } },
+        .build,
     );
     try std.testing.expectEqualStrings("File written successfully.", result);
+}
+
+test "executeTool enforces mode allowlist" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const write_in_review = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"x\",\"content\":\"y\"}" } },
+        .review,
+    );
+    try std.testing.expectEqualStrings("Unknown tool: write_file", write_in_review);
+
+    const prd_in_review = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "save_prd", .arguments = "{\"markdown\":\"m\",\"html\":\"h\"}" } },
+        .review,
+    );
+    try std.testing.expectEqualStrings("Unknown tool: save_prd", prd_in_review);
+
+    const prd_in_build = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "save_prd", .arguments = "{\"markdown\":\"m\",\"html\":\"h\"}" } },
+        .build,
+    );
+    try std.testing.expectEqualStrings("Unknown tool: save_prd", prd_in_build);
+
+    const review_tool_in_build = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "save_review_results", .arguments = "{\"analysis_markdown\":\"## Change Summary\\nA\\n\\n## Quality and Regression Assessment\\nB\\n\\n## Validation Performed\\nC\\n\\n## Findings\\nD\",\"conclusion\":\"ok\",\"evidence_complete\":true,\"merge_worthy\":true}" } },
+        .build,
+    );
+    try std.testing.expectEqualStrings("Unknown tool: save_review_results", review_tool_in_build);
+
+    const read_in_review = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"puny-test-chat-missing.txt\"}" } },
+        .review,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, read_in_review, "Tool read_file failed") != null);
+
+    const shell_in_planning = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "execute_shell", .arguments = "{\"command\":\"echo hi\"}" } },
+        .planning,
+    );
+    try std.testing.expectEqualStrings("Unknown tool: execute_shell", shell_in_planning);
 }
 
 test "runTurn completes a content turn against the mock provider" {
