@@ -24,7 +24,9 @@ pub fn isAnthropicModel(model_id: []const u8) bool {
 }
 
 pub fn isResponsesModel(model_id: []const u8) bool {
-    return std.mem.startsWith(u8, model_id, "muse-spark-");
+    return std.mem.startsWith(u8, model_id, "muse-spark-") or
+        std.mem.startsWith(u8, model_id, "grok-") or
+        std.mem.startsWith(u8, model_id, "gpt-");
 }
 
 pub const ModelInfo = struct {
@@ -187,6 +189,21 @@ test "isResponsesModel detects muse-spark family" {
     try std.testing.expect(!isResponsesModel("muse-spark"));
     try std.testing.expect(!isResponsesModel(""));
     try std.testing.expect(!isResponsesModel("xmuse-spark-1.2"));
+}
+
+test "isResponsesModel detects grok and gpt families" {
+    try std.testing.expect(isResponsesModel("grok-4.5"));
+    try std.testing.expect(isResponsesModel("grok-build-0.1"));
+    try std.testing.expect(isResponsesModel("grok-"));
+    try std.testing.expect(isResponsesModel("gpt-5.5"));
+    try std.testing.expect(isResponsesModel("gpt-5.3-codex"));
+    try std.testing.expect(isResponsesModel("gpt-4o"));
+    try std.testing.expect(isResponsesModel("gpt-"));
+    try std.testing.expect(!isResponsesModel("deepseek-v4-pro"));
+    try std.testing.expect(!isResponsesModel("gro"));
+    try std.testing.expect(!isResponsesModel("gpt"));
+    try std.testing.expect(!isResponsesModel("xgrok-4.5"));
+    try std.testing.expect(!isResponsesModel("xgport-5.5"));
 }
 
 test "parseModels maps OpenAI model list" {

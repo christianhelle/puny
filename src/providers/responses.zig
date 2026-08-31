@@ -709,7 +709,9 @@ test "ResponsesSseCallback handles output at streaming server" {
     const Recorder = struct {
         allocator: std.mem.Allocator,
         events: *std.ArrayList(SseTestEvent),
-        fn callback(self: *@This()) StreamCallback { return .{ .context = self, .vtable = &.{ .event = event } }; }
+        fn callback(self: *@This()) StreamCallback {
+            return .{ .context = self, .vtable = &.{ .event = event } };
+        }
         fn event(ctx: *anyopaque, ev: StreamEvent) !void {
             const self: *@This() = @ptrCast(@alignCast(ctx));
             switch (ev) {

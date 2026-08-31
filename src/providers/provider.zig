@@ -618,7 +618,7 @@ test "Provider.chatStreaming dispatches to the opencode OpenAI fallback" {
     var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
 
     const request = openai.ChatRequest{
-        .model = "gpt-4o",
+        .model = "deepseek-v4-pro",
         .messages = &.{.{ .user = "hi" }},
         .tools = &.{},
     };
@@ -770,6 +770,72 @@ test "Provider.chatStreaming preserves responses HTTP error details" {
     try std.testing.expectEqualStrings(body, failure.body);
     // Ensure request was to /v1/responses
     try std.testing.expectEqualStrings("/v1/responses", ctx.getRequestPath());
+}
+
+test "Provider.chatStreaming dispatches to the responses transport for gpt" {
+    const body =
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hello GPT\",\"sequence_number\":1,\"logprobs\":[]}\n\n" ++
+        "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "gpt-5.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/responses", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 3), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hello GPT", content),
+        else => return error.ExpectedContentEvent,
+    }
+}
+
+test "Provider.chatStreaming dispatches to the responses transport for grok" {
+    const body =
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hello Grok\",\"sequence_number\":1,\"logprobs\":[]}\n\n" ++
+        "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"grok-4.5\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "grok-4.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/responses", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 3), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hello Grok", content),
+        else => return error.ExpectedContentEvent,
+    }
 }
 
 const CancelStreamingServer = struct {
