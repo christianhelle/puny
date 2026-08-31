@@ -50,6 +50,7 @@ const web = @import("web.zig");
 const review = @import("review.zig");
 const core_session = @import("../core/session.zig");
 const skill_loader = @import("skill_loader.zig");
+const AgentMode = @import("../core/mode.zig").AgentMode;
 
 pub const registry = blk: {
     @setEvalBranchQuota(10000);
@@ -169,4 +170,40 @@ test "defineTool execution applies default values for omitted optional fields" {
     const args = try std.json.parseFromSliceLeaky(std.json.Value, arena, "{\"text\":\"hi\"}", .{});
     const result = try tool_def.execute(arena, std.testing.io, args);
     try std.testing.expectEqualStrings("echo 1: hi", result);
+}
+
+test "dispatchForMode isolates tool allowlist per mode" {
+    // Build can write, review and planning cannot.
+    try std.testing.expect(dispatchForMode("write_file", .build) != null);
+    try std.testing.expect(dispatchForMode("write_file", .review) == null);
+    try std.testing.expect(dispatchForMode("write_file", .planning) == null);
+
+    // save_prd only in planning.
+    try std.testing.expect(dispatchForMode("save_prd", .planning) != null);
+    try std.testing.expect(dispatchForMode("save_prd", .build) == null);
+    try std.testing.expect(dispatchForMode("save_prd", .review) == null);
+
+    // save_review_results only in review.
+    try std.testing.expect(dispatchForMode("save_review_results", .review) != null);
+    try std.testing.expect(dispatchForMode("save_review_results", .build) == null);
+    try std.testing.expect(dispatchForMode("save_review_results", .planning) == null);
+
+    // Common read tools available in all modes.
+    try std.testing.expect(dispatchForMode("read_file", .build) != null);
+    try std.testing.expect(dispatchForMode("read_file", .planning) != null);
+    try std.testing.expect(dispatchForMode("read_file", .review) != null);
+
+    // Shell only in build and review, not planning.
+    try std.testing.expect(dispatchForMode("execute_shell", .build) != null);
+    try std.testing.expect(dispatchForMode("execute_shell", .review) != null);
+    try std.testing.expect(dispatchForMode("execute_shell", .planning) == null);
+
+    try std.testing.expect(dispatchForMode("unknown_tool", .build) == null);
+    try std.testing.expect(dispatchForMode("unknown_tool", .review) == null);
+}
+
+test "registryForMode returns the exact allowlist used for schemas and dispatch" {
+    try std.testing.expectEqual(registry.len, registryForMode(.build).len);
+    try std.testing.expectEqual(planning_registry.len, registryForMode(.planning).len);
+    try std.testing.expectEqual(review_registry.len, registryForMode(.review).len);
 }
