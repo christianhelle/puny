@@ -363,7 +363,7 @@ const RegenerateProvidersStep = struct {
 
         // Streaming clients must consume non-success response bodies before
         // notifying observers; provider regression tests guard this behavior.
-        // 2. Generate openai with shared runtime – only Chat + Models are used (provider.zig, openai_shim.zig)
+        // 2. Generate openai with shared runtime – Chat + Models + Responses are used (provider.zig, openai_shim.zig, responses transport)
         try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
             "generate",
             "-i",
@@ -379,6 +379,8 @@ const RegenerateProvidersStep = struct {
             "Chat",
             "--tag",
             "Models",
+            "--tag",
+            "Responses",
         });
 
         // 3. Generate lmstudio with shared runtime – only Models is used via lmstudio_shim.zig
