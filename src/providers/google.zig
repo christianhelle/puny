@@ -41,42 +41,6 @@ fn newObject(allocator: std.mem.Allocator) !std.json.ObjectMap {
     return try std.json.ObjectMap.init(allocator, &.{}, &.{});
 }
 
-fn writeGoogleTextPart(writer: anytype, text: []const u8) !void {
-    try writer.writeAll("{\"text\":");
-    try std.json.Stringify.value(text, .{}, writer);
-    try writer.writeByte('}');
-}
-
-fn writeGoogleFunctionCallPart(writer: anytype, name: []const u8, arguments: []const u8) !void {
-    try writer.writeAll("{\"functionCall\":{\"name\":");
-    try std.json.Stringify.value(name, .{}, writer);
-    try writer.writeAll(",\"args\":");
-    if (std.mem.trim(u8, arguments, " \t\r\n").len > 0) {
-        try writer.writeAll(arguments);
-    } else {
-        try writer.writeAll("{}");
-    }
-    try writer.writeAll("}}");
-}
-
-fn writeGoogleFunctionDeclaration(writer: anytype, tool: openai.ToolDefinition) !void {
-    const function = tool.function.object;
-    const name = if (function.get("name")) |v| v.string else return error.MissingToolName;
-    const description = if (function.get("description")) |v| v.string else "";
-
-    try writer.writeAll("{\"name\":");
-    try std.json.Stringify.value(name, .{}, writer);
-    try writer.writeAll(",\"description\":");
-    try std.json.Stringify.value(description, .{}, writer);
-    try writer.writeAll(",\"parameters\":");
-    if (function.get("parameters")) |params| {
-        try std.json.Stringify.value(params, .{}, writer);
-    } else {
-        try writer.writeAll("{}");
-    }
-    try writer.writeByte('}');
-}
-
 fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u8, before_index: usize) []const u8 {
     var idx = @min(before_index, messages.len);
     while (idx > 0) : (idx -= 1) {
