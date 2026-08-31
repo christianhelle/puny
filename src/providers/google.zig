@@ -33,6 +33,29 @@ const GoogleGenerateContentRequest = struct {
     generationConfig: ?GoogleGenerationConfig = null,
 };
 
+/// Typed SSE response shims. `SseResponse.candidates` stays as raw
+/// `std.json.Value` so each candidate can be parsed (or skipped) independently,
+/// preserving per-candidate leniency for malformed entries.
+const SsePart = struct {
+    text: ?[]const u8 = null,
+    thought: ?bool = null,
+    functionCall: ?google_contracts.FunctionCall = null,
+};
+
+const SseContent = struct {
+    parts: ?[]const SsePart = null,
+};
+
+const SseCandidate = struct {
+    content: ?SseContent = null,
+    finishReason: ?[]const u8 = null,
+};
+
+const SseResponse = struct {
+    candidates: ?[]const std.json.Value = null,
+    usageMetadata: ?google_contracts.UsageMetadata = null,
+};
+
 pub fn isGoogleModel(model_id: []const u8) bool {
     return std.mem.startsWith(u8, model_id, "gemini-");
 }
@@ -180,84 +203,65 @@ const GoogleSseCallback = struct {
             if (obs.on_chunk) |cb| cb(obs.ctx, data);
         }
 
-        const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
+        // Invalid JSON (syntax errors) propagates as a parse failure; valid JSON
+        // that doesn't match the SseResponse shape is ignored leniently.
+        var raw_parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
+        defer raw_parsed.deinit();
+
+        var parsed = std.json.parseFromValue(SseResponse, self.allocator, raw_parsed.value, .{ .ignore_unknown_fields = true }) catch return;
         defer parsed.deinit();
 
-        if (parsed.value != .object) return;
-        const root = parsed.value.object;
-
-        if (root.get("candidates")) |candidates| {
-            if (candidates == .array) {
-                for (candidates.array.items) |candidate| {
-                    if (candidate != .object) continue;
-                    try self.handleCandidate(candidate.object);
-                }
+        const root = parsed.value;
+        if (root.candidates) |candidates| {
+            for (candidates) |candidate_value| {
+                var candidate_parsed = std.json.parseFromValue(SseCandidate, self.allocator, candidate_value, .{ .ignore_unknown_fields = true }) catch continue;
+                defer candidate_parsed.deinit();
+                try self.handleCandidate(candidate_parsed.value);
             }
         }
 
-        if (root.get("usageMetadata")) |usage| {
-            if (usage == .object) {
-                if (usage.object.get("promptTokenCount")) |v| {
-                    if (v == .integer) self.input_tokens = v.integer;
-                }
-                var output_tokens: i64 = 0;
-                if (usage.object.get("candidatesTokenCount")) |v| {
-                    if (v == .integer) output_tokens = v.integer;
-                }
-                try self.callback.emit(.{ .usage = .{
-                    .input_tokens = self.input_tokens,
-                    .output_tokens = output_tokens,
-                } });
-            }
+        if (root.usageMetadata) |usage| {
+            if (usage.promptTokenCount) |v| self.input_tokens = v;
+            var output_tokens: i64 = 0;
+            if (usage.candidatesTokenCount) |v| output_tokens = v;
+            try self.callback.emit(.{ .usage = .{
+                .input_tokens = self.input_tokens,
+                .output_tokens = output_tokens,
+            } });
         }
     }
 
-    fn handleCandidate(self: *@This(), candidate: std.json.ObjectMap) !void {
-        if (candidate.get("content")) |content| {
-            if (content == .object) {
-                if (content.object.get("parts")) |parts| {
-                    if (parts == .array) {
-                        for (parts.array.items) |part| {
-                            if (part != .object) continue;
-                            try self.handlePart(part.object);
-                        }
-                    }
+    fn handleCandidate(self: *@This(), candidate: SseCandidate) !void {
+        if (candidate.content) |content| {
+            if (content.parts) |parts| {
+                for (parts) |part| {
+                    try self.handlePart(part);
                 }
             }
         }
 
-        if (candidate.get("finishReason")) |reason| {
-            if (reason == .string) {
-                try self.callback.emit(.{ .finish = if (reason.string.len == 0) null else reason.string });
-            }
+        if (candidate.finishReason) |reason| {
+            try self.callback.emit(.{ .finish = if (reason.len == 0) null else reason });
         }
     }
 
-    fn handlePart(self: *@This(), part: std.json.ObjectMap) !void {
-        if (part.get("thought")) |thought| {
-            if (thought == .bool and thought.bool) {
-                if (part.get("text")) |text| {
-                    if (text == .string) {
-                        try self.callback.emit(.{ .reasoning = text.string });
-                    }
+    fn handlePart(self: *@This(), part: SsePart) !void {
+        if (part.thought) |thought| {
+            if (thought) {
+                if (part.text) |text| {
+                    try self.callback.emit(.{ .reasoning = text });
                 }
                 return;
             }
         }
 
-        if (part.get("text")) |text| {
-            if (text == .string) {
-                try self.callback.emit(.{ .content = text.string });
-            }
+        if (part.text) |text| {
+            try self.callback.emit(.{ .content = text });
             return;
         }
 
-        if (part.get("functionCall")) |function_call| {
-            if (function_call != .object) return;
-            const name = if (function_call.object.get("name")) |v|
-                (if (v == .string) v.string else return)
-            else
-                return;
+        if (part.functionCall) |function_call| {
+            const name = function_call.name orelse return;
 
             const index = self.tool_call_index;
             self.tool_call_index += 1;
@@ -266,7 +270,7 @@ const GoogleSseCallback = struct {
             const id = std.fmt.bufPrint(&id_buf, "call_{d}", .{index}) catch return;
             try self.callback.emit(.{ .tool_call_start = .{ .index = index, .id = id, .name = name } });
 
-            const args = function_call.object.get("args") orelse std.json.Value{ .object = try newObject(self.allocator) };
+            const args = function_call.args orelse std.json.Value{ .object = try newObject(self.allocator) };
             var args_str: std.Io.Writer.Allocating = .init(self.allocator);
             defer args_str.deinit();
             try std.json.Stringify.value(args, .{ .emit_null_optional_fields = false }, &args_str.writer);
@@ -878,6 +882,76 @@ test "GoogleSseCallback ignores malformed function calls" {
     try sse.event("{\"candidates\":[{\"content\":{\"parts\":[{\"unknown\":true}]}}]}");
 
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
+
+test "google sse typed parse maps text, finish reason, and usage metadata" {
+    const data =
+        \\{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"},{"text":" world"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30}}
+    ;
+    var parsed = try std.json.parseFromSlice(SseResponse, std.testing.allocator, data, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const candidates = parsed.value.candidates.?;
+    try std.testing.expectEqual(@as(usize, 1), candidates.len);
+
+    var candidate_parsed = try std.json.parseFromValue(SseCandidate, std.testing.allocator, candidates[0], .{ .ignore_unknown_fields = true });
+    defer candidate_parsed.deinit();
+    const candidate = candidate_parsed.value;
+
+    const parts = candidate.content.?.parts.?;
+    try std.testing.expectEqual(@as(usize, 2), parts.len);
+    try std.testing.expectEqualStrings("Hello", parts[0].text.?);
+    try std.testing.expectEqualStrings(" world", parts[1].text.?);
+    try std.testing.expectEqualStrings("STOP", candidate.finishReason.?);
+
+    try std.testing.expectEqual(@as(i64, 10), parsed.value.usageMetadata.?.promptTokenCount.?);
+    try std.testing.expectEqual(@as(i64, 20), parsed.value.usageMetadata.?.candidatesTokenCount.?);
+    try std.testing.expectEqual(@as(i64, 30), parsed.value.usageMetadata.?.totalTokenCount.?);
+}
+
+test "google sse typed parse maps thought and function call parts" {
+    const data =
+        \\{"candidates":[{"content":{"parts":[{"text":"Let me reason","thought":true},{"text":"answer"},{"functionCall":{"name":"read_file","args":{"path":"src/main.zig"}}}]}}]}
+    ;
+    var parsed = try std.json.parseFromSlice(SseResponse, std.testing.allocator, data, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    var candidate_parsed = try std.json.parseFromValue(SseCandidate, std.testing.allocator, parsed.value.candidates.?[0], .{ .ignore_unknown_fields = true });
+    defer candidate_parsed.deinit();
+    const candidate = candidate_parsed.value;
+
+    const parts = candidate.content.?.parts.?;
+    try std.testing.expectEqual(@as(usize, 3), parts.len);
+    try std.testing.expectEqual(true, parts[0].thought.?);
+    try std.testing.expectEqualStrings("Let me reason", parts[0].text.?);
+    try std.testing.expect(parts[1].thought == null);
+    try std.testing.expectEqualStrings("answer", parts[1].text.?);
+    const function_call = parts[2].functionCall.?;
+    try std.testing.expectEqualStrings("read_file", function_call.name.?);
+    try std.testing.expectEqualStrings("src/main.zig", function_call.args.?.object.get("path").?.string);
+}
+
+test "google sse typed parse skips malformed candidates individually" {
+    const data =
+        \\{"candidates":[42,{"content":{"parts":[{"text":"hi"}]}},{"content":"nope"}]}
+    ;
+    var parsed = try std.json.parseFromSlice(SseResponse, std.testing.allocator, data, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    var seen: usize = 0;
+    for (parsed.value.candidates.?) |candidate_value| {
+        var candidate_parsed = std.json.parseFromValue(SseCandidate, std.testing.allocator, candidate_value, .{ .ignore_unknown_fields = true }) catch continue;
+        defer candidate_parsed.deinit();
+        if (candidate_parsed.value.content) |content| {
+            if (content.parts) |parts| {
+                for (parts) |part| {
+                    _ = part;
+                    seen += 1;
+                }
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), seen);
 }
 
 // ── chatStreamingGoogle server tests ─────────────────────────────────
