@@ -1,6 +1,7 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
+const core_session = @import("../core/session.zig");
 
 const ExecuteShellParams = struct {
     command: []const u8,
@@ -87,4 +88,50 @@ test "execute_shell propagates errors for a missing working directory" {
         error.FileNotFound,
         executeShell(std.testing.allocator, std.testing.io, .{ .command = "echo x", .working_directory = "puny-test-shell-missing-dir" }),
     );
+}
+
+test "execute_shell blocks mutating commands in review mode" {
+    core_session.setWriteBlocked(true);
+    defer core_session.setWriteBlocked(false);
+
+    const blocked = [_][]const u8{
+        "rm foo.txt",
+        "echo hi > file.txt",
+        "git commit -m 'x'",
+        "git reset --hard HEAD",
+        "mv a b",
+        "cp a b",
+        "mkdir newdir",
+        "git checkout main",
+        "git push origin main",
+        "sudo rm -rf /",
+        "echo hi | tee file.txt",
+        "sed -i s/foo/bar/ file.txt",
+    };
+    for (blocked) |cmd| {
+        const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = cmd });
+        defer std.testing.allocator.free(output);
+        try std.testing.expect(std.mem.startsWith(u8, output, "Review mode:"));
+    }
+}
+
+test "execute_shell allows read-only checks in review mode" {
+    core_session.setWriteBlocked(true);
+    defer core_session.setWriteBlocked(false);
+
+    const allowed = [_][]const u8{
+        "echo hello from shell",
+        "git status",
+        "git diff --stat",
+    };
+    for (allowed) |cmd| {
+        const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = cmd });
+        defer std.testing.allocator.free(output);
+        // Allowed commands should not be blocked; they either succeed or fail due to missing tool but not due to review block.
+        if (std.mem.startsWith(u8, output, "Review mode:")) {
+            std.debug.print("allowed command was blocked: {s}\noutput: {s}\n", .{ cmd, output });
+            return error.TestUnexpectedResult;
+        }
+        try std.testing.expect(std.mem.startsWith(u8, output, "Exit code:"));
+    }
 }
