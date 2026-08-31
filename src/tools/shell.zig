@@ -9,7 +9,67 @@ const ExecuteShellParams = struct {
     timeout_seconds: ?i64 = null,
 };
 
+fn isBlockedReviewCommand(command: []const u8) bool {
+    if (std.mem.indexOf(u8, command, ">") != null) return true;
+    if (std.mem.indexOf(u8, command, "tee") != null) return true;
+
+    const blocked_substrings = [_][]const u8{
+        "rm ",
+        "rm\t",
+        "mv ",
+        "mv\t",
+        "cp ",
+        "cp\t",
+        "mkdir",
+        "rmdir",
+        "touch ",
+        "touch\t",
+        "chmod",
+        "chown",
+        "truncate",
+        "dd ",
+        "dd\t",
+        "mkfs",
+        "sudo",
+        "ln ",
+        "ln\t",
+        "git commit",
+        "git reset",
+        "git checkout",
+        "git switch",
+        "git push",
+        "git pull",
+        "git merge",
+        "git rebase",
+        "git add",
+        "git rm",
+        "git mv",
+        "git restore",
+        "git clean",
+        "git stash",
+        "git revert",
+        "git cherry-pick",
+        "git tag",
+        "git branch -d",
+        "git branch --delete",
+        "git config",
+        "sed -i",
+    };
+    for (blocked_substrings) |needle| {
+        if (std.mem.indexOf(u8, command, needle) != null) return true;
+    }
+    return false;
+}
+
 fn executeShell(allocator: std.mem.Allocator, io: std.Io, params: ExecuteShellParams) ![]const u8 {
+    if (core_session.isWriteBlocked() and isBlockedReviewCommand(params.command)) {
+        return std.fmt.allocPrint(
+            allocator,
+            "Review mode: shell command blocked. Only read-only inspections and build checks are allowed.",
+            .{},
+        );
+    }
+
     const argv = if (@import("builtin").os.tag == .windows)
         &[_][]const u8{ "cmd", "/c", params.command }
     else
