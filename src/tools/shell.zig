@@ -9,30 +9,38 @@ const ExecuteShellParams = struct {
     timeout_seconds: ?i64 = null,
 };
 
+fn containsWord(text: []const u8, word: []const u8) bool {
+    if (text.len < word.len) return false;
+    var i: usize = 0;
+    while (i <= text.len - word.len) : (i += 1) {
+        if (std.mem.eql(u8, text[i .. i + word.len], word)) {
+            const before_ok = i == 0 or !std.ascii.isAlphanumeric(text[i - 1]);
+            const after_ok = i + word.len >= text.len or !std.ascii.isAlphanumeric(text[i + word.len]);
+            if (before_ok and after_ok) return true;
+        }
+    }
+    return false;
+}
+
 fn isBlockedReviewCommand(command: []const u8) bool {
     if (std.mem.indexOf(u8, command, ">") != null) return true;
-    if (std.mem.indexOf(u8, command, "tee") != null) return true;
+    if (containsWord(command, "tee")) return true;
 
-    const blocked_substrings = [_][]const u8{
-        "rm ",
-        "rm\t",
-        "mv ",
-        "mv\t",
-        "cp ",
-        "cp\t",
-        "mkdir",
-        "rmdir",
-        "touch ",
-        "touch\t",
-        "chmod",
-        "chown",
-        "truncate",
-        "dd ",
-        "dd\t",
-        "mkfs",
-        "sudo",
-        "ln ",
-        "ln\t",
+    if (containsWord(command, "rm")) return true;
+    if (containsWord(command, "mv")) return true;
+    if (containsWord(command, "cp")) return true;
+    if (containsWord(command, "mkdir")) return true;
+    if (containsWord(command, "rmdir")) return true;
+    if (containsWord(command, "touch")) return true;
+    if (containsWord(command, "chmod")) return true;
+    if (containsWord(command, "chown")) return true;
+    if (containsWord(command, "truncate")) return true;
+    if (containsWord(command, "mkfs")) return true;
+    if (containsWord(command, "sudo")) return true;
+    if (containsWord(command, "ln")) return true;
+    if (containsWord(command, "dd")) return true;
+
+    const blocked_phrases = [_][]const u8{
         "git commit",
         "git reset",
         "git checkout",
@@ -55,8 +63,8 @@ fn isBlockedReviewCommand(command: []const u8) bool {
         "git config",
         "sed -i",
     };
-    for (blocked_substrings) |needle| {
-        if (std.mem.indexOf(u8, command, needle) != null) return true;
+    for (blocked_phrases) |phrase| {
+        if (std.mem.indexOf(u8, command, phrase) != null) return true;
     }
     return false;
 }
