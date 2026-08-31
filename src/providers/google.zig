@@ -334,84 +334,65 @@ const GoogleSseCallback = struct {
             if (obs.on_chunk) |cb| cb(obs.ctx, data);
         }
 
-        const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
+        // Invalid JSON (syntax errors) propagates as a parse failure; valid JSON
+        // that doesn't match the SseResponse shape is ignored leniently.
+        var raw_parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true });
+        defer raw_parsed.deinit();
+
+        var parsed = std.json.parseFromValue(SseResponse, self.allocator, raw_parsed.value, .{ .ignore_unknown_fields = true }) catch return;
         defer parsed.deinit();
 
-        if (parsed.value != .object) return;
-        const root = parsed.value.object;
-
-        if (root.get("candidates")) |candidates| {
-            if (candidates == .array) {
-                for (candidates.array.items) |candidate| {
-                    if (candidate != .object) continue;
-                    try self.handleCandidate(candidate.object);
-                }
+        const root = parsed.value;
+        if (root.candidates) |candidates| {
+            for (candidates) |candidate_value| {
+                var candidate_parsed = std.json.parseFromValue(SseCandidate, self.allocator, candidate_value, .{ .ignore_unknown_fields = true }) catch continue;
+                defer candidate_parsed.deinit();
+                try self.handleCandidate(candidate_parsed.value);
             }
         }
 
-        if (root.get("usageMetadata")) |usage| {
-            if (usage == .object) {
-                if (usage.object.get("promptTokenCount")) |v| {
-                    if (v == .integer) self.input_tokens = v.integer;
-                }
-                var output_tokens: i64 = 0;
-                if (usage.object.get("candidatesTokenCount")) |v| {
-                    if (v == .integer) output_tokens = v.integer;
-                }
-                try self.callback.emit(.{ .usage = .{
-                    .input_tokens = self.input_tokens,
-                    .output_tokens = output_tokens,
-                } });
-            }
+        if (root.usageMetadata) |usage| {
+            if (usage.promptTokenCount) |v| self.input_tokens = v;
+            var output_tokens: i64 = 0;
+            if (usage.candidatesTokenCount) |v| output_tokens = v;
+            try self.callback.emit(.{ .usage = .{
+                .input_tokens = self.input_tokens,
+                .output_tokens = output_tokens,
+            } });
         }
     }
 
-    fn handleCandidate(self: *@This(), candidate: std.json.ObjectMap) !void {
-        if (candidate.get("content")) |content| {
-            if (content == .object) {
-                if (content.object.get("parts")) |parts| {
-                    if (parts == .array) {
-                        for (parts.array.items) |part| {
-                            if (part != .object) continue;
-                            try self.handlePart(part.object);
-                        }
-                    }
+    fn handleCandidate(self: *@This(), candidate: SseCandidate) !void {
+        if (candidate.content) |content| {
+            if (content.parts) |parts| {
+                for (parts) |part| {
+                    try self.handlePart(part);
                 }
             }
         }
 
-        if (candidate.get("finishReason")) |reason| {
-            if (reason == .string) {
-                try self.callback.emit(.{ .finish = if (reason.string.len == 0) null else reason.string });
-            }
+        if (candidate.finishReason) |reason| {
+            try self.callback.emit(.{ .finish = if (reason.len == 0) null else reason });
         }
     }
 
-    fn handlePart(self: *@This(), part: std.json.ObjectMap) !void {
-        if (part.get("thought")) |thought| {
-            if (thought == .bool and thought.bool) {
-                if (part.get("text")) |text| {
-                    if (text == .string) {
-                        try self.callback.emit(.{ .reasoning = text.string });
-                    }
+    fn handlePart(self: *@This(), part: SsePart) !void {
+        if (part.thought) |thought| {
+            if (thought) {
+                if (part.text) |text| {
+                    try self.callback.emit(.{ .reasoning = text });
                 }
                 return;
             }
         }
 
-        if (part.get("text")) |text| {
-            if (text == .string) {
-                try self.callback.emit(.{ .content = text.string });
-            }
+        if (part.text) |text| {
+            try self.callback.emit(.{ .content = text });
             return;
         }
 
-        if (part.get("functionCall")) |function_call| {
-            if (function_call != .object) return;
-            const name = if (function_call.object.get("name")) |v|
-                (if (v == .string) v.string else return)
-            else
-                return;
+        if (part.functionCall) |function_call| {
+            const name = function_call.name orelse return;
 
             const index = self.tool_call_index;
             self.tool_call_index += 1;
@@ -420,7 +401,7 @@ const GoogleSseCallback = struct {
             const id = std.fmt.bufPrint(&id_buf, "call_{d}", .{index}) catch return;
             try self.callback.emit(.{ .tool_call_start = .{ .index = index, .id = id, .name = name } });
 
-            const args = function_call.object.get("args") orelse std.json.Value{ .object = try newObject(self.allocator) };
+            const args = function_call.args orelse std.json.Value{ .object = try newObject(self.allocator) };
             var args_str: std.Io.Writer.Allocating = .init(self.allocator);
             defer args_str.deinit();
             try std.json.Stringify.value(args, .{ .emit_null_optional_fields = false }, &args_str.writer);
