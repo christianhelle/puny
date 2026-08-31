@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Port lenient two-phase SseResponse parse with per-candidate catch continue  ([#176](https://github.com/christianhelle/puny/pull/176)) ([@christianhelle](https://github.com/christianhelle/))
 - Use generated OpenAPI contracts in Google provider (Muse Spark 1.2) ([#173](https://github.com/christianhelle/puny/pull/173)) ([@christianhelle](https://github.com/christianhelle/))
 
 
