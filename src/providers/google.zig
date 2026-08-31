@@ -3,6 +3,7 @@ const cancel = @import("../core/cancel.zig");
 const http_client = @import("client.zig");
 const openai = @import("openai.zig");
 const opencode_zen = @import("opencode_zen.zig");
+const contracts = @import("google/contracts.zig");
 
 pub fn isGoogleModel(model_id: []const u8) bool {
     return std.mem.startsWith(u8, model_id, "gemini-");
@@ -66,104 +67,236 @@ fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u
     return tool_call_id;
 }
 
-pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
-    var buf: std.Io.Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-    const w = &buf.writer;
+fn googleClient(c: *http_client.Client) @import("google/client.zig").Client {
+    var g = @import("google/client.zig").Client.init(c.allocator, c.io, c.api_key);
+    g.base_url = c.base_url;
+    g.organization = c.organization;
+    g.project = c.project;
+    g.default_headers = c.default_headers;
+    g.http_observer = if (c.http_observer) |obs| .{
+        .ctx = obs.ctx,
+        .onRequest = obs.onRequest,
+        .onResponse = obs.onResponse,
+        .onError = obs.onError,
+    } else null;
+    return g;
+}
 
-    var system: ?[]const u8 = null;
-
-    try w.writeAll("{\"contents\":[");
+pub fn buildGenerateContentRequest(arena: std.mem.Allocator, request: openai.ChatRequest) !contracts.GenerateContentRequest {
+    var contents = std.ArrayList(contracts.Content).empty;
+    var system_instruction: ?contracts.Content = null;
 
     var i: usize = 0;
-    var first_content = true;
     while (i < request.messages.len) {
         switch (request.messages[i]) {
             .system => |content| {
-                if (system == null) system = content;
+                if (system_instruction == null) {
+                    const part = contracts.Part{ .text = try arena.dupe(u8, content) };
+                    const parts = try arena.alloc(contracts.Part, 1);
+                    parts[0] = part;
+                    system_instruction = contracts.Content{ .role = null, .parts = parts };
+                }
                 i += 1;
             },
             .user => |content| {
-                if (!first_content) try w.writeByte(',');
-                try w.writeAll("{\"role\":\"user\",\"parts\":[");
-                try writeGoogleTextPart(w, content);
-                try w.writeAll("]}");
-                first_content = false;
+                const part = contracts.Part{ .text = try arena.dupe(u8, content) };
+                const parts = try arena.alloc(contracts.Part, 1);
+                parts[0] = part;
+                try contents.append(arena, .{ .role = try arena.dupe(u8, "user"), .parts = parts });
                 i += 1;
             },
             .assistant => |assistant| {
-                if (!first_content) try w.writeByte(',');
-                try w.writeAll("{\"role\":\"model\",\"parts\":[");
-                var first_part = true;
-                if (assistant.content) |content| {
-                    try writeGoogleTextPart(w, content);
-                    first_part = false;
+                var part_count: usize = 0;
+                if (assistant.content) |_| part_count += 1;
+                if (assistant.tool_calls) |tc| part_count += tc.len;
+                if (part_count == 0) {
+                    i += 1;
+                    continue;
+                }
+                const parts = try arena.alloc(contracts.Part, part_count);
+                var idx: usize = 0;
+                if (assistant.content) |c| {
+                    parts[idx] = .{ .text = try arena.dupe(u8, c) };
+                    idx += 1;
                 }
                 if (assistant.tool_calls) |tool_calls| {
                     for (tool_calls) |tc| {
-                        if (!first_part) try w.writeByte(',');
-                        try writeGoogleFunctionCallPart(w, tc.function.name, tc.function.arguments);
-                        first_part = false;
+                        const trimmed = std.mem.trim(u8, tc.function.arguments, " \t\r\n");
+                        const args_val: std.json.Value = if (trimmed.len > 0)
+                            try std.json.parseFromSliceLeaky(std.json.Value, arena, trimmed, .{})
+                        else
+                            .{ .object = try newObject(arena) };
+                        parts[idx] = .{
+                            .functionCall = .{
+                                .name = try arena.dupe(u8, tc.function.name),
+                                .args = args_val,
+                            },
+                        };
+                        idx += 1;
                     }
                 }
-                try w.writeAll("]}");
-                first_content = false;
+                try contents.append(arena, .{ .role = try arena.dupe(u8, "model"), .parts = parts });
                 i += 1;
             },
             .tool => {
-                if (!first_content) try w.writeByte(',');
-                try w.writeAll("{\"role\":\"user\",\"parts\":[");
-                var first_part = true;
+                var parts_list = std.ArrayList(contracts.Part).empty;
                 while (i < request.messages.len and std.meta.activeTag(request.messages[i]) == .tool) {
                     const tool = request.messages[i].tool;
                     const name = googleToolNameForId(request.messages, tool.tool_call_id, i);
-                    if (!first_part) try w.writeByte(',');
                     var prefix_buf: [256]u8 = undefined;
                     const prefix = try std.fmt.bufPrint(&prefix_buf, "Tool {s} result:", .{name});
-                    try writeGoogleTextPart(w, prefix);
-                    try w.writeByte(',');
-                    try writeGoogleTextPart(w, tool.content);
-                    first_part = false;
+                    try parts_list.append(arena, .{ .text = try arena.dupe(u8, prefix) });
+                    try parts_list.append(arena, .{ .text = try arena.dupe(u8, tool.content) });
                     i += 1;
                 }
-                try w.writeAll("]}");
-                first_content = false;
+                const parts = try parts_list.toOwnedSlice(arena);
+                try contents.append(arena, .{ .role = try arena.dupe(u8, "user"), .parts = parts });
             },
         }
     }
-    try w.writeByte(']');
 
-    if (system) |value| {
-        try w.writeAll(",\"systemInstruction\":{\"parts\":[");
-        try writeGoogleTextPart(w, value);
-        try w.writeAll("]}");
-    }
-
+    var tools: ?[]const contracts.Tool = null;
     if (request.tools.len > 0) {
-        try w.writeAll(",\"tools\":[{\"functionDeclarations\":[");
-        for (request.tools, 0..) |tool, j| {
-            if (j > 0) try w.writeByte(',');
-            try writeGoogleFunctionDeclaration(w, tool);
+        // Single Tool containing all functionDeclarations (matches manual payload)
+        var decls = std.ArrayList(contracts.FunctionDeclaration).empty;
+        for (request.tools) |tool| {
+            const function = tool.function.object;
+            const name_val = function.get("name") orelse return error.MissingToolName;
+            if (name_val != .string) return error.MissingToolName;
+            const name = try arena.dupe(u8, name_val.string);
+            const description = if (function.get("description")) |v| if (v == .string) try arena.dupe(u8, v.string) else try arena.dupe(u8, "") else try arena.dupe(u8, "");
+            var parameters: ?contracts.Schema = null;
+            if (function.get("parameters")) |params| {
+                var buf: std.Io.Writer.Allocating = .init(arena);
+                defer buf.deinit();
+                try std.json.Stringify.value(params, .{}, &buf.writer);
+                parameters = try std.json.parseFromSliceLeaky(contracts.Schema, arena, buf.written(), .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+            } else {
+                // Empty schema serializes to {} – matches manual "{}" for missing params
+                parameters = contracts.Schema{};
+            }
+            try decls.append(arena, .{
+                .name = name,
+                .description = description,
+                .parameters = parameters,
+            });
         }
-        try w.writeAll("]}]");
+        const decl_slice = try decls.toOwnedSlice(arena);
+        const tool = contracts.Tool{ .functionDeclarations = decl_slice };
+        const tool_slice = try arena.alloc(contracts.Tool, 1);
+        tool_slice[0] = tool;
+        tools = tool_slice;
     }
 
-    try w.writeAll(",\"generationConfig\":{\"maxOutputTokens\":");
-    try std.json.Stringify.value(opencode_zen.default_max_tokens, .{}, w);
-    if (request.temperature) |temp| {
-        try w.writeAll(",\"temperature\":");
-        try std.json.Stringify.value(temp, .{}, w);
-    }
+    const generation_config = contracts.GenerationConfig{
+        .maxOutputTokens = opencode_zen.default_max_tokens,
+        .temperature = request.temperature,
+    };
+
+    return contracts.GenerateContentRequest{
+        .contents = try contents.toOwnedSlice(arena),
+        .systemInstruction = system_instruction,
+        .tools = tools,
+        .generationConfig = generation_config,
+        .safetySettings = null,
+        .toolConfig = null,
+        .cachedContent = null,
+    };
+}
+
+test "buildGenerateContentRequest creates typed request matching manual payload" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const schema = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        arena,
+        "{\"name\":\"read_file\",\"description\":\"Read a file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}}",
+        .{},
+    );
+
+    const request = openai.ChatRequest{
+        .model = "gemini-2.5-pro",
+        .messages = &.{
+            .{ .system = "You are helpful." },
+            .{ .user = "Hello" },
+        },
+        .tools = &.{.{ .function = schema }},
+        .temperature = 0.7,
+    };
+
+    const typed = try buildGenerateContentRequest(arena, request);
+    try std.testing.expect(typed.contents != null);
+    try std.testing.expectEqual(@as(usize, 1), typed.contents.?.len);
+    try std.testing.expectEqualStrings("user", typed.contents.?[0].role.?);
+    try std.testing.expect(typed.systemInstruction != null);
+    try std.testing.expectEqualStrings("You are helpful.", typed.systemInstruction.?.parts.?[0].text.?);
+    try std.testing.expect(typed.tools != null);
+    try std.testing.expectEqual(@as(usize, 1), typed.tools.?[0].functionDeclarations.?.len);
+    try std.testing.expectEqualStrings("read_file", typed.tools.?[0].functionDeclarations.?[0].name.?);
+    try std.testing.expectEqual(@as(f64, 0.7), typed.generationConfig.?.temperature.?);
+    try std.testing.expectEqual(@as(i64, 4096), typed.generationConfig.?.maxOutputTokens.?);
+}
+
+test "buildGenerateContentRequest rejects tools without name" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const function = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        arena,
+        "{\"description\":\"no name\"}",
+        .{},
+    );
+
+    const request = openai.ChatRequest{
+        .model = "gemini-2.5-pro",
+        .messages = &.{},
+        .tools = &.{.{ .function = function }},
+    };
+
+    try std.testing.expectError(error.MissingToolName, buildGenerateContentRequest(arena, request));
+}
+
+pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest) ![]u8 {
+    // Build typed request via generated contracts for validation, then serialize
+    // to JSON. This keeps the wire format identical to the previous hand-written
+    // writer while reusing the generated types (Content/Part/Tool/GenerationConfig).
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const typed = try buildGenerateContentRequest(arena, request);
+
+    // Serialize typed struct to JSON Value so we can inject thinkingConfig
+    // which is not yet modeled in contracts.GenerationConfig.
+    var buf: std.Io.Writer.Allocating = .init(arena);
+    defer buf.deinit();
+    try std.json.Stringify.value(typed, .{ .emit_null_optional_fields = false }, &buf.writer);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, arena, buf.written(), .{});
+    defer parsed.deinit();
+
     if (request.reasoning_effort) |effort| {
         if (effort != .default) {
-            try w.writeAll(",\"thinkingConfig\":{\"includeThoughts\":true}");
+            if (parsed.value.object.get("generationConfig")) |gc_val| {
+                if (gc_val == .object) {
+                    var new_obj = gc_val.object;
+                    var thinking = try std.json.ObjectMap.init(arena, &.{}, &.{});
+                    try thinking.put(arena, "includeThoughts", .{ .bool = true });
+                    try new_obj.put(arena, "thinkingConfig", .{ .object = thinking });
+                    try parsed.value.object.put(arena, "generationConfig", .{ .object = new_obj });
+                }
+            }
         }
     }
-    try w.writeByte('}');
 
-    try w.writeByte('}');
-
-    return buf.toOwnedSlice();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    try std.json.Stringify.value(parsed.value, .{ .emit_null_optional_fields = false }, &out.writer);
+    return out.toOwnedSlice();
 }
 
 const GoogleSseCallback = struct {
@@ -324,6 +457,20 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
     var transfer_buffer: [8 * 1024]u8 = undefined;
     const response_reader = response.reader(&transfer_buffer);
 
+    var done = std.atomic.Value(bool).init(false);
+    var watcher_ctx = http_client.CancelWatcher{
+        .connection = req.connection,
+        .io = client.io,
+        .pred = cancel.isCancelled,
+        .done = &done,
+    };
+    const watcher_thread: ?std.Thread = std.Thread.spawn(.{}, http_client.CancelWatcher.run, .{&watcher_ctx}) catch null;
+    defer if (watcher_thread) |t| {
+        done.store(true, .release);
+        t.join();
+        watcher_ctx.restoreConnection();
+    };
+
     var cancelable_reader_buffer: [1]u8 = undefined;
     var cancelable_reader = openai.CancelableReader.init(response_reader, &cancelable_reader_buffer);
     const reader = &cancelable_reader.reader;
@@ -331,7 +478,13 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
     if (response.head.status.class() != .success) {
         var body_alloc: std.Io.Writer.Allocating = .init(allocator);
         defer body_alloc.deinit();
-        _ = reader.streamRemaining(&body_alloc.writer) catch {};
+        _ = reader.streamRemaining(&body_alloc.writer) catch |err| {
+            if (client.http_observer) |obs| {
+                if (obs.onError) |cb| cb(obs.ctx, .POST, url, @errorName(err));
+            }
+            if (cancel.isCancelled()) return error.Canceled;
+            return response.bodyErr() orelse err;
+        };
 
         if (client.http_observer) |obs| {
             if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, body_alloc.written(), elapsed_ns);
