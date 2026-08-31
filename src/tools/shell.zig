@@ -22,62 +22,86 @@ fn containsWord(text: []const u8, word: []const u8) bool {
     return false;
 }
 
-fn isBlockedReviewCommand(command: []const u8) bool {
-    if (std.mem.indexOf(u8, command, ">") != null) return true;
-    if (containsWord(command, "tee")) return true;
+fn isAllowedReviewCommand(command: []const u8) bool {
+    const trimmed = std.mem.trimStart(u8, command, " \t\r\n");
+    if (trimmed.len == 0) return false;
 
-    if (containsWord(command, "rm")) return true;
-    if (containsWord(command, "mv")) return true;
-    if (containsWord(command, "cp")) return true;
-    if (containsWord(command, "mkdir")) return true;
-    if (containsWord(command, "rmdir")) return true;
-    if (containsWord(command, "touch")) return true;
-    if (containsWord(command, "chmod")) return true;
-    if (containsWord(command, "chown")) return true;
-    if (containsWord(command, "truncate")) return true;
-    if (containsWord(command, "mkfs")) return true;
-    if (containsWord(command, "sudo")) return true;
-    if (containsWord(command, "ln")) return true;
-    if (containsWord(command, "dd")) return true;
+    // Reject any shell redirection or tee usage which could cause writes.
+    if (std.mem.indexOf(u8, trimmed, ">") != null) return false;
+    if (containsWord(trimmed, "tee")) return false;
 
-    const blocked_phrases = [_][]const u8{
-        "git commit",
-        "git reset",
-        "git checkout",
-        "git switch",
-        "git push",
-        "git pull",
-        "git merge",
-        "git rebase",
-        "git add",
-        "git rm",
-        "git mv",
-        "git restore",
-        "git clean",
-        "git stash",
-        "git revert",
-        "git cherry-pick",
+    // Reject chaining / substitution operators that could hide mutating commands
+    if (std.mem.indexOf(u8, trimmed, ";") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "&&") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "||") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "`") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "$(") != null) return false;
+
+    // Explicitly reject known mutating / patch / install / interpreter patterns
+    // (defense in depth — these are also rejected because they are not allowlisted,
+    // but make the intent explicit as required by the review guidance).
+    if (std.mem.indexOf(u8, trimmed, "git apply") != null) return false;
+    if (containsWord(trimmed, "patch")) return false;
+    if (containsWord(trimmed, "install")) return false;
+    if (std.mem.indexOf(u8, trimmed, "python -c") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "python3 -c") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "node -e") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "ruby -e") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "perl -e") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "php -r") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "sh -c") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "bash -c") != null) return false;
+
+    // Reject mutating git branch deletions even though "git branch" is allowlisted
+    if (std.mem.indexOf(u8, trimmed, "git branch -d") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "git branch --delete") != null) return false;
+    if (std.mem.indexOf(u8, trimmed, "git branch -D") != null) return false;
+
+    const allowed_prefixes = [_][]const u8{
+        "echo",
+        "cat",
+        "ls",
+        "pwd",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "rg",
+        "find",
+        "sort",
+        "uniq",
+        "file",
+        "stat",
+        "git status",
+        "git diff",
+        "git log",
+        "git show",
+        "git ls-files",
+        "git branch",
+        "git rev-parse",
+        "git rev-list",
+        "git ls-remote",
         "git tag",
-        "git branch -d",
-        "git branch --delete",
-        "git config",
-        "sed -i",
+        "git remote",
+        "zig build",
+        "zig test",
+        "zig fmt",
+        "true",
+        "false",
     };
-    for (blocked_phrases) |phrase| {
-        if (std.mem.indexOf(u8, command, phrase) != null) return true;
+
+    for (allowed_prefixes) |prefix| {
+        if (std.mem.startsWith(u8, trimmed, prefix)) {
+            const rest = trimmed[prefix.len..];
+            if (rest.len == 0) return true;
+            const c = rest[0];
+            if (std.ascii.isWhitespace(c) or c == '-' or c == '"' or c == '\'' or c == '.' or c == '/') return true;
+        }
     }
     return false;
 }
 
-fn executeShell(allocator: std.mem.Allocator, io: std.Io, params: ExecuteShellParams) ![]const u8 {
-    if (core_session.isWriteBlocked() and isBlockedReviewCommand(params.command)) {
-        return std.fmt.allocPrint(
-            allocator,
-            "Review mode: shell command blocked. Only read-only inspections and build checks are allowed.",
-            .{},
-        );
-    }
-
+fn runShellCommand(allocator: std.mem.Allocator, io: std.Io, params: ExecuteShellParams) ![]const u8 {
     const argv = if (@import("builtin").os.tag == .windows)
         &[_][]const u8{ "cmd", "/c", params.command }
     else
@@ -94,6 +118,30 @@ fn executeShell(allocator: std.mem.Allocator, io: std.Io, params: ExecuteShellPa
     };
 }
 
+fn executeShell(allocator: std.mem.Allocator, io: std.Io, params: ExecuteShellParams) ![]const u8 {
+    if (core_session.isWriteBlocked() and !isAllowedReviewCommand(params.command)) {
+        return std.fmt.allocPrint(
+            allocator,
+            "Review mode: shell command blocked. Only read-only inspections and build checks are allowed.",
+            .{},
+        );
+    }
+
+    return runShellCommand(allocator, io, params);
+}
+
+fn reviewExecuteShell(allocator: std.mem.Allocator, io: std.Io, params: ExecuteShellParams) ![]const u8 {
+    if (!isAllowedReviewCommand(params.command)) {
+        return std.fmt.allocPrint(
+            allocator,
+            "Review mode: shell command blocked. Only read-only inspections and build checks are allowed.",
+            .{},
+        );
+    }
+
+    return runShellCommand(allocator, io, params);
+}
+
 pub const execute_shell = tools.defineTool(
     "execute_shell",
     "Execute a shell command and return stdout, stderr, and exit code.",
@@ -105,7 +153,7 @@ pub const review_execute_shell = tools.defineTool(
     "execute_shell",
     "Execute a read-only shell command for inspections and build checks; mutating commands are blocked.",
     ExecuteShellParams,
-    executeShell,
+    reviewExecuteShell,
 );
 
 test "execute_shell runs a command and returns its output" {
