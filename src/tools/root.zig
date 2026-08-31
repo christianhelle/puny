@@ -142,6 +142,13 @@ test "review registry permits checks and the report tool but not source writes" 
     try std.testing.expect(!has_save_prd);
 }
 
+test "review shell is advertised as read-only while build shell is unrestricted" {
+    const review_shell = dispatchForMode("execute_shell", .review).?;
+    const build_shell = dispatchForMode("execute_shell", .build).?;
+    try std.testing.expect(std.mem.indexOf(u8, review_shell.description, "read-only") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_shell.description, "read-only") == null);
+}
+
 test "defineTool executes the handler with parsed JSON args" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
