@@ -499,6 +499,38 @@ test "googleRequestPayload converts OpenAI request" {
     try std.testing.expect(generation_config.get("thinkingConfig") == null);
 }
 
+test "googleRequestPayload preserves full tool schema fidelity" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    // Keywords the generated contracts.Schema does not model must round-trip
+    // verbatim through the payload.
+    const schema =
+        \\{"name":"read_file","description":"Read a file","parameters":{"type":"object","additionalProperties":false,"title":"ReadFileArgs","properties":{"path":{"type":"string","$ref":"#/definitions/path"}},"required":["path"],"oneOf":[{"type":"object"}]}}
+    ;
+    const function = try std.json.parseFromSliceLeaky(std.json.Value, allocator, schema, .{});
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{},
+        .tools = &.{.{ .function = function }},
+        .stream = true,
+    };
+
+    const payload = try googleRequestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const parameters = parsed.value.object.get("tools").?.array.items[0].object.get("functionDeclarations").?.array.items[0].object.get("parameters").?.object;
+
+    try std.testing.expectEqual(false, parameters.get("additionalProperties").?.bool);
+    try std.testing.expectEqualStrings("ReadFileArgs", parameters.get("title").?.string);
+    const path = parameters.get("properties").?.object.get("path").?.object;
+    try std.testing.expectEqualStrings("#/definitions/path", path.get("$ref").?.string);
+    try std.testing.expectEqual(@as(usize, 1), parameters.get("oneOf").?.array.items.len);
+}
+
 test "googleRequestPayload includes thinkingConfig when reasoning is enabled" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
