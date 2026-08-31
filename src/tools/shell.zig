@@ -93,6 +93,13 @@ pub const execute_shell = tools.defineTool(
     executeShell,
 );
 
+pub const review_execute_shell = tools.defineTool(
+    "execute_shell",
+    "Execute a read-only shell command for inspections and build checks; mutating commands are blocked.",
+    ExecuteShellParams,
+    executeShell,
+);
+
 test "execute_shell runs a command and returns its output" {
     const output = try executeShell(std.testing.allocator, std.testing.io, .{ .command = "echo hello from shell" });
     defer std.testing.allocator.free(output);

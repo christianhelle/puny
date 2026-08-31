@@ -18,7 +18,7 @@ const WriteFileParams = struct {
 
 fn writeFile(allocator: std.mem.Allocator, io: std.Io, params: WriteFileParams) ![]const u8 {
     if (core_session.isWriteBlocked()) {
-        return "Write blocked: app is in planning mode. Exit planning mode with /build or use save_prd to save the PRD.";
+        return "Write blocked: app is in planning or review mode. Exit to build mode with /build or use the mode-specific save tool.";
     }
     _ = allocator;
     try helpers.writeFile(io, params.path, params.content);
