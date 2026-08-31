@@ -11,3 +11,5 @@ src/providers/anthropic/client.zig linguist-generated=true
 src/providers/anthropic/contracts.zig linguist-generated=true
 src/providers/anthropic/models.zig linguist-generated=true
 src/providers/anthropic/runtime.zig linguist-generated=true
+src/providers/google/client.zig linguist-generated=true
+src/providers/google/contracts.zig linguist-generated=true
