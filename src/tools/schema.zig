@@ -73,7 +73,7 @@ pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u
                     S.append(&buf, &pos, "]");
                 }
 
-                S.append(&buf, &pos, "}}");
+                S.append(&buf, &pos, ",\"additionalProperties\":false}}");
 
                 const len = pos;
                 var result: [len]u8 = undefined;
