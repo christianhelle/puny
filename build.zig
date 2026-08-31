@@ -429,6 +429,8 @@ const RegenerateProvidersStep = struct {
             "models",
         });
 
+        try patchGoogleGeneratedFiles(allocator, io);
+
         std.log.info("regenerate-providers: done", .{});
     }
 
@@ -473,6 +475,51 @@ const RegenerateProvidersStep = struct {
                 std.log.err("openapi2zig terminated abnormally: {any}", .{result.term});
                 return error.OpenApi2ZigFailed;
             },
+        }
+    }
+
+    fn patchGoogleGeneratedFiles(allocator: std.mem.Allocator, io: std.Io) !void {
+        const cwd = std.Io.Dir.cwd();
+        // Fix client: /v1beta/ss/ -> /v1beta/models/ and Bearer -> x-goog-api-key
+        {
+            const path = "src/providers/google/client.zig";
+            const content = cwd.readFileAlloc(io, path, allocator, .limited(4 * 1024 * 1024)) catch |err| {
+                if (err == error.FileNotFound) {
+                    std.log.warn("google client not found for patching: {s}", .{path});
+                    return;
+                }
+                return err;
+            };
+            defer allocator.free(content);
+            const patched = try std.mem.replaceOwned(u8, allocator, content, "/v1beta/ss/", "/v1beta/models/");
+            defer allocator.free(patched);
+            const patched2 = try std.mem.replaceOwned(u8, allocator, patched, "\"Bearer {s}\"", "\"{s}\"");
+            defer allocator.free(patched2);
+            const patched3 = try std.mem.replaceOwned(u8, allocator, patched2, "\"Authorization\"", "\"x-goog-api-key\"");
+            defer allocator.free(patched3);
+            try cwd.writeFile(io, .{ .sub_path = path, .data = patched3 });
+            std.log.info("patched {s} for Google auth and path", .{path});
+        }
+        // Fix contracts: Schema.items ?Schema -> ?*Schema to avoid infinite size recursion
+        {
+            const path = "src/providers/google/contracts.zig";
+            const content = cwd.readFileAlloc(io, path, allocator, .limited(2 * 1024 * 1024)) catch |err| {
+                if (err == error.FileNotFound) {
+                    std.log.warn("google contracts not found for patching: {s}", .{path});
+                    return;
+                }
+                return err;
+            };
+            defer allocator.free(content);
+            // Only patch the specific line: items: ?Schema -> items: ?*Schema
+            const search = "    items: ?Schema = null,";
+            const replace = "    items: ?*Schema = null,";
+            if (std.mem.indexOf(u8, content, search) != null) {
+                const patched = try std.mem.replaceOwned(u8, allocator, content, search, replace);
+                defer allocator.free(patched);
+                try cwd.writeFile(io, .{ .sub_path = path, .data = patched });
+                std.log.info("patched {s} Schema.items recursion", .{path});
+            }
         }
     }
 };
