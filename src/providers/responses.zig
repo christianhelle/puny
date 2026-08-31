@@ -12,14 +12,45 @@ pub const ReasoningEffort = openai.ReasoningEffort;
 // Reuse openai's CancelableReader but we need it for responses streaming
 pub const CancelableReader = openai.CancelableReader;
 
+fn isNullableSchema(value: std.json.Value) bool {
+    if (value != .object) return false;
+    const obj = value.object;
+    // {"type":"null"}
+    if (obj.get("type")) |t| {
+        if (t == .string and std.mem.eql(u8, t.string, "null")) return true;
+        if (t == .array) {
+            for (t.array.items) |item| {
+                if (item == .string and std.mem.eql(u8, item.string, "null")) return true;
+            }
+        }
+    }
+    // {"anyOf":[{"type":"null"}, ...]} or similar
+    if (obj.get("anyOf")) |any| {
+        if (any == .array) {
+            for (any.array.items) |item| {
+                if (isNullableSchema(item)) return true;
+                if (item == .object) {
+                    if (item.object.get("type")) |tt| {
+                        if (tt == .string and std.mem.eql(u8, tt.string, "null")) return true;
+                    }
+                }
+            }
+        }
+    }
+    if (obj.get("oneOf")) |one| {
+        if (one == .array) {
+            for (one.array.items) |item| {
+                if (isNullableSchema(item)) return true;
+            }
+        }
+    }
+    return false;
+}
+
 pub const ResponsesSseCallback = struct {
     allocator: std.mem.Allocator,
     callback: StreamCallback,
     observer: ?client.HttpObserver = null,
-    // Track function call name by output_index for delta correlation
-    // Simple fixed map for up to 32 simultaneous tool calls
-    tool_names: [32][]const u8 = [_][]const u8{""} ** 32,
-    tool_ids: [32][]const u8 = [_][]const u8{""} ** 32,
 
     pub fn event(self: *@This(), data: []const u8) !void {
         if (self.observer) |obs| {
@@ -95,14 +126,6 @@ pub const ResponsesSseCallback = struct {
                 else => "",
             } else "";
 
-            // Store for later deltas
-            if (output_index < self.tool_names.len) {
-                // We need to dupe to keep alive beyond this callback - but callback expects slice valid only during emit
-                // We'll store duped slices in allocator and leak for duration? Simpler: keep reference to parsed string which is owned by parsed arena - not safe after defer.
-                // Instead we store by duplicating into allocator and managing lifecycle - for test simplicity, we emit directly without long storage
-                // For now, store empty; but emit.
-            }
-
             if (call_id.len > 0 or name.len > 0) {
                 try self.callback.emit(.{ .tool_call_start = .{ .index = output_index, .id = call_id, .name = name } });
                 // Check if arguments already present in added event
@@ -143,9 +166,8 @@ pub const ResponsesSseCallback = struct {
             return;
         }
 
-        // For completed / failed etc - emit finish and usage
-        if (std.mem.eql(u8, typ, "response.completed") or std.mem.eql(u8, typ, "response.incomplete") or std.mem.eql(u8, typ, "response.failed")) {
-            // Try to extract usage from response object
+        // Completed -> "stop", incomplete -> "length", failed -> error
+        if (std.mem.eql(u8, typ, "response.completed")) {
             if (obj.get("response")) |resp_val| {
                 if (resp_val == .object) {
                     const resp_obj = resp_val.object;
@@ -160,7 +182,6 @@ pub const ResponsesSseCallback = struct {
                                 .integer => |i| i,
                                 else => 0,
                             } else 0;
-                            // Try nested reasoning tokens
                             var reasoning_output_tokens: ?i64 = null;
                             if (usage_obj.get("output_tokens_details")) |details| {
                                 if (details == .object) {
@@ -180,30 +201,50 @@ pub const ResponsesSseCallback = struct {
                     }
                 }
             }
-            // Also emit finish
-            const finish: ?[]const u8 = if (std.mem.eql(u8, typ, "response.completed")) "stop" else typ;
-            try self.callback.emit(.{ .finish = finish });
+            try self.callback.emit(.{ .finish = "stop" });
             return;
         }
 
-        // response.output_item.done for function_call with final args - already handled as delta? Emit if needed
-        if (std.mem.eql(u8, typ, "response.output_item.done")) {
-            const item_val = obj.get("item") orelse return;
-            if (item_val != .object) return;
-            const item = item_val.object;
-            const item_type_val = item.get("type") orelse return;
-            if (item_type_val != .string) return;
-            if (!std.mem.eql(u8, item_type_val.string, "function_call")) return;
-            const output_index: usize = if (obj.get("output_index")) |v| switch (v) {
-                .integer => |i| @intCast(i),
-                else => 0,
-            } else 0;
-            // If arguments present and we haven't emitted, emit as delta
-            // This handles case where incremental deltas were not sent but final done contains full args
-            // To avoid duplicate, we could check but simpler: if delta not already sent via previous deltas, the streaming may have already covered.
-            // We'll not emit here to avoid duplication; but if you rely on done for completeness, uncomment.
-            _ = output_index;
+        if (std.mem.eql(u8, typ, "response.incomplete")) {
+            if (obj.get("response")) |resp_val| {
+                if (resp_val == .object) {
+                    const resp_obj = resp_val.object;
+                    if (resp_obj.get("usage")) |usage_val| {
+                        if (usage_val == .object) {
+                            const usage_obj = usage_val.object;
+                            const input_tokens: i64 = if (usage_obj.get("input_tokens")) |v| switch (v) {
+                                .integer => |i| i,
+                                else => 0,
+                            } else 0;
+                            const output_tokens: i64 = if (usage_obj.get("output_tokens")) |v| switch (v) {
+                                .integer => |i| i,
+                                else => 0,
+                            } else 0;
+                            var reasoning_output_tokens: ?i64 = null;
+                            if (usage_obj.get("output_tokens_details")) |details| {
+                                if (details == .object) {
+                                    if (details.object.get("reasoning_tokens")) |rt| {
+                                        if (rt == .integer) reasoning_output_tokens = rt.integer;
+                                    }
+                                }
+                            }
+                            try self.callback.emit(.{ .usage = .{
+                                .input_tokens = input_tokens,
+                                .output_tokens = output_tokens,
+                                .reasoning_output_tokens = reasoning_output_tokens,
+                                .tokens_per_second = null,
+                                .time_to_first_token_seconds = null,
+                            } });
+                        }
+                    }
+                }
+            }
+            try self.callback.emit(.{ .finish = "length" });
             return;
+        }
+
+        if (std.mem.eql(u8, typ, "response.failed")) {
+            return error.ResponseError;
         }
 
         // Ignore other types: response.created, response.in_progress, response.queued, response.content_part.*, etc.
@@ -321,62 +362,64 @@ pub fn responsesRequestPayload(allocator: std.mem.Allocator, request: ChatReques
             try std.json.Stringify.value(d, .{}, w);
         }
         if (parameters) |p| {
-            // Ensure strict mode compliance: 'required' must include every property key and 'additionalProperties' false
             if (p == .object) {
-                if (p.object.get("properties")) |props_val| {
-                    if (props_val == .object) {
-                        const props = props_val.object;
-                        try w.writeAll(",\"parameters\":{\"type\":\"object\",\"properties\":");
-                        try std.json.Stringify.value(std.json.Value{ .object = props }, .{}, w);
-                        try w.writeAll(",\"required\":[");
-                        var first_req = true;
-                        var prop_it = props.iterator();
-                        while (prop_it.next()) |entry| {
-                            if (!first_req) try w.writeByte(',');
-                            first_req = false;
-                            try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
+                var required_set = std.StringHashMap(void).init(allocator);
+                defer required_set.deinit();
+                if (p.object.get("required")) |req_val| {
+                    if (req_val == .array) {
+                        for (req_val.array.items) |item| {
+                            if (item == .string) required_set.put(item.string, {}) catch {};
                         }
-                        try w.writeAll("],\"additionalProperties\":false}");
-                    } else {
-                        // properties not an object, fallback to ensure additionalProperties
-                        if (p.object.get("additionalProperties") == null) {
-                            try w.writeAll(",\"parameters\":{");
-                            var first = true;
-                            var it = p.object.iterator();
-                            while (it.next()) |entry| {
-                                if (!first) try w.writeByte(',');
-                                first = false;
-                                try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
-                                try w.writeByte(':');
-                                try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
-                            }
-                            if (!first) try w.writeByte(',');
-                            try w.writeAll("\"additionalProperties\":false}");
-                        } else {
-                            try w.writeAll(",\"parameters\":");
-                            try std.json.Stringify.value(p, .{}, w);
-                        }
-                    }
-                } else {
-                    // no properties, ensure additionalProperties
-                    if (p.object.get("additionalProperties") == null) {
-                        try w.writeAll(",\"parameters\":{");
-                        var first = true;
-                        var it = p.object.iterator();
-                        while (it.next()) |entry| {
-                            if (!first) try w.writeByte(',');
-                            first = false;
-                            try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
-                            try w.writeByte(':');
-                            try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
-                        }
-                        if (!first) try w.writeByte(',');
-                        try w.writeAll("\"additionalProperties\":false}");
-                    } else {
-                        try w.writeAll(",\"parameters\":");
-                        try std.json.Stringify.value(p, .{}, w);
                     }
                 }
+                try w.writeAll(",\"parameters\":{");
+                var first_key = true;
+                var it = p.object.iterator();
+                while (it.next()) |entry| {
+                    const key = entry.key_ptr.*;
+                    if (std.mem.eql(u8, key, "properties")) {
+                        if (!first_key) try w.writeByte(',');
+                        first_key = false;
+                        try w.writeAll("\"properties\":{");
+                        if (entry.value_ptr.* == .object) {
+                            const props = entry.value_ptr.*.object;
+                            var first_prop = true;
+                            var prop_it = props.iterator();
+                            while (prop_it.next()) |prop_entry| {
+                                if (!first_prop) try w.writeByte(',');
+                                first_prop = false;
+                                try std.json.Stringify.value(prop_entry.key_ptr.*, .{}, w);
+                                try w.writeByte(':');
+                                const prop_key = prop_entry.key_ptr.*;
+                                const is_required = required_set.contains(prop_key);
+                                const schema = prop_entry.value_ptr.*;
+                                if (!is_required and !isNullableSchema(schema)) {
+                                    try w.writeAll("{\"anyOf\":[");
+                                    try std.json.Stringify.value(schema, .{}, w);
+                                    try w.writeAll(",{\"type\":\"null\"}]}");
+                                } else {
+                                    try std.json.Stringify.value(schema, .{}, w);
+                                }
+                            }
+                        }
+                        try w.writeByte('}');
+                    } else if (std.mem.eql(u8, key, "required")) {
+                        if (!first_key) try w.writeByte(',');
+                        first_key = false;
+                        try w.writeAll("\"required\":");
+                        try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
+                    } else if (std.mem.eql(u8, key, "additionalProperties")) {
+                        // handled at end
+                    } else {
+                        if (!first_key) try w.writeByte(',');
+                        first_key = false;
+                        try std.json.Stringify.value(key, .{}, w);
+                        try w.writeByte(':');
+                        try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
+                    }
+                }
+                if (!first_key) try w.writeByte(',');
+                try w.writeAll("\"additionalProperties\":false}");
             } else {
                 try w.writeAll(",\"parameters\":");
                 try std.json.Stringify.value(p, .{}, w);
@@ -384,9 +427,10 @@ pub fn responsesRequestPayload(allocator: std.mem.Allocator, request: ChatReques
         } else {
             try w.writeAll(",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}");
         }
-        // strict defaults to true if not specified
-        try w.writeAll(",\"strict\":");
-        try std.json.Stringify.value(strict orelse true, .{}, w);
+        if (strict) |s| {
+            try w.writeAll(",\"strict\":");
+            try std.json.Stringify.value(s, .{}, w);
+        }
         try w.writeByte('}');
     }
     try w.writeByte(']');
@@ -593,7 +637,8 @@ test "responsesRequestPayload maps system user assistant and tool" {
     const tool_obj = tools.items[0].object;
     try std.testing.expectEqualStrings("function", tool_obj.get("type").?.string);
     try std.testing.expectEqualStrings("read_file", tool_obj.get("name").?.string);
-    try std.testing.expect(tool_obj.get("strict").?.bool == true);
+    // strict is omitted when not originally present (preserve original)
+    try std.testing.expect(tool_obj.get("strict") == null);
 
     const reasoning = root.get("reasoning").?.object;
     try std.testing.expectEqualStrings("low", reasoning.get("effort").?.string);

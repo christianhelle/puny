@@ -14,11 +14,7 @@ pub fn isAnthropicModel(model_id: []const u8) bool {
         std.mem.startsWith(u8, model_id, "qwen");
 }
 
-pub fn isResponsesModel(model_id: []const u8) bool {
-    return std.mem.startsWith(u8, model_id, "muse-spark-") or
-        std.mem.startsWith(u8, model_id, "grok-") or
-        std.mem.startsWith(u8, model_id, "gpt-");
-}
+pub const isResponsesModel = opencode.isResponsesModel;
 
 pub const ModelInfo = opencode.ModelInfo;
 pub const ModelsList = opencode.ModelsList;

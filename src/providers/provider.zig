@@ -838,6 +838,119 @@ test "Provider.chatStreaming dispatches to the responses transport for grok" {
     }
 }
 
+const ResponsesStallServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        var chunk_buf: [1024]u8 = undefined;
+        var body = request.respondStreaming(&chunk_buf, .{
+            .respond_options = .{ .status = .ok },
+        }) catch return;
+        defer body.end() catch {};
+
+        body.writer.writeAll("data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hi\",\"sequence_number\":1,\"logprobs\":[]}\n\n") catch return;
+        body.flush() catch return;
+        self.io.sleep(.{ .nanoseconds = 5000 * std.time.ns_per_ms }, .awake) catch {};
+        body.writer.writeAll("data: [DONE]\n\n") catch return;
+        body.flush() catch return;
+    }
+};
+
+fn startResponsesStallServer() !*ResponsesStallServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = try std.testing.allocator.create(ResponsesStallServer);
+    errdefer std.testing.allocator.destroy(ctx);
+    ctx.* = .{ .io = std.testing.io, .server = server };
+    errdefer ctx.server.deinit(std.testing.io);
+    ctx.thread = try std.Thread.spawn(.{}, ResponsesStallServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopResponsesStallServer(ctx: *ResponsesStallServer) void {
+    ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
+    std.testing.allocator.destroy(ctx);
+}
+
+fn responsesStallServerUrl(ctx: *ResponsesStallServer) ![]u8 {
+    return std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+}
+
+test "chatStreaming aborts promptly when responses server stalls mid-stream after cancel for opencode" {
+    const ctx = try startResponsesStallServer();
+    defer stopResponsesStallServer(ctx);
+    const url = try responsesStallServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    cancel.reset();
+    defer cancel.reset();
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const trigger = try std.Thread.spawn(.{}, CancelTrigger.run, .{});
+    defer trigger.join();
+
+    const request = openai.ChatRequest{
+        .model = "muse-spark-1.2-contributor",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    const start = std.Io.Clock.awake.now(std.testing.io);
+    try std.testing.expectError(error.Canceled, prov.chatStreaming(request, rec.callback()));
+    const elapsed = start.untilNow(std.testing.io, .awake).nanoseconds;
+    try std.testing.expect(elapsed < 2000 * std.time.ns_per_ms);
+}
+
+test "chatStreaming aborts promptly when responses server stalls mid-stream after cancel for opencode_go" {
+    const ctx = try startResponsesStallServer();
+    defer stopResponsesStallServer(ctx);
+    const url = try responsesStallServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    cancel.reset();
+    defer cancel.reset();
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const trigger = try std.Thread.spawn(.{}, CancelTrigger.run, .{});
+    defer trigger.join();
+
+    const request = openai.ChatRequest{
+        .model = "gpt-5.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    const start = std.Io.Clock.awake.now(std.testing.io);
+    try std.testing.expectError(error.Canceled, prov.chatStreaming(request, rec.callback()));
+    const elapsed = start.untilNow(std.testing.io, .awake).nanoseconds;
+    try std.testing.expect(elapsed < 2000 * std.time.ns_per_ms);
+}
+
 const CancelStreamingServer = struct {
     io: std.Io,
     server: std.Io.net.Server,
