@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Use generated OpenAPI contracts in Google provider (Muse Spark 1.2) ([#173](https://github.com/christianhelle/puny/pull/173)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.3.5](https://github.com/christianhelle/puny/releases/tag/v0.3.5) (2026-08-30)
 
 ### Features
