@@ -298,7 +298,7 @@ pub fn @"generativelanguage.models.generateTextRaw"(client: *Client, model: []co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:generateText", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:generateText", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -315,8 +315,8 @@ pub fn @"generativelanguage.models.generateTextRaw"(client: *Client, model: []co
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -348,7 +348,7 @@ pub fn @"generativelanguage.models.streamGenerateContentRaw"(client: *Client, mo
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:streamGenerateContent", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:streamGenerateContent", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -365,8 +365,8 @@ pub fn @"generativelanguage.models.streamGenerateContentRaw"(client: *Client, mo
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -398,7 +398,7 @@ pub fn @"generativelanguage.models.embedTextRaw"(client: *Client, model: []const
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:embedText", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:embedText", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -415,8 +415,8 @@ pub fn @"generativelanguage.models.embedTextRaw"(client: *Client, model: []const
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -448,7 +448,7 @@ pub fn @"generativelanguage.models.countTextTokensRaw"(client: *Client, model: [
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:countTextTokens", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:countTextTokens", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -465,8 +465,8 @@ pub fn @"generativelanguage.models.countTextTokensRaw"(client: *Client, model: [
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -498,7 +498,7 @@ pub fn @"generativelanguage.models.generateAnswerRaw"(client: *Client, model: []
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:generateAnswer", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:generateAnswer", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -515,8 +515,8 @@ pub fn @"generativelanguage.models.generateAnswerRaw"(client: *Client, model: []
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -548,7 +548,7 @@ pub fn @"generativelanguage.models.batchEmbedContentsRaw"(client: *Client, model
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:batchEmbedContents", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:batchEmbedContents", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -565,8 +565,8 @@ pub fn @"generativelanguage.models.batchEmbedContentsRaw"(client: *Client, model
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -598,7 +598,7 @@ pub fn @"generativelanguage.models.generateMessageRaw"(client: *Client, model: [
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:generateMessage", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:generateMessage", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -615,8 +615,8 @@ pub fn @"generativelanguage.models.generateMessageRaw"(client: *Client, model: [
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -648,7 +648,7 @@ pub fn @"generativelanguage.models.batchEmbedTextRaw"(client: *Client, model: []
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:batchEmbedText", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:batchEmbedText", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -665,8 +665,8 @@ pub fn @"generativelanguage.models.batchEmbedTextRaw"(client: *Client, model: []
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -698,7 +698,7 @@ pub fn @"generativelanguage.models.generateContentRaw"(client: *Client, model: [
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:generateContent", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:generateContent", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -715,8 +715,8 @@ pub fn @"generativelanguage.models.generateContentRaw"(client: *Client, model: [
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -768,8 +768,8 @@ pub fn @"generativelanguage.models.listRaw"(client: *Client, pageSize: ?i64, pag
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.GET, uri_buf.written(), payload, operation_headers.items);
@@ -801,7 +801,7 @@ pub fn @"generativelanguage.models.countMessageTokensRaw"(client: *Client, model
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:countMessageTokens", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:countMessageTokens", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -818,8 +818,8 @@ pub fn @"generativelanguage.models.countMessageTokensRaw"(client: *Client, model
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -874,8 +874,8 @@ pub fn @"generativelanguage.models.operations.listRaw"(client: *Client, name: []
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.GET, uri_buf.written(), payload, operation_headers.items);
@@ -907,7 +907,7 @@ pub fn @"generativelanguage.models.predictLongRunningRaw"(client: *Client, model
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:predictLongRunning", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:predictLongRunning", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -924,8 +924,8 @@ pub fn @"generativelanguage.models.predictLongRunningRaw"(client: *Client, model
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -957,7 +957,7 @@ pub fn @"generativelanguage.models.countTokensRaw"(client: *Client, model: []con
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:countTokens", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:countTokens", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -974,8 +974,8 @@ pub fn @"generativelanguage.models.countTokensRaw"(client: *Client, model: []con
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -1020,8 +1020,8 @@ pub fn @"generativelanguage.models.operations.getRaw"(client: *Client, name: []c
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.GET, uri_buf.written(), payload, operation_headers.items);
@@ -1053,7 +1053,7 @@ pub fn @"generativelanguage.models.predictRaw"(client: *Client, model: []const u
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:predict", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:predict", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1070,8 +1070,8 @@ pub fn @"generativelanguage.models.predictRaw"(client: *Client, model: []const u
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
@@ -1103,7 +1103,7 @@ pub fn @"generativelanguage.models.embedContentRaw"(client: *Client, model: []co
     const allocator = client.allocator;
     var uri_buf: std.Io.Writer.Allocating = .init(allocator);
     defer uri_buf.deinit();
-    try uri_buf.writer.print("{s}/v1beta/ss/{s}:embedContent", .{ client.base_url, model });
+    try uri_buf.writer.print("{s}/v1beta/models/{s}:embedContent", .{ client.base_url, model });
 
     var str: std.Io.Writer.Allocating = .init(allocator);
     defer str.deinit();
@@ -1120,8 +1120,8 @@ pub fn @"generativelanguage.models.embedContentRaw"(client: *Client, model: []co
     var auth_header: ?[]u8 = null;
     defer if (auth_header) |value| allocator.free(value);
     if (client.api_key.len > 0) {
-        auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.api_key});
-        try operation_headers.append(allocator, .{ .name = "Authorization", .value = auth_header.? });
+        auth_header = try std.fmt.allocPrint(allocator, "{s}", .{client.api_key});
+        try operation_headers.append(allocator, .{ .name = "x-goog-api-key", .value = auth_header.? });
     }
 
     return requestRawWithExtraHeaders(client, std.http.Method.POST, uri_buf.written(), payload, operation_headers.items);
