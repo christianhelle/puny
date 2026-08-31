@@ -1003,6 +1003,76 @@ test "GoogleSseCallback ignores malformed function calls" {
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
 }
 
+test "google sse typed parse maps text, finish reason, and usage metadata" {
+    const data =
+        \\{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"},{"text":" world"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30}}
+    ;
+    var parsed = try std.json.parseFromSlice(SseResponse, std.testing.allocator, data, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const candidates = parsed.value.candidates.?;
+    try std.testing.expectEqual(@as(usize, 1), candidates.len);
+
+    var candidate_parsed = try std.json.parseFromValue(SseCandidate, std.testing.allocator, candidates[0], .{ .ignore_unknown_fields = true });
+    defer candidate_parsed.deinit();
+    const candidate = candidate_parsed.value;
+
+    const parts = candidate.content.?.parts.?;
+    try std.testing.expectEqual(@as(usize, 2), parts.len);
+    try std.testing.expectEqualStrings("Hello", parts[0].text.?);
+    try std.testing.expectEqualStrings(" world", parts[1].text.?);
+    try std.testing.expectEqualStrings("STOP", candidate.finishReason.?);
+
+    try std.testing.expectEqual(@as(i64, 10), parsed.value.usageMetadata.?.promptTokenCount.?);
+    try std.testing.expectEqual(@as(i64, 20), parsed.value.usageMetadata.?.candidatesTokenCount.?);
+    try std.testing.expectEqual(@as(i64, 30), parsed.value.usageMetadata.?.totalTokenCount.?);
+}
+
+test "google sse typed parse maps thought and function call parts" {
+    const data =
+        \\{"candidates":[{"content":{"parts":[{"text":"Let me reason","thought":true},{"text":"answer"},{"functionCall":{"name":"read_file","args":{"path":"src/main.zig"}}}]}}]}
+    ;
+    var parsed = try std.json.parseFromSlice(SseResponse, std.testing.allocator, data, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    var candidate_parsed = try std.json.parseFromValue(SseCandidate, std.testing.allocator, parsed.value.candidates.?[0], .{ .ignore_unknown_fields = true });
+    defer candidate_parsed.deinit();
+    const candidate = candidate_parsed.value;
+
+    const parts = candidate.content.?.parts.?;
+    try std.testing.expectEqual(@as(usize, 3), parts.len);
+    try std.testing.expectEqual(true, parts[0].thought.?);
+    try std.testing.expectEqualStrings("Let me reason", parts[0].text.?);
+    try std.testing.expect(parts[1].thought == null);
+    try std.testing.expectEqualStrings("answer", parts[1].text.?);
+    const function_call = parts[2].functionCall.?;
+    try std.testing.expectEqualStrings("read_file", function_call.name.?);
+    try std.testing.expectEqualStrings("src/main.zig", function_call.args.?.object.get("path").?.string);
+}
+
+test "google sse typed parse skips malformed candidates individually" {
+    const data =
+        \\{"candidates":[42,{"content":{"parts":[{"text":"hi"}]}},{"content":"nope"}]}
+    ;
+    var parsed = try std.json.parseFromSlice(SseResponse, std.testing.allocator, data, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    var seen: usize = 0;
+    for (parsed.value.candidates.?) |candidate_value| {
+        var candidate_parsed = std.json.parseFromValue(SseCandidate, std.testing.allocator, candidate_value, .{ .ignore_unknown_fields = true }) catch continue;
+        defer candidate_parsed.deinit();
+        if (candidate_parsed.value.content) |content| {
+            if (content.parts) |parts| {
+                for (parts) |part| {
+                    _ = part;
+                    seen += 1;
+                }
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), seen);
+}
+
 // ── chatStreamingGoogle server tests ─────────────────────────────────
 
 const GoogleServer = struct {
