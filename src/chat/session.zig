@@ -407,7 +407,6 @@ pub const ChatSession = struct {
                             continue;
                         },
                         .operational_failure => |failure| {
-                            try enterReviewMode(ctx);
                             const failure_context = try std.fmt.allocPrint(
                                 ctx.messages_arena.allocator(),
                                 "Review preflight failed before an immutable scope could be established: {s}",
@@ -434,7 +433,6 @@ pub const ChatSession = struct {
                             continue;
                         },
                         .no_changes => |scope| {
-                            try enterReviewMode(ctx);
                             const review_context = try branch_review.buildPromptContext(ctx.messages_arena.allocator(), scope);
                             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = review_context });
                             const saved = branch_review.writeNoChanges(ctx.messages_arena.allocator(), ctx.io, scope) catch |err| {
