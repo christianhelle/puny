@@ -23,6 +23,10 @@ pub fn isAnthropicModel(model_id: []const u8) bool {
     return std.mem.startsWith(u8, model_id, "claude-");
 }
 
+pub fn isResponsesModel(model_id: []const u8) bool {
+    return std.mem.startsWith(u8, model_id, "muse-spark-");
+}
+
 pub const ModelInfo = struct {
     id: []const u8,
     owned_by: []const u8,
@@ -173,6 +177,16 @@ test "isAnthropicModel detects claude families" {
     try std.testing.expect(isAnthropicModel("claude-haiku-4.5"));
     try std.testing.expect(!isAnthropicModel("deepseek-v4-pro"));
     try std.testing.expect(!isAnthropicModel("kimi-k2.7-code"));
+}
+
+test "isResponsesModel detects muse-spark family" {
+    try std.testing.expect(isResponsesModel("muse-spark-1.2-contributor"));
+    try std.testing.expect(isResponsesModel("muse-spark-1.2"));
+    try std.testing.expect(isResponsesModel("muse-spark-"));
+    try std.testing.expect(!isResponsesModel("deepseek-v4-flash"));
+    try std.testing.expect(!isResponsesModel("muse-spark"));
+    try std.testing.expect(!isResponsesModel(""));
+    try std.testing.expect(!isResponsesModel("xmuse-spark-1.2"));
 }
 
 test "parseModels maps OpenAI model list" {

@@ -14,6 +14,10 @@ pub fn isAnthropicModel(model_id: []const u8) bool {
         std.mem.startsWith(u8, model_id, "qwen");
 }
 
+pub fn isResponsesModel(model_id: []const u8) bool {
+    return std.mem.startsWith(u8, model_id, "muse-spark-");
+}
+
 pub const ModelInfo = opencode.ModelInfo;
 pub const ModelsList = opencode.ModelsList;
 pub const parseModels = opencode.parseModels;
@@ -67,6 +71,16 @@ test "isAnthropicModel requires the family prefix" {
 test "isSupportedModel accepts any model id" {
     try std.testing.expect(isSupportedModel("deepseek-v4-pro"));
     try std.testing.expect(isSupportedModel(""));
+}
+
+test "isResponsesModel detects muse-spark family" {
+    try std.testing.expect(isResponsesModel("muse-spark-1.2-contributor"));
+    try std.testing.expect(isResponsesModel("muse-spark-1.2"));
+    try std.testing.expect(isResponsesModel("muse-spark-"));
+    try std.testing.expect(!isResponsesModel("deepseek-v4-flash"));
+    try std.testing.expect(!isResponsesModel("muse-spark"));
+    try std.testing.expect(!isResponsesModel(""));
+    try std.testing.expect(!isResponsesModel("xmuse-spark-1.2"));
 }
 
 const TestModelsServer = struct {
