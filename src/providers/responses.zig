@@ -321,10 +321,26 @@ pub fn responsesRequestPayload(allocator: std.mem.Allocator, request: ChatReques
             try std.json.Stringify.value(d, .{}, w);
         }
         if (parameters) |p| {
-            try w.writeAll(",\"parameters\":");
-            try std.json.Stringify.value(p, .{}, w);
+            // Ensure strict mode compliance: 'additionalProperties' must be false
+            if (p == .object and p.object.get("additionalProperties") == null) {
+                try w.writeAll(",\"parameters\":{");
+                var first = true;
+                var it = p.object.iterator();
+                while (it.next()) |entry| {
+                    if (!first) try w.writeByte(',');
+                    first = false;
+                    try std.json.Stringify.value(entry.key_ptr.*, .{}, w);
+                    try w.writeByte(':');
+                    try std.json.Stringify.value(entry.value_ptr.*, .{}, w);
+                }
+                if (!first) try w.writeByte(',');
+                try w.writeAll("\"additionalProperties\":false}");
+            } else {
+                try w.writeAll(",\"parameters\":");
+                try std.json.Stringify.value(p, .{}, w);
+            }
         } else {
-            try w.writeAll(",\"parameters\":{\"type\":\"object\",\"properties\":{}}");
+            try w.writeAll(",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}");
         }
         // strict defaults to true if not specified
         try w.writeAll(",\"strict\":");
