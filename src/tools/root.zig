@@ -96,6 +96,21 @@ pub const review_registry = blk: {
     };
 };
 
+pub fn registryForMode(mode: AgentMode) []const Tool {
+    return switch (mode) {
+        .build => registry,
+        .planning => planning_registry,
+        .review => review_registry,
+    };
+}
+
+pub fn dispatchForMode(name: []const u8, mode: AgentMode) ?Tool {
+    for (registryForMode(mode)) |tool| {
+        if (std.mem.eql(u8, tool.name, name)) return tool;
+    }
+    return null;
+}
+
 test "dispatch returns known tools" {
     try std.testing.expect(dispatch("read_file") != null);
     try std.testing.expect(dispatch("write_file") != null);
