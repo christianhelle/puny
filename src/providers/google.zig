@@ -299,6 +299,29 @@ pub fn googleRequestPayload(allocator: std.mem.Allocator, request: openai.ChatRe
     return out.toOwnedSlice();
 }
 
+/// Typed SSE response shims. `SseResponse.candidates` stays as raw
+/// `std.json.Value` so each candidate can be parsed (or skipped) independently,
+/// preserving per-candidate leniency for malformed entries.
+const SsePart = struct {
+    text: ?[]const u8 = null,
+    thought: ?bool = null,
+    functionCall: ?contracts.FunctionCall = null,
+};
+
+const SseContent = struct {
+    parts: ?[]const SsePart = null,
+};
+
+const SseCandidate = struct {
+    content: ?SseContent = null,
+    finishReason: ?[]const u8 = null,
+};
+
+const SseResponse = struct {
+    candidates: ?[]const std.json.Value = null,
+    usageMetadata: ?contracts.UsageMetadata = null,
+};
+
 const GoogleSseCallback = struct {
     allocator: std.mem.Allocator,
     callback: openai.StreamCallback,
