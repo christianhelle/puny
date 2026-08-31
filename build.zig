@@ -332,6 +332,7 @@ const RegenerateProvidersStep = struct {
             "src/providers/openai",
             "src/providers/lmstudio",
             "src/providers/anthropic",
+            "src/providers/google",
         }) |dir| {
             cwd.deleteTree(io, dir) catch |err| {
                 if (err == error.FileNotFound) {
