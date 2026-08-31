@@ -9,6 +9,7 @@ const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
+const responses = @import("responses.zig");
 const cancel = @import("../core/cancel.zig");
 
 pub const ModelProvider = enum {
@@ -68,13 +69,17 @@ pub const Provider = union(enum) {
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
             .lmstudio => |*c| chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
-            .opencode => |*c| if (opencode_zen.isAnthropicModel(request.model))
+            .opencode => |*c| if (opencode_zen.isResponsesModel(request.model))
+                chatStreamingCaptured(c, request, callback, chatStreamingResponses)
+            else if (opencode_zen.isAnthropicModel(request.model))
                 chatStreamingCaptured(c, request, callback, anthropic.chatStreaming)
             else if (google.isGoogleModel(request.model))
                 chatStreamingCaptured(c, request, callback, google.chatStreamingGoogle)
             else
                 chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
-            .opencode_go => |*c| if (opencode_go.isAnthropicModel(request.model))
+            .opencode_go => |*c| if (opencode_go.isResponsesModel(request.model))
+                chatStreamingCaptured(c, request, callback, chatStreamingResponses)
+            else if (opencode_go.isAnthropicModel(request.model))
                 chatStreamingCaptured(c, request, callback, anthropic.chatStreaming)
             else
                 chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
@@ -154,6 +159,10 @@ fn chatStreamingCopilotCaptured(c: *copilot.Client, request: openai.ChatRequest,
 /// for the native mapping, which is unused on this path).
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     return openai.chatStreaming(c, request, callback);
+}
+
+fn chatStreamingResponses(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    return responses.chatStreamingResponses(c, request, callback);
 }
 
 test "getProviderDisplayName maps known providers" {
@@ -654,6 +663,113 @@ test "Provider.chatStreaming dispatches to the opencode_go OpenAI fallback" {
         .content => |content| try std.testing.expectEqualStrings("Hi from Go", content),
         else => return error.ExpectedContentEvent,
     }
+}
+
+test "Provider.chatStreaming dispatches to the responses transport for muse-spark" {
+    const body =
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hello Spark\",\"sequence_number\":1,\"logprobs\":[]}\n\n" ++
+        "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"muse-spark-1.2-contributor\",\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":3,\"total_tokens\":8}}}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "muse-spark-1.2-contributor",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/responses", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 3), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hello Spark", content),
+        else => return error.ExpectedContentEvent,
+    }
+    // usage is second event, finish third
+    switch (rec.events.items[1]) {
+        .usage => |usage| {
+            try std.testing.expectEqual(@as(i64, 5), usage.input_tokens);
+            try std.testing.expectEqual(@as(i64, 3), usage.output_tokens);
+        },
+        else => return error.ExpectedUsageEvent,
+    }
+    switch (rec.events.items[2]) {
+        .finish => |finish| try std.testing.expectEqualStrings("stop", finish.?),
+        else => return error.ExpectedFinishEvent,
+    }
+}
+
+test "Provider.chatStreaming dispatches to the opencode responses transport for muse-spark" {
+    const body =
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hello Zen\",\"sequence_number\":1,\"logprobs\":[]}\n\n" ++
+        "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"muse-spark-1.2\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":4,\"total_tokens\":6}}}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "muse-spark-1.2",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/responses", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 3), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hello Zen", content),
+        else => return error.ExpectedContentEvent,
+    }
+}
+
+test "Provider.chatStreaming preserves responses HTTP error details" {
+    const body = "{\"error\":{\"message\":\"responses unavailable\"}}";
+    const ctx = try startProviderTestServer(.internal_server_error, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "test-key") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "muse-spark-1.2-contributor",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, rec.callback()));
+
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(std.http.Status.internal_server_error, failure.status);
+    try std.testing.expectEqualStrings(body, failure.body);
+    // Ensure request was to /v1/responses
+    try std.testing.expectEqualStrings("/v1/responses", ctx.getRequestPath());
 }
 
 const CancelStreamingServer = struct {
