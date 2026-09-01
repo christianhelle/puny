@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add external orchestrate scripts with interactive planning phase ([#180](https://github.com/christianhelle/puny/pull/180)) ([@christianhelle](https://github.com/christianhelle/))
 - Always enable HTTP logging for debug builds ([#181](https://github.com/christianhelle/puny/pull/181)) ([@christianhelle](https://github.com/christianhelle/))
 - Autonomous branch review mode with merge-worthiness verdict ([#170](https://github.com/christianhelle/puny/pull/170)) ([@christianhelle](https://github.com/christianhelle/))
 - Support muse-spark, grok and gpt via Responses API (/v1/responses) ([#177](https://github.com/christianhelle/puny/pull/177)) ([@christianhelle](https://github.com/christianhelle/))
