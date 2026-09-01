@@ -64,6 +64,9 @@ fn run(init: std.process.Init) !u8 {
 
     const args_slice = try init.minimal.args.toSlice(arena);
     var parsed = cli.parseArgs(init.io, init.environ_map, args_slice);
+    if (comptime @import("builtin").mode == .Debug) {
+        parsed.debug = true;
+    }
 
     if (parsed.upgrade) {
         try upgrade.runUpgrade(arena, init.io, init.environ_map, parsed.force_upgrade);
@@ -831,5 +834,18 @@ test "http log file is hardened with 0600 permissions on posix" {
     try std.testing.expect(std.mem.indexOf(u8, data, "0o600") != null);
     // ensure the http log path specifically is covered, not just chat log
     try std.testing.expect(std.mem.indexOf(u8, data, "\"puny_http_log.log\", @enumFromInt(0o600)") != null);
+}
+
+
+test "debug logging is always enabled for debug builds" {
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(128 * 1024));
+    defer std.testing.allocator.free(data);
+    const needle_mode = "comptime @import(\"builtin\").mode" ++ " == .Debug";
+    const needle_assign = "parsed.debug" ++ " = true";
+    try std.testing.expect(std.mem.indexOf(u8, data, needle_mode) != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, needle_assign) != null);
+    const parse_idx = std.mem.indexOf(u8, data, "parseArgs") orelse 0;
+    const mode_idx = std.mem.indexOf(u8, data, needle_mode) orelse 0;
+    try std.testing.expect(mode_idx > parse_idx);
 }
 
