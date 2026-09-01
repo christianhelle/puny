@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// Sanitizes request/response bodies and metadata before they are written to
-/// the HTTP debug log, so credentials never leak into `puny_http_log.log`.
+/// the HTTP debug log, so credentials never leak into `puny_http.log`.
 pub const FormattedBody = struct {
     text: []const u8,
     owned: bool,

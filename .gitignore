@@ -7,7 +7,7 @@ zig-cache/
 *.exe
 zig-pkg
 artifacts
-puny_http_log.log
+puny_http.log
 puny_chat.log
 review-results.md
 trace.log

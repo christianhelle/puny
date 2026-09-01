@@ -208,7 +208,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --prune                  Delete old sessions (use --session to keep one)
         \\      --chat-log               Log conversation to puny_chat.log
         \\      --no-skills              Disable skill loading entirely
-        \\      --debug                  Log HTTP requests and responses to puny_http_log.log
+        \\      --debug                  Log HTTP requests and responses to puny_http.log
         \\  -U, --upgrade                Upgrade to the latest release
         \\      --force                  Force upgrade even if same version (use with --upgrade)
         \\  -h, --help                   Show this help text
