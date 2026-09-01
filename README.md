@@ -298,6 +298,10 @@ A branch with no committed changes also receives `NO`.
 
 Review mode rejects `main`, detached HEAD, and directories outside a Git
 repository. Invoking it on `main` exits with code `2` without writing a report.
+For a single autonomous review pass use `puny --review` directly. To loop
+`implement → review → fix` until merge worthy, use the external orchestrate
+scripts in `scripts/` (see below).
+
 ### Orchestrate a plan → implement → review loop
 
 `scripts/orchestrate.sh` (bash) and `scripts/orchestrate.ps1` (PowerShell) wrap
@@ -378,6 +382,7 @@ Exit codes mirror `puny --review`: `0` merge worthy, `1` still not merge worthy 
 fetch failure). The script prints the tail of `review-results.md` each iteration and
 the final report path on success. If you try `--prompt "/plan ..."` the script warns
 that planning with `--oneshot` will exit after the first question — use `--plan` instead.
+
 
 ### Prompt from a file or URL
 
@@ -664,7 +669,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--session <id>`        | Resume a previous session by UUID or unique prefix                                        |
 | `--resume`              | Resume the most recent session with a saved conversation                                  |
 | `--prune`               | Delete old sessions (use with `--session` to keep one)                                    |
-| `--debug`               | Log HTTP requests and responses to `puny_http.log`                                       |
+| `--debug`               | Log HTTP requests and responses to `puny_debug.log`                                       |
 | `-U`, `--upgrade`       | Upgrade to the latest release via install script                                          |
 | `--force`               | Force upgrade even if already on the latest version (use with `--upgrade`)                |
 | `-h`, `--help`          | Show help text                                                                            |
@@ -839,7 +844,7 @@ zig build run -- --mock --model mock-model --prompt "respond with reasoning" --s
 
 ### HTTP debug logging
 
-To log all HTTP requests and responses to `puny_http.log`, use `--debug`:
+To log all HTTP requests and responses to `puny_debug.log`, use `--debug`:
 
 ```bash
 puny --debug

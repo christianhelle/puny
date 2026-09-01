@@ -339,12 +339,12 @@
             <code>./scripts/orchestrate.sh --plan "Add CSV export with PRD"</code>
           </div>
           <div class="install-code">
-            <code>.\scripts\orchestrate.ps1 -Prompt "Add CSV export"</code>
+            <code>pwsh ./scripts/orchestrate.ps1 -Prompt "Add CSV export"</code>
           </div>
           <div class="install-code">
-            <code>.\scripts\orchestrate.ps1 -Plan "Add CSV export with PRD"</code>
+            <code>pwsh ./scripts/orchestrate.ps1 -Plan "Add CSV export with PRD"</code>
           </div>
-          <p>Exit codes mirror <code>puny --review</code>: <code>0</code> merge worthy, <code>1</code> still rejected after max iterations, <code>2</code> operational failure. Pass <code>--no-auto-commit</code> / <code>-NoAutoCommit</code> to let the agent handle commits, and <code>--puny-bin</code> / <code>-PunyBin</code> or <code>$PUNY_BIN</code> to point at a custom binary.</p>
+          <p><code>scripts/orchestrate.ps1</code> requires PowerShell 7+ (<code>pwsh</code>). Exit codes mirror <code>puny --review</code>: <code>0</code> merge worthy, <code>1</code> still rejected after max iterations, <code>2</code> operational failure. Pass <code>--no-auto-commit</code> / <code>-NoAutoCommit</code> to let the agent handle commits, and <code>--puny-bin</code> / <code>-PunyBin</code> or <code>$PUNY_BIN</code> to point at a custom binary.</p>
         </div>
       </div>
     </div>
