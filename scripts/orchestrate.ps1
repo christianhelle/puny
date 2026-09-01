@@ -179,6 +179,7 @@ function Commit-IfDirty {
   Write-Host "[orchestrate] committing dirty worktree..."
   $status | ForEach-Object { Write-Host "  $_" }
   # Stage everything except review-results.md (puny treats it as generated).
+  # Always ensure review-results.md is not staged, even if it was staged before.
   git add -A -- ':!review-results.md' 2>$null
   if ($LASTEXITCODE -ne 0) {
     git add -A
@@ -186,8 +187,8 @@ function Commit-IfDirty {
       [Console]::Error.WriteLine("error: git add failed")
       return $false
     }
-    git reset -q HEAD -- review-results.md 2>$null | Out-Null
   }
+  git reset -q HEAD -- review-results.md 2>$null | Out-Null
   git commit -m $Message
   if ($LASTEXITCODE -ne 0) {
     [Console]::Error.WriteLine("error: git commit failed")
@@ -212,6 +213,9 @@ function Get-PunySessionBase {
 }
 
 function Find-LatestPlan {
+  param(
+    [DateTime]$Since = [DateTime]::MinValue
+  )
   $base = Get-PunySessionBase
   # Also try alternative fallbacks
   $candidates = @($base)
@@ -225,6 +229,7 @@ function Find-LatestPlan {
   foreach ($candidate in $candidates) {
     if (Test-Path $candidate) {
       $latest = Get-ChildItem -Path $candidate -Recurse -Filter "plan.md" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since } |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
       if ($latest) { return $latest.FullName }
@@ -247,16 +252,18 @@ function Invoke-PlanningPhase {
   } else {
     $planInput = $Plan
   }
+  # Record start time to avoid picking up stale plans from previous sessions
+  $planningStart = Get-Date
   # Run puny in planning mode without --oneshot, wait indefinitely until exit
   & $PunyBin --prompt "/plan $planInput"
   $ec = $LASTEXITCODE
   if ($ec -ne 0) {
     Write-Host "[orchestrate] planning puny exited with code $ec (continuing to look for PRD)" -ForegroundColor Yellow
   }
-  $latestPlan = Find-LatestPlan
+  $latestPlan = Find-LatestPlan -Since $planningStart
   if (-not $latestPlan -or -not (Test-Path $latestPlan)) {
-    Write-Host "[orchestrate] warning: no plan.md found in session store after planning." -ForegroundColor Yellow
-    Write-Host "[orchestrate] Checked: $(Get-PunySessionBase) (and fallbacks)" -ForegroundColor Yellow
+    Write-Host "[orchestrate] warning: no plan.md found in session store after planning (or no plan newer than start time)." -ForegroundColor Yellow
+    Write-Host "[orchestrate] Checked: $(Get-PunySessionBase) (and fallbacks) since $planningStart" -ForegroundColor Yellow
     Write-Host "[orchestrate] You can manually copy the PRD to $repoRoot/prd.md and continue." -ForegroundColor Yellow
     return $false
   }
@@ -289,7 +296,7 @@ function Invoke-PunyImplement {
   & $PunyBin @argsList
   if ($LASTEXITCODE -ne 0) {
     [Console]::Error.WriteLine("error: puny implement step failed with exit code $LASTEXITCODE")
-    exit $LASTEXITCODE
+    exit 2
   }
 }
 
@@ -299,7 +306,7 @@ function Invoke-PunyFix {
   & $PunyBin --prompt $fixPrompt --oneshot
   if ($LASTEXITCODE -ne 0) {
     [Console]::Error.WriteLine("error: puny fix step failed with exit code $LASTEXITCODE")
-    exit $LASTEXITCODE
+    exit 2
   }
 }
 

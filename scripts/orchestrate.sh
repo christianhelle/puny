@@ -168,13 +168,10 @@ commit_if_dirty() {
   echo "$status" | sed 's/^/  /'
   # Stage everything except review-results.md (which puny treats as generated
   # and is gitignored in the main repo). Use pathspec exclusion when supported
-  # and fall back to add-all + reset.
-  if git add -A -- ':!review-results.md' 2>/dev/null; then
-    :
-  else
-    git add -A
-    git reset -q HEAD -- review-results.md 2>/dev/null || true
-  fi
+  # and fall back to add-all + reset. Always reset review-results.md to handle
+  # the case where it was already staged before this invocation.
+  git add -A -- ':!review-results.md' 2>/dev/null || git add -A
+  git reset -q HEAD -- review-results.md 2>/dev/null || true
   # Allow empty commit message failure to surface.
   git commit -m "$msg" || die "git commit failed"
 }
@@ -188,7 +185,14 @@ run_puny_implement() {
   fi
   echo "[orchestrate] running: $PUNY_BIN ${prompt_args[*]} --oneshot ${EXTRA_ARGS[*]:-}"
   # shellcheck disable=SC2086
+  set +e
   "$PUNY_BIN" "${prompt_args[@]}" --oneshot "${EXTRA_ARGS[@]}"
+  local ec=$?
+  set -e
+  if [[ $ec -ne 0 ]]; then
+    echo "error: puny implement step failed with exit code $ec" >&2
+    exit 2
+  fi
 }
 
 run_puny_fix() {
@@ -197,7 +201,14 @@ run_puny_fix() {
   # Keep prompt small by referencing the report file; agent can read it with read_file.
   fix_prompt="Review found issues (see review-results.md). Read $report with read_file and fix every finding, then ensure existing tests still pass. Do not edit review-results.md. Work only on source files."
   echo "[orchestrate] running fix: $PUNY_BIN --prompt <fix> --oneshot"
+  set +e
   "$PUNY_BIN" --prompt "$fix_prompt" --oneshot "${EXTRA_ARGS[@]}"
+  local ec=$?
+  set -e
+  if [[ $ec -ne 0 ]]; then
+    echo "error: puny fix step failed with exit code $ec" >&2
+    exit 2
+  fi
 }
 
 run_review() {
@@ -245,7 +256,27 @@ find_latest_plan() {
     fi
   fi
   if [[ -d "$base" ]]; then
-    find "$base" -name "plan.md" -type f -printf "%T@ %p\n" 2>/dev/null | sort -n | tail -n 1 | cut -d' ' -f2-
+    local latest=""
+    local latest_time=0
+    local start_time="${PLANNING_START_TIME:-0}"
+    # Portable null-delimited traversal; compare mtimes with stat (GNU/BSD)
+    while IFS= read -r -d '' file; do
+      local mtime
+      if stat -c "%Y" "$file" >/dev/null 2>&1; then
+        mtime=$(stat -c "%Y" "$file")
+      else
+        mtime=$(stat -f "%m" "$file" 2>/dev/null || echo 0)
+      fi
+      # Skip stale plans that predate the planning start
+      if (( mtime < start_time )); then
+        continue
+      fi
+      if (( mtime > latest_time )); then
+        latest_time=$mtime
+        latest="$file"
+      fi
+    done < <(find "$base" -name "plan.md" -type f -print0 2>/dev/null)
+    echo "$latest"
   fi
 }
 
@@ -263,10 +294,14 @@ run_planning_phase() {
   else
     plan_input="$PLAN_PROMPT"
   fi
+  # Record start time to avoid picking up stale plans from previous sessions
+  PLANNING_START_TIME=$(date +%s)
   # Run puny in planning mode without --oneshot, wait indefinitely until exit
   # shellcheck disable=SC2086
+  set +e
   "$PUNY_BIN" --prompt "/plan $plan_input" "${EXTRA_ARGS[@]}"
   local ec=$?
+  set -e
   if [[ $ec -ne 0 ]]; then
     echo "[orchestrate] planning puny exited with code $ec (continuing to look for PRD)" >&2
   fi
