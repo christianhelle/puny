@@ -253,14 +253,57 @@ function Invoke-PlanningPhase {
     $planInput = $Plan
   }
   # Record start time to avoid picking up stale plans from previous sessions
+  # Capture existing plans before planning for session binding
+  $baseForBefore = Get-PunySessionBase
+  $beforePlans = @()
+  $candidatesBefore = @($baseForBefore)
+  if ($env:USERPROFILE) {
+    $candidatesBefore += Join-Path $env:USERPROFILE "puny/sessions"
+    $candidatesBefore += Join-Path $env:USERPROFILE ".config/puny/sessions"
+  }
+  if ($env:HOME) {
+    $candidatesBefore += Join-Path $env:HOME ".config/puny/sessions"
+  }
+  foreach ($candidate in $candidatesBefore) {
+    if (Test-Path $candidate) {
+      $beforePlans += Get-ChildItem -Path $candidate -Recurse -Filter "plan.md" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+    }
+  }
   $planningStart = Get-Date
-  # Run puny in planning mode without --oneshot, wait indefinitely until exit
-  & $PunyBin --prompt "/plan $planInput"
-  $ec = $LASTEXITCODE
+  # Use a temporary prompt file to avoid OS command-line length limits (ARG_MAX)
+  $tmpPrompt = [System.IO.Path]::GetTempFileName()
+  try {
+    "/plan $planInput" | Set-Content -LiteralPath $tmpPrompt -Encoding utf8 -NoNewline
+    # Run puny in planning mode without --oneshot, wait indefinitely until exit
+    & $PunyBin --prompt-file $tmpPrompt
+    $ec = $LASTEXITCODE
+  } finally {
+    Remove-Item -LiteralPath $tmpPrompt -Force -ErrorAction SilentlyContinue
+  }
   if ($ec -ne 0) {
     Write-Host "[orchestrate] planning puny exited with code $ec (continuing to look for PRD)" -ForegroundColor Yellow
   }
-  $latestPlan = Find-LatestPlan -Since $planningStart
+  # Find latest plan that is new and newer than start time (session binding)
+  $latestPlan = $null
+  $latestTime = [DateTime]::MinValue
+  foreach ($candidate in $candidatesBefore) {
+    if (Test-Path $candidate) {
+      $plans = Get-ChildItem -Path $candidate -Recurse -Filter "plan.md" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notin $beforePlans -and $_.LastWriteTime -ge $planningStart } |
+        Sort-Object LastWriteTime -Descending
+      if ($plans) {
+        $candidateLatest = $plans | Select-Object -First 1
+        if ($candidateLatest.LastWriteTime -gt $latestTime) {
+          $latestTime = $candidateLatest.LastWriteTime
+          $latestPlan = $candidateLatest.FullName
+        }
+      }
+    }
+  }
+  # Fallback to Find-LatestPlan with start-time filter if no new session plan found
+  if (-not $latestPlan) {
+    $latestPlan = Find-LatestPlan -Since $planningStart
+  }
   if (-not $latestPlan -or -not (Test-Path $latestPlan)) {
     Write-Host "[orchestrate] warning: no plan.md found in session store after planning (or no plan newer than start time)." -ForegroundColor Yellow
     Write-Host "[orchestrate] Checked: $(Get-PunySessionBase) (and fallbacks) since $planningStart" -ForegroundColor Yellow
