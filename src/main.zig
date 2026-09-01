@@ -152,7 +152,7 @@ fn run(init: std.process.Init) !u8 {
     var debug_buffer: [4096]u8 = undefined;
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
-        const file = try std.Io.Dir.cwd().createFile(init.io, "puny_debug.log", .{});
+        const file = try std.Io.Dir.cwd().createFile(init.io, "puny_http_log.log", .{});
         debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
             .file = file,

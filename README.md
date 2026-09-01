@@ -587,7 +587,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--session <id>`        | Resume a previous session by UUID or unique prefix                                        |
 | `--resume`              | Resume the most recent session with a saved conversation                                  |
 | `--prune`               | Delete old sessions (use with `--session` to keep one)                                    |
-| `--debug`               | Log HTTP requests and responses to `puny_debug.log`                                       |
+| `--debug`               | Log HTTP requests and responses to `puny_http_log.log`                                       |
 | `-U`, `--upgrade`       | Upgrade to the latest release via install script                                          |
 | `--force`               | Force upgrade even if already on the latest version (use with `--upgrade`)                |
 | `-h`, `--help`          | Show help text                                                                            |
@@ -762,7 +762,7 @@ zig build run -- --mock --model mock-model --prompt "respond with reasoning" --s
 
 ### HTTP debug logging
 
-To log all HTTP requests and responses to `puny_debug.log`, use `--debug`:
+To log all HTTP requests and responses to `puny_http_log.log`, use `--debug`:
 
 ```bash
 puny --debug
