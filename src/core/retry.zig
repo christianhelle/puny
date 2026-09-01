@@ -17,6 +17,7 @@ pub fn isTransientError(err: anyerror) bool {
         error.TlsConnectionClosure,
         error.SslUpgradeFailed,
         error.HttpHeadersInvalid,
+        error.HttpConnectionClosing,
         => true,
         else => false,
     };
