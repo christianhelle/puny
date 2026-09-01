@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Autonomous branch review mode with merge-worthiness verdict ([#170](https://github.com/christianhelle/puny/pull/170)) ([@christianhelle](https://github.com/christianhelle/))
 - Support muse-spark, grok and gpt via Responses API (/v1/responses) ([#177](https://github.com/christianhelle/puny/pull/177)) ([@christianhelle](https://github.com/christianhelle/))
 - Port lenient two-phase SseResponse parse with per-candidate catch continue  ([#176](https://github.com/christianhelle/puny/pull/176)) ([@christianhelle](https://github.com/christianhelle/))
 - Use generated OpenAPI contracts in Google provider (Muse Spark 1.2) ([#173](https://github.com/christianhelle/puny/pull/173)) ([@christianhelle](https://github.com/christianhelle/))
