@@ -326,6 +326,20 @@
             <code>puny --prompt-file spec.md --oneshot</code>
           </div>
         </div>
+        <div class="install-card">
+          <h3>Orchestrate: plan → implement → review loop</h3>
+          <p>Wrap <code>puny --prompt --oneshot</code> + <code>puny --review</code> into an autonomous loop (<code>scripts/orchestrate.sh</code> / <code>scripts/orchestrate.ps1</code>) that commits after each implement step and re-runs review until <code>MERGE WORTHY: YES</code> (exit 0) or <code>--max-iterations</code> is hit. Run on a feature branch with <code>origin/main</code> available.</p>
+          <div class="install-code">
+            <code>./scripts/orchestrate.sh --prompt "Add CSV export"</code>
+          </div>
+          <div class="install-code">
+            <code>./scripts/orchestrate.sh --prompt-file spec.md --max-iterations 3</code>
+          </div>
+          <div class="install-code">
+            <code>.\scripts\orchestrate.ps1 -Prompt "Add CSV export"</code>
+          </div>
+          <p>Exit codes mirror <code>puny --review</code>: <code>0</code> merge worthy, <code>1</code> still rejected after max iterations, <code>2</code> operational failure. Pass <code>--no-auto-commit</code> / <code>-NoAutoCommit</code> to let the agent handle commits, and <code>--puny-bin</code> / <code>-PunyBin</code> or <code>$PUNY_BIN</code> to point at a custom binary.</p>
+        </div>
       </div>
     </div>
   </section>
