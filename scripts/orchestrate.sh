@@ -136,7 +136,15 @@ commit_if_dirty() {
   fi
   echo "[orchestrate] committing dirty worktree..."
   echo "$status" | sed 's/^/  /'
-  git add -A
+  # Stage everything except review-results.md (which puny treats as generated
+  # and is gitignored in the main repo). Use pathspec exclusion when supported
+  # and fall back to add-all + reset.
+  if git add -A -- ':!review-results.md' 2>/dev/null; then
+    :
+  else
+    git add -A
+    git reset -q HEAD -- review-results.md 2>/dev/null || true
+  fi
   # Allow empty commit message failure to surface.
   git commit -m "$msg" || die "git commit failed"
 }
@@ -164,12 +172,8 @@ run_puny_fix() {
 
 run_review() {
   echo "[orchestrate] running: $PUNY_BIN --review ${EXTRA_ARGS[*]:-}"
-  set +e
   # shellcheck disable=SC2086
   "$PUNY_BIN" --review "${EXTRA_ARGS[@]}"
-  local ec=$?
-  set -e
-  return $ec
 }
 
 echo "[orchestrate] branch: $BRANCH"

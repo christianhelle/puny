@@ -87,44 +87,42 @@ if (-not $PunyBin) {
   if ($env:PUNY_BIN) { $PunyBin = $env:PUNY_BIN } else { $PunyBin = "puny" }
 }
 
-if ($Prompt -and $PromptFile) {
-  Write-Error "cannot use both -Prompt and -PromptFile"
+function Fail-WithError {
+  param([string]$Message)
+  [Console]::Error.WriteLine("error: $Message")
   exit 2
+}
+
+if ($Prompt -and $PromptFile) {
+  Fail-WithError "cannot use both -Prompt and -PromptFile"
 }
 if (-not $Prompt -and -not $PromptFile) {
-  Write-Error "one of -Prompt or -PromptFile is required (see -Help)"
-  exit 2
+  Fail-WithError "one of -Prompt or -PromptFile is required (see -Help)"
 }
 if ($MaxIterations -lt 1) {
-  Write-Error "-MaxIterations must be a positive integer"
-  exit 2
+  Fail-WithError "-MaxIterations must be a positive integer"
 }
 
 # Verify puny binary exists (either in PATH or as a path).
 $punyCmd = Get-Command $PunyBin -ErrorAction SilentlyContinue
 if (-not $punyCmd -and -not (Test-Path -LiteralPath $PunyBin)) {
-  Write-Error "puny binary not found: $PunyBin (set -PunyBin or `$env:PUNY_BIN)"
-  exit 2
+  Fail-WithError "puny binary not found: $PunyBin (set -PunyBin or `$env:PUNY_BIN)"
 }
 
 # Verify git repository and branch preconditions (mirrors puny --review checks).
 try { $null = git rev-parse --show-toplevel 2>$null } catch {
-  Write-Error "not a git repository"
-  exit 2
+  Fail-WithError "not a git repository"
 }
 if ($LASTEXITCODE -ne 0) {
-  Write-Error "not a git repository"
-  exit 2
+  Fail-WithError "not a git repository"
 }
 
 $branch = (git symbolic-ref --quiet --short HEAD 2>$null)
 if (-not $branch) {
-  Write-Error "detached HEAD is not supported — checkout a feature branch"
-  exit 2
+  Fail-WithError "detached HEAD is not supported — checkout a feature branch"
 }
 if ($branch -eq "main") {
-  Write-Error "orchestration cannot run on main — checkout a feature branch"
-  exit 2
+  Fail-WithError "orchestration cannot run on main — checkout a feature branch"
 }
 
 $repoRoot = (git rev-parse --show-toplevel).Trim()
@@ -150,21 +148,26 @@ function Get-DirtyStatus {
 
 function Commit-IfDirty {
   param([string]$Message)
-  $status = Get-DirtyStatus
-  if (-not $status -or $status.Count -eq 0) {
+  $status = @(Get-DirtyStatus)
+  if ($status.Count -eq 0) {
     Write-Host "[orchestrate] worktree clean — nothing to commit"
     return $true
   }
   Write-Host "[orchestrate] committing dirty worktree..."
   $status | ForEach-Object { Write-Host "  $_" }
-  git add -A
+  # Stage everything except review-results.md (puny treats it as generated).
+  git add -A -- ':!review-results.md' 2>$null
   if ($LASTEXITCODE -ne 0) {
-    Write-Error "git add failed"
-    return $false
+    git add -A
+    if ($LASTEXITCODE -ne 0) {
+      [Console]::Error.WriteLine("error: git add failed")
+      return $false
+    }
+    git reset -q HEAD -- review-results.md 2>$null | Out-Null
   }
   git commit -m $Message
   if ($LASTEXITCODE -ne 0) {
-    Write-Error "git commit failed"
+    [Console]::Error.WriteLine("error: git commit failed")
     return $false
   }
   return $true
@@ -181,7 +184,7 @@ function Invoke-PunyImplement {
   Write-Host "[orchestrate] running: $PunyBin $($argsList -join ' ')"
   & $PunyBin @argsList
   if ($LASTEXITCODE -ne 0) {
-    Write-Error "puny implement step failed with exit code $LASTEXITCODE"
+    [Console]::Error.WriteLine("error: puny implement step failed with exit code $LASTEXITCODE")
     exit $LASTEXITCODE
   }
 }
@@ -191,7 +194,7 @@ function Invoke-PunyFix {
   Write-Host "[orchestrate] running fix: $PunyBin --prompt <fix> --oneshot"
   & $PunyBin --prompt $fixPrompt --oneshot
   if ($LASTEXITCODE -ne 0) {
-    Write-Error "puny fix step failed with exit code $LASTEXITCODE"
+    [Console]::Error.WriteLine("error: puny fix step failed with exit code $LASTEXITCODE")
     exit $LASTEXITCODE
   }
 }
