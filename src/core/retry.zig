@@ -83,6 +83,10 @@ test "isTransientError recognizes network and transport errors" {
     }
 }
 
+test "isTransientError treats HttpConnectionClosing as transient" {
+    try std.testing.expect(isTransientError(error.HttpConnectionClosing));
+}
+
 test "isTransientError rejects generic and archive errors" {
     try std.testing.expect(!isTransientError(error.Unexpected));
     try std.testing.expect(!isTransientError(error.SystemResources));
