@@ -328,7 +328,7 @@
         </div>
         <div class="install-card">
           <h3>Orchestrate: plan → implement → review loop</h3>
-          <p>Wrap <code>puny --prompt --oneshot</code> + <code>puny --review</code> into an autonomous loop (<code>scripts/orchestrate.sh</code> / <code>scripts/orchestrate.ps1</code>) that commits after each implement step and re-runs review until <code>MERGE WORTHY: YES</code> (exit 0) or <code>--max-iterations</code> is hit. Run on a feature branch with <code>origin/main</code> available.</p>
+          <p>Wrap <code>puny --prompt --oneshot</code> + <code>puny --review</code> into an autonomous loop (<code>scripts/orchestrate.sh</code> / <code>scripts/orchestrate.ps1</code>) that commits after each implement step and re-runs review until <code>MERGE WORTHY: YES</code> (exit 0) or <code>--max-iterations</code> is hit. Run on a feature branch with <code>origin/main</code> available. Planning mode is interactive — use <code>--plan</code> / <code>-Plan</code> to run <code>puny --prompt "/plan ..."</code> without <code>--oneshot</code>, wait until you exit puny, and have the generated <code>plan.md</code> copied to <code>./prd.md</code> for the implement step. Direct <code>--prompt "/plan ..."</code> with <code>--oneshot</code> exits after the first question and is not supported.</p>
           <div class="install-code">
             <code>./scripts/orchestrate.sh --prompt "Add CSV export"</code>
           </div>
@@ -336,7 +336,13 @@
             <code>./scripts/orchestrate.sh --prompt-file spec.md --max-iterations 3</code>
           </div>
           <div class="install-code">
+            <code>./scripts/orchestrate.sh --plan "Add CSV export with PRD"</code>
+          </div>
+          <div class="install-code">
             <code>.\scripts\orchestrate.ps1 -Prompt "Add CSV export"</code>
+          </div>
+          <div class="install-code">
+            <code>.\scripts\orchestrate.ps1 -Plan "Add CSV export with PRD"</code>
           </div>
           <p>Exit codes mirror <code>puny --review</code>: <code>0</code> merge worthy, <code>1</code> still rejected after max iterations, <code>2</code> operational failure. Pass <code>--no-auto-commit</code> / <code>-NoAutoCommit</code> to let the agent handle commits, and <code>--puny-bin</code> / <code>-PunyBin</code> or <code>$PUNY_BIN</code> to point at a custom binary.</p>
         </div>
