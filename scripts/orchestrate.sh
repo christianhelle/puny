@@ -287,19 +287,41 @@ run_planning_phase() {
   # Record existing plans and start time to avoid stale plan pickup and to bind to the new session
   local plan_before
   plan_before=$(mktemp)
-  # Capture existing plan.md files before planning (for session binding)
-  local base_before
-  base_before="$(puny_session_base)"
+  # Capture existing plan.md files before planning (for session binding) across all candidate bases
+  local base_primary
+  base_primary="$(puny_session_base)"
   if command -v cygpath >/dev/null 2>&1; then
-    base_before="$(cygpath -u "$base_before" 2>/dev/null || echo "$base_before")"
-  elif [[ "$base_before" == *":"* ]]; then
-    base_before="$(echo "$base_before" | sed -E 's/^([A-Za-z]):/\/mnt\/\L\1/' | tr '\\' '/')"
+    base_primary="$(cygpath -u "$base_primary" 2>/dev/null || echo "$base_primary")"
+  elif [[ "$base_primary" == *":"* ]]; then
+    base_primary="$(echo "$base_primary" | sed -E 's/^([A-Za-z]):/\/mnt\/\L\1/' | tr '\\' '/')"
   fi
-  if [[ -d "$base_before" ]]; then
-    find "$base_before" -name "plan.md" -type f -print0 2>/dev/null | tr '\0' '\n' | sort > "$plan_before" 2>/dev/null || true
-  else
-    : > "$plan_before"
+  local candidates_before=()
+  candidates_before+=("$base_primary")
+  if [[ -n "${USERPROFILE:-}" ]]; then
+    local alt1="$USERPROFILE/puny/sessions"
+    local alt2="$USERPROFILE/.config/puny/sessions"
+    if command -v cygpath >/dev/null 2>&1; then
+      alt1="$(cygpath -u "$alt1" 2>/dev/null || echo "$alt1")"
+      alt2="$(cygpath -u "$alt2" 2>/dev/null || echo "$alt2")"
+    elif [[ "$alt1" == *":"* ]]; then
+      alt1="$(echo "$alt1" | sed -E 's/^([A-Za-z]):/\/mnt\/\L\1/' | tr '\\' '/')"
+      alt2="$(echo "$alt2" | sed -E 's/^([A-Za-z]):/\/mnt\/\L\1/' | tr '\\' '/')"
+    fi
+    candidates_before+=("$alt1" "$alt2")
   fi
+  if [[ -n "${HOME:-}" ]]; then
+    candidates_before+=("$HOME/.config/puny/sessions")
+  fi
+  : > "$plan_before"
+  local cand
+  for cand in "${candidates_before[@]}"; do
+    if [[ -d "$cand" ]]; then
+      find "$cand" -name "plan.md" -type f -print0 2>/dev/null | tr '\0' '\n' >> "$plan_before" 2>/dev/null || true
+    fi
+  done
+  sort -u -o "$plan_before" "$plan_before" 2>/dev/null || true
+  # Keep base_before for backward compat (primary)
+  local base_before="$base_primary"
   PLANNING_START_TIME=$(date +%s)
   # Use a temporary prompt file to avoid OS command-line length limits (ARG_MAX)
   local tmp_prompt
@@ -323,49 +345,47 @@ run_planning_phase() {
   if [[ $ec -ne 0 ]]; then
     echo "[orchestrate] planning puny exited with code $ec (continuing to look for PRD)" >&2
   fi
-  local latest_plan
-  # First try to find a new plan.md that appeared during this planning session (session binding)
-  local new_plan=""
-  if [[ -d "$base_before" ]]; then
-    while IFS= read -r file; do
-      if ! grep -Fxq "$file" "$plan_before" 2>/dev/null; then
-        # Check if this new plan is newer than start time (avoid stale)
-        local mtime
-        if stat -c "%Y" "$file" >/dev/null 2>&1; then
-          mtime=$(stat -c "%Y" "$file")
-        else
-          mtime=$(stat -f "%m" "$file" 2>/dev/null || echo 0)
-        fi
-        if (( mtime >= PLANNING_START_TIME )); then
-          # Pick the newest among new ones
-          if [[ -z "$new_plan" ]]; then
-            new_plan="$file"
+  local latest_plan=""
+  # Collect new plan.md files that appeared during this planning invocation across all candidates (session binding)
+  local new_plans=()
+  local cand
+  for cand in "${candidates_before[@]}"; do
+    if [[ -d "$cand" ]]; then
+      while IFS= read -r -d '' file; do
+        if ! grep -Fxq "$file" "$plan_before" 2>/dev/null; then
+          local mtime
+          if stat -c "%Y" "$file" >/dev/null 2>&1; then
+            mtime=$(stat -c "%Y" "$file")
           else
-            local new_mtime cur_mtime
-            if stat -c "%Y" "$new_plan" >/dev/null 2>&1; then
-              cur_mtime=$(stat -c "%Y" "$new_plan")
-            else
-              cur_mtime=$(stat -f "%m" "$new_plan" 2>/dev/null || echo 0)
-            fi
-            if (( mtime > cur_mtime )); then
-              new_plan="$file"
+            mtime=$(stat -f "%m" "$file" 2>/dev/null || echo 0)
+          fi
+          if (( mtime >= PLANNING_START_TIME )); then
+            # Avoid duplicates from overlapping candidate paths
+            local dup=0
+            local existing
+            for existing in "${new_plans[@]}"; do
+              if [[ "$existing" == "$file" ]]; then dup=1; break; fi
+            done
+            if (( dup == 0 )); then
+              new_plans+=("$file")
             fi
           fi
         fi
-      fi
-    done < <(find "$base_before" -name "plan.md" -type f -print0 2>/dev/null | tr '\0' '\n' | sort)
-    # Fallback to find_latest_plan if no new session plan found (e.g., plan was overwritten in existing session)
-    if [[ -n "$new_plan" && -f "$new_plan" ]]; then
-      latest_plan="$new_plan"
-    else
-      latest_plan="$(find_latest_plan)"
+      done < <(find "$cand" -name "plan.md" -type f -print0 2>/dev/null)
     fi
+  done
+  if (( ${#new_plans[@]} == 1 )); then
+    latest_plan="${new_plans[0]}"
+  elif (( ${#new_plans[@]} > 1 )); then
+    echo "[orchestrate] warning: multiple new plans found without clear session binding, rejecting ambiguous candidates." >&2
+    printf '  %s\n' "${new_plans[@]}" >&2
+    latest_plan=""
   else
-    latest_plan="$(find_latest_plan)"
+    latest_plan=""
   fi
   if [[ -z "$latest_plan" || ! -f "$latest_plan" ]]; then
-    echo "[orchestrate] warning: no plan.md found in session store after planning." >&2
-    echo "[orchestrate] Checked: $(puny_session_base) (and fallbacks)" >&2
+    echo "[orchestrate] warning: no plan.md found in session store after planning (or no plan from the launched session)." >&2
+    echo "[orchestrate] Checked: $(puny_session_base) (and fallbacks) since $(date -d "@$PLANNING_START_TIME" 2>/dev/null || date -r "$PLANNING_START_TIME" 2>/dev/null || echo "$PLANNING_START_TIME")" >&2
     echo "[orchestrate] You can manually copy the PRD to $REPO_ROOT/prd.md and continue." >&2
     return 1
   fi

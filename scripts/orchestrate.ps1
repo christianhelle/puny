@@ -31,7 +31,7 @@
 .EXAMPLE
   ./scripts/orchestrate.ps1 -Prompt "Add CSV export to the report command"
   ./scripts/orchestrate.ps1 -PromptFile spec.md -MaxIterations 3
-  ./scripts/orchestrate.ps1 -Prompt "/plan Add CSV export"
+  ./scripts/orchestrate.ps1 -Plan "Add CSV export"
   $env:PUNY_BIN = "./zig-out/bin/puny.exe"; ./scripts/orchestrate.ps1 -Prompt "Fix typo"
 
   Run from the repository root on a feature branch (not main, not detached HEAD).
@@ -283,26 +283,26 @@ function Invoke-PlanningPhase {
   if ($ec -ne 0) {
     Write-Host "[orchestrate] planning puny exited with code $ec (continuing to look for PRD)" -ForegroundColor Yellow
   }
-  # Find latest plan that is new and newer than start time (session binding)
-  $latestPlan = $null
-  $latestTime = [DateTime]::MinValue
+  # Find latest plan that is new and belongs to the session launched by this invocation (session binding)
+  # Collect all new plan.md files that appeared during this planning invocation
+  $newPlans = @()
   foreach ($candidate in $candidatesBefore) {
     if (Test-Path $candidate) {
-      $plans = Get-ChildItem -Path $candidate -Recurse -Filter "plan.md" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notin $beforePlans -and $_.LastWriteTime -ge $planningStart } |
-        Sort-Object LastWriteTime -Descending
-      if ($plans) {
-        $candidateLatest = $plans | Select-Object -First 1
-        if ($candidateLatest.LastWriteTime -gt $latestTime) {
-          $latestTime = $candidateLatest.LastWriteTime
-          $latestPlan = $candidateLatest.FullName
-        }
-      }
+      $newPlans += Get-ChildItem -Path $candidate -Recurse -Filter "plan.md" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notin $beforePlans -and $_.LastWriteTime -ge $planningStart }
     }
   }
-  # Fallback to Find-LatestPlan with start-time filter if no new session plan found
-  if (-not $latestPlan) {
-    $latestPlan = Find-LatestPlan -Since $planningStart
+  # Deduplicate by FullName (candidates may overlap)
+  $newPlans = @($newPlans | Sort-Object FullName -Unique)
+  $latestPlan = $null
+  if ($newPlans.Count -eq 1) {
+    $latestPlan = $newPlans[0].FullName
+  } elseif ($newPlans.Count -gt 1) {
+    Write-Host "[orchestrate] warning: multiple new plans found without clear session binding, rejecting ambiguous candidates." -ForegroundColor Yellow
+    $newPlans | ForEach-Object { Write-Host "  $($_.FullName) ($($_.LastWriteTime))" -ForegroundColor Yellow }
+  } else {
+    # No new plan found – do not fallback to timestamp-only selection; reject ambiguous
+    $latestPlan = $null
   }
   if (-not $latestPlan -or -not (Test-Path $latestPlan)) {
     Write-Host "[orchestrate] warning: no plan.md found in session store after planning (or no plan newer than start time)." -ForegroundColor Yellow
