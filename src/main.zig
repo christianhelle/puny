@@ -153,6 +153,9 @@ fn run(init: std.process.Init) !u8 {
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
         const file = try std.Io.Dir.cwd().createFile(init.io, "puny_http_log.log", .{});
+        if (comptime @import("builtin").os.tag != .windows) {
+            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_http_log.log", @enumFromInt(0o600), .{}) catch {};
+        }
         debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
             .file = file,
@@ -819,3 +822,14 @@ test "test runner suppresses unexpected error stack traces" {
 test "include all module tests" {
     _ = @import("test_runner.zig");
 }
+
+test "http log file is hardened with 0600 permissions on posix" {
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(128 * 1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expect(std.mem.indexOf(u8, data, "puny_http_log.log") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "setFilePermissions") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "0o600") != null);
+    // ensure the http log path specifically is covered, not just chat log
+    try std.testing.expect(std.mem.indexOf(u8, data, "\"puny_http_log.log\", @enumFromInt(0o600)") != null);
+}
+
