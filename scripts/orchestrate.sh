@@ -153,11 +153,10 @@ REPORT_PATH="$REPO_ROOT/review-results.md"
 commit_if_dirty() {
   local msg="$1"
   # Exclude review-results.md from dirty check, matching puny's filter.
+  # Use exact-path filter only (avoid broad grep that would ignore docs/review-results.md).
   local status
-  status="$(git status --porcelain=v1 --untracked-files=all | grep -v " review-results.md" | grep -v "?? review-results.md" || true)"
-  # Fallback: also filter exact path match generically.
+  status="$(git status --porcelain=v1 --untracked-files=all || true)"
   if [[ -n "$status" ]]; then
-    # Re-filter more precisely: drop any line whose path is review-results.md
     status="$(echo "$status" | awk 'substr($0,4) != "review-results.md"' || true)"
   fi
   if [[ -z "${status//[[:space:]]/}" ]]; then
@@ -285,28 +284,85 @@ run_planning_phase() {
   echo "[orchestrate] Puny will run without --oneshot. Answer the planning questions."
   echo "[orchestrate] When the PRD is saved, exit puny (/quit or Ctrl+C) to continue to implement."
   echo "[orchestrate] The generated PRD will be copied to $REPO_ROOT/prd.md"
-  local plan_input=""
+  # Record existing plans and start time to avoid stale plan pickup and to bind to the new session
+  local plan_before
+  plan_before=$(mktemp)
+  # Capture existing plan.md files before planning (for session binding)
+  local base_before
+  base_before="$(puny_session_base)"
+  if command -v cygpath >/dev/null 2>&1; then
+    base_before="$(cygpath -u "$base_before" 2>/dev/null || echo "$base_before")"
+  elif [[ "$base_before" == *":"* ]]; then
+    base_before="$(echo "$base_before" | sed -E 's/^([A-Za-z]):/\/mnt\/\L\1/' | tr '\\' '/')"
+  fi
+  if [[ -d "$base_before" ]]; then
+    find "$base_before" -name "plan.md" -type f -print0 2>/dev/null | tr '\0' '\n' | sort > "$plan_before" 2>/dev/null || true
+  else
+    : > "$plan_before"
+  fi
+  PLANNING_START_TIME=$(date +%s)
+  # Use a temporary prompt file to avoid OS command-line length limits (ARG_MAX)
+  local tmp_prompt
+  tmp_prompt=$(mktemp)
+  # shellcheck disable=SC2064
+  trap 'rm -f "$tmp_prompt" "$plan_before"' RETURN
   if [[ -n "$PLAN_FILE" ]]; then
     if [[ ! -f "$PLAN_FILE" ]]; then
       die "plan file not found: $PLAN_FILE"
     fi
-    plan_input="$(cat "$PLAN_FILE")"
+    printf "/plan %s" "$(cat "$PLAN_FILE")" > "$tmp_prompt"
   else
-    plan_input="$PLAN_PROMPT"
+    printf "/plan %s" "$PLAN_PROMPT" > "$tmp_prompt"
   fi
-  # Record start time to avoid picking up stale plans from previous sessions
-  PLANNING_START_TIME=$(date +%s)
   # Run puny in planning mode without --oneshot, wait indefinitely until exit
   # shellcheck disable=SC2086
   set +e
-  "$PUNY_BIN" --prompt "/plan $plan_input" "${EXTRA_ARGS[@]}"
+  "$PUNY_BIN" --prompt-file "$tmp_prompt" "${EXTRA_ARGS[@]}"
   local ec=$?
   set -e
   if [[ $ec -ne 0 ]]; then
     echo "[orchestrate] planning puny exited with code $ec (continuing to look for PRD)" >&2
   fi
   local latest_plan
-  latest_plan="$(find_latest_plan)"
+  # First try to find a new plan.md that appeared during this planning session (session binding)
+  local new_plan=""
+  if [[ -d "$base_before" ]]; then
+    while IFS= read -r file; do
+      if ! grep -Fxq "$file" "$plan_before" 2>/dev/null; then
+        # Check if this new plan is newer than start time (avoid stale)
+        local mtime
+        if stat -c "%Y" "$file" >/dev/null 2>&1; then
+          mtime=$(stat -c "%Y" "$file")
+        else
+          mtime=$(stat -f "%m" "$file" 2>/dev/null || echo 0)
+        fi
+        if (( mtime >= PLANNING_START_TIME )); then
+          # Pick the newest among new ones
+          if [[ -z "$new_plan" ]]; then
+            new_plan="$file"
+          else
+            local new_mtime cur_mtime
+            if stat -c "%Y" "$new_plan" >/dev/null 2>&1; then
+              cur_mtime=$(stat -c "%Y" "$new_plan")
+            else
+              cur_mtime=$(stat -f "%m" "$new_plan" 2>/dev/null || echo 0)
+            fi
+            if (( mtime > cur_mtime )); then
+              new_plan="$file"
+            fi
+          fi
+        fi
+      fi
+    done < <(find "$base_before" -name "plan.md" -type f -print0 2>/dev/null | tr '\0' '\n' | sort)
+    # Fallback to find_latest_plan if no new session plan found (e.g., plan was overwritten in existing session)
+    if [[ -n "$new_plan" && -f "$new_plan" ]]; then
+      latest_plan="$new_plan"
+    else
+      latest_plan="$(find_latest_plan)"
+    fi
+  else
+    latest_plan="$(find_latest_plan)"
+  fi
   if [[ -z "$latest_plan" || ! -f "$latest_plan" ]]; then
     echo "[orchestrate] warning: no plan.md found in session store after planning." >&2
     echo "[orchestrate] Checked: $(puny_session_base) (and fallbacks)" >&2
