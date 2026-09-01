@@ -41,6 +41,8 @@
 param(
   [string]$Prompt = "",
   [string]$PromptFile = "",
+  [string]$Plan = "",
+  [string]$PlanFile = "",
   [int]$MaxIterations = 5,
   [switch]$NoAutoCommit,
   [string]$PunyBin = "",
@@ -58,6 +60,8 @@ Orchestrate an autonomous puny loop: implement -> review -> fix until merge wort
 
   -Prompt <text>       Initial task prompt (mutually exclusive with -PromptFile)
   -PromptFile <path>   Load initial prompt from a file (10 MiB limit)
+  -Plan <text>         Run an interactive planning phase before implement (mutually exclusive with -PlanFile)
+  -PlanFile <path>     Run an interactive planning phase from a file
   -MaxIterations <n>   Max review->fix cycles (default: 5)
   -NoAutoCommit        Do not auto-commit; rely on the agent to commit
   -PunyBin <bin>       Puny binary to invoke (default: puny, or `$env:PUNY_BIN)
@@ -66,8 +70,9 @@ Orchestrate an autonomous puny loop: implement -> review -> fix until merge wort
 Examples:
   ./scripts/orchestrate.ps1 -Prompt "Add CSV export to the report command"
   ./scripts/orchestrate.ps1 -PromptFile spec.md -MaxIterations 3
-  ./scripts/orchestrate.ps1 -Prompt "/plan Add CSV export"   # start with planning mode
-  `$env:PUNY_BIN="./zig-out/bin/puny.exe"; ./scripts/orchestrate.ps1 -Prompt "Fix typo"
+  ./scripts/orchestrate.ps1 -Plan "Add CSV export with PRD" -Prompt "Implement the PRD at ./prd.md"
+  ./scripts/orchestrate.ps1 -PlanFile spec.md
+  `$env:PUNY_BIN="./zig-out/bin/puny.exe"; ./scripts/orchestrate.ps1 -Prompt "Fix typo" -NoAutoCommit
 
 Notes:
   - Run from the repository root on a feature branch (not main, not detached HEAD).
@@ -75,6 +80,11 @@ Notes:
     puny --review (which reviews merge-base..HEAD) can see them.
   - Review report is written to review-results.md each iteration.
   - Exit code mirrors puny --review: 0=merge worthy, 1=rejected, 2=operational failure.
+  - Planning mode is interactive and cannot be used with -Prompt "/plan ..." + --oneshot.
+    The orchestrate planning phase runs `puny --prompt "/plan ..."` without --oneshot,
+    waits until you exit puny (/quit), then copies the generated plan.md from the
+    session store to ./prd.md in the repo. The next implement step can then use
+    -PromptFile ./prd.md or your original -Prompt.
 "@ | Write-Host
 }
 
@@ -96,11 +106,21 @@ function Fail-WithError {
 if ($Prompt -and $PromptFile) {
   Fail-WithError "cannot use both -Prompt and -PromptFile"
 }
-if (-not $Prompt -and -not $PromptFile) {
-  Fail-WithError "one of -Prompt or -PromptFile is required (see -Help)"
+if ($Plan -and $PlanFile) {
+  Fail-WithError "cannot use both -Plan and -PlanFile"
+}
+if (-not $Prompt -and -not $PromptFile -and -not $Plan -and -not $PlanFile) {
+  Fail-WithError "one of -Prompt, -PromptFile, -Plan, or -PlanFile is required (see -Help)"
 }
 if ($MaxIterations -lt 1) {
   Fail-WithError "-MaxIterations must be a positive integer"
+}
+
+# Planning mode is interactive and cannot be used with --oneshot. Warn if the user
+# tries to use -Prompt "/plan ..." which would exit after the first question.
+if ($Prompt -like "/plan*") {
+  Write-Host "warning: -Prompt `"/plan ...`" with --oneshot will exit after the first planning question." -ForegroundColor Yellow
+  Write-Host "         Use -Plan `"task`" for an interactive planning session that waits for the PRD to be saved." -ForegroundColor Yellow
 }
 
 # Verify puny binary exists (either in PATH or as a path).
@@ -133,6 +153,9 @@ Write-Host "[orchestrate] branch: $branch"
 Write-Host "[orchestrate] repo:   $repoRoot"
 Write-Host "[orchestrate] max iterations: $MaxIterations"
 Write-Host "[orchestrate] auto-commit:    $(if ($autoCommit) { 'yes' } else { 'no' })"
+if ($Plan -or $PlanFile) {
+  Write-Host "[orchestrate] planning requested: $(if ($PlanFile) { $PlanFile } else { $Plan })"
+}
 
 function Get-DirtyStatus {
   $raw = git status --porcelain=v1 --untracked-files=all 2>$null
@@ -173,6 +196,87 @@ function Commit-IfDirty {
   return $true
 }
 
+function Get-PunySessionBase {
+  if ($env:XDG_CONFIG_HOME) {
+    return Join-Path $env:XDG_CONFIG_HOME "puny/sessions"
+  } elseif ($env:APPDATA) {
+    return Join-Path $env:APPDATA "puny/sessions"
+  } elseif ($env:USERPROFILE) {
+    # Fallback for Windows when APPDATA not set
+    $p = Join-Path $env:USERPROFILE "puny/sessions"
+    if (Test-Path $p) { return $p }
+    return Join-Path $env:USERPROFILE ".config/puny/sessions"
+  } else {
+    return Join-Path $env:HOME ".config/puny/sessions"
+  }
+}
+
+function Find-LatestPlan {
+  $base = Get-PunySessionBase
+  # Also try alternative fallbacks
+  $candidates = @($base)
+  if ($env:USERPROFILE) {
+    $candidates += Join-Path $env:USERPROFILE "puny/sessions"
+    $candidates += Join-Path $env:USERPROFILE ".config/puny/sessions"
+  }
+  if ($env:HOME) {
+    $candidates += Join-Path $env:HOME ".config/puny/sessions"
+  }
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      $latest = Get-ChildItem -Path $candidate -Recurse -Filter "plan.md" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+      if ($latest) { return $latest.FullName }
+    }
+  }
+  return $null
+}
+
+function Invoke-PlanningPhase {
+  Write-Host "[orchestrate] Starting interactive planning phase..."
+  Write-Host "[orchestrate] Puny will run without --oneshot. Answer the planning questions."
+  Write-Host "[orchestrate] When the PRD is saved, exit puny (/quit or Ctrl+C) to continue to implement."
+  Write-Host "[orchestrate] The generated PRD will be copied to $repoRoot/prd.md"
+  $planInput = ""
+  if ($PlanFile) {
+    if (-not (Test-Path $PlanFile)) {
+      Fail-WithError "plan file not found: $PlanFile"
+    }
+    $planInput = Get-Content -Raw -LiteralPath $PlanFile
+  } else {
+    $planInput = $Plan
+  }
+  # Run puny in planning mode without --oneshot, wait indefinitely until exit
+  & $PunyBin --prompt "/plan $planInput"
+  $ec = $LASTEXITCODE
+  if ($ec -ne 0) {
+    Write-Host "[orchestrate] planning puny exited with code $ec (continuing to look for PRD)" -ForegroundColor Yellow
+  }
+  $latestPlan = Find-LatestPlan
+  if (-not $latestPlan -or -not (Test-Path $latestPlan)) {
+    Write-Host "[orchestrate] warning: no plan.md found in session store after planning." -ForegroundColor Yellow
+    Write-Host "[orchestrate] Checked: $(Get-PunySessionBase) (and fallbacks)" -ForegroundColor Yellow
+    Write-Host "[orchestrate] You can manually copy the PRD to $repoRoot/prd.md and continue." -ForegroundColor Yellow
+    return $false
+  }
+  Write-Host "[orchestrate] Found plan: $latestPlan"
+  Copy-Item -LiteralPath $latestPlan -Destination (Join-Path $repoRoot "prd.md") -Force
+  Write-Host "[orchestrate] Copied PRD to $(Join-Path $repoRoot "prd.md")"
+  $latestHtml = [System.IO.Path]::ChangeExtension($latestPlan, ".html")
+  # Actually plan.html is sibling with same base name but .html
+  $latestHtml = Join-Path (Split-Path $latestPlan) "plan.html"
+  if (Test-Path $latestHtml) {
+    Copy-Item -LiteralPath $latestHtml -Destination (Join-Path $repoRoot "prd.html") -Force
+    Write-Host "[orchestrate] Copied HTML to $(Join-Path $repoRoot "prd.html")"
+  }
+  if (-not $Prompt -and -not $PromptFile) {
+    $script:PromptFile = Join-Path $repoRoot "prd.md"
+    Write-Host "[orchestrate] Using generated prd.md for implement phase"
+  }
+  return $true
+}
+
 function Invoke-PunyImplement {
   $argsList = @()
   if ($PromptFile) {
@@ -205,8 +309,28 @@ function Invoke-Review {
   return $LASTEXITCODE
 }
 
-# Phase 1: initial implement (plan -> implement). If the prompt starts with /plan,
-# puny will enter planning mode and attempt to save plan.md in one turn.
+# Phase 0: interactive planning (optional, runs without --oneshot and waits)
+# Planning mode uses an interactive interview and cannot be used with --oneshot.
+# This phase runs `puny --prompt "/plan ..."` without --oneshot, waits indefinitely
+# until you exit puny, then copies the generated plan.md from the session store
+# to $repoRoot/prd.md for the implement step.
+if ($Plan -or $PlanFile) {
+  $planningOk = Invoke-PlanningPhase
+  if (-not $planningOk) {
+    Write-Host "[orchestrate] planning phase did not produce a PRD, continuing..." -ForegroundColor Yellow
+  }
+  if (-not $Prompt -and -not $PromptFile) {
+    if (-not (Test-Path (Join-Path $repoRoot "prd.md"))) {
+      Fail-WithError "no implement prompt available and no prd.md was generated (provide -Prompt/-PromptFile or ensure planning saved a PRD)"
+    }
+  }
+}
+
+if (-not $Prompt -and -not $PromptFile) {
+  Fail-WithError "no implement prompt available (provide -Prompt/-PromptFile or use -Plan to generate prd.md)"
+}
+
+# Phase 1: initial implement
 Invoke-PunyImplement
 if ($autoCommit) {
   if (-not (Commit-IfDirty -Message "puny orchestrate: implement initial prompt")) {
