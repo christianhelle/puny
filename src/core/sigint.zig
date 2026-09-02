@@ -11,6 +11,13 @@ pub fn trigger() void {
     @atomicStore(bool, &triggered, true, .monotonic);
 }
 
+/// Clears a delivered interrupt so the caller can absorb it instead of letting
+/// the chat loop tear the session down on its next pass. Only the orchestrate
+/// abort path uses this: it stops an interactive run and returns to the prompt.
+pub fn clear() void {
+    @atomicStore(bool, &triggered, false, .monotonic);
+}
+
 pub fn register() !void {
     if (builtin.os.tag == .windows) {
         return registerWindows();
@@ -78,4 +85,13 @@ test "register installs a SIGINT handler that sets the flag" {
     } else {
         return error.SkipZigTest;
     }
+}
+
+test "clear resets a delivered interrupt" {
+    triggered = false;
+    defer triggered = false;
+    trigger();
+    try std.testing.expect(isTriggered());
+    clear();
+    try std.testing.expect(!isTriggered());
 }
