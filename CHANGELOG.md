@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Move the orchestrate loop into the binary ([#183](https://github.com/christianhelle/puny/pull/183)) ([@christianhelle](https://github.com/christianhelle/))
 - Handle HttpConnectionClosing as transient error ([#182](https://github.com/christianhelle/puny/pull/182)) ([@christianhelle](https://github.com/christianhelle/))
 - Add external orchestrate scripts with interactive planning phase ([#180](https://github.com/christianhelle/puny/pull/180)) ([@christianhelle](https://github.com/christianhelle/))
 - Always enable HTTP logging for debug builds ([#181](https://github.com/christianhelle/puny/pull/181)) ([@christianhelle](https://github.com/christianhelle/))
