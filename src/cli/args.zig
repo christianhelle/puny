@@ -233,7 +233,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -1, --oneshot, --one-shot    Exit after processing the prompt (requires --prompt or --prompt-file)
         \\      --review                 Review the current branch against the latest origin/main and exit
         \\      --orchestrate           Implement, review, and fix the current branch until merge worthy
-        \\      --max-iterations <n>    Maximum review to fix cycles for --orchestrate (default 5)
+        \\      --max-iterations <n>    Maximum review iterations for --orchestrate; a fix runs between reviews (default 5)
         \\  -M, --mock                   Use mock provider (no network calls, for testing)
         \\      --reconfigure            Re-run first-run setup and update config
         \\      --show-thinking          Show reasoning/thinking output from the model
