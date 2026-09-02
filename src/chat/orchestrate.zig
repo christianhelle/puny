@@ -209,6 +209,19 @@ pub fn autoCommit(
         );
     }
 
+    // `git status` can report entries that stage to nothing: a submodule with
+    // dirty content only, or a file whose change is normalized away (e.g. CRLF
+    // via .gitattributes). Committing then fails, so treat an empty index as
+    // "nothing left to sweep" rather than a phase failure.
+    const staged = try branch_review.runGit(
+        allocator,
+        io,
+        repo_root,
+        &.{ "diff", "--cached", "--quiet" },
+        30 * std.time.ns_per_s,
+    );
+    if (staged == .ok) return;
+
     const commit = try branch_review.runGit(
         allocator,
         io,
