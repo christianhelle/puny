@@ -23,7 +23,6 @@ const resolver = @import("../providers/resolver.zig");
 const instructions = @import("../agents/instructions.zig");
 const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
-const tools = @import("../tools/root.zig");
 const branch_review = @import("../review/review.zig");
 const orchestrate = @import("orchestrate.zig");
 const help = @import("../tui/help.zig");
