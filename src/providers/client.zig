@@ -266,23 +266,6 @@ pub fn requestRawWithContentType(client: *Client, method: std.http.Method, url: 
     };
 }
 
-pub fn getRaw(client: *Client, path: []const u8) !RawResponse {
-    const url = try std.fmt.allocPrint(client.allocator, "{s}{s}", .{ client.base_url, path });
-    defer client.allocator.free(url);
-    return requestRaw(client, .GET, url, null);
-}
-
-pub fn postJsonRaw(client: *Client, path: []const u8, payload: anytype) !RawResponse {
-    const allocator = client.allocator;
-    var str: std.Io.Writer.Allocating = .init(allocator);
-    defer str.deinit();
-    try std.json.Stringify.value(payload, .{ .emit_null_optional_fields = false }, &str.writer);
-
-    const url = try std.fmt.allocPrint(allocator, "{s}{s}", .{ client.base_url, path });
-    defer allocator.free(url);
-    return requestRaw(client, .POST, url, str.written());
-}
-
 pub fn parseRawResponse(comptime T: type, raw: RawResponse) !ApiResult(T) {
     if (raw.status.class() != .success) return .{ .api_error = raw };
     const parsed = std.json.parseFromSlice(T, raw.allocator, raw.body, .{ .ignore_unknown_fields = true }) catch |err| {
@@ -987,31 +970,6 @@ test "requestRaw returns the raw body for a non-success status" {
 
     try std.testing.expectEqual(.internal_server_error, raw.status);
     try std.testing.expectEqualStrings("boom", raw.body);
-}
-
-test "getRaw and postJsonRaw build URLs from the base url" {
-    const ctx = try startHttpTestServer(.ok, "pong");
-    defer stopHttpTestServer(ctx);
-
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-
-    var c = try clientForTestServer(ctx, arena, "");
-    defer c.deinit();
-
-    var raw = try getRaw(&c, "/models");
-    defer raw.deinit();
-    try std.testing.expectEqualStrings("pong", raw.body);
-
-    const ctx2 = try startHttpTestServer(.ok, "pong");
-    defer stopHttpTestServer(ctx2);
-    var c2 = try clientForTestServer(ctx2, arena, "");
-    defer c2.deinit();
-
-    var post_raw = try postJsonRaw(&c2, "/models", .{ .name = "x" });
-    defer post_raw.deinit();
-    try std.testing.expectEqualStrings("pong", post_raw.body);
 }
 
 test "requestRaw notifies the http observer" {
