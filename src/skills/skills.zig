@@ -130,12 +130,6 @@ pub const Registry = struct {
         self.fully_scanned = true;
     }
 
-    pub fn findTriggeredSkill(self: *Registry, text: []const u8) ?[]const u8 {
-        for (self.records.items) |r| {
-            if (recordMatchesTrigger(&r, text)) return r.name;
-        }
-        return null;
-    }
 };
 
 pub fn homeDir(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) !?[]const u8 {
@@ -537,96 +531,6 @@ test "fullScan populates disable_model_invocation from frontmatter" {
 
     const record = registry.findByName("manual-skill").?;
     try std.testing.expect(record.disable_model_invocation);
-}
-
-test "findTriggeredSkill matches directory name" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.createDir(std.testing.io, "grill-me", .default_dir);
-    try tmp.dir.createDir(std.testing.io, "other-skill", .default_dir);
-
-    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
-    defer std.testing.allocator.free(base_path);
-
-    var registry = Registry.init(std.testing.allocator);
-    defer registry.deinit();
-    try registry.lightScan(std.testing.io, base_path);
-
-    const matched = registry.findTriggeredSkill("can you grill me on this");
-    try std.testing.expect(matched != null);
-    try std.testing.expectEqualStrings("grill-me", matched.?);
-}
-
-test "findTriggeredSkill matches trigger phrase" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.createDir(std.testing.io, "my-skill", .default_dir);
-    const content = "---\nname: my-skill\ndescription: Does stuff\ntriggers: do the thing, run it\n---\nbody";
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "my-skill/SKILL.md", .data = content });
-
-    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
-    defer std.testing.allocator.free(base_path);
-
-    var registry = Registry.init(std.testing.allocator);
-    defer registry.deinit();
-    try registry.lightScan(std.testing.io, base_path);
-    try registry.fullScan(std.testing.io);
-
-    const matched = registry.findTriggeredSkill("please do the thing now");
-    try std.testing.expect(matched != null);
-    try std.testing.expectEqualStrings("my-skill", matched.?);
-}
-
-test "findTriggeredSkill skips disabled skills" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.createDir(std.testing.io, "manual-skill", .default_dir);
-    const content = "---\nname: manual-skill\ndescription: Manual\ndisable-model-invocation: true\n---\nbody";
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "manual-skill/SKILL.md", .data = content });
-
-    try tmp.dir.createDir(std.testing.io, "auto-skill", .default_dir);
-    const content2 = "---\nname: auto-skill\ndescription: Auto\n---\nbody";
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "auto-skill/SKILL.md", .data = content2 });
-
-    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
-    defer std.testing.allocator.free(base_path);
-
-    var registry = Registry.init(std.testing.allocator);
-    defer registry.deinit();
-    try registry.lightScan(std.testing.io, base_path);
-    try registry.fullScan(std.testing.io);
-
-    const matched = registry.findTriggeredSkill("please use auto-skill");
-    try std.testing.expect(matched != null);
-    try std.testing.expectEqualStrings("auto-skill", matched.?);
-}
-
-test "findTriggeredSkill returns null when no match" {
-    var registry = Registry.init(std.testing.allocator);
-    defer registry.deinit();
-
-    const matched = registry.findTriggeredSkill("hello world");
-    try std.testing.expect(matched == null);
-}
-
-test "findTriggeredSkill matches a hyphenated directory name in prose" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.createDir(std.testing.io, "write-a-skill", .default_dir);
-    const base_path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
-    defer std.testing.allocator.free(base_path);
-
-    var registry = Registry.init(std.testing.allocator);
-    defer registry.deinit();
-    try registry.lightScan(std.testing.io, base_path);
-
-    const matched = registry.findTriggeredSkill("help me write a skill");
-    try std.testing.expect(matched != null);
-    try std.testing.expectEqualStrings("write-a-skill", matched.?);
 }
 
 test "recordMatchesTrigger matches whole words only" {
