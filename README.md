@@ -363,7 +363,7 @@ compute `merge-base(origin/main, HEAD)..HEAD`.
 | Flag | Meaning |
 | ---- | ------- |
 | `--orchestrate` | Run the loop headlessly and exit with the review's code (requires `--prompt` or `--prompt-file`) |
-| `--max-iterations <n>` | Maximum review → fix cycles (default `5`) |
+| `--max-iterations <n>` | Maximum review iterations; a fix runs between reviews, not after the last one (default `5`) |
 | `/orchestrate [task]` | Run the loop in a chat session; with no task, implement the session's `plan.md` |
 | `/orchestrate --plan <task>` | Plan interactively first, then start the loop when the PRD is saved |
 | `/orchestrate --iterations <n>` | Per-run iteration cap (alias `--max-iterations`) |
@@ -657,7 +657,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                              |
 | `--review`               | Review the current branch against the latest `origin/main`, write `review-results.md`, and exit       |
 | `--orchestrate`          | Implement, review, and fix the current branch until merge worthy, then exit (requires `--prompt` or `--prompt-file`) |
-| `--max-iterations <n>`   | Maximum review to fix cycles for `--orchestrate` (default `5`)                                        |
+| `--max-iterations <n>`   | Maximum review iterations for `--orchestrate`; a fix runs between reviews, not after the last one (default `5`) |
 | `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
 | `--reconfigure`         | Re-run first-run setup and update config                                                  |
 | `--show-thinking`       | Show reasoning/thinking output from the model                                             |
