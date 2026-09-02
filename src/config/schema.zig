@@ -44,20 +44,24 @@ pub const PromptsConfig = struct {
     system: PromptOverride = .{},
     planning: PromptOverride = .{},
     review: PromptOverride = .{},
+    orchestrate: PromptOverride = .{},
 
     pub fn clone(self: PromptsConfig, allocator: std.mem.Allocator) std.mem.Allocator.Error!PromptsConfig {
         var system = try self.system.clone(allocator);
         errdefer system.deinit(allocator);
         var planning = try self.planning.clone(allocator);
         errdefer planning.deinit(allocator);
-        const review = try self.review.clone(allocator);
-        return .{ .system = system, .planning = planning, .review = review };
+        var review = try self.review.clone(allocator);
+        errdefer review.deinit(allocator);
+        const orchestrate = try self.orchestrate.clone(allocator);
+        return .{ .system = system, .planning = planning, .review = review, .orchestrate = orchestrate };
     }
 
     pub fn deinit(self: *PromptsConfig, allocator: std.mem.Allocator) void {
         self.system.deinit(allocator);
         self.planning.deinit(allocator);
         self.review.deinit(allocator);
+        self.orchestrate.deinit(allocator);
     }
 };
 
@@ -233,6 +237,7 @@ pub const Config = struct {
             .system => .{ self.prompts.system.override, self.prompts.system.prefix, self.prompts.system.suffix },
             .planning => .{ self.prompts.planning.override, self.prompts.planning.prefix, self.prompts.planning.suffix },
             .review => .{ self.prompts.review.override, self.prompts.review.prefix, self.prompts.review.suffix },
+            .orchestrate => .{ self.prompts.orchestrate.override, self.prompts.orchestrate.prefix, self.prompts.orchestrate.suffix },
         };
         if (override) |value| return allocator.dupe(u8, value);
         if (prefix.len == 0 and suffix.len == 0) return allocator.dupe(u8, default_prompt);
