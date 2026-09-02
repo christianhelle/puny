@@ -1,8 +1,8 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
 
-const command_column_width = 18;
-const command_padding = "                  "[0..command_column_width];
+const command_column_width = 20;
+const command_padding = "                    "[0..command_column_width];
 
 pub fn showHelp(writer: *std.Io.Writer) !void {
     try writer.print("\n\n{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
