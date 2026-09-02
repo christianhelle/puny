@@ -129,7 +129,6 @@ pub const Registry = struct {
         }
         self.fully_scanned = true;
     }
-
 };
 
 pub fn homeDir(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) !?[]const u8 {
