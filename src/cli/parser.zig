@@ -8,6 +8,7 @@ pub const Command = union(enum) {
     plan: ?[]const u8,
     build: ?[]const u8,
     review,
+    orchestrate: ?[]const u8,
     model: ?[]const u8,
     provider: ?[]const u8,
     thinking: ?[]const u8,
@@ -33,6 +34,7 @@ pub const command_tokens = [_][]const u8{
     "/plan",
     "/build",
     "/review",
+    "/orchestrate",
     "/model",
     "/provider",
     "/thinking",
@@ -95,6 +97,19 @@ pub fn parse(user_message: []const u8) Command {
 
     if (eqlIgnoreCase(user_message, "/review") or eqlIgnoreCase(user_message, ":review"))
         return .review;
+
+    if (eqlIgnoreCase(user_message, "/orchestrate") or std.mem.startsWith(u8, user_message, "/orchestrate ")) {
+        if (user_message.len > "/orchestrate ".len) {
+            return .{ .orchestrate = user_message["/orchestrate ".len..] };
+        }
+        return .{ .orchestrate = null };
+    }
+    if (eqlIgnoreCase(user_message, ":orchestrate") or std.mem.startsWith(u8, user_message, ":orchestrate ")) {
+        if (user_message.len > ":orchestrate ".len) {
+            return .{ .orchestrate = user_message[":orchestrate ".len..] };
+        }
+        return .{ .orchestrate = null };
+    }
 
     if (eqlIgnoreCase(user_message, "/model") or std.mem.startsWith(u8, user_message, "/model ")) {
         if (user_message.len > "/model ".len) {
@@ -200,6 +215,9 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqualDeep(Command{ .build = "code it" }, parse("/build code it"));
     try std.testing.expectEqualDeep(Command.review, parse("/review"));
 
+    try std.testing.expectEqualDeep(Command{ .orchestrate = null }, parse("/orchestrate"));
+    try std.testing.expectEqualDeep(Command{ .orchestrate = "add csv export" }, parse("/orchestrate add csv export"));
+
     try std.testing.expectEqualDeep(Command{ .model = null }, parse("/model"));
     try std.testing.expectEqualDeep(Command{ .model = "llama" }, parse("/model llama"));
 
@@ -215,6 +233,12 @@ test "parse recognizes all slash commands" {
     try std.testing.expectEqualDeep(Command{ .skill = "nano-commits" }, parse("/nano-commits"));
 
     try std.testing.expectEqualDeep(Command{ .prompt = "hello" }, parse("hello"));
+}
+
+test "parse recognizes the orchestrate command before the skill fallback" {
+    try std.testing.expectEqualDeep(Command{ .orchestrate = null }, parse(":orchestrate"));
+    try std.testing.expectEqualDeep(Command{ .orchestrate = "--iterations 3 tidy up" }, parse(":orchestrate --iterations 3 tidy up"));
+    try std.testing.expect(parse("/orchestrate") != .skill);
 }
 
 test "parse recognizes the file command before the skill fallback" {
