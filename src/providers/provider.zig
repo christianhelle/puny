@@ -154,9 +154,7 @@ fn chatStreamingCopilotCaptured(c: *copilot.Client, request: openai.ChatRequest,
 
 /// Streams through the hand-written OpenAI-compatible transport. This
 /// intentionally routes LM Studio, OpenCode Zen/Go via the OpenAI-compatible
-/// `/v1/chat/completions` endpoint (the native LM Studio `/api/v1/chat`
-/// uses a distinct `reasoning` enum; see `adapter.lmStudioReasoningFromEffort`
-/// for the native mapping, which is unused on this path).
+/// `/v1/chat/completions` endpoint.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     return openai.chatStreaming(c, request, callback);
 }
