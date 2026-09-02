@@ -25,21 +25,6 @@ pub fn matches(query: []const u8, path: []const u8) bool {
     return false;
 }
 
-/// Returns only the paths from `files` that match `query`. The returned slice
-/// aliases the entries of `files` (no copies are made of the path strings).
-pub fn filterFiles(
-    allocator: std.mem.Allocator,
-    files: []const []const u8,
-    query: []const u8,
-) ![][]const u8 {
-    var result: std.ArrayList([]const u8) = .empty;
-    errdefer result.deinit(allocator);
-    for (files) |path| {
-        if (matches(query, path)) try result.append(allocator, path);
-    }
-    return result.toOwnedSlice(allocator);
-}
-
 /// True when a directory should not be descended into while collecting files:
 /// hidden dot-directories plus common build/dependency folders.
 fn isIgnoredDir(name: []const u8) bool {
@@ -473,21 +458,6 @@ test "matches returns false when the query is absent" {
 
 test "matches returns false when the query is longer than the path" {
     try std.testing.expect(!matches("src/tui/file_picker.zig/extra", "src/tui/file_picker.zig"));
-}
-
-test "filterFiles keeps only matching paths" {
-    const files = [_][]const u8{ "src/main.zig", "src/tui/input.zig", "tests/main_test.zig" };
-    const result = try filterFiles(std.testing.allocator, &files, "tui");
-    defer std.testing.allocator.free(result);
-    try std.testing.expectEqual(@as(usize, 1), result.len);
-    try std.testing.expectEqualStrings("src/tui/input.zig", result[0]);
-}
-
-test "filterFiles returns everything for an empty query" {
-    const files = [_][]const u8{ "a.zig", "b.zig", "c.zig" };
-    const result = try filterFiles(std.testing.allocator, &files, "");
-    defer std.testing.allocator.free(result);
-    try std.testing.expectEqual(@as(usize, 3), result.len);
 }
 
 test "normalizePath strips a leading ./ prefix" {
