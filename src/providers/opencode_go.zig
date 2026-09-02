@@ -1,6 +1,5 @@
 const std = @import("std");
 const http_client = @import("client.zig");
-const openai = @import("openai.zig");
 const opencode = @import("opencode_zen.zig");
 
 pub const default_base_url = "https://opencode.ai/zen/go";
