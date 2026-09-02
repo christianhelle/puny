@@ -1,5 +1,4 @@
 const std = @import("std");
-const ansi = @import("../tui/ansi.zig");
 const cancel = @import("../core/cancel.zig");
 const openai = @import("../providers/openai.zig");
 const http_client = @import("../providers/client.zig");
