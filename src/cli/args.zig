@@ -1,6 +1,8 @@
 const std = @import("std");
 const version = @import("../version.zig");
 
+pub const default_max_iterations: usize = 5;
+
 pub const Options = struct {
     provider: ?[]const u8 = null,
     url: ?[]const u8 = null,
@@ -12,6 +14,8 @@ pub const Options = struct {
     prompt_file: ?[]const u8 = null,
     oneshot: bool = false,
     review: bool = false,
+    orchestrate: bool = false,
+    max_iterations: usize = default_max_iterations,
     mock: bool = false,
     reconfigure: bool = false,
     debug: bool = false,
@@ -53,8 +57,23 @@ pub fn validate(opts: Options) !void {
     if (opts.prompt != null and opts.prompt_file != null) {
         return error.ConflictingPrompts;
     }
-    if (opts.oneshot and !opts.review and opts.prompt == null and opts.prompt_file == null) {
+    if (opts.oneshot and !opts.review and !opts.orchestrate and opts.prompt == null and opts.prompt_file == null) {
         return error.OneshotRequiresPrompt;
+    }
+    if (opts.orchestrate and opts.review) {
+        return error.OrchestrateConflictsReview;
+    }
+    if (opts.orchestrate and (opts.session != null or opts.do_resume or opts.prune)) {
+        return error.OrchestrateConflictsSession;
+    }
+    if (opts.orchestrate and (opts.upgrade or opts.force_upgrade)) {
+        return error.OrchestrateConflictsOperation;
+    }
+    if (opts.orchestrate and opts.prompt == null and opts.prompt_file == null) {
+        return error.OrchestrateRequiresPrompt;
+    }
+    if (opts.max_iterations == 0) {
+        return error.InvalidMaxIterations;
     }
 }
 
@@ -97,6 +116,14 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         } else if (std.mem.eql(u8, arg, "--review")) {
             opts.review = true;
             opts.oneshot = true;
+        } else if (std.mem.eql(u8, arg, "--orchestrate")) {
+            opts.orchestrate = true;
+            opts.oneshot = true;
+        } else if (std.mem.eql(u8, arg, "--max-iterations")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.max_iterations = std.fmt.parseInt(usize, args[i], 10) catch
+                fatal(io, "Invalid value for --max-iterations: {s}\n\n", .{args[i]});
         } else if (std.mem.eql(u8, arg, "--prompt") or std.mem.eql(u8, arg, "-p")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -138,6 +165,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         error.ReviewConflictsOperation => fatal(io, "--review cannot be combined with upgrade options\n\n", .{}),
         error.ConflictingPrompts => fatal(io, "Cannot use both --prompt and --prompt-file\n\n", .{}),
         error.OneshotRequiresPrompt => fatal(io, "--oneshot requires --prompt or --prompt-file\n\n", .{}),
+        error.OrchestrateRequiresPrompt => fatal(io, "--orchestrate requires --prompt or --prompt-file\n\n", .{}),
+        error.OrchestrateConflictsReview => fatal(io, "--orchestrate cannot be combined with --review\n\n", .{}),
+        error.OrchestrateConflictsSession => fatal(io, "--orchestrate cannot be combined with session or prune options\n\n", .{}),
+        error.OrchestrateConflictsOperation => fatal(io, "--orchestrate cannot be combined with upgrade options\n\n", .{}),
+        error.InvalidMaxIterations => fatal(io, "--max-iterations must be greater than zero\n\n", .{}),
     };
 
     if (opts.provider == null) {
@@ -200,6 +232,8 @@ pub fn printHelp(io: std.Io) void {
         \\      --prompt-file <path|url> Read first prompt from a file or URL
         \\  -1, --oneshot, --one-shot    Exit after processing the prompt (requires --prompt or --prompt-file)
         \\      --review                 Review the current branch against the latest origin/main and exit
+        \\      --orchestrate           Implement, review, and fix the current branch until merge worthy
+        \\      --max-iterations <n>    Maximum review to fix cycles for --orchestrate (default 5)
         \\  -M, --mock                   Use mock provider (no network calls, for testing)
         \\      --reconfigure            Re-run first-run setup and update config
         \\      --show-thinking          Show reasoning/thinking output from the model
