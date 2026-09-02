@@ -418,6 +418,12 @@ fn run(init: std.process.Init) !u8 {
         const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
         return outcome.exitCode();
     }
+    if (parsed.orchestrate) {
+        // An orchestrate run that never reached a verdict is an operational
+        // failure, the same as a review that could not start.
+        const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
+        return outcome.exitCode();
+    }
     if (parsed.oneshot) {
         if (review_outcome) |outcome| return outcome.exitCode();
     }
