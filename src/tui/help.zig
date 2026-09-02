@@ -2,7 +2,7 @@ const std = @import("std");
 const ansi = @import("ansi.zig");
 
 const command_column_width = 20;
-const command_padding = "                    "[0..command_column_width];
+const command_padding = [_]u8{' '} ** command_column_width;
 
 pub fn showHelp(writer: *std.Io.Writer) !void {
     try writer.print("\n\n{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
@@ -66,21 +66,21 @@ test "printCommand pads short command names to the column width" {
     defer output.deinit();
 
     try printCommand(&output.writer, "/stats", "Show session statistics");
-    // "/stats" (6 chars) padded with 12 spaces to reach the 18-column width.
-    try std.testing.expectEqualStrings("  \x1b[32m/stats\x1b[0m             Show session statistics\n", output.written());
+    // "/stats" (6 chars) padded with 14 spaces to reach the 20-column width.
+    try std.testing.expectEqualStrings("  \x1b[32m/stats\x1b[0m               Show session statistics\n", output.written());
 }
 
-test "printCommand does not pad an exactly 18-byte command name" {
+test "printCommand does not pad an exactly 20-byte command name" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    // "/provider [name]xy" is exactly command_column_width bytes; no padding
+    // "/provider [name]xyzz" is exactly command_column_width bytes; no padding
     // may appear before the description.
-    try printCommand(&output.writer, "/provider [name]xy", "Desc");
-    try std.testing.expectEqualStrings("  \x1b[32m/provider [name]xy\x1b[0m Desc\n", output.written());
+    try printCommand(&output.writer, "/provider [name]xyzz", "Desc");
+    try std.testing.expectEqualStrings("  \x1b[32m/provider [name]xyzz\x1b[0m Desc\n", output.written());
 }
 
 test "printCommand does not pad long command names" {
