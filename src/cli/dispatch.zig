@@ -27,6 +27,7 @@ pub const Action = union(enum) {
     load_skill: []const u8,
     load_prompt_file: []const u8,
     begin_review,
+    begin_orchestrate: []const u8,
     help,
 };
 
@@ -93,6 +94,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         },
 
         .review => return .begin_review,
+        .orchestrate => |text| return .{ .begin_orchestrate = text orelse "" },
 
         .model => |model_id| {
             if (ctx.oneshot) {
@@ -871,4 +873,54 @@ test "dispatch review requests review preparation without changing mode" {
 
     try std.testing.expectEqual(Action.begin_review, action);
     try std.testing.expectEqual(.build, mode);
+}
+
+test "dispatch orchestrate carries the argument text without changing mode" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+
+    const action = try dispatch(Command{ .orchestrate = "--iterations 3 add csv export" }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .begin_orchestrate = "--iterations 3 add csv export" }, action);
+    try std.testing.expectEqual(.build, mode);
+    try std.testing.expectEqual(@as(usize, 0), messages.items.len);
+}
+
+test "dispatch orchestrate without text yields an empty spec" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+
+    const action = try dispatch(Command{ .orchestrate = null }, .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    });
+
+    try std.testing.expectEqualDeep(Action{ .begin_orchestrate = "" }, action);
 }
