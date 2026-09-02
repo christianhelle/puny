@@ -99,14 +99,6 @@ pub const OpenAiAccumulator = struct {
         return chars;
     }
 
-    pub fn assistantContent(self: *const @This()) ?openai.AssistantContent {
-        if (self.content.items.len == 0 and !self.hasToolCalls()) return null;
-        return .{
-            .content = if (self.content.items.len > 0) self.content.items else null,
-            .tool_calls = if (self.tool_calls.items.len > 0) self.tool_calls.items else null,
-        };
-    }
-
     pub fn cloneAssistantContent(self: *const @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!?openai.AssistantContent {
         if (self.content.items.len == 0 and !self.hasToolCalls()) return null;
         const content = if (self.content.items.len > 0)
@@ -512,32 +504,6 @@ test "OpenAiAccumulator records usage events" {
     try std.testing.expect(acc.usage != null);
     try std.testing.expectEqual(@as(i64, 10), acc.usage.?.input_tokens);
     try std.testing.expectEqual(@as(i64, 5), acc.usage.?.output_tokens);
-}
-
-test "OpenAiAccumulator assistantContent reflects content and tool calls" {
-    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
-    defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
-
-    var empty = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
-    defer empty.deinit();
-    try std.testing.expect(empty.assistantContent() == null);
-
-    var content_only = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
-    defer content_only.deinit();
-    try content_only.onEvent(.{ .content = "hi" });
-    const with_content = content_only.assistantContent().?;
-    try std.testing.expect(with_content.content != null);
-    try std.testing.expect(with_content.tool_calls == null);
-
-    var tools_only = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
-    defer tools_only.deinit();
-    try tools_only.onEvent(.{ .tool_call_start = .{ .index = 0, .id = "call_1", .name = "read_file" } });
-    try tools_only.onEvent(.{ .tool_call_delta = .{ .index = 0, .arguments = "{}" } });
-    try tools_only.onEvent(.{ .finish = "tool_calls" });
-    const with_tools = tools_only.assistantContent().?;
-    try std.testing.expect(with_tools.content == null);
-    try std.testing.expect(with_tools.tool_calls != null);
 }
 
 test "OpenAiAccumulator cloneAssistantContent deep-copies" {
