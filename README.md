@@ -17,6 +17,7 @@ and stays out of your way.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Session management**: each run, `/new`, or `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
 - **Branch review mode**: review committed branch changes against the latest `origin/main` and produce an automation-ready merge-worthiness report.
+- **Orchestrate loop**: `/orchestrate` and `--orchestrate` run implement → review → fix until the branch is merge worthy, each phase from a fresh context.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
 - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
@@ -299,89 +300,81 @@ A branch with no committed changes also receives `NO`.
 Review mode rejects `main`, detached HEAD, and directories outside a Git
 repository. Invoking it on `main` exits with code `2` without writing a report.
 For a single autonomous review pass use `puny --review` directly. To loop
-`implement → review → fix` until merge worthy, use the external orchestrate
-scripts in `scripts/` (see below).
+`implement → review → fix` until merge worthy, use `/orchestrate` or
+`--orchestrate` (see below).
 
-### Orchestrate a plan → implement → review loop
+### Orchestrate an implement → review → fix loop
 
-`scripts/orchestrate.sh` (bash) and `scripts/orchestrate.ps1` (PowerShell) wrap
-`puny --prompt --oneshot` + `puny --review` into the autonomous flow
-`[plan] → implement → (while review != merge worthy) → [fix findings]` and exit
-with the final review code.
+`/orchestrate` and `--orchestrate` run the autonomous flow
+`[plan] → implement → (while review != merge worthy) → fix findings` in a single
+process, and exit with the same code `puny --review` would.
 
 ```text
-[plan (interactive, optional)]
-  → implement (puny --prompt --oneshot)
-    → commit dirty worktree (excluding review-results.md)
-    → review (puny --review, 0=merge worthy, 1=rejected, 2=operational failure)
-    → on 0: done; on 1: feed review-results.md back to puny for fixes and loop
+[plan (interactive, /orchestrate --plan only)]
+  → implement (build mode, the model commits as it works)
+    → commit anything left in the worktree (excluding generated files)
+    → review (0 = merge worthy, 1 = rejected, 2 = operational failure)
+    → on 0: done; on 1: feed review-results.md back for fixes and loop
 ```
 
-Planning mode (`/plan`) is **interactive** — the model asks clarifying questions
-until you confirm the PRD and calls `save_prd`. With `--oneshot` the CLI exits
-after the first question, so `orchestrate` **cannot** use `--prompt "/plan ..."`
-with `--oneshot` directly. Instead the scripts expose a dedicated planning phase
-that runs `puny --prompt "/plan ..."` **without** `--oneshot`, waits indefinitely
-until you exit puny (`/quit` / `Ctrl+C`), then copies the generated
-`plan.md`/`plan.html` from the session store (`~/.config/puny/sessions/<id>/`
-or `%APPDATA%\puny\sessions\<id>\`) to `./prd.md`/`./prd.html` in the repo.
-The next implement step can then use `--prompt-file ./prd.md` (auto-selected if
-no `--prompt` was given).
-
-Preconditions: run from the repo root on a feature branch (not `main`, not
-detached HEAD, not outside a Git repo). The branch must have `origin/main`
-available so `puny --review` can compute `merge-base(origin/main, HEAD)..HEAD`.
-
-**Bash:**
+Every phase starts from a **fresh conversation** and hands off through
+artifacts — the saved PRD into implement, commits into review, and
+`review-results.md` back into fix. Nothing accumulates across phases, so the
+loop stays inside the context window of a small local model.
 
 ```bash
-# Implement then loop until merge worthy (max 5 iterations)
-./scripts/orchestrate.sh --prompt "Add CSV export to the report command"
+# Implement, then loop until merge worthy (default 5 iterations)
+puny --orchestrate --prompt "Add CSV export to the report command"
 
-# From a spec file, cap at 3 iterations
-./scripts/orchestrate.sh --prompt-file spec.md --max-iterations 3
-
-# Interactive planning first, then implement from the generated PRD
-./scripts/orchestrate.sh --plan "Add CSV export with PRD"
-./scripts/orchestrate.sh --plan "Add CSV export" --prompt "Implement the PRD at ./prd.md"
-./scripts/orchestrate.sh --plan-file spec.md
-
-# Planning + implement in one go (prd.md auto-used if no --prompt)
-./scripts/orchestrate.sh --plan "Add CSV export"  # generates ./prd.md then implements it
-
-# Use a non-default binary and disable auto-commit
-PUNY_BIN=./zig-out/bin/puny ./scripts/orchestrate.sh --prompt "Fix typo" --no-auto-commit
-./scripts/orchestrate.sh --prompt "Add filter" --puny-bin ./zig-out/bin/puny
+# From a spec file, capped at 3 iterations
+puny --orchestrate --prompt-file spec.md --max-iterations 3
 ```
 
-**PowerShell 7+ (`pwsh`):**
+Inside a chat session:
 
-```powershell
-pwsh ./scripts/orchestrate.ps1 -Prompt "Add CSV export to the report command"
-pwsh ./scripts/orchestrate.ps1 -PromptFile spec.md -MaxIterations 3
-pwsh ./scripts/orchestrate.ps1 -Plan "Add CSV export with PRD"
-pwsh ./scripts/orchestrate.ps1 -Plan "Add CSV export" -Prompt "Implement the PRD at ./prd.md"
-pwsh ./scripts/orchestrate.ps1 -PlanFile spec.md
-$env:PUNY_BIN = ".\zig-out\bin\puny.exe"; pwsh ./scripts/orchestrate.ps1 -Prompt "Fix typo" -NoAutoCommit
-pwsh ./scripts/orchestrate.ps1 -Prompt "Add filter" -PunyBin .\zig-out\bin\puny.exe
+```text
+/orchestrate Add CSV export to the report command
+/orchestrate --iterations 3 Add CSV export
+/orchestrate --plan Add CSV export     # plan interactively first, then run
+/orchestrate                           # implement the PRD this session saved
 ```
 
-| Flag / Option | Meaning |
-| ------------- | ------- |
-| `--prompt <text>` / `-Prompt <text>` | Initial task (mutually exclusive with `--prompt-file`) |
-| `--prompt-file <path>` / `-PromptFile <path>` | Load initial prompt from file (10 MiB limit) |
-| `--plan <text>` / `-Plan <text>` | Run an interactive planning phase before implement (mutually exclusive with `--plan-file`); waits until you exit puny, copies session `plan.md` to `./prd.md` |
-| `--plan-file <path>` / `-PlanFile <path>` | Run an interactive planning phase from a file |
-| `--max-iterations <n>` / `-MaxIterations <n>` | Max review→fix cycles (default `5`) |
-| `--auto-commit` / `--no-auto-commit` / `-NoAutoCommit` | Auto `git add -A && git commit` after each implement step so `puny --review` can see the changes (default: auto-commit on) |
-| `--puny-bin <bin>` / `-PunyBin <bin>` / `$PUNY_BIN` | Puny binary to invoke (default `puny`) |
-| `--help` / `-Help` | Show help and exit |
+`/orchestrate --plan` runs the normal interactive planning interview. The loop
+starts by itself the moment the model calls `save_prd`, reading the PRD straight
+from the session folder — nothing is copied into your repository. Bare
+`/orchestrate` does the same for a plan the session already has.
 
-Exit codes mirror `puny --review`: `0` merge worthy, `1` still not merge worthy after
-`--max-iterations`, `2` retryable operational failure (missing repo, detached HEAD,
-fetch failure). The script prints the tail of `review-results.md` each iteration and
-the final report path on success. If you try `--prompt "/plan ..."` the script warns
-that planning with `--oneshot` will exit after the first question — use `--plan` instead.
+The headless `--orchestrate` flag never plans: it needs `--prompt` or
+`--prompt-file` and goes straight to implementing.
+
+**Commits.** The review only sees committed changes, so the model is told to
+commit as it works: one logical change per commit, one-line plain-English
+imperative messages, no Conventional Commits prefixes, no trailers, no
+co-author, never pushing or amending. Anything it leaves behind is swept into a
+single backstop commit before the review runs, so a review never passes
+judgement on a partial diff. `review-results.md`, `puny_http.log`, and
+`puny_chat.log` are never committed. Override the instructions with the
+`prompts.orchestrate` entry in `config.json`.
+
+Preconditions: run from a repository on a feature branch (not `main`, not
+detached HEAD). The branch needs `origin/main` available so the review can
+compute `merge-base(origin/main, HEAD)..HEAD`.
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--orchestrate` | Run the loop headlessly and exit with the review's code (requires `--prompt` or `--prompt-file`) |
+| `--max-iterations <n>` | Maximum review → fix cycles (default `5`) |
+| `/orchestrate [task]` | Run the loop in a chat session; with no task, implement the session's `plan.md` |
+| `/orchestrate --plan <task>` | Plan interactively first, then start the loop when the PRD is saved |
+| `/orchestrate --iterations <n>` | Per-run iteration cap (alias `--max-iterations`) |
+
+Exit codes mirror `puny --review`: `0` merge worthy, `1` still not merge worthy
+after the iteration budget, `2` operational failure (missing repo, detached
+HEAD, on `main`, fetch failure, a failed commit, or an interrupted run).
+
+Press `Ctrl+C` to stop a run. Work already committed stays committed; anything
+still in the worktree is left for you. Interrupts are noticed between phases —
+use double-`Esc` to cancel a turn already in flight.
 
 
 ### Prompt from a file or URL
@@ -663,6 +656,8 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--prompt-file <file-or-url>` | Read first prompt from a file or URL (10 MiB limit) |
 | `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                              |
 | `--review`               | Review the current branch against the latest `origin/main`, write `review-results.md`, and exit       |
+| `--orchestrate`          | Implement, review, and fix the current branch until merge worthy, then exit (requires `--prompt` or `--prompt-file`) |
+| `--max-iterations <n>`   | Maximum review to fix cycles for `--orchestrate` (default `5`)                                        |
 | `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
 | `--reconfigure`         | Re-run first-run setup and update config                                                  |
 | `--show-thinking`       | Show reasoning/thinking output from the model                                             |
@@ -700,6 +695,7 @@ While in a chat session:
 - `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`
 - `/build [task]` — switch to build mode (optionally with a task description)
 - `/review` — review committed changes against the latest `origin/main`; remain in read-only review mode afterward
+- `/orchestrate [task]` — run the implement to review to fix loop until the branch is merge worthy; `--plan <task>` plans interactively first, `--iterations <n>` caps the rounds, and a bare `/orchestrate` implements the PRD this session saved
 - `/model [id]` — switch to another model; shows the model picker if no ID is given
 - `/provider [name]` — switch to another provider without reconfiguring everything; shows the provider picker if no name is given, then opens the model picker for the new provider
 - `/thinking [level]` — change the reasoning effort of the current model; shows the effort picker if no level is given (valid levels: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`)
