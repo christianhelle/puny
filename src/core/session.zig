@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const tool_schema = @import("../tools/schema.zig");
-const helpers = @import("../tools/helpers.zig");
 const AgentMode = @import("mode.zig").AgentMode;
 
 const Tool = tool_schema.Tool;
