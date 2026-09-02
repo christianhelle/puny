@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Auto-download openapi2zig for regenerate-providers step ([#185](https://github.com/christianhelle/puny/pull/185)) ([@christianhelle](https://github.com/christianhelle/))
 - Remove dead and unused code ([#184](https://github.com/christianhelle/puny/pull/184)) ([@christianhelle](https://github.com/christianhelle/))
 - Move the orchestrate loop into the binary ([#183](https://github.com/christianhelle/puny/pull/183)) ([@christianhelle](https://github.com/christianhelle/))
 - Handle HttpConnectionClosing as transient error ([#182](https://github.com/christianhelle/puny/pull/182)) ([@christianhelle](https://github.com/christianhelle/))
