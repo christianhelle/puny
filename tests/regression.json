@@ -105,6 +105,63 @@
     }
   },
   {
+    "name": "Orchestrate command reaches a merge-worthy verdict",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/orchestrate --iterations 2 add a note", "--oneshot"],
+    "expect": ["Orchestrate: implement", "Orchestrate: review (iteration 1/2)", "MERGE WORTHY: YES", "Orchestrate finished: MERGE WORTHY: YES"],
+    "not_expect": ["Orchestrate could not start", "Orchestrate: fix"],
+    "exit_code": 0,
+    "git_fixture": "feature",
+    "evidence": {
+      "file_contains": {
+        "path": "review-results.md",
+        "patterns": ["## Review Scope", "**MERGE WORTHY: YES**"]
+      }
+    }
+  },
+  {
+    "name": "Orchestrate headless flag runs the loop without a slash command",
+    "args": ["--mock", "--model", "mock-model", "--orchestrate", "--prompt", "add a note", "--max-iterations", "2"],
+    "expect": ["Orchestrate: implement", "MERGE WORTHY: YES", "Orchestrate finished: MERGE WORTHY: YES"],
+    "not_expect": ["Orchestrate could not start"],
+    "exit_code": 0,
+    "git_fixture": "feature"
+  },
+  {
+    "name": "Orchestrate runs a fix round and exits rejected after the budget",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/orchestrate --iterations 2 tidy up", "--oneshot"],
+    "expect": ["Orchestrate: review (iteration 1/2)", "Orchestrate: fix (iteration 1/2)", "Orchestrate: review (iteration 2/2)", "MERGE WORTHY: NO", "not merge worthy after 2 iteration(s)"],
+    "not_expect": ["MERGE WORTHY: YES"],
+    "exit_code": 1,
+    "git_fixture": "empty"
+  },
+  {
+    "name": "Orchestrate commits a dirty worktree before reviewing",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/orchestrate --iterations 1 add a note", "--oneshot"],
+    "expect": ["Orchestrate: implement", "Committing dirty worktree", "MERGE WORTHY: YES"],
+    "not_expect": ["Orchestrate stopped:"],
+    "exit_code": 0,
+    "git_fixture": "feature_dirty"
+  },
+  {
+    "name": "Orchestrate rejects main as an operational failure",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/orchestrate tidy up", "--oneshot"],
+    "expect": ["Orchestrate could not start:", "cannot run on main"],
+    "not_expect": ["Orchestrate: implement"],
+    "exit_code": 2,
+    "git_fixture": "main",
+    "evidence": {
+      "file_not_exists": ["review-results.md"]
+    }
+  },
+  {
+    "name": "Orchestrate rejects an unknown flag without starting a run",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/orchestrate --wat tidy up", "--oneshot"],
+    "expect": ["Unknown orchestrate flag.", "Usage: /orchestrate"],
+    "not_expect": ["Orchestrate: implement"],
+    "exit_code": 2,
+    "git_fixture": "feature"
+  },
+  {
     "name": "Tool call: read_file",
     "args": ["--mock", "--model", "mock-model", "--prompt", "read the code", "--oneshot"],
     "expect": ["Reading", "Tool executed"],

@@ -182,6 +182,7 @@ const IsolatedEnv = struct {
 
 const GitFixtureKind = enum {
     feature,
+    feature_dirty,
     empty,
     empty_blocked_report,
     main,
@@ -232,7 +233,7 @@ const GitFixture = struct {
                     try std.Io.Dir.cwd().createDirPath(io, blocked_path);
                 }
             },
-            .feature, .missing_origin => {
+            .feature, .feature_dirty, .missing_origin => {
                 try runGitOk(allocator, io, worktree, &.{ "checkout", "-b", "feature/review" });
                 const feature_path = try std.fs.path.join(allocator, &.{ worktree, "feature.txt" });
                 defer allocator.free(feature_path);
@@ -241,6 +242,13 @@ const GitFixture = struct {
                 try runGitOk(allocator, io, worktree, &.{ "commit", "-m", "feature" });
                 if (kind == .missing_origin) {
                     try runGitOk(allocator, io, worktree, &.{ "remote", "remove", "origin" });
+                }
+                if (kind == .feature_dirty) {
+                    // Uncommitted work the model would otherwise leave behind,
+                    // so the orchestrate backstop commit has something to sweep.
+                    const dirty_path = try std.fs.path.join(allocator, &.{ worktree, "dirty.txt" });
+                    defer allocator.free(dirty_path);
+                    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = dirty_path, .data = "dirty\n" });
                 }
             },
         }
