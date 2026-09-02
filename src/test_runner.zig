@@ -32,6 +32,7 @@ test "include chat.session_commands tests" {
 }
 test "include chat.persistence tests" {
     _ = @import("chat/persistence.zig");
+    _ = @import("chat/orchestrate.zig");
 }
 test "include chat.attachments tests" {
     _ = @import("chat/attachments.zig");
