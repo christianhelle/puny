@@ -442,15 +442,39 @@ const RegenerateProvidersStep = struct {
         std.log.warn("openapi2zig not found on PATH, downloading the latest release", .{});
         try installOpenApi2Zig(allocator, io);
 
-        return b.findProgram(&.{"openapi2zig"}, &.{}) catch |err| {
-            std.log.err("openapi2zig install completed but the binary still could not be found on PATH: {s}", .{@errorName(err)});
-            return err;
-        };
+        // The installer runs in a child process and cannot update this
+        // process's PATH, so a fresh PATH lookup can still miss a
+        // first-time install. Fall back to the well-known install
+        // directory (the same $HOME/.local/bin convention this project's
+        // own install-* steps use) before giving up.
+        if (b.findProgram(&.{"openapi2zig"}, &.{})) |exe| {
+            return exe;
+        } else |_| {}
+
+        if (findInWellKnownInstallDir(b)) |exe| {
+            return exe;
+        }
+
+        std.log.err("openapi2zig install completed but the binary still could not be found; restart your shell (or add its install directory to PATH) and try again", .{});
+        return error.FileNotFound;
+    }
+
+    fn findInWellKnownInstallDir(b: *std.Build) ?[]const u8 {
+        const bin_name = if (builtin.os.tag == .windows) "openapi2zig.exe" else "openapi2zig";
+        const home = if (builtin.os.tag == .windows)
+            b.graph.environ_map.get("USERPROFILE") orelse return null
+        else
+            b.graph.environ_map.get("HOME") orelse return null;
+        if (home.len == 0) return null;
+
+        const candidate = b.pathJoin(&.{ home, ".local", "bin", bin_name });
+        std.Io.Dir.cwd().access(b.graph.io, candidate, .{}) catch return null;
+        return candidate;
     }
 
     fn installOpenApi2Zig(allocator: std.mem.Allocator, io: std.Io) !void {
         const argv: []const []const u8 = if (builtin.os.tag == .windows)
-            &.{ "powershell", "-NoProfile", "-Command", "irm https://christianhelle.com/openapi2zig/install.ps1 | iex" }
+            &.{ "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "irm https://christianhelle.com/openapi2zig/install.ps1 | iex" }
         else
             &.{ "bash", "-c", "curl -fsSL https://christianhelle.com/openapi2zig/install | bash" };
 
