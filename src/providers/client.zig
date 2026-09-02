@@ -775,7 +775,6 @@ test "parseSseReader propagates read failures" {
     try std.testing.expectError(error.ReadFailed, parseSseReader(allocator, &failing.reader, &recorder, null));
 }
 
-
 // ── parseRawResponse tests ───────────────────────────────────────────
 
 const SimpleResponse = struct {
