@@ -577,8 +577,8 @@ test "fixPrompt names the report and avoids mock tool-call keywords" {
     // Whole-word keywords the mock provider dispatches on. Matching any of them
     // would turn every mocked fix phase into spurious tool calls.
     const keywords = [_][]const u8{
-        "long",  "fast",  "slow",  "echo",     "empty",     "partial", "usage",
-        "error", "fail",  "read",  "search",   "shell",     "table",   "markdown",
+        "long",      "fast", "slow", "echo",   "empty", "partial", "usage",
+        "error",     "fail", "read", "search", "shell", "table",   "markdown",
         "reasoning",
     };
     for (keywords) |keyword| {
