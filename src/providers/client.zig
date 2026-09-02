@@ -438,12 +438,6 @@ pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, call
     _ = try dispatchSseEvent(&event_data, callback);
 }
 
-pub fn parseSseBytesTyped(comptime T: type, allocator: std.mem.Allocator, bytes: []const u8, callback: anytype, cancellation_token: ?*CancellationToken) !void {
-    const Callback = @TypeOf(callback.*);
-    var typed_callback: TypedSseCallback(T, Callback) = .{ .allocator = allocator, .callback = callback };
-    try parseSseBytes(allocator, bytes, &typed_callback, cancellation_token);
-}
-
 fn processSseLine(event_data: *std.Io.Writer.Allocating, raw_line: []const u8, callback: anytype) !bool {
     const line = std.mem.trimEnd(u8, raw_line, "\r");
     if (line.len == 0) return try dispatchSseEvent(event_data, callback);
@@ -470,19 +464,6 @@ fn dispatchSseEvent(event_data: *std.Io.Writer.Allocating, callback: anytype) !b
     if (std.mem.eql(u8, data, "[DONE]")) return true;
     try callback.event(data);
     return false;
-}
-
-fn TypedSseCallback(comptime T: type, comptime Callback: type) type {
-    return struct {
-        allocator: std.mem.Allocator,
-        callback: *Callback,
-
-        pub fn event(self: *@This(), data: []const u8) !void {
-            var parsed = try std.json.parseFromSlice(T, self.allocator, data, .{ .ignore_unknown_fields = true });
-            defer parsed.deinit();
-            try self.callback.event(&parsed.value);
-        }
-    };
 }
 
 ///////////////////////////////////////////
@@ -794,34 +775,6 @@ test "parseSseReader propagates read failures" {
     try std.testing.expectError(error.ReadFailed, parseSseReader(allocator, &failing.reader, &recorder, null));
 }
 
-const TypedChunk = struct {
-    value: []const u8,
-};
-
-const TypedRecorder = struct {
-    allocator: std.mem.Allocator,
-    values: *std.ArrayList([]const u8),
-
-    pub fn event(self: *@This(), chunk: *const TypedChunk) !void {
-        try self.values.append(self.allocator, try self.allocator.dupe(u8, chunk.value));
-    }
-};
-
-test "parseSseBytesTyped parses each event into the target type" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const allocator = arena_state.allocator();
-
-    var values = std.ArrayList([]const u8).empty;
-    var recorder = TypedRecorder{ .allocator = allocator, .values = &values };
-
-    const bytes = "data: {\"value\":\"one\"}\n\ndata: {\"value\":\"two\",\"extra\":1}\n\n";
-    try parseSseBytesTyped(TypedChunk, allocator, bytes, &recorder, null);
-
-    try std.testing.expectEqual(@as(usize, 2), recorder.values.items.len);
-    try std.testing.expectEqualStrings("one", recorder.values.items[0]);
-    try std.testing.expectEqualStrings("two", recorder.values.items[1]);
-}
 
 // ── parseRawResponse tests ───────────────────────────────────────────
 
