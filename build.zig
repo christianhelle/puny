@@ -346,12 +346,7 @@ const RegenerateProvidersStep = struct {
             std.log.info("removed {s}", .{dir});
         }
 
-        const openapi2zig_exe = b.findProgram(&.{"openapi2zig"}, &.{}) catch |err| switch (err) {
-            error.FileNotFound => blk: {
-                std.log.warn("openapi2zig not found via build search, trying PATH", .{});
-                break :blk "openapi2zig";
-            },
-        };
+        const openapi2zig_exe = try ensureOpenApi2Zig(b, allocator, io);
         std.log.info("using openapi2zig: {s}", .{openapi2zig_exe});
 
         // 1. Generate shared runtime (mirrors `openapi2zig generate -o ../runtime.zig --runtime-only` in generate.ps1)
@@ -435,6 +430,58 @@ const RegenerateProvidersStep = struct {
         try patchGoogleGeneratedFiles(allocator, io);
 
         std.log.info("regenerate-providers: done", .{});
+    }
+
+    fn ensureOpenApi2Zig(b: *std.Build, allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
+        if (b.findProgram(&.{"openapi2zig"}, &.{})) |exe| {
+            return exe;
+        } else |err| {
+            if (err != error.FileNotFound) return err;
+        }
+
+        std.log.warn("openapi2zig not found on PATH, downloading the latest release", .{});
+        try installOpenApi2Zig(allocator, io);
+
+        return b.findProgram(&.{"openapi2zig"}, &.{}) catch |err| {
+            std.log.err("openapi2zig install completed but the binary still could not be found on PATH: {s}", .{@errorName(err)});
+            return err;
+        };
+    }
+
+    fn installOpenApi2Zig(allocator: std.mem.Allocator, io: std.Io) !void {
+        const argv: []const []const u8 = if (builtin.os.tag == .windows)
+            &.{ "powershell", "-NoProfile", "-Command", "irm https://christianhelle.com/openapi2zig/install.ps1 | iex" }
+        else
+            &.{ "bash", "-c", "curl -fsSL https://christianhelle.com/openapi2zig/install | bash" };
+
+        std.log.info("running: {s}", .{try std.mem.join(allocator, " ", argv)});
+
+        const result = std.process.run(allocator, io, .{
+            .argv = argv,
+            .stdout_limit = .limited(4 * 1024 * 1024),
+            .stderr_limit = .limited(4 * 1024 * 1024),
+        }) catch |err| {
+            std.log.err("failed to run openapi2zig install script: {s}", .{@errorName(err)});
+            return err;
+        };
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+
+        if (result.stdout.len > 0) std.log.info("{s}", .{result.stdout});
+        if (result.stderr.len > 0) std.log.info("{s}", .{result.stderr});
+
+        switch (result.term) {
+            .exited => |code| {
+                if (code != 0) {
+                    std.log.err("openapi2zig install script exited with code {d}", .{code});
+                    return error.OpenApi2ZigInstallFailed;
+                }
+            },
+            else => {
+                std.log.err("openapi2zig install script terminated abnormally: {any}", .{result.term});
+                return error.OpenApi2ZigInstallFailed;
+            },
+        }
     }
 
     fn runOpenApi2Zig(
