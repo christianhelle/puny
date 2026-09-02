@@ -31,21 +31,6 @@ fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u
     return tool_call_id;
 }
 
-fn googleClient(c: *http_client.Client) @import("google/client.zig").Client {
-    var g = @import("google/client.zig").Client.init(c.allocator, c.io, c.api_key);
-    g.base_url = c.base_url;
-    g.organization = c.organization;
-    g.project = c.project;
-    g.default_headers = c.default_headers;
-    g.http_observer = if (c.http_observer) |obs| .{
-        .ctx = obs.ctx,
-        .onRequest = obs.onRequest,
-        .onResponse = obs.onResponse,
-        .onError = obs.onError,
-    } else null;
-    return g;
-}
-
 pub fn buildGenerateContentRequest(arena: std.mem.Allocator, request: openai.ChatRequest) !contracts.GenerateContentRequest {
     var contents = std.ArrayList(contracts.Content).empty;
     var system_instruction: ?contracts.Content = null;
