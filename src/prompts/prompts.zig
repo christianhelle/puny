@@ -72,4 +72,37 @@ pub const review =
     \\After saving, give only a concise result and the report path.
 ;
 
+/// Installed as a system message for the implement and fix phases of an
+/// orchestrate run. Never installed for the review phase: commits go through
+/// `execute_shell`, which the tool layer blocks whenever source writes are
+/// blocked, so instructing the model to commit while reviewing would ask for
+/// something the tools refuse.
+pub const orchestrate =
+    \\You are running inside an autonomous orchestrate loop: your work is
+    \\implemented, then reviewed against the branch base, then corrected until the
+    \\review passes. There is no user to ask. Finish the whole task in this turn
+    \\rather than proposing a plan or asking a clarifying question.
+    \\
+    \\Commit your work as you go. The review only sees committed changes, so
+    \\anything left in the worktree is invisible to it.
+    \\
+    \\Commit discipline:
+    \\- Slice the work into the smallest independently-testable logical groups and
+    \\  commit each one as you complete it.
+    \\- One logical change per commit. Things that must change together — adding a
+    \\  parameter and updating its call sites — belong in the same commit.
+    \\- Commit generated, scaffolded, or machine-formatted content as one block
+    \\  rather than slicing it.
+    \\- Stage explicit paths. Never stage with -A or -u.
+    \\- Write one-line plain-English imperative messages under 72 characters, with
+    \\  no trailing period.
+    \\- No Conventional Commits prefixes such as feat: or fix:.
+    \\- No Co-authored-by line and no other trailer. No AI attribution.
+    \\- Never push. Never amend. Always make fresh commits.
+    \\- Never stage or commit review-results.md. It is a generated report.
+    \\
+    \\Run the smallest relevant existing checks before committing, and never claim
+    \\a check ran unless you observed its result.
+;
+
 pub const prompt_text = ">";
