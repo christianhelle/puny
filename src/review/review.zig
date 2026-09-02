@@ -65,7 +65,7 @@ const ActiveReview = struct {
 
 var active_review: ?ActiveReview = null;
 
-const GitResult = union(enum) {
+pub const GitResult = union(enum) {
     ok: []const u8,
     failed: []const u8,
 };
@@ -76,11 +76,31 @@ pub fn prepare(allocator: std.mem.Allocator, io: std.Io) !Preparation {
     return prepareAt(allocator, io, cwd);
 }
 
-pub fn prepareAt(allocator: std.mem.Allocator, io: std.Io, start_dir: []const u8) !Preparation {
+pub const Preconditions = union(enum) {
+    ok: struct {
+        repo_root: []const u8,
+        branch: []const u8,
+    },
+    invalid: Failure,
+};
+
+/// Checks the three cheap branch preconditions shared by review mode and the
+/// orchestrate loop: inside a Git repository, on a named branch, and not on
+/// main. Kept separate from `prepareAt` so orchestrate can preflight without
+/// paying for the `git fetch` a full preparation performs. `label` opens each
+/// message so the caller names itself.
+pub fn checkRepoPreconditions(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    start_dir: []const u8,
+    label: []const u8,
+) !Preconditions {
     const root_result = try runGit(allocator, io, start_dir, &.{ "rev-parse", "--show-toplevel" }, 30 * std.time.ns_per_s);
     const repo_root = switch (root_result) {
         .ok => |value| value,
-        .failed => return .{ .invalid = .{ .message = "Review mode requires a Git repository." } },
+        .failed => return .{ .invalid = .{
+            .message = try std.fmt.allocPrint(allocator, "{s} requires a Git repository.", .{label}),
+        } },
     };
 
     const branch_result = try runGit(allocator, io, repo_root, &.{ "symbolic-ref", "--quiet", "--short", "HEAD" }, 30 * std.time.ns_per_s);
@@ -88,16 +108,26 @@ pub fn prepareAt(allocator: std.mem.Allocator, io: std.Io, start_dir: []const u8
         .ok => |value| value,
         .failed => return .{ .invalid = .{
             .repo_root = repo_root,
-            .message = "Review mode requires a named branch; detached HEAD is not supported.",
+            .message = try std.fmt.allocPrint(allocator, "{s} requires a named branch; detached HEAD is not supported.", .{label}),
         } },
     };
     if (std.mem.eql(u8, branch, "main")) {
         return .{ .invalid = .{
             .repo_root = repo_root,
             .branch = branch,
-            .message = "Review mode cannot run on main.",
+            .message = try std.fmt.allocPrint(allocator, "{s} cannot run on main.", .{label}),
         } };
     }
+
+    return .{ .ok = .{ .repo_root = repo_root, .branch = branch } };
+}
+
+pub fn prepareAt(allocator: std.mem.Allocator, io: std.Io, start_dir: []const u8) !Preparation {
+    const preconditions = try checkRepoPreconditions(allocator, io, start_dir, "Review mode");
+    const repo_root, const branch = switch (preconditions) {
+        .ok => |value| .{ value.repo_root, value.branch },
+        .invalid => |failure| return .{ .invalid = failure },
+    };
 
     const fetch_result = try runGit(
         allocator,
@@ -179,7 +209,7 @@ fn operationalFailure(repo_root: []const u8, branch: []const u8, message: []cons
     } };
 }
 
-fn runGit(
+pub fn runGit(
     allocator: std.mem.Allocator,
     io: std.Io,
     cwd: []const u8,
@@ -205,14 +235,14 @@ fn runGit(
         .{ .failed = try allocator.dupe(u8, std.mem.trim(u8, detail, &std.ascii.whitespace)) };
 }
 
-fn commandSection(output: []const u8, marker: []const u8) []const u8 {
+pub fn commandSection(output: []const u8, marker: []const u8) []const u8 {
     const start_index = std.mem.indexOf(u8, output, marker) orelse return "";
     const start = start_index + marker.len;
     const end = if (std.mem.indexOfPos(u8, output, start, "\nSTDERR:\n")) |index| index else output.len;
     return output[start..end];
 }
 
-fn withoutGeneratedReport(allocator: std.mem.Allocator, status: []const u8) ![]const u8 {
+pub fn withoutGeneratedReport(allocator: std.mem.Allocator, status: []const u8) ![]const u8 {
     var filtered: std.ArrayList(u8) = .empty;
     defer filtered.deinit(allocator);
     var lines = std.mem.splitScalar(u8, status, '\n');
