@@ -1,5 +1,3 @@
-const std = @import("std");
-
 pub const system =
     \\You are Puny, an AI coding agent for the terminal.
     \\You have access to file-system, shell, search, git, and web tools.
