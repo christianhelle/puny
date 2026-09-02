@@ -12,7 +12,6 @@ const commands = @import("../cli/commands.zig");
 const core_session = @import("../core/session.zig");
 const git_root = @import("../core/git_root.zig");
 const sessions = @import("../sessions/sessions.zig");
-const config = @import("../config/config.zig");
 const indicator = @import("../tui/indicator.zig");
 const input = @import("../tui/input.zig");
 const mock = @import("../providers/mock.zig");
