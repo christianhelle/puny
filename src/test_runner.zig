@@ -156,9 +156,6 @@ test "include providers.anthropic tests" {
 test "include providers.google tests" {
     _ = @import("providers/google.zig");
 }
-test "include providers.google_shim tests" {
-    _ = @import("providers/google_shim.zig");
-}
 test "include providers.google client tests" {
     _ = @import("providers/google/client.zig");
     _ = @import("providers/google/contracts.zig");
