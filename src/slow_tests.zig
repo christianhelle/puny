@@ -1,6 +1,5 @@
 //! Aggregates the slow test modules that run only under `zig build
 //! test-regression`, keeping `zig build test` fast.
-const std = @import("std");
 
 test "include retry_download slow tests" {
     _ = @import("retry_download_tests.zig");
