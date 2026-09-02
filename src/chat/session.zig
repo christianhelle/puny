@@ -26,6 +26,7 @@ const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
 const tools = @import("../tools/root.zig");
 const branch_review = @import("../review/review.zig");
+const orchestrate = @import("orchestrate.zig");
 const help = @import("../tui/help.zig");
 
 pub const ReconfigurePrompt = session_commands.ReconfigurePrompt;
@@ -64,6 +65,18 @@ pub const ChatSession = struct {
         }
         var loaded_skills = std.StringHashMapUnmanaged(void){};
         defer loaded_skills.deinit(ctx.arena);
+        var pending_orchestrate: ?orchestrate.Spec = null;
+
+        if (ctx.parsed.orchestrate) {
+            pending_prompt = null;
+            _ = try runOrchestrate(ctx, .{
+                .task = ctx.parsed.prompt orelse "",
+                .max_iterations = ctx.parsed.max_iterations,
+            });
+            finalizeSession(ctx);
+            return;
+        }
+
         while (true) {
             if (sigint.isTriggered()) {
                 finalizeSession(ctx);
@@ -127,34 +140,16 @@ pub const ChatSession = struct {
                     try ctx.stdout_writer.print(" Performing full memory reset...", .{});
                     try ctx.stdout_writer.flush();
 
-                    ctx.prov.deinit();
-                    ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
-                    _ = ctx.messages_arena.reset(.free_all);
-                    ctx.messages.* = .empty;
+                    try recycleMessagesArena(ctx);
                     ctx.mode.* = .build;
                     core_session.setWriteBlocked(false);
-                    const system_prompt = try ctx.cfg.resolvePrompt(ctx.messages_arena.allocator(), "system", prompts.system);
-                    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = system_prompt });
-
-                    if (try git_root.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
-                        defer ctx.arena.free(repo_root);
-                        if (try instructions.load(ctx.arena, ctx.io, repo_root)) |result| {
-                            defer ctx.arena.free(result.filename);
-                            defer ctx.arena.free(result.content);
-                            const labeled = try std.fmt.allocPrint(ctx.messages_arena.allocator(), "Instructions from {s}:\n{s}", .{ result.filename, result.content });
-                            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = labeled });
-                        }
-                    }
+                    try installBaseContext(ctx);
 
                     ctx.session.* = try core_session.Session.init(ctx.arena, ctx.session.base, ctx.random, ctx.io);
 
                     ctx.session_stats.deinit();
                     ctx.session_stats.* = stats.SessionStats.init(ctx.arena, ctx.io);
                     ctx.session_stats.session_id = ctx.session.id;
-
-                    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
-                    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
-                    if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                     ctx.history.clear();
                     loaded_skills.clearRetainingCapacity();
@@ -465,6 +460,50 @@ pub const ChatSession = struct {
                         },
                     }
                 },
+                .begin_orchestrate => |text| {
+                    const spec = orchestrate.parseCommand(text) catch |err| {
+                        try ctx.stdout_writer.print("\n{s}\n{s}", .{ orchestrate.parseError(err), orchestrate.usage });
+                        try ctx.stdout_writer.flush();
+                        if (ctx.parsed.oneshot) {
+                            ctx.review_outcome.* = .operational_failure;
+                            finalizeSession(ctx);
+                            return;
+                        }
+                        continue;
+                    };
+
+                    if (spec.plan) {
+                        // Planning is an interview the REPL has to drive, so the
+                        // run starts once the model saves the PRD. Handing off
+                        // through plan.md keeps the same artifact contract the
+                        // phases use. Reuses the /plan dispatch so the planning
+                        // setup lives in exactly one place.
+                        pending_orchestrate = spec;
+                        core_session.setWriteBlocked(true);
+                        _ = try commands.dispatch(.{ .plan = spec.task }, .{
+                            .arena = ctx.arena,
+                            .messages_alloc = ctx.messages_arena.allocator(),
+                            .messages_arena = ctx.messages_arena,
+                            .io = ctx.io,
+                            .stdout_writer = ctx.stdout_writer,
+                            .messages = ctx.messages,
+                            .mode = ctx.mode,
+                            .oneshot = ctx.parsed.oneshot,
+                            .cfg = ctx.cfg,
+                            .session_prd_path = ctx.session.prd_path,
+                        });
+                        try ctx.stdout_writer.print("Orchestrate starts once the PRD is saved.\n", .{});
+                        try ctx.stdout_writer.flush();
+                    } else {
+                        _ = try runOrchestrate(ctx, spec);
+                        if (ctx.parsed.oneshot) {
+                            finalizeSession(ctx);
+                            return;
+                        }
+                        if (sigint.isTriggered()) sigint.clear();
+                        continue;
+                    }
+                },
                 .run_chat_turn => {},
             }
 
@@ -501,6 +540,26 @@ pub const ChatSession = struct {
                 continue;
             };
             if (turn_result == .exit) return;
+
+            // `/orchestrate --plan` waits here: the planning interview runs as
+            // ordinary turns, and the run begins the moment save_prd lands a
+            // plan in the session directory. Leaving planning mode any other
+            // way cancels it.
+            if (pending_orchestrate) |pending| {
+                if (ctx.mode.* != .planning) {
+                    pending_orchestrate = null;
+                } else if (core_session.sessionHasPlan(ctx.io, ctx.session.dir)) {
+                    pending_orchestrate = null;
+                    try ctx.stdout_writer.print("\nPRD saved. Starting orchestrate.\n", .{});
+                    try ctx.stdout_writer.flush();
+                    _ = try runOrchestrate(ctx, .{ .max_iterations = pending.max_iterations });
+                    if (ctx.parsed.oneshot) {
+                        finalizeSession(ctx);
+                        return;
+                    }
+                    if (sigint.isTriggered()) sigint.clear();
+                }
+            }
         }
     }
 };
@@ -557,7 +616,9 @@ fn readUserInput(
     };
 }
 
-fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
+/// Drives one agentic turn. `honor_oneshot` is false for orchestrate phases,
+/// which run several turns inside a single `--oneshot` invocation.
+fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_complete = false;
     var turn_cancelled = false;
     var turn_had_error = false;
@@ -646,13 +707,18 @@ fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
     try persistence.saveSessionMeta(ctx);
     upsertCurrentSession(ctx);
 
-    if (ctx.parsed.oneshot) {
+    if (honor_oneshot and ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});
         finalizeSession(ctx);
-        return .exit;
+        return .{ .cancelled = turn_cancelled, .had_error = turn_had_error, .exited = true };
     }
 
-    return .continue_loop;
+    return .{ .cancelled = turn_cancelled, .had_error = turn_had_error };
+}
+
+fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
+    const report = try runTurn(ctx, true);
+    return if (report.exited) .exit else .continue_loop;
 }
 
 fn printReviewResult(stdout_writer: *std.Io.Writer, saved: branch_review.SavedReport) !void {
@@ -669,6 +735,75 @@ fn printReviewWriteError(io: std.Io, err: anyerror) void {
     var writer: std.Io.File.Writer = .init(.stderr(), io, &buffer);
     writer.interface.print("Review report could not be written: {s}\n", .{@errorName(err)}) catch {};
     writer.interface.flush() catch {};
+}
+
+/// Tears down and rebuilds the provider around a `messages_arena` reset.
+///
+/// The provider is allocated from `messages_arena`, so resetting the arena
+/// without this dance leaves a dangling client. Shared by `/reset` and by the
+/// orchestrate loop, which starts every phase from a clean conversation.
+fn recycleMessagesArena(ctx: *ChatLoopContext) !void {
+    ctx.prov.deinit();
+    ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
+    _ = ctx.messages_arena.reset(.free_all);
+    ctx.messages.* = .empty;
+
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+    if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
+}
+
+/// Re-installs the standing system context after an arena reset: the system
+/// prompt, the skills listing, and the repository instructions file.
+fn installBaseContext(ctx: *ChatLoopContext) !void {
+    const alloc = ctx.messages_arena.allocator();
+    const system_prompt = try ctx.cfg.resolvePrompt(alloc, "system", prompts.system);
+    try ctx.messages.append(alloc, .{ .system = system_prompt });
+
+    if (!ctx.parsed.no_skills and ctx.skill_registry.count() > 0) {
+        const skills_block = try ctx.skill_registry.buildListing(alloc);
+        try ctx.messages.append(alloc, .{ .system = skills_block });
+    }
+
+    if (try git_root.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
+        defer ctx.arena.free(repo_root);
+        if (try instructions.load(ctx.arena, ctx.io, repo_root)) |result| {
+            defer ctx.arena.free(result.filename);
+            defer ctx.arena.free(result.content);
+            const labeled = try std.fmt.allocPrint(alloc, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
+            try ctx.messages.append(alloc, .{ .system = labeled });
+        }
+    }
+}
+
+/// Gives the next orchestrate phase a clean conversation while keeping the
+/// session itself: same directory, same `plan.md`, same accumulated token
+/// stats, same prompt history. That is what separates a phase boundary from
+/// `/reset`, which mints a whole new session.
+fn resetContextForPhase(ctx: *ChatLoopContext) anyerror!void {
+    persistence.saveMessages(ctx) catch {};
+    try recycleMessagesArena(ctx);
+    try installBaseContext(ctx);
+}
+
+/// One agentic turn that ignores `--oneshot`. The orchestrate loop drives
+/// several turns inside a single invocation, so it cannot use `runChatTurn`,
+/// which finalizes and exits the session as soon as a one-shot turn completes.
+fn runManagedTurn(ctx: *ChatLoopContext) anyerror!orchestrate.TurnReport {
+    return runTurn(ctx, false);
+}
+
+/// Starts an orchestrate run and records its verdict for the process exit code.
+fn runOrchestrate(ctx: *ChatLoopContext, spec: orchestrate.Spec) !orchestrate.Status {
+    const status = try orchestrate.run(ctx, spec, .{
+        .run_turn = runManagedTurn,
+        .reset_context = resetContextForPhase,
+    });
+    ctx.review_outcome.* = status.toOutcome();
+    persistence.saveMessages(ctx) catch {};
+    persistence.saveSessionMeta(ctx) catch {};
+    upsertCurrentSession(ctx);
+    return status;
 }
 
 fn enterReviewMode(ctx: *ChatLoopContext) !void {
