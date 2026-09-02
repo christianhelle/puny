@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Remove dead and unused code ([#184](https://github.com/christianhelle/puny/pull/184)) ([@christianhelle](https://github.com/christianhelle/))
 - Move the orchestrate loop into the binary ([#183](https://github.com/christianhelle/puny/pull/183)) ([@christianhelle](https://github.com/christianhelle/))
 - Handle HttpConnectionClosing as transient error ([#182](https://github.com/christianhelle/puny/pull/182)) ([@christianhelle](https://github.com/christianhelle/))
 - Add external orchestrate scripts with interactive planning phase ([#180](https://github.com/christianhelle/puny/pull/180)) ([@christianhelle](https://github.com/christianhelle/))
