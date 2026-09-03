@@ -536,15 +536,19 @@ fn findHeader(headers: []const std.http.Header, name: []const u8) ?std.http.Head
 
 test "notifyHttpRequest passes the agent as a user-agent header alongside the extras" {
     const Capture = struct {
-        var seen_headers: []const std.http.Header = &.{};
         var seen_count: usize = 0;
+        var first_header_name: []const u8 = "";
+        var user_agent_value: []const u8 = "";
 
         fn onRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
             _ = ctx;
             _ = method;
             _ = url;
             _ = body;
-            seen_headers = headers;
+            // Assert against `headers` here, inside the callback: the buffer
+            // it points into (stack or heap) is only valid for this call.
+            first_header_name = headers[0].name;
+            user_agent_value = findHeader(headers, "user-agent").?.value;
             seen_count += 1;
         }
     };
