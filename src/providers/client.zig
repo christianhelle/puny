@@ -560,8 +560,33 @@ test "notifyHttpRequest passes the agent as a user-agent header alongside the ex
     notifyHttpRequest(obs, .POST, "http://example.com", &extra_headers, null, "puny/1.2.3");
 
     try std.testing.expectEqual(@as(usize, 1), Capture.seen_count);
-    try std.testing.expectEqualStrings("content-type", Capture.seen_headers[0].name);
-    try std.testing.expectEqualStrings("puny/1.2.3", findHeader(Capture.seen_headers, "user-agent").?.value);
+    try std.testing.expectEqualStrings("content-type", Capture.first_header_name);
+    try std.testing.expectEqualStrings("puny/1.2.3", Capture.user_agent_value);
+}
+
+test "notifyHttpRequest preserves the user-agent header with 32 extra headers" {
+    const Capture = struct {
+        var user_agent_value: []const u8 = "";
+
+        fn onRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = ctx;
+            _ = method;
+            _ = url;
+            _ = body;
+            user_agent_value = findHeader(headers, "user-agent").?.value;
+        }
+    };
+    Capture.user_agent_value = "";
+
+    var extra_headers: [32]std.http.Header = undefined;
+    for (&extra_headers, 0..) |*header, i| {
+        header.* = .{ .name = "x-extra", .value = if (i == 0) "0" else "n" };
+    }
+    const obs = HttpObserver{ .ctx = null, .onRequest = Capture.onRequest, .onResponse = null, .onError = null };
+
+    notifyHttpRequest(obs, .POST, "http://example.com", &extra_headers, null, "puny/1.2.3");
+
+    try std.testing.expectEqualStrings("puny/1.2.3", Capture.user_agent_value);
 }
 
 test "requestRaw's debug observer sees the user-agent header" {
