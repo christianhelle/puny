@@ -332,10 +332,17 @@
           </div>
         </div>
         <div class="install-card">
+          <h3>One-shot automation</h3>
+          <p>Run <code>puny</code> once to complete setup before using it in a non-interactive job. One-shot mode requires <code>--prompt</code> or <code>--prompt-file</code>; pass <code>--model</code> (or set <code>PUNY_MODEL</code>) so the run never needs the model picker.</p>
+          <div class="install-code">
+            <code>puny --model model-id --prompt "List all source files" --oneshot</code>
+          </div>
+        </div>
+        <div class="install-card">
           <h3>Prompt Files</h3>
           <p>Load the first prompt from a local file or an <code>http://</code>/<code>https://</code> URL via <code>--prompt-file</code> at startup or <code>/file</code> in a session:</p>
           <div class="install-code">
-            <code>puny --prompt-file spec.md --oneshot</code>
+            <code>puny --model model-id --prompt-file spec.md --oneshot</code>
           </div>
         </div>
         <div class="install-card">

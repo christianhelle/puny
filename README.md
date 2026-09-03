@@ -305,11 +305,22 @@ these instructions after `/new`, `/reset`, and between orchestrate phases.
 
 ### One-shot prompt
 
-Run a single prompt and exit. Useful for scripts or quick tasks:
+Run one prompt and exit:
 
 ```bash
 puny --prompt "List all source files" --oneshot
 ```
+
+`--oneshot` requires either `--prompt` or `--prompt-file`. It reuses the model
+saved during setup; pass `--model` (or set `PUNY_MODEL`) to make an unattended
+run independent of that saved selection:
+
+```bash
+puny --model model-id --prompt "List all source files" --oneshot
+```
+
+On a fresh installation, run `puny` once to complete the setup wizard before
+using one-shot mode in a non-interactive job.
 
 ### Review a branch
 
@@ -424,7 +435,7 @@ at startup via the CLI or interactively with `/file`:
 
 ```bash
 # CLI: local file or remote URL, optionally one-shot
-puny --prompt-file spec.md --oneshot
+puny --model model-id --prompt-file spec.md --oneshot
 puny --prompt-file https://example.com/spec.md
 
 # Interactive
