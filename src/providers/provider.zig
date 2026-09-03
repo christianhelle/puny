@@ -1295,7 +1295,7 @@ test "Provider.chatStreaming sends the session header on the OpenAI transport" {
 
     var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
     defer prov.deinit();
-    prov.setConfig(.{ .base_url = url, .session_id = "9f1c2b3a" });
+    prov.setConfig(.{ .base_url = url, .session_id = "363313fc-7071-4450-bcc2-bd3eaaf93886" });
 
     var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer rec_state.deinit();
@@ -1309,7 +1309,7 @@ test "Provider.chatStreaming sends the session header on the OpenAI transport" {
     try prov.chatStreaming(request, rec.callback());
 
     try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
-    try std.testing.expectEqualStrings("9f1c2b3a", ctx.getSessionHeader());
+    try std.testing.expectEqualStrings("363313fc", ctx.getSessionHeader());
 }
 
 test "Provider.chatStreaming sends the session header on the Anthropic transport" {
@@ -1320,7 +1320,7 @@ test "Provider.chatStreaming sends the session header on the Anthropic transport
 
     var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
     defer prov.deinit();
-    prov.setConfig(.{ .base_url = url, .session_id = "9f1c2b3a" });
+    prov.setConfig(.{ .base_url = url, .session_id = "363313fc-7071-4450-bcc2-bd3eaaf93886" });
 
     var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer rec_state.deinit();
@@ -1334,5 +1334,5 @@ test "Provider.chatStreaming sends the session header on the Anthropic transport
     try prov.chatStreaming(request, rec.callback());
 
     try std.testing.expectEqualStrings("/v1/messages", ctx.getRequestPath());
-    try std.testing.expectEqualStrings("9f1c2b3a", ctx.getSessionHeader());
+    try std.testing.expectEqualStrings("363313fc", ctx.getSessionHeader());
 }
