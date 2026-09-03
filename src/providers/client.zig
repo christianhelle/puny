@@ -102,6 +102,24 @@ pub const HttpObserver = struct {
     on_chunk: ?*const fn (ctx: ?*anyopaque, data: []const u8) void = null,
 };
 
+/// The User-Agent header is set on requests via `std.http.Client`'s standard
+/// header override, so it never appears in the `extra_headers` slice a
+/// request builds for the observer. This appends it to a stack copy of
+/// `extra_headers` so `onRequest` (and, via it, debug logging) can see the
+/// exact value that will go out on the wire, without that copy ever reaching
+/// the real request and being sent twice.
+pub fn notifyHttpRequest(obs: HttpObserver, method: std.http.Method, url: []const u8, extra_headers: []const std.http.Header, payload: ?[]const u8, agent: []const u8) void {
+    const cb = obs.onRequest orelse return;
+    var buf: [32]std.http.Header = undefined;
+    if (extra_headers.len >= buf.len) {
+        cb(obs.ctx, method, url, extra_headers, payload);
+        return;
+    }
+    @memcpy(buf[0..extra_headers.len], extra_headers);
+    buf[extra_headers.len] = .{ .name = "user-agent", .value = agent };
+    cb(obs.ctx, method, url, buf[0 .. extra_headers.len + 1], payload);
+}
+
 pub const Client = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -244,9 +262,7 @@ pub fn requestRawWithContentType(client: *Client, method: std.http.Method, url: 
     const auth_header = try appendClientHeaders(allocator, &headers, client, content_type, "application/json");
     defer if (auth_header) |value| allocator.free(value);
 
-    if (client.http_observer) |obs| {
-        if (obs.onRequest) |cb| cb(obs.ctx, method, url, headers.items, payload);
-    }
+    if (client.http_observer) |obs| notifyHttpRequest(obs, method, url, headers.items, payload, user_agent);
 
     const uri = try std.Uri.parse(url);
     var response_body: std.Io.Writer.Allocating = .init(allocator);
@@ -507,6 +523,57 @@ fn findHeader(headers: []const std.http.Header, name: []const u8) ?std.http.Head
         if (std.mem.eql(u8, header.name, name)) return header;
     }
     return null;
+}
+
+test "notifyHttpRequest passes the agent as a user-agent header alongside the extras" {
+    const Capture = struct {
+        var seen_headers: []const std.http.Header = &.{};
+        var seen_count: usize = 0;
+
+        fn onRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = ctx;
+            _ = method;
+            _ = url;
+            _ = body;
+            seen_headers = headers;
+            seen_count += 1;
+        }
+    };
+    Capture.seen_count = 0;
+
+    const extra_headers = [_]std.http.Header{.{ .name = "content-type", .value = "application/json" }};
+    const obs = HttpObserver{ .ctx = null, .onRequest = Capture.onRequest, .onResponse = null, .onError = null };
+
+    notifyHttpRequest(obs, .POST, "http://example.com", &extra_headers, null, "puny/1.2.3");
+
+    try std.testing.expectEqual(@as(usize, 1), Capture.seen_count);
+    try std.testing.expectEqualStrings("content-type", Capture.seen_headers[0].name);
+    try std.testing.expectEqualStrings("puny/1.2.3", findHeader(Capture.seen_headers, "user-agent").?.value);
+}
+
+test "requestRaw's debug observer sees the user-agent header" {
+    const Capture = struct {
+        var found: bool = false;
+
+        fn onRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = ctx;
+            _ = method;
+            _ = url;
+            _ = body;
+            found = findHeader(headers, "user-agent") != null;
+        }
+    };
+    Capture.found = false;
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+    c.http_observer = .{ .ctx = null, .onRequest = Capture.onRequest, .onResponse = null, .onError = null };
+
+    // A bogus base URL is enough: the observer fires before the connection
+    // is attempted, and the resulting error is expected here.
+    _ = requestRaw(&c, .GET, "http://127.0.0.1:1", null) catch {};
+
+    try std.testing.expect(Capture.found);
 }
 
 test "appendClientHeaders sends Authorization header with scheme and key" {
