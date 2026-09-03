@@ -10,10 +10,9 @@ const copilot = @import("copilot.zig");
 
 const ModelProvider = provider.ModelProvider;
 
-pub fn effectiveProvider(parsed: cli.Options, cfg: config.Config) ModelProvider {
+pub fn effectiveProvider(parsed: cli.Options, cfg: config.Config) !ModelProvider {
     if (parsed.provider) |p| {
-        const parsed_enum = std.meta.stringToEnum(provider.ModelProvider, p);
-        if (parsed_enum) |val| return val;
+        return provider.parseModelProvider(p) orelse error.InvalidProvider;
     }
     return cfg.provider;
 }
@@ -225,13 +224,13 @@ test "resolveApiKey reads and trims api key file" {
 
 test "effectiveProvider precedence" {
     const cfg_default = config.Config{};
-    try std.testing.expectEqual(.lmstudio, effectiveProvider(.{}, cfg_default));
+    try std.testing.expectEqual(.lmstudio, try effectiveProvider(.{}, cfg_default));
 
     const cfg_opencode = config.Config{ .provider = .opencode_zen };
-    try std.testing.expectEqual(.opencode_zen, effectiveProvider(.{}, cfg_opencode));
+    try std.testing.expectEqual(.opencode_zen, try effectiveProvider(.{}, cfg_opencode));
 
     const parsed_flag = cli.Options{ .provider = "opencode_zen" };
-    try std.testing.expectEqual(.opencode_zen, effectiveProvider(parsed_flag, config.Config{ .provider = .lmstudio }));
+    try std.testing.expectEqual(.opencode_zen, try effectiveProvider(parsed_flag, config.Config{ .provider = .lmstudio }));
 }
 
 test "baseUrlFor uses CLI url for lmstudio only" {
@@ -275,10 +274,10 @@ test "providerHasFixedUrl for opencode, opencode-go, copilot and mock" {
     try std.testing.expect(!providerHasFixedUrl(.lmstudio));
 }
 
-test "effectiveProvider ignores an invalid provider flag" {
-    const parsed = cli.Options{ .provider = "not_a_provider" };
-    try std.testing.expectEqual(.opencode_go, effectiveProvider(parsed, config.Config{ .provider = .opencode_go }));
-    try std.testing.expectEqual(.copilot, effectiveProvider(parsed, config.Config{ .provider = .copilot }));
+test "effectiveProvider accepts legacy aliases and rejects invalid providers" {
+    try std.testing.expectEqual(.opencode_zen, try effectiveProvider(.{ .provider = "opencode" }, .{}));
+    try std.testing.expectEqual(.opencode_go, try effectiveProvider(.{ .provider = "opencode-go" }, .{}));
+    try std.testing.expectError(error.InvalidProvider, effectiveProvider(.{ .provider = "not_a_provider" }, .{}));
 }
 
 test "resolveApiKey returns empty for the mock provider" {

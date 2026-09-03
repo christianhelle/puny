@@ -1,5 +1,6 @@
 const std = @import("std");
 const version = @import("../version.zig");
+const provider = @import("../providers/provider.zig");
 
 pub const default_max_iterations: usize = 5;
 
@@ -45,6 +46,9 @@ fn fatal(io: std.Io, comptime fmt: []const u8, args: anytype) noreturn {
 /// Returns an error when the combination of options is invalid. Kept separate
 /// from `parseArgs` so it is testable without triggering a process exit.
 pub fn validate(opts: Options) !void {
+    if (opts.provider) |name| {
+        if (provider.parseModelProvider(name) == null) return error.InvalidProvider;
+    }
     if (opts.review and (opts.prompt != null or opts.prompt_file != null)) {
         return error.ReviewConflictsPrompt;
     }
@@ -159,7 +163,18 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         }
     }
 
+    if (opts.provider == null) {
+        if (environ_map.get("PUNY_PROVIDER")) |value| {
+            opts.provider = value;
+        }
+    }
+
     validate(opts) catch |err| switch (err) {
+        error.InvalidProvider => fatal(
+            io,
+            "Invalid provider '{s}'. Expected one of: lmstudio, opencode_zen, opencode_go, copilot.\n\n",
+            .{opts.provider.?},
+        ),
         error.ReviewConflictsPrompt => fatal(io, "--review cannot be combined with --prompt or --prompt-file\n\n", .{}),
         error.ReviewConflictsSession => fatal(io, "--review cannot be combined with session or prune options\n\n", .{}),
         error.ReviewConflictsOperation => fatal(io, "--review cannot be combined with upgrade options\n\n", .{}),
@@ -172,10 +187,8 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         error.InvalidMaxIterations => fatal(io, "--max-iterations must be greater than zero\n\n", .{}),
     };
 
-    if (opts.provider == null) {
-        if (environ_map.get("PUNY_PROVIDER")) |value| {
-            opts.provider = value;
-        }
+    if (opts.provider) |name| {
+        opts.provider = @tagName(provider.parseModelProvider(name).?);
     }
     if (opts.url == null) {
         if (environ_map.get("PUNY_PROVIDER_URL")) |value| {
@@ -267,7 +280,7 @@ test "parseArgs sets provider from flag" {
 
     const args = &[_][:0]const u8{ "puny", "--provider", "opencode" };
     const opts = parseArgs(undefined, &env, args);
-    try std.testing.expectEqualStrings("opencode", opts.provider.?);
+    try std.testing.expectEqualStrings("opencode_zen", opts.provider.?);
 }
 
 test "parseArgs falls back to PUNY_PROVIDER env" {
@@ -281,7 +294,7 @@ test "parseArgs falls back to PUNY_PROVIDER env" {
 
     const args = &[_][:0]const u8{"puny"};
     const opts = parseArgs(undefined, &env, args);
-    try std.testing.expectEqualStrings("opencode", opts.provider.?);
+    try std.testing.expectEqualStrings("opencode_zen", opts.provider.?);
 }
 
 test "parseArgs sets show_thinking from flag" {
@@ -322,7 +335,11 @@ test "parseArgs flag overrides PUNY_PROVIDER env" {
 
     const args = &[_][:0]const u8{ "puny", "--provider", "opencode" };
     const opts = parseArgs(undefined, &env, args);
-    try std.testing.expectEqualStrings("opencode", opts.provider.?);
+    try std.testing.expectEqualStrings("opencode_zen", opts.provider.?);
+}
+
+test "validate rejects an unknown provider" {
+    try std.testing.expectError(error.InvalidProvider, validate(.{ .provider = "unknown" }));
 }
 
 test "parseArgs sets upgrade from flag" {

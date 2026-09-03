@@ -20,6 +20,12 @@ pub const ModelProvider = enum {
     mock,
 };
 
+pub fn parseModelProvider(name: []const u8) ?ModelProvider {
+    if (std.mem.eql(u8, name, "opencode")) return .opencode_zen;
+    if (std.mem.eql(u8, name, "opencode-go")) return .opencode_go;
+    return std.meta.stringToEnum(ModelProvider, name);
+}
+
 pub const ClientConfig = client.ClientConfig;
 
 pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
@@ -169,6 +175,16 @@ test "getProviderDisplayName maps known providers" {
     try std.testing.expectEqualStrings("OpenCode Go", getProviderDisplayName(.opencode_go));
     try std.testing.expectEqualStrings("GitHub Copilot", getProviderDisplayName(.copilot));
     try std.testing.expectEqualStrings("Mock", getProviderDisplayName(.mock));
+}
+
+test "parseModelProvider accepts canonical names and legacy aliases" {
+    try std.testing.expectEqual(.lmstudio, parseModelProvider("lmstudio").?);
+    try std.testing.expectEqual(.opencode_zen, parseModelProvider("opencode_zen").?);
+    try std.testing.expectEqual(.opencode_zen, parseModelProvider("opencode").?);
+    try std.testing.expectEqual(.opencode_go, parseModelProvider("opencode_go").?);
+    try std.testing.expectEqual(.opencode_go, parseModelProvider("opencode-go").?);
+    try std.testing.expectEqual(.copilot, parseModelProvider("copilot").?);
+    try std.testing.expect(parseModelProvider("unknown") == null);
 }
 
 test "asCopilot returns null for non-copilot providers" {

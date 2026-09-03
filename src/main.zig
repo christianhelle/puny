@@ -578,7 +578,7 @@ fn initializeProviderAndModel(
     reasoning_effort: *?openai.ReasoningEffort,
     session_id: []const u8,
 ) !void {
-    selected_provider.* = resolver.effectiveProvider(parsed, cfg.*);
+    selected_provider.* = try resolver.effectiveProvider(parsed, cfg.*);
     provider_url.* = if (parsed.mock) "-" else resolver.baseUrlFor(selected_provider.*, parsed, cfg.*);
     const api_key = try resolver.resolveApiKey(arena, io, parsed, cfg.*, selected_provider.*, init.environ_map.get("PUNY_API_KEY"));
 
