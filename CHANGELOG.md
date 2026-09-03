@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Generate provider clients via the openapi2zig library instead of the CLI ([#188](https://github.com/christianhelle/puny/pull/188)) ([@christianhelle](https://github.com/christianhelle/))
 - Send the OpenCode session header and a puny user agent ([#187](https://github.com/christianhelle/puny/pull/187)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix help text column alignment ([#186](https://github.com/christianhelle/puny/pull/186)) ([@christianhelle](https://github.com/christianhelle/))
 - Auto-download openapi2zig for regenerate-providers step ([#185](https://github.com/christianhelle/puny/pull/185)) ([@christianhelle](https://github.com/christianhelle/))
