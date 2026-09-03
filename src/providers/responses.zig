@@ -470,9 +470,7 @@ pub fn chatStreamingResponses(chat_client: *client.Client, request: ChatRequest,
 
     const uri = try std.Uri.parse(url);
 
-    if (chat_client.http_observer) |obs| {
-        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
-    }
+    if (chat_client.http_observer) |obs| client.notifyHttpRequest(obs, .POST, url, headers.items, payload, client.user_agent);
 
     const start = std.Io.Clock.awake.now(chat_client.io);
     var req = chat_client.http.request(.POST, uri, .{
@@ -865,4 +863,58 @@ test "chatStreamingResponses identifies itself as puny with its version" {
     const received = ctx.user_agent[0..ctx.user_agent_len];
     try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
     try std.testing.expectEqualStrings(client.user_agent, received);
+}
+
+test "chatStreamingResponses's http observer sees the user-agent header" {
+    const ctx = try startResponsesServer("data: [DONE]\n\n");
+    defer stopResponsesServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const url = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    const ObserverCtx = struct {
+        found_value: [128]u8 = undefined,
+        found_len: usize = 0,
+
+        fn onRequest(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = body;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            for (headers) |header| {
+                if (!std.ascii.eqlIgnoreCase(header.name, "user-agent")) continue;
+                const len = @min(header.value.len, self.found_value.len);
+                @memcpy(self.found_value[0..len], header.value[0..len]);
+                self.found_len = len;
+            }
+        }
+
+        fn value(self: *const @This()) []const u8 {
+            return self.found_value[0..self.found_len];
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    c.http_observer = .{
+        .ctx = &observer_ctx,
+        .onRequest = ObserverCtx.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    const request = ChatRequest{
+        .model = "gpt-5.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreamingResponses(&c, request, undefined);
+
+    try std.testing.expectEqualStrings(client.user_agent, observer_ctx.value());
 }

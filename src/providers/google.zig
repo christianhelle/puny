@@ -377,9 +377,7 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
         try headers.append(allocator, session_header);
     }
 
-    if (client.http_observer) |obs| {
-        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
-    }
+    if (client.http_observer) |obs| http_client.notifyHttpRequest(obs, .POST, url, headers.items, payload, http_client.user_agent);
 
     const uri = try std.Uri.parse(url);
 
@@ -1426,6 +1424,58 @@ test "chatStreamingGoogle identifies itself as puny with its version" {
     const received = ctx.user_agent[0..ctx.user_agent_len];
     try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
     try std.testing.expectEqualStrings(http_client.user_agent, received);
+}
+
+test "chatStreamingGoogle's http observer sees the user-agent header" {
+    const ctx = try startGoogleServer(.ok, "data: [DONE]\n\n");
+    defer stopGoogleServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try googleClientForServer(ctx, arena);
+    defer c.deinit();
+
+    const ObserverCtx = struct {
+        found_value: [128]u8 = undefined,
+        found_len: usize = 0,
+
+        fn onRequest(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = body;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            for (headers) |header| {
+                if (!std.ascii.eqlIgnoreCase(header.name, "user-agent")) continue;
+                const len = @min(header.value.len, self.found_value.len);
+                @memcpy(self.found_value[0..len], header.value[0..len]);
+                self.found_len = len;
+            }
+        }
+
+        fn value(self: *const @This()) []const u8 {
+            return self.found_value[0..self.found_len];
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    c.http_observer = .{
+        .ctx = &observer_ctx,
+        .onRequest = ObserverCtx.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreamingGoogle(&c, request, undefined);
+
+    try std.testing.expectEqualStrings(http_client.user_agent, observer_ctx.value());
 }
 
 test "chatStreamingGoogle sends only the session id prefix" {
