@@ -254,8 +254,10 @@ Run Puny from the project directory you want the agent to work in:
 puny
 ```
 
-Puny uses the provider saved during setup, shows its model picker, and opens a
-chat prompt. When using LM Studio, start it and load a tool-capable model first.
+Puny uses the provider saved during setup and reuses its saved model when
+available. If no usable model is saved, Puny opens the provider's model picker
+before opening the chat prompt. When using LM Studio, start it and load a
+tool-capable model first.
 
 ### Interactive chat
 
