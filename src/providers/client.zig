@@ -109,6 +109,8 @@ pub const Client = struct {
     organization: ?[]const u8 = null,
     project: ?[]const u8 = null,
     default_headers: []const std.http.Header = &.{},
+    /// Stable per-conversation id sent as the OpenCode session header.
+    session_id: ?[]const u8 = null,
     http_observer: ?HttpObserver = null,
     last_http_failure: ?HttpFailure = null,
 
@@ -274,6 +276,9 @@ pub fn parseRawResponse(comptime T: type, raw: RawResponse) !ApiResult(T) {
     return .{ .ok = .{ .allocator = raw.allocator, .body = raw.body, .parsed = parsed } };
 }
 
+/// Header OpenCode uses to group requests belonging to the same conversation.
+pub const session_header_name = "x-opencode-session";
+
 pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), client: *Client, content_type: ?[]const u8, accept: []const u8) !?[]u8 {
     if (content_type) |ct| {
         try headers.append(allocator, .{ .name = "Content-Type", .value = ct });
@@ -294,6 +299,9 @@ pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList
     }
     for (client.default_headers) |header| {
         try headers.append(allocator, header);
+    }
+    if (client.session_id) |session_id| {
+        try headers.append(allocator, .{ .name = session_header_name, .value = session_id });
     }
     return auth_header;
 }
@@ -1101,4 +1109,41 @@ test "FailingSseReader discard and readVec report read failures" {
     var buf: [1]u8 = undefined;
     var vec = [_][]u8{&buf};
     try std.testing.expectError(error.ReadFailed, failing.reader.readVec(vec[0..]));
+}
+
+test "appendClientHeaders sends the OpenCode session header when a session id is set" {
+    const allocator = std.testing.allocator;
+    var client = Client{
+        .allocator = allocator,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "",
+        .session_id = "9f1c2b3a",
+    };
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth_header = try appendClientHeaders(allocator, &headers, &client, "application/json", "application/json");
+    defer if (auth_header) |value| allocator.free(value);
+
+    try std.testing.expectEqualStrings("9f1c2b3a", findHeader(headers.items, "x-opencode-session").?.value);
+}
+
+test "appendClientHeaders omits the OpenCode session header without a session id" {
+    const allocator = std.testing.allocator;
+    var client = Client{
+        .allocator = allocator,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "",
+    };
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth_header = try appendClientHeaders(allocator, &headers, &client, "application/json", "application/json");
+    defer if (auth_header) |value| allocator.free(value);
+
+    try std.testing.expect(findHeader(headers.items, "x-opencode-session") == null);
 }
