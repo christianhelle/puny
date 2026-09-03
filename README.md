@@ -522,6 +522,17 @@ Once saved, Puny uses the stored provider and key on subsequent runs, so you onl
 
 The config file stores per-provider settings (URL, API key, and last-selected model) so you can switch between providers without re-entering credentials.
 
+Configuration is stored at:
+
+| OS            | Path                                                                 |
+| ------------- | -------------------------------------------------------------------- |
+| Linux / macOS | `$XDG_CONFIG_HOME/puny/config.json` or `~/.config/puny/config.json`   |
+| Windows       | `%APPDATA%\puny\config.json` or `%USERPROFILE%\puny\config.json`      |
+
+Use `--reconfigure` at startup or `/config` during a session to update this
+file. Provider keys written by Puny are encrypted, so copying an `apiKey` value
+without its encryption key does not produce a usable configuration.
+
 ### API key protection
 
 Puny does not write API keys to `config.json` as clear text. When Puny saves a
