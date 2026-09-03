@@ -958,6 +958,9 @@ test "appendCopilotHeaders sets the standard Copilot headers" {
     try std.testing.expectEqualStrings("req-id-1", findHeader(headers.items, "x-request-id").?.value);
     try std.testing.expectEqualStrings("agent", findHeader(headers.items, "X-Initiator").?.value);
     try std.testing.expectEqualStrings("2025-04-01", findHeader(headers.items, "x-github-api-version").?.value);
+    // The user agent rides in the request's standard header slot instead: adding
+    // it here as well would put two of them on the wire.
+    try std.testing.expect(findHeader(headers.items, "user-agent") == null);
 }
 
 test "appendCopilotHeaders omits X-Initiator when null" {
