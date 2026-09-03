@@ -428,3 +428,24 @@ test "httpGet identifies itself as puny with its version" {
     try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
     try std.testing.expectEqualStrings(version.user_agent, received);
 }
+
+test "httpDownloadFile identifies itself as puny with its version" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var server = try listenForHttpGetTest(std.testing.io);
+    var ctx = HttpGetTestCtx{ .io = std.testing.io, .server = server, .body = "downloaded" };
+    const thread = try std.Thread.spawn(.{}, HttpGetTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/download", .{port});
+    defer std.testing.allocator.free(url);
+
+    try httpDownloadFile(std.testing.allocator, std.testing.io, url, tmp.dir, "payload.bin");
+
+    waitForHttpGetTestServer(&ctx, thread, &server);
+
+    const received = ctx.user_agent[0..ctx.user_agent_len];
+    try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
+    try std.testing.expectEqualStrings(version.user_agent, received);
+}
