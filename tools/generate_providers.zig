@@ -92,13 +92,10 @@ fn patchGoogleGeneratedFiles(allocator: std.mem.Allocator, io: std.Io, cwd: std.
     // Fix client: /v1beta/ss/ -> /v1beta/models/ and Bearer -> x-goog-api-key
     {
         const path = "src/providers/google/client.zig";
-        const content = cwd.readFileAlloc(io, path, allocator, .limited(4 * 1024 * 1024)) catch |err| {
-            if (err == error.FileNotFound) {
-                std.log.warn("google client not found for patching: {s}", .{path});
-                return;
-            }
-            return err;
-        };
+        // generateFromSpec just wrote this directory; a missing file here means
+        // generation didn't produce what patching expects, so fail loudly
+        // instead of silently skipping the patch.
+        const content = try cwd.readFileAlloc(io, path, allocator, .limited(4 * 1024 * 1024));
         defer allocator.free(content);
         const patched = try std.mem.replaceOwned(u8, allocator, content, "/v1beta/ss/", "/v1beta/models/");
         defer allocator.free(patched);
@@ -106,19 +103,17 @@ fn patchGoogleGeneratedFiles(allocator: std.mem.Allocator, io: std.Io, cwd: std.
         defer allocator.free(patched2);
         const patched3 = try std.mem.replaceOwned(u8, allocator, patched2, "\"Authorization\"", "\"x-goog-api-key\"");
         defer allocator.free(patched3);
-        try cwd.writeFile(io, .{ .sub_path = path, .data = patched3 });
-        std.log.info("patched {s} for Google auth and path", .{path});
+        if (std.mem.eql(u8, content, patched3)) {
+            std.log.info("{s} already matches Google auth and path, skipping", .{path});
+        } else {
+            try cwd.writeFile(io, .{ .sub_path = path, .data = patched3 });
+            std.log.info("patched {s} for Google auth and path", .{path});
+        }
     }
     // Fix contracts: Schema.items ?Schema -> ?*Schema to avoid infinite size recursion
     {
         const path = "src/providers/google/contracts.zig";
-        const content = cwd.readFileAlloc(io, path, allocator, .limited(2 * 1024 * 1024)) catch |err| {
-            if (err == error.FileNotFound) {
-                std.log.warn("google contracts not found for patching: {s}", .{path});
-                return;
-            }
-            return err;
-        };
+        const content = try cwd.readFileAlloc(io, path, allocator, .limited(2 * 1024 * 1024));
         defer allocator.free(content);
         // Only patch the specific line: items: ?Schema -> items: ?*Schema
         const search = "    items: ?Schema = null,";
