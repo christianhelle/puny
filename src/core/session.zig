@@ -84,7 +84,16 @@ pub const Session = struct {
     html_path: []const u8,
 
     pub fn init(arena: std.mem.Allocator, base_dir: []const u8, random: std.Random, io: std.Io) !Session {
-        const id = try generateUuid(random, arena);
+        return initOwnedId(arena, base_dir, try generateUuid(random, arena), io);
+    }
+
+    /// Creates a session for an id generated up front, so callers that need the
+    /// id before the session directory exists can reuse the same one.
+    pub fn initWithId(arena: std.mem.Allocator, base_dir: []const u8, session_id: []const u8, io: std.Io) !Session {
+        return initOwnedId(arena, base_dir, try arena.dupe(u8, session_id), io);
+    }
+
+    fn initOwnedId(arena: std.mem.Allocator, base_dir: []const u8, id: []const u8, io: std.Io) !Session {
         const dir = try std.fs.path.join(arena, &.{ base_dir, "sessions", id });
         const prd_path = try std.fs.path.join(arena, &.{ dir, "plan.md" });
         const html_path = try std.fs.path.join(arena, &.{ dir, "plan.html" });
@@ -682,4 +691,27 @@ test "hasFile detects file existence" {
         f.close(std.testing.io);
     }
     try std.testing.expect(hasFile(std.testing.io, path));
+}
+
+test "initWithId creates the directory for a caller-supplied session id" {
+    const test_dir = try testBaseDir(std.testing.allocator, std.testing.io);
+    defer {
+        cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+
+    const session = try Session.initWithId(std.testing.allocator, test_dir, "9f1c2b3a-0000-4000-8000-000000000000", std.testing.io);
+    defer {
+        std.testing.allocator.free(session.id);
+        std.testing.allocator.free(session.base);
+        std.testing.allocator.free(session.dir);
+        std.testing.allocator.free(session.prd_path);
+        std.testing.allocator.free(session.html_path);
+    }
+
+    try std.testing.expectEqualStrings("9f1c2b3a-0000-4000-8000-000000000000", session.id);
+    try std.testing.expect(std.mem.endsWith(u8, session.dir, session.id));
+
+    var session_dir = try std.Io.Dir.cwd().openDir(std.testing.io, session.dir, .{});
+    session_dir.close(std.testing.io);
 }
