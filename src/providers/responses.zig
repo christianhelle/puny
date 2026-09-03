@@ -477,7 +477,7 @@ pub fn chatStreamingResponses(chat_client: *client.Client, request: ChatRequest,
     const start = std.Io.Clock.awake.now(chat_client.io);
     var req = chat_client.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
-        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .headers = .{ .accept_encoding = .{ .override = "identity" }, .user_agent = .{ .override = client.user_agent } },
         .extra_headers = headers.items,
     }) catch |err| {
         if (chat_client.http_observer) |obs| {
@@ -775,4 +775,94 @@ test "ResponsesSseCallback handles output at streaming server" {
         "data: [DONE]\n\n";
     try client.parseSseBytes(allocator, data, &sse, null);
     try std.testing.expectEqual(@as(usize, 3), events.items.len);
+}
+
+const ResponsesServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    body: []const u8,
+    thread: std.Thread = undefined,
+    user_agent: [128]u8 = undefined,
+    user_agent_len: usize = 0,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        var it = request.iterateHeaders();
+        while (it.next()) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "user-agent")) {
+                const len = @min(header.value.len, self.user_agent.len);
+                @memcpy(self.user_agent[0..len], header.value[0..len]);
+                self.user_agent_len = len;
+            }
+        }
+        request.respond(self.body, .{ .status = .ok }) catch return;
+    }
+};
+
+fn startResponsesServer(body: []const u8) !*ResponsesServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = std.testing.allocator.create(ResponsesServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
+    ctx.* = .{ .io = std.testing.io, .server = server, .body = body };
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
+    ctx.thread = try std.Thread.spawn(.{}, ResponsesServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopResponsesServer(ctx: *ResponsesServer) void {
+    ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
+    std.testing.allocator.destroy(ctx);
+}
+
+test "chatStreamingResponses identifies itself as puny with its version" {
+    const ctx = try startResponsesServer("data: [DONE]\n\n");
+    defer stopResponsesServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const url = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    const NoopRecorder = struct {
+        fn callback(self: *@This()) StreamCallback {
+            return .{ .context = self, .vtable = &.{ .event = event } };
+        }
+        fn event(ctx_ptr: *anyopaque, ev: StreamEvent) !void {
+            _ = ctx_ptr;
+            _ = ev;
+        }
+    };
+    var recorder = NoopRecorder{};
+
+    const request = ChatRequest{
+        .model = "gpt-5.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreamingResponses(&c, request, recorder.callback());
+
+    const received = ctx.user_agent[0..ctx.user_agent_len];
+    try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
+    try std.testing.expectEqualStrings(client.user_agent, received);
 }
