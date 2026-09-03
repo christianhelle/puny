@@ -237,9 +237,9 @@ pub fn printHelp(io: std.Io) void {
         \\
         \\Options:
         \\      --provider <name>        Provider: lmstudio, opencode_zen, opencode_go, or copilot (CLI/env/config precedence)
-        \\  -u, --url <url>              LM Studio endpoint URL (config/env/CLI precedence)
-        \\  -k, --api-key <key>          Provider API token (env/CLI precedence, session only)
-        \\      --api-key-file <path>    Read API token from file
+        \\  -u, --url <url>              LM Studio endpoint URL (CLI > env > config > default)
+        \\  -k, --api-key <key>          Provider API token (CLI > file > env > config; session only)
+        \\      --api-key-file <path>    Read API token from file (below --api-key in precedence)
         \\  -m, --model <id>             Model identifier (skip picker if found in running models)
         \\  -p, --prompt <text>          Pre-fill prompt as first user message
         \\      --prompt-file <path|url> Read first prompt from a file or URL
