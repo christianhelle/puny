@@ -91,6 +91,7 @@ pub const ClientConfig = struct {
     base_url: ?[]const u8 = null,
     api_key: ?[]const u8 = null,
     http_observer: ?HttpObserver = null,
+    session_id: ?[]const u8 = null,
 };
 
 pub const HttpObserver = struct {
@@ -138,6 +139,7 @@ pub const Client = struct {
         if (config.base_url) |url| self.withBaseUrl(url);
         if (config.api_key) |key| self.api_key = key;
         if (config.http_observer) |obs| self.http_observer = obs;
+        if (config.session_id) |id| self.session_id = id;
     }
 
     pub fn clearLastHttpFailure(self: *Client) void {
@@ -1221,4 +1223,19 @@ test "requestRaw identifies itself as puny with its version" {
     const received = ctx.received();
     try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
     try std.testing.expectEqualStrings(version.version, received["puny/".len..]);
+}
+
+test "setConfig applies the session id and preserves it when unset" {
+    var client = Client{
+        .allocator = undefined,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "key",
+    };
+
+    client.setConfig(.{ .session_id = "9f1c2b3a" });
+    try std.testing.expectEqualStrings("9f1c2b3a", client.session_id.?);
+
+    client.setConfig(.{ .base_url = "http://new.url" });
+    try std.testing.expectEqualStrings("9f1c2b3a", client.session_id.?);
 }
