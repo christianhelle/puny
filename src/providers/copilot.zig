@@ -79,9 +79,7 @@ fn httpRequest(
 ) !client.RawResponse {
     const allocator = self.inner.allocator;
 
-    if (self.inner.http_observer) |obs| {
-        if (obs.onRequest) |cb| cb(obs.ctx, method, url, extra_headers, payload);
-    }
+    if (self.inner.http_observer) |obs| client.notifyHttpRequest(obs, method, url, extra_headers, payload, user_agent);
 
     const uri = try std.Uri.parse(url);
     var response_body: std.Io.Writer.Allocating = .init(allocator);
@@ -489,9 +487,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
     );
     defer allocator.free(auth);
 
-    if (self.inner.http_observer) |obs| {
-        if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
-    }
+    if (self.inner.http_observer) |obs| client.notifyHttpRequest(obs, .POST, url, headers.items, payload, user_agent);
 
     const uri = try std.Uri.parse(url);
 
@@ -1677,6 +1673,52 @@ test "listModels sends exactly one Copilot user agent" {
     try std.testing.expectEqualStrings(user_agent, ctx.firstUserAgent());
 }
 
+test "listModels's http observer sees the Copilot user-agent header, not puny's" {
+    const ctx = try startUserAgentServer("{\"data\":[]}");
+    defer stopUserAgentServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var c = try clientWithSeededToken(ctx, arena_state.allocator());
+    defer c.deinit();
+
+    const ObserverCtx = struct {
+        found_value: [128]u8 = undefined,
+        found_len: usize = 0,
+
+        fn onRequest(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = body;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            for (headers) |header| {
+                if (!std.ascii.eqlIgnoreCase(header.name, "user-agent")) continue;
+                const len = @min(header.value.len, self.found_value.len);
+                @memcpy(self.found_value[0..len], header.value[0..len]);
+                self.found_len = len;
+            }
+        }
+
+        fn value(self: *const @This()) []const u8 {
+            return self.found_value[0..self.found_len];
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    c.inner.http_observer = .{
+        .ctx = &observer_ctx,
+        .onRequest = ObserverCtx.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    var owned = try listModels(&c);
+    owned.deinit();
+
+    try std.testing.expectEqualStrings(user_agent, observer_ctx.value());
+}
+
 test "chatStreaming sends exactly one Copilot user agent" {
     const ctx = try startUserAgentServer("data: [DONE]\n\n");
     defer stopUserAgentServer(ctx);
@@ -1708,4 +1750,55 @@ test "chatStreaming sends exactly one Copilot user agent" {
 
     try std.testing.expectEqual(@as(usize, 1), ctx.count);
     try std.testing.expectEqualStrings(user_agent, ctx.firstUserAgent());
+}
+
+test "chatStreaming's http observer sees the Copilot user-agent header, not puny's" {
+    const ctx = try startUserAgentServer("data: [DONE]\n\n");
+    defer stopUserAgentServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var c = try clientWithSeededToken(ctx, arena_state.allocator());
+    defer c.deinit();
+
+    const ObserverCtx = struct {
+        found_value: [128]u8 = undefined,
+        found_len: usize = 0,
+
+        fn onRequest(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = body;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            for (headers) |header| {
+                if (!std.ascii.eqlIgnoreCase(header.name, "user-agent")) continue;
+                const len = @min(header.value.len, self.found_value.len);
+                @memcpy(self.found_value[0..len], header.value[0..len]);
+                self.found_len = len;
+            }
+        }
+
+        fn value(self: *const @This()) []const u8 {
+            return self.found_value[0..self.found_len];
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    c.inner.http_observer = .{
+        .ctx = &observer_ctx,
+        .onRequest = ObserverCtx.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    const request = openai.ChatRequest{
+        .model = "gpt-5.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreaming(&c, request, undefined);
+
+    try std.testing.expectEqualStrings(user_agent, observer_ctx.value());
 }
