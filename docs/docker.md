@@ -67,7 +67,7 @@ docker run -it --mount "type=bind,source=${PWD},target=/app" -e PUNY_API_KEY=gho
 ## Available tags
 
 - `latest`
-- Semantic versions: `v1.2.3`, `1.2`, `1`
+- Semantic versions: `1.2.3`, `1.2`, `1`
 - Branch refs
 
 ## Build the image locally
