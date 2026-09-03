@@ -63,7 +63,31 @@ pub fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     return config.default_lm_studio_url;
 }
 
+/// OpenCode groups requests by conversation through a session header, so only
+/// its clients carry the session id. Other providers ignore it.
+pub fn applySessionId(prov: *provider.Provider, session_id: []const u8) void {
+    if (session_id.len == 0) return;
+    switch (prov.*) {
+        .opencode, .opencode_go => |*c| c.session_id = session_id,
+        else => {},
+    }
+}
+
 pub fn createProvider(
+    is_mock: bool,
+    prov: ModelProvider,
+    url: []const u8,
+    api_key: []const u8,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    session_id: []const u8,
+) provider.Provider {
+    var created = createClient(is_mock, prov, url, api_key, arena, io);
+    applySessionId(&created, session_id);
+    return created;
+}
+
+fn createClient(
     is_mock: bool,
     prov: ModelProvider,
     url: []const u8,
@@ -137,11 +161,11 @@ test "createProvider returns mock for mock flag or provider name" {
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
 
-    var by_flag = createProvider(true, .lmstudio, "http://example", "", allocator, std.testing.io);
+    var by_flag = createProvider(true, .lmstudio, "http://example", "", allocator, std.testing.io, "");
     defer by_flag.deinit();
     try std.testing.expectEqual(std.meta.activeTag(by_flag), std.meta.Tag(provider.Provider).mock);
 
-    var by_name = createProvider(false, .mock, "-", "", allocator, std.testing.io);
+    var by_name = createProvider(false, .mock, "-", "", allocator, std.testing.io, "");
     defer by_name.deinit();
     try std.testing.expectEqual(std.meta.activeTag(by_name), std.meta.Tag(provider.Provider).mock);
 }
@@ -294,7 +318,7 @@ test "createProvider builds each provider type" {
     const allocator = arena_state.allocator();
 
     {
-        var prov = createProvider(false, .lmstudio, "http://lm", "key-1", allocator, std.testing.io);
+        var prov = createProvider(false, .lmstudio, "http://lm", "key-1", allocator, std.testing.io, "");
         defer prov.deinit();
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).lmstudio);
         try std.testing.expectEqualStrings("http://lm", prov.lmstudio.base_url);
@@ -302,7 +326,7 @@ test "createProvider builds each provider type" {
     }
 
     {
-        var prov = createProvider(false, .opencode_zen, "http://zen", "key-2", allocator, std.testing.io);
+        var prov = createProvider(false, .opencode_zen, "http://zen", "key-2", allocator, std.testing.io, "");
         defer prov.deinit();
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).opencode);
         try std.testing.expectEqualStrings("http://zen", prov.opencode.base_url);
@@ -310,7 +334,7 @@ test "createProvider builds each provider type" {
     }
 
     {
-        var prov = createProvider(false, .opencode_go, "http://go", "key-3", allocator, std.testing.io);
+        var prov = createProvider(false, .opencode_go, "http://go", "key-3", allocator, std.testing.io, "");
         defer prov.deinit();
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).opencode_go);
         try std.testing.expectEqualStrings("http://go", prov.opencode_go.base_url);
@@ -318,7 +342,7 @@ test "createProvider builds each provider type" {
     }
 
     {
-        var prov = createProvider(false, .copilot, "http://copilot", "key-4", allocator, std.testing.io);
+        var prov = createProvider(false, .copilot, "http://copilot", "key-4", allocator, std.testing.io, "");
         defer prov.deinit();
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).copilot);
         try std.testing.expectEqualStrings("http://copilot", prov.copilot.inner.base_url);
@@ -373,4 +397,28 @@ test "ensureCopilotAuth discovers a github token from the environment" {
     var cfg = config.Config{};
     try ensureCopilotAuth(allocator, std.testing.io, init, &cfg, undefined, &prov);
     try std.testing.expectEqualStrings("gho_discovered", prov.copilot.github_token);
+}
+
+test "createProvider tags only the OpenCode clients with the session id" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        var prov = createProvider(false, .opencode_zen, "http://zen", "key", allocator, std.testing.io, "9f1c2b3a");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("9f1c2b3a", prov.opencode.session_id.?);
+    }
+
+    {
+        var prov = createProvider(false, .opencode_go, "http://go", "key", allocator, std.testing.io, "9f1c2b3a");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("9f1c2b3a", prov.opencode_go.session_id.?);
+    }
+
+    {
+        var prov = createProvider(false, .lmstudio, "http://lm", "key", allocator, std.testing.io, "9f1c2b3a");
+        defer prov.deinit();
+        try std.testing.expect(prov.lmstudio.session_id == null);
+    }
 }
