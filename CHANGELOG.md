@@ -6,6 +6,7 @@
 - Improve documentation correctness and usage ([#189](https://github.com/christianhelle/puny/pull/189)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Include the User-Agent header in the debug HTTP log ([#190](https://github.com/christianhelle/puny/pull/190)) ([@christianhelle](https://github.com/christianhelle/))
 - Generate provider clients via the openapi2zig library instead of the CLI ([#188](https://github.com/christianhelle/puny/pull/188)) ([@christianhelle](https://github.com/christianhelle/))
 - Send the OpenCode session header and a puny user agent ([#187](https://github.com/christianhelle/puny/pull/187)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix help text column alignment ([#186](https://github.com/christianhelle/puny/pull/186)) ([@christianhelle](https://github.com/christianhelle/))
