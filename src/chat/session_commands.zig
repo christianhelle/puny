@@ -120,7 +120,7 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
 
     const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
     ctx.prov.deinit();
-    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
     if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
     if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
     ctx.model_provider.* = picked_provider;
@@ -180,7 +180,7 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
 
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         ctx.prov.deinit();
-        ctx.prov.* = resolver.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io);
+        ctx.prov.* = resolver.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
         if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
         if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
         ctx.model_provider.* = new_provider_name;

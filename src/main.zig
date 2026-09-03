@@ -597,7 +597,7 @@ fn initializeProviderAndModel(
         break :blk null;
     };
 
-    prov.* = resolver.createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io);
+    prov.* = resolver.createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io, "");
     errdefer prov.deinit();
     if (!parsed.mock) try resolver.ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
