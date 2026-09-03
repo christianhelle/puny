@@ -291,6 +291,10 @@
           <p>Each attachment is limited to 64 KiB. Unreadable files, larger files, and paths containing whitespace are not attached.</p>
         </div>
         <div class="install-card">
+          <h3>Repository instructions</h3>
+          <p>Inside a Git repository, Puny loads the first instruction file found at the repository root: <code>AGENTS.md</code>, then <code>.github/copilot-instructions.md</code>, then <code>CLAUDE.md</code>. Use that file for project-specific commands, conventions, and constraints that should apply to every request.</p>
+        </div>
+        <div class="install-card">
           <h3>Skills</h3>
           <p>Puny supports reusable prompt-engineering skills stored as markdown files. Skills are scanned from <code>~/.agents/skills/</code> (global) and <code>&lt;repo&gt;/.agents/skills/</code> (per-project).</p>
           <p>Each skill directory contains a <code>SKILL.md</code> file with YAML frontmatter:</p>

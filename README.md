@@ -290,6 +290,19 @@ appends the contents of each readable file. Each attachment is limited to
 64 KiB; unreadable files, larger files, and paths containing whitespace are not
 attached.
 
+### Repository instructions
+
+When Puny starts inside a Git repository, it loads the first instruction file
+found at the repository root in this order:
+
+1. `AGENTS.md`
+2. `.github/copilot-instructions.md`
+3. `CLAUDE.md`
+
+Only one file is loaded. Use it for project-specific build commands,
+conventions, and constraints that should apply to every request. Puny restores
+these instructions after `/new`, `/reset`, and between orchestrate phases.
+
 ### One-shot prompt
 
 Run a single prompt and exit. Useful for scripts or quick tasks:
