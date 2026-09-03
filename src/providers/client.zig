@@ -110,14 +110,23 @@ pub const HttpObserver = struct {
 /// the real request and being sent twice.
 pub fn notifyHttpRequest(obs: HttpObserver, method: std.http.Method, url: []const u8, extra_headers: []const std.http.Header, payload: ?[]const u8, agent: []const u8) void {
     const cb = obs.onRequest orelse return;
-    var buf: [32]std.http.Header = undefined;
-    if (extra_headers.len >= buf.len) {
-        cb(obs.ctx, method, url, extra_headers, payload);
+    var stack_buf: [32]std.http.Header = undefined;
+    if (extra_headers.len < stack_buf.len) {
+        @memcpy(stack_buf[0..extra_headers.len], extra_headers);
+        stack_buf[extra_headers.len] = .{ .name = "user-agent", .value = agent };
+        cb(obs.ctx, method, url, stack_buf[0 .. extra_headers.len + 1], payload);
         return;
     }
-    @memcpy(buf[0..extra_headers.len], extra_headers);
-    buf[extra_headers.len] = .{ .name = "user-agent", .value = agent };
-    cb(obs.ctx, method, url, buf[0 .. extra_headers.len + 1], payload);
+    // Rare path: more extra headers than fit on the stack buffer. Fall back
+    // to a heap allocation so the User-Agent is still surfaced to the observer.
+    const heap_buf = std.heap.page_allocator.alloc(std.http.Header, extra_headers.len + 1) catch {
+        cb(obs.ctx, method, url, extra_headers, payload);
+        return;
+    };
+    defer std.heap.page_allocator.free(heap_buf);
+    @memcpy(heap_buf[0..extra_headers.len], extra_headers);
+    heap_buf[extra_headers.len] = .{ .name = "user-agent", .value = agent };
+    cb(obs.ctx, method, url, heap_buf, payload);
 }
 
 pub const Client = struct {
