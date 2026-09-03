@@ -39,14 +39,15 @@ to files Puny should edit on Linux hosts.
 
 ## One-shot prompt
 
-Run a single prompt and exit:
+After completing setup in an interactive container, pass a model ID so the run
+does not open the model picker:
 
 ```bash
 docker run --rm \
   --mount "type=bind,source=${PWD},target=/workspace" \
   --mount "type=volume,source=puny-home,target=/app" \
   --workdir /workspace \
-  christianhelle/puny:latest --prompt "List all source files" --oneshot
+  christianhelle/puny:latest --model model-id --prompt "List all source files" --oneshot
 ```
 
 ## LM Studio
