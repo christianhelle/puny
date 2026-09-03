@@ -207,6 +207,12 @@ Puny connects to `https://opencode.ai/zen/go` and shows the model picker.
 Go models are served over OpenAI-compatible `/v1/chat/completions` (DeepSeek, Grok, GLM, Kimi, MiMo)
 and Anthropic `/v1/messages` (MiniMax, Qwen) transports.
 
+Requests to OpenCode Zen and OpenCode Go carry an `x-opencode-session` header
+holding the current session id, so OpenCode can group the requests belonging to
+one conversation. Starting a new session with `/new` or `/reset` sends a new id;
+resuming a session with `/resume` or `--session` keeps the original one. Puny
+also identifies itself as `puny/<version>` in the `User-Agent` of every request.
+
 ### GitHub Copilot
 
 Use Puny with your existing [GitHub Copilot](https://github.com/features/copilot) subscription:
