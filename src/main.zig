@@ -213,34 +213,6 @@ fn run(init: std.process.Init) !u8 {
 
     const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
 
-    var prov: provider.Provider = undefined;
-    var selected_provider: ModelProvider = undefined;
-    var provider_url: []const u8 = undefined;
-    var model_key: []const u8 = undefined;
-    var reasoning_effort: ?openai.ReasoningEffort = null;
-    try initializeProviderAndModel(
-        arena,
-        messages_arena,
-        init.io,
-        init,
-        parsed,
-        cfg,
-        stdout_writer,
-        random,
-        &prov,
-        &selected_provider,
-        &provider_url,
-        &model_key,
-        &reasoning_effort,
-    );
-
-    var session_restored = false;
-    var restore_incomplete = false;
-    var agent_mode: AgentMode = if (startup_review_scope != null) .review else .build;
-    var review_outcome: ?branch_review.Outcome = null;
-    var messages: std.ArrayList(openai.Message) = .empty;
-    defer messages.deinit(messages_arena);
-
     var restore_target: ?sessions.SessionInfo = null;
     if (parsed.session) |sid| {
         if (sessions.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
@@ -266,6 +238,39 @@ fn run(init: std.process.Init) !u8 {
         } else |_| {}
     }
 
+    // The session id is generated before the provider so every request,
+    // the model list included, is attributed to this conversation.
+    const session_id = if (restore_target) |s| s.id else try core_sess.generateUuid(random, arena);
+
+    var prov: provider.Provider = undefined;
+    var selected_provider: ModelProvider = undefined;
+    var provider_url: []const u8 = undefined;
+    var model_key: []const u8 = undefined;
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    try initializeProviderAndModel(
+        arena,
+        messages_arena,
+        init.io,
+        init,
+        parsed,
+        cfg,
+        stdout_writer,
+        random,
+        &prov,
+        &selected_provider,
+        &provider_url,
+        &model_key,
+        &reasoning_effort,
+        session_id,
+    );
+
+    var session_restored = false;
+    var restore_incomplete = false;
+    var agent_mode: AgentMode = if (startup_review_scope != null) .review else .build;
+    var review_outcome: ?branch_review.Outcome = null;
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(messages_arena);
+
     var current_session: core_sess.Session = undefined;
     if (restore_target) |s| {
         const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", s.id });
@@ -278,7 +283,7 @@ fn run(init: std.process.Init) !u8 {
             try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
         );
     } else {
-        current_session = try core_sess.Session.init(arena, base_dir, random, init.io);
+        current_session = try core_sess.Session.initWithId(arena, base_dir, session_id, init.io);
     }
 
     try welcome.print(stdout_writer, .{
@@ -571,6 +576,7 @@ fn initializeProviderAndModel(
     provider_url: *[]const u8,
     model_key: *[]const u8,
     reasoning_effort: *?openai.ReasoningEffort,
+    session_id: []const u8,
 ) !void {
     selected_provider.* = resolver.effectiveProvider(parsed, cfg.*);
     provider_url.* = if (parsed.mock) "-" else resolver.baseUrlFor(selected_provider.*, parsed, cfg.*);
@@ -597,7 +603,7 @@ fn initializeProviderAndModel(
         break :blk null;
     };
 
-    prov.* = resolver.createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io, "");
+    prov.* = resolver.createProvider(parsed.mock, selected_provider.*, provider_url.*, api_key, provider_arena, io, session_id);
     errdefer prov.deinit();
     if (!parsed.mock) try resolver.ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
