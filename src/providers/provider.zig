@@ -329,19 +329,21 @@ const ProviderTestServer = struct {
             lockMutex(&self.request_path_mutex);
             defer self.request_path_mutex.unlock();
             self.request_path.appendSlice(std.testing.allocator, request.head.target) catch {};
-        }
-        var it = request.iterateHeaders();
-        while (it.next()) |header| {
-            if (std.ascii.eqlIgnoreCase(header.name, client.session_header_name)) {
-                const len = @min(header.value.len, self.session_header.len);
-                @memcpy(self.session_header[0..len], header.value[0..len]);
-                self.session_header_len = len;
+            var it = request.iterateHeaders();
+            while (it.next()) |header| {
+                if (std.ascii.eqlIgnoreCase(header.name, client.session_header_name)) {
+                    const len = @min(header.value.len, self.session_header.len);
+                    @memcpy(self.session_header[0..len], header.value[0..len]);
+                    self.session_header_len = len;
+                }
             }
         }
         request.respond(self.body, .{ .status = self.status }) catch return;
     }
 
-    fn getSessionHeader(self: *const @This()) []const u8 {
+    fn getSessionHeader(self: *@This()) []const u8 {
+        lockMutex(&self.request_path_mutex);
+        defer self.request_path_mutex.unlock();
         return self.session_header[0..self.session_header_len];
     }
 
