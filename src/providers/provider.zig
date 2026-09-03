@@ -23,7 +23,8 @@ pub const ModelProvider = enum {
 pub fn parseModelProvider(name: []const u8) ?ModelProvider {
     if (std.mem.eql(u8, name, "opencode")) return .opencode_zen;
     if (std.mem.eql(u8, name, "opencode-go")) return .opencode_go;
-    return std.meta.stringToEnum(ModelProvider, name);
+    const parsed = std.meta.stringToEnum(ModelProvider, name) orelse return null;
+    return if (parsed == .mock) null else parsed;
 }
 
 pub const ClientConfig = client.ClientConfig;
@@ -184,6 +185,7 @@ test "parseModelProvider accepts canonical names and legacy aliases" {
     try std.testing.expectEqual(.opencode_go, parseModelProvider("opencode_go").?);
     try std.testing.expectEqual(.opencode_go, parseModelProvider("opencode-go").?);
     try std.testing.expectEqual(.copilot, parseModelProvider("copilot").?);
+    try std.testing.expect(parseModelProvider("mock") == null);
     try std.testing.expect(parseModelProvider("unknown") == null);
 }
 
