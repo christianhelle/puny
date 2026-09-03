@@ -314,6 +314,38 @@ test "logHttpRequest redacts the cookie header value" {
     try std.testing.expect(std.mem.indexOf(u8, content, "content-type: application/json") != null);
 }
 
+test "logHttpRequest writes the user-agent header value to the log file" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [4096]u8 = undefined;
+    var file = try tmp.dir.createFile(std.testing.io, "debug.log", .{});
+    defer file.close(std.testing.io);
+    var file_writer = std.Io.File.Writer.init(file, std.testing.io, &buffer);
+    var log = DebugLog{
+        .file = file,
+        .writer = &file_writer.interface,
+        .allocator = allocator,
+    };
+
+    const headers = [_]std.http.Header{
+        .{ .name = "user-agent", .value = http_client.user_agent },
+        .{ .name = "content-type", .value = "application/json" },
+    };
+    logHttpRequest(@ptrCast(&log), .POST, "http://example.com", &headers, null);
+
+    try file_writer.interface.flush();
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "debug.log", allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    var expected_line: [128]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&expected_line, "user-agent: {s}\n", .{http_client.user_agent});
+    try std.testing.expect(std.mem.indexOf(u8, content, expected) != null);
+}
+
 test "logHttpResponse redacts authorization and set-cookie header values" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
