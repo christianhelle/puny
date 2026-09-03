@@ -498,7 +498,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
     const start = std.Io.Clock.awake.now(self.inner.io);
     var req = self.inner.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
-        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .headers = .{ .accept_encoding = .{ .override = "identity" }, .user_agent = .{ .override = user_agent } },
         .extra_headers = headers.items,
     }) catch |err| {
         if (self.inner.http_observer) |obs| {
@@ -1669,6 +1669,39 @@ test "listModels sends exactly one Copilot user agent" {
 
     var owned = try listModels(&c);
     owned.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), ctx.count);
+    try std.testing.expectEqualStrings(user_agent, ctx.firstUserAgent());
+}
+
+test "chatStreaming sends exactly one Copilot user agent" {
+    const ctx = try startUserAgentServer("data: [DONE]\n\n");
+    defer stopUserAgentServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var c = try clientWithSeededToken(ctx, arena_state.allocator());
+    defer c.deinit();
+
+    const NoopRecorder = struct {
+        fn callback(self: *@This()) openai.StreamCallback {
+            return .{ .context = self, .vtable = &.{ .event = event } };
+        }
+        fn event(context: *anyopaque, ev: openai.StreamEvent) !void {
+            _ = context;
+            _ = ev;
+        }
+    };
+    var recorder = NoopRecorder{};
+
+    const request = openai.ChatRequest{
+        .model = "gpt-5.5",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreaming(&c, request, recorder.callback());
 
     try std.testing.expectEqual(@as(usize, 1), ctx.count);
     try std.testing.expectEqualStrings(user_agent, ctx.firstUserAgent());
