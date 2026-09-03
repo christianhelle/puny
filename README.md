@@ -186,26 +186,29 @@ zig build run
 Sign in to [OpenCode Zen](https://opencode.ai/zen), copy your API key, then:
 
 ```bash
-puny --provider opencode --api-key YOUR_API_KEY
+puny --provider opencode_zen --api-key YOUR_API_KEY
 ```
 
 Puny connects to `https://opencode.ai/zen` and shows the model picker.
-Models served over OpenCode Zen's OpenAI-compatible `/v1/chat/completions`
-transport are listed (DeepSeek, GPT, GLM, Kimi, MiniMax, Grok, Big Pickle, and the free models),
-plus Qwen and Claude models served over Anthropic's `/v1/messages` transport,
-and Gemini models served over Google's `/v1/models/<model>:streamGenerateContent` transport.
+Puny chooses the streaming transport from the model ID:
+
+- `muse-spark-*`, `grok-*`, and `gpt-*` use `/v1/responses`.
+- `claude-*` uses Anthropic's `/v1/messages`.
+- `gemini-*` uses Google's `/v1/models/<model>:streamGenerateContent`.
+- All other model IDs use the OpenAI-compatible `/v1/chat/completions` endpoint.
 
 ### OpenCode Go
 
 Sign in to [OpenCode Zen](https://opencode.ai/zen), subscribe to Go, copy your API key (same key for Zen and Go), then:
 
 ```bash
-puny --provider opencode-go --api-key YOUR_API_KEY
+puny --provider opencode_go --api-key YOUR_API_KEY
 ```
 
 Puny connects to `https://opencode.ai/zen/go` and shows the model picker.
-Go models are served over OpenAI-compatible `/v1/chat/completions` (DeepSeek, Grok, GLM, Kimi, MiMo)
-and Anthropic `/v1/messages` (MiniMax, Qwen) transports.
+Models beginning with `muse-spark-`, `grok-`, or `gpt-` use
+`/v1/responses`; `minimax-*` and `qwen*` use Anthropic's `/v1/messages`;
+all other model IDs use `/v1/chat/completions`.
 
 Requests to OpenCode Zen and OpenCode Go carry an `x-opencode-session` header
 holding the first 8 characters of the current session id — the same prefix
@@ -245,13 +248,14 @@ listed models (Claude, GPT-5 mini, Gemini, Kimi, and more).
 
 ## Usage
 
-Make sure LM Studio is running and a tool-capable model is loaded, then start Puny:
+Run Puny from the project directory you want the agent to work in:
 
 ```bash
 puny
 ```
 
-Puny shows the model picker, connects to LM Studio, and drops you into a chat prompt.
+Puny uses the provider saved during setup, shows its model picker, and opens a
+chat prompt. When using LM Studio, start it and load a tool-capable model first.
 
 ### Interactive chat
 
@@ -412,10 +416,13 @@ responses are limited to 10 MiB, and remote fetches time out after 30 seconds.
 
 ### Select a provider
 
-Use `--provider` to switch between LM Studio (`lmstudio`, the default), OpenCode Zen (`opencode`), OpenCode Go (`opencode-go`), and GitHub Copilot (`copilot`). You can also set `PUNY_PROVIDER` or the `provider` field in `config.json`.
+Use `--provider` to switch between LM Studio (`lmstudio`, the default),
+OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), and GitHub Copilot
+(`copilot`). The same identifiers apply to `PUNY_PROVIDER` and the `provider`
+field in `config.json`.
 
 ```bash
-puny --provider opencode --api-key YOUR_API_KEY
+puny --provider opencode_zen --api-key YOUR_API_KEY
 ```
 
 Precedence is: `--provider` > `PUNY_PROVIDER` > `config.json` > `lmstudio`.
@@ -466,7 +473,7 @@ puny --reconfigure
 
 You will be prompted for:
 
-1. **Provider** — `lmstudio`, `opencode`, `opencode-go`, or `copilot`.
+1. **Provider** — LM Studio (`lmstudio`), OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), or GitHub Copilot (`copilot`).
 2. **Provider URL** — only for LM Studio; press Enter to use the default. OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
@@ -653,7 +660,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 | Flag                    | Description                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------- |
-| `--provider <name>`     | Provider: `lmstudio`, `opencode`, `opencode-go`, or `copilot` (env/config/CLI precedence) |
+| `--provider <name>`     | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, or `copilot` (CLI/env/config precedence) |
 | `-u`, `--url <url>`     | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)                                 |
 | `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
 | `--api-key-file <path>` | Read provider API token from file (session only)                                          |

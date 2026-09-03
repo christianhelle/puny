@@ -45,13 +45,13 @@ docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny
 ## OpenCode Zen
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode --api-key YOUR_API_KEY
+docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode_zen --api-key YOUR_API_KEY
 ```
 
 ## OpenCode Go
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode-go --api-key YOUR_API_KEY
+docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode_go --api-key YOUR_API_KEY
 ```
 
 ## GitHub Copilot
