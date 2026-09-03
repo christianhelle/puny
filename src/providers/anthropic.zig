@@ -228,8 +228,8 @@ fn appendAnthropicHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(
     if (client.api_key.len > 0) {
         try headers.append(allocator, .{ .name = "x-api-key", .value = client.api_key });
     }
-    if (client.session_id) |session_id| {
-        try headers.append(allocator, .{ .name = http_client.session_header_name, .value = http_client.sessionHeaderValue(session_id) });
+    if (client.sessionHeader()) |session_header| {
+        try headers.append(allocator, session_header);
     }
 }
 
@@ -1276,4 +1276,21 @@ test "appendAnthropicHeaders sends only the session id prefix" {
         }
     }
     try std.testing.expect(found_session);
+}
+
+test "appendAnthropicHeaders omits the OpenCode session header for an empty session id" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    var c = http_client.Client.init(allocator, std.testing.io, "my-key");
+    defer c.deinit();
+    c.session_id = "";
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    try appendAnthropicHeaders(allocator, &headers, &c);
+
+    for (headers.items) |h| {
+        if (std.mem.eql(u8, h.name, "x-opencode-session")) return error.UnexpectedSessionHeader;
+    }
 }
