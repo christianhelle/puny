@@ -261,7 +261,7 @@ pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, c
     const start = std.Io.Clock.awake.now(client.io);
     var req = client.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
-        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .headers = .{ .accept_encoding = .{ .override = "identity" }, .user_agent = .{ .override = http_client.user_agent } },
         .extra_headers = headers.items,
     }) catch |err| {
         if (client.http_observer) |obs| {
@@ -903,6 +903,8 @@ const TestServer = struct {
     status: std.http.Status,
     body: []const u8,
     thread: std.Thread = undefined,
+    user_agent: [128]u8 = undefined,
+    user_agent_len: usize = 0,
 
     fn serve(self: *@This()) void {
         var stream = self.server.accept(self.io) catch return;
@@ -915,6 +917,14 @@ const TestServer = struct {
 
         var http_server = std.http.Server.init(&reader.interface, &writer.interface);
         var request = http_server.receiveHead() catch return;
+        var it = request.iterateHeaders();
+        while (it.next()) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "user-agent")) {
+                const len = @min(header.value.len, self.user_agent.len);
+                @memcpy(self.user_agent[0..len], header.value[0..len]);
+                self.user_agent_len = len;
+            }
+        }
         request.respond(self.body, .{ .status = self.status }) catch return;
     }
 };
@@ -1213,4 +1223,35 @@ test "appendAnthropicHeaders sends the OpenCode session header when a session id
         }
     }
     try std.testing.expect(found_session);
+}
+
+test "chatStreaming identifies itself as puny with its version" {
+    const ctx = try startTestServer(.ok, "data: [DONE]\n\n");
+    defer stopTestServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var c = try clientForServer(ctx, allocator);
+    defer c.deinit();
+
+    var events = std.ArrayList(TestEvent).empty;
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{ .event = TestSseCallback.event },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreaming(&c, request, callback);
+
+    const received = ctx.user_agent[0..ctx.user_agent_len];
+    try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
+    try std.testing.expectEqualStrings(http_client.user_agent, received);
 }
