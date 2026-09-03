@@ -2,6 +2,9 @@
 
 ## [Unreleased Changes]
 
+### Merged Pull Requests
+- Improve documentation correctness and usage ([#189](https://github.com/christianhelle/puny/pull/189)) ([@christianhelle](https://github.com/christianhelle/))
+
 ### Features
 - Generate provider clients via the openapi2zig library instead of the CLI ([#188](https://github.com/christianhelle/puny/pull/188)) ([@christianhelle](https://github.com/christianhelle/))
 - Send the OpenCode session header and a puny user agent ([#187](https://github.com/christianhelle/puny/pull/187)) ([@christianhelle](https://github.com/christianhelle/))
