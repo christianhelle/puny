@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -171,8 +170,27 @@ pub fn build(b: *std.Build) !void {
     test_integration_step.dependOn(&run_integration.step);
 
     const regenerate_step = b.step("regenerate-providers", "Re-generate provider clients from OpenAPI specs");
-    const regenerate = RegenerateProvidersStep.create(b);
-    regenerate_step.dependOn(&regenerate.step);
+    if (b.lazyDependency("openapi2zig", .{
+        .target = b.graph.host,
+        .optimize = .ReleaseSafe,
+    })) |openapi2zig| {
+        const generate_providers = b.addExecutable(.{
+            .name = "generate_providers",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/generate_providers.zig"),
+                .target = b.graph.host,
+                .optimize = .ReleaseSafe,
+            }),
+        });
+        generate_providers.root_module.addImport("openapi2zig", openapi2zig.module("openapi2zig"));
+
+        const run_generate_providers = b.addRunArtifact(generate_providers);
+        // It rewrites files under src/providers, so it must run every time
+        // rather than being cached away.
+        run_generate_providers.has_side_effects = true;
+        run_generate_providers.setCwd(b.path("."));
+        regenerate_step.dependOn(&run_generate_providers.step);
+    }
 }
 
 fn addPunyExecutable(
@@ -302,299 +320,6 @@ const InstallReleaseStep = struct {
         const dest_path = b.pathResolve(&.{ self.dest_dir, self.dest_name });
         const p = try step.installFile(self.source, dest_path);
         step.result_cached = p == .fresh;
-    }
-};
-
-const RegenerateProvidersStep = struct {
-    step: std.Build.Step,
-
-    fn create(b: *std.Build) *RegenerateProvidersStep {
-        const self = b.allocator.create(RegenerateProvidersStep) catch @panic("OOM");
-        self.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "regenerate providers",
-                .owner = b,
-                .makeFn = make,
-            }),
-        };
-        return self;
-    }
-
-    fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
-        _ = options;
-        const b = step.owner;
-        const allocator = b.allocator;
-        const io = b.graph.io;
-        const cwd = std.Io.Dir.cwd();
-
-        // Remove existing provider output directories (mirrors generate.ps1 Remove-Item)
-        for ([_][]const u8{
-            "src/providers/openai",
-            "src/providers/lmstudio",
-            "src/providers/anthropic",
-            "src/providers/google",
-        }) |dir| {
-            cwd.deleteTree(io, dir) catch |err| {
-                if (err == error.FileNotFound) {
-                    std.log.info("skipping missing {s}", .{dir});
-                    continue;
-                }
-                std.log.err("failed to remove {s}: {s}", .{ dir, @errorName(err) });
-                return err;
-            };
-            std.log.info("removed {s}", .{dir});
-        }
-
-        const openapi2zig_exe = try ensureOpenApi2Zig(b, allocator, io);
-        std.log.info("using openapi2zig: {s}", .{openapi2zig_exe});
-
-        // 1. Generate shared runtime (mirrors `openapi2zig generate -o ../runtime.zig --runtime-only` in generate.ps1)
-        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
-            "generate",
-            "-o",
-            "src/providers/runtime.zig",
-            "--runtime-only",
-        });
-
-        // Streaming clients must consume non-success response bodies before
-        // notifying observers; provider regression tests guard this behavior.
-        // 2. Generate openai with shared runtime – Chat + Models + Responses are used (provider.zig, openai_shim.zig, responses transport)
-        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
-            "generate",
-            "-i",
-            "src/providers/openapi/openai.json",
-            "-o",
-            "src/providers/openai/",
-            "--multiple-files",
-            "--file-name",
-            "models=contracts.zig",
-            "--runtime-module",
-            "../runtime.zig",
-            "--tag",
-            "Chat",
-            "--tag",
-            "Models",
-            "--tag",
-            "Responses",
-        });
-
-        // 3. Generate lmstudio with shared runtime – only Models is used via lmstudio_shim.zig
-        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
-            "generate",
-            "-i",
-            "src/providers/openapi/lmstudio.json",
-            "-o",
-            "src/providers/lmstudio",
-            "--multiple-files",
-            "--file-name",
-            "models=contracts.zig",
-            "--runtime-module",
-            "../runtime.zig",
-            "--tag",
-            "Models",
-        });
-
-        // 4. Generate anthropic with shared runtime – only Messages is used (anthropic.zig + provider.zig)
-        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
-            "generate",
-            "-i",
-            "src/providers/openapi/anthropic.json",
-            "-o",
-            "src/providers/anthropic/",
-            "--multiple-files",
-            "--file-name",
-            "models=contracts.zig",
-            "--runtime-module",
-            "../runtime.zig",
-            "--tag",
-            "Messages",
-        });
-
-        // 5. Generate google with shared runtime – only Models is used (google.zig)
-        try runOpenApi2Zig(allocator, io, openapi2zig_exe, &.{
-            "generate",
-            "-i",
-            "src/providers/openapi/google.json",
-            "-o",
-            "src/providers/google/",
-            "--multiple-files",
-            "--file-name",
-            "models=contracts.zig",
-            "--runtime-module",
-            "../runtime.zig",
-            "--tag",
-            "models",
-        });
-
-        try patchGoogleGeneratedFiles(allocator, io);
-
-        std.log.info("regenerate-providers: done", .{});
-    }
-
-    fn ensureOpenApi2Zig(b: *std.Build, allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
-        if (b.findProgram(&.{"openapi2zig"}, &.{})) |exe| {
-            return exe;
-        } else |err| {
-            if (err != error.FileNotFound) return err;
-        }
-
-        std.log.warn("openapi2zig not found on PATH, downloading the latest release", .{});
-        try installOpenApi2Zig(allocator, io);
-
-        // The installer runs in a child process and cannot update this
-        // process's PATH, so a fresh PATH lookup can still miss a
-        // first-time install. Fall back to the well-known install
-        // directory (the same $HOME/.local/bin convention this project's
-        // own install-* steps use) before giving up.
-        if (b.findProgram(&.{"openapi2zig"}, &.{})) |exe| {
-            return exe;
-        } else |_| {}
-
-        if (findInWellKnownInstallDir(b)) |exe| {
-            return exe;
-        }
-
-        std.log.err("openapi2zig install completed but the binary still could not be found; restart your shell (or add its install directory to PATH) and try again", .{});
-        return error.FileNotFound;
-    }
-
-    fn findInWellKnownInstallDir(b: *std.Build) ?[]const u8 {
-        const bin_name = if (builtin.os.tag == .windows) "openapi2zig.exe" else "openapi2zig";
-        const home = if (builtin.os.tag == .windows)
-            b.graph.environ_map.get("USERPROFILE") orelse return null
-        else
-            b.graph.environ_map.get("HOME") orelse return null;
-        if (home.len == 0) return null;
-
-        const candidate = b.pathJoin(&.{ home, ".local", "bin", bin_name });
-        std.Io.Dir.cwd().access(b.graph.io, candidate, .{}) catch return null;
-        return candidate;
-    }
-
-    fn installOpenApi2Zig(allocator: std.mem.Allocator, io: std.Io) !void {
-        const argv: []const []const u8 = if (builtin.os.tag == .windows)
-            &.{ "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "irm https://christianhelle.com/openapi2zig/install.ps1 | iex" }
-        else
-            &.{ "bash", "-c", "curl -fsSL https://christianhelle.com/openapi2zig/install | bash" };
-
-        std.log.info("running: {s}", .{try std.mem.join(allocator, " ", argv)});
-
-        const result = std.process.run(allocator, io, .{
-            .argv = argv,
-            .stdout_limit = .limited(4 * 1024 * 1024),
-            .stderr_limit = .limited(4 * 1024 * 1024),
-        }) catch |err| {
-            std.log.err("failed to run openapi2zig install script: {s}", .{@errorName(err)});
-            return err;
-        };
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-
-        if (result.stdout.len > 0) std.log.info("{s}", .{result.stdout});
-        if (result.stderr.len > 0) std.log.info("{s}", .{result.stderr});
-
-        switch (result.term) {
-            .exited => |code| {
-                if (code != 0) {
-                    std.log.err("openapi2zig install script exited with code {d}", .{code});
-                    return error.OpenApi2ZigInstallFailed;
-                }
-            },
-            else => {
-                std.log.err("openapi2zig install script terminated abnormally: {any}", .{result.term});
-                return error.OpenApi2ZigInstallFailed;
-            },
-        }
-    }
-
-    fn runOpenApi2Zig(
-        allocator: std.mem.Allocator,
-        io: std.Io,
-        exe: []const u8,
-        args: []const []const u8,
-    ) !void {
-        var argv: std.ArrayList([]const u8) = .empty;
-        defer argv.deinit(allocator);
-        try argv.append(allocator, exe);
-        for (args) |a| try argv.append(allocator, a);
-
-        const joined = try std.mem.join(allocator, " ", argv.items);
-        defer allocator.free(joined);
-        std.log.info("running: {s}", .{joined});
-
-        const result = std.process.run(allocator, io, .{
-            .argv = argv.items,
-            .stdout_limit = .limited(4 * 1024 * 1024),
-            .stderr_limit = .limited(4 * 1024 * 1024),
-        }) catch |err| {
-            std.log.err("failed to spawn openapi2zig: {s}", .{@errorName(err)});
-            return err;
-        };
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-
-        if (result.stdout.len > 0) std.log.info("{s}", .{result.stdout});
-        if (result.stderr.len > 0) std.log.info("{s}", .{result.stderr});
-
-        switch (result.term) {
-            .exited => |code| {
-                if (code != 0) {
-                    std.log.err("openapi2zig exited with code {d}", .{code});
-                    if (result.stderr.len > 0) std.log.err("stderr: {s}", .{result.stderr});
-                    return error.OpenApi2ZigFailed;
-                }
-            },
-            else => {
-                std.log.err("openapi2zig terminated abnormally: {any}", .{result.term});
-                return error.OpenApi2ZigFailed;
-            },
-        }
-    }
-
-    fn patchGoogleGeneratedFiles(allocator: std.mem.Allocator, io: std.Io) !void {
-        const cwd = std.Io.Dir.cwd();
-        // Fix client: /v1beta/ss/ -> /v1beta/models/ and Bearer -> x-goog-api-key
-        {
-            const path = "src/providers/google/client.zig";
-            const content = cwd.readFileAlloc(io, path, allocator, .limited(4 * 1024 * 1024)) catch |err| {
-                if (err == error.FileNotFound) {
-                    std.log.warn("google client not found for patching: {s}", .{path});
-                    return;
-                }
-                return err;
-            };
-            defer allocator.free(content);
-            const patched = try std.mem.replaceOwned(u8, allocator, content, "/v1beta/ss/", "/v1beta/models/");
-            defer allocator.free(patched);
-            const patched2 = try std.mem.replaceOwned(u8, allocator, patched, "\"Bearer {s}\"", "\"{s}\"");
-            defer allocator.free(patched2);
-            const patched3 = try std.mem.replaceOwned(u8, allocator, patched2, "\"Authorization\"", "\"x-goog-api-key\"");
-            defer allocator.free(patched3);
-            try cwd.writeFile(io, .{ .sub_path = path, .data = patched3 });
-            std.log.info("patched {s} for Google auth and path", .{path});
-        }
-        // Fix contracts: Schema.items ?Schema -> ?*Schema to avoid infinite size recursion
-        {
-            const path = "src/providers/google/contracts.zig";
-            const content = cwd.readFileAlloc(io, path, allocator, .limited(2 * 1024 * 1024)) catch |err| {
-                if (err == error.FileNotFound) {
-                    std.log.warn("google contracts not found for patching: {s}", .{path});
-                    return;
-                }
-                return err;
-            };
-            defer allocator.free(content);
-            // Only patch the specific line: items: ?Schema -> items: ?*Schema
-            const search = "    items: ?Schema = null,";
-            const replace = "    items: ?*Schema = null,";
-            if (std.mem.indexOf(u8, content, search) != null) {
-                const patched = try std.mem.replaceOwned(u8, allocator, content, search, replace);
-                defer allocator.free(patched);
-                try cwd.writeFile(io, .{ .sub_path = path, .data = patched });
-                std.log.info("patched {s} Schema.items recursion", .{path});
-            }
-        }
     }
 };
 
