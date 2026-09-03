@@ -228,6 +228,9 @@ fn appendAnthropicHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(
     if (client.api_key.len > 0) {
         try headers.append(allocator, .{ .name = "x-api-key", .value = client.api_key });
     }
+    if (client.session_id) |session_id| {
+        try headers.append(allocator, .{ .name = http_client.session_header_name, .value = session_id });
+    }
 }
 
 pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
@@ -1189,4 +1192,25 @@ test "mergeAnthropicHeaders deduplicates a caller-supplied anthropic-version hea
     try std.testing.expectEqual(@as(usize, 1), version_count);
     try std.testing.expect(found_custom);
     try std.testing.expectEqual(@as(usize, 2), merged.used.len);
+}
+
+test "appendAnthropicHeaders sends the OpenCode session header when a session id is set" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    var c = http_client.Client.init(allocator, std.testing.io, "my-key");
+    defer c.deinit();
+    c.session_id = "9f1c2b3a";
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    try appendAnthropicHeaders(allocator, &headers, &c);
+
+    var found_session = false;
+    for (headers.items) |h| {
+        if (std.mem.eql(u8, h.name, "x-opencode-session") and std.mem.eql(u8, h.value, "9f1c2b3a")) {
+            found_session = true;
+        }
+    }
+    try std.testing.expect(found_session);
 }
