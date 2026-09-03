@@ -508,4 +508,8 @@ test "debug observer logs complete sanitized streaming error response bodies" {
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "server exploded") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"api_key\": \"***\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "secret-value") == null);
+
+    var expected_line: [128]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&expected_line, "user-agent: {s}\n", .{http_client.user_agent});
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), expected) != null);
 }
