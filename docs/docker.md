@@ -64,36 +64,43 @@ docker run --rm -it \
 
 ## OpenCode Zen
 
+Set `PUNY_API_KEY` in the host shell, then pass it through without placing the
+token value in the Docker command:
+
 ```bash
 docker run --rm -it \
   --mount "type=bind,source=${PWD},target=/workspace" \
   --mount "type=volume,source=puny-home,target=/app" \
   --workdir /workspace \
-  christianhelle/puny:latest --provider opencode_zen --api-key YOUR_API_KEY
+  --env PUNY_API_KEY \
+  christianhelle/puny:latest --provider opencode_zen
 ```
 
 ## OpenCode Go
 
+OpenCode Go uses the same API key:
+
 ```bash
 docker run --rm -it \
   --mount "type=bind,source=${PWD},target=/workspace" \
   --mount "type=volume,source=puny-home,target=/app" \
   --workdir /workspace \
-  christianhelle/puny:latest --provider opencode_go --api-key YOUR_API_KEY
+  --env PUNY_API_KEY \
+  christianhelle/puny:latest --provider opencode_go
 ```
 
 ## GitHub Copilot
 
-Pass a discovered or manually issued GitHub OAuth token via `PUNY_API_KEY` (device-flow
-login needs an interactive terminal). Replace `gho_...` below with your actual token:
+Set `PUNY_API_KEY` in the host shell to a discovered or manually issued GitHub
+OAuth token, then pass it through. Device-flow login needs an interactive
+terminal.
 
 ```bash
-# Replace gho_... with your GitHub OAuth token
 docker run --rm -it \
   --mount "type=bind,source=${PWD},target=/workspace" \
   --mount "type=volume,source=puny-home,target=/app" \
   --workdir /workspace \
-  -e PUNY_API_KEY=gho_... \
+  --env PUNY_API_KEY \
   christianhelle/puny:latest --provider copilot
 ```
 
@@ -125,4 +132,22 @@ docker run --rm -it \
 
 ## API key security
 
-The examples above pass `--api-key` inline for simplicity. For shared or production environments, prefer mounting a key file with `--api-key-file` or a `config.json` instead.
+The provider examples pass an existing host environment variable without
+putting its value in shell history. Container environment variables remain
+visible through Docker inspection. For shared or production environments,
+mount a secrets directory read-only and use `--api-key-file`:
+
+```bash
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --mount "type=bind,source=${HOME}/.config/puny-secrets,target=/run/secrets,readonly" \
+  --workdir /workspace \
+  christianhelle/puny:latest \
+  --provider opencode_zen \
+  --api-key-file /run/secrets/api-key
+```
+
+Create `${HOME}/.config/puny-secrets/api-key` before running the command and
+restrict its host permissions. Alternatively, save the key during setup; Puny
+encrypts it in the `puny-home` volume.
