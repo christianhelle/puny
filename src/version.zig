@@ -5,6 +5,9 @@ pub const version = build_info.VERSION;
 pub const git_commit = build_info.GIT_COMMIT;
 pub const dirty = build_info.DIRTY;
 
+/// Identifies this client to HTTP servers puny talks to.
+pub const user_agent = "puny/" ++ version;
+
 pub fn format(buf: []u8) []const u8 {
     if (std.mem.eql(u8, git_commit, "unknown")) {
         return std.fmt.bufPrint(buf, "{s}", .{version}) catch version;
@@ -48,4 +51,9 @@ test "format appends the dirty marker when the worktree is dirty" {
     var buf: [256]u8 = undefined;
     const output = format(&buf);
     try std.testing.expect(std.mem.endsWith(u8, output, "-dirty)"));
+}
+
+test "user_agent names puny and its version" {
+    try std.testing.expect(std.mem.startsWith(u8, user_agent, "puny/"));
+    try std.testing.expectEqualStrings(version, user_agent["puny/".len..]);
 }

@@ -281,7 +281,7 @@ pub fn parseRawResponse(comptime T: type, raw: RawResponse) !ApiResult(T) {
 }
 
 /// User-Agent identifying this client and its version to providers.
-pub const user_agent = "puny/" ++ version.version;
+pub const user_agent = version.user_agent;
 
 /// Header OpenCode uses to group requests belonging to the same conversation.
 pub const session_header_name = "x-opencode-session";
