@@ -169,27 +169,42 @@ pub fn build(b: *std.Build) !void {
     const test_integration_step = b.step("test-integration", "Run integration tests against all provider/model combos");
     test_integration_step.dependOn(&run_integration.step);
 
-    const regenerate_step = b.step("regenerate-providers", "Re-generate provider clients from OpenAPI specs");
-    if (b.lazyDependency("openapi2zig", .{
-        .target = b.graph.host,
-        .optimize = .ReleaseSafe,
-    })) |openapi2zig| {
-        const generate_providers = b.addExecutable(.{
-            .name = "generate_providers",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("tools/generate_providers.zig"),
-                .target = b.graph.host,
-                .optimize = .ReleaseSafe,
-            }),
-        });
-        generate_providers.root_module.addImport("openapi2zig", openapi2zig.module("openapi2zig"));
+    // `build()` runs in full regardless of which step ends up being executed,
+    // so an unconditional b.lazyDependency call here would make plain
+    // `zig build` and `zig build test` fetch openapi2zig too — build.zig has
+    // no way to learn which steps were requested before build() returns.
+    // Require this flag alongside the step name to opt in to the fetch.
+    const regenerate_providers = b.option(
+        bool,
+        "regenerate-providers",
+        "Fetch openapi2zig and regenerate the provider clients (required by `zig build regenerate-providers`)",
+    ) orelse false;
 
-        const run_generate_providers = b.addRunArtifact(generate_providers);
-        // It rewrites files under src/providers, so it must run every time
-        // rather than being cached away.
-        run_generate_providers.has_side_effects = true;
-        run_generate_providers.setCwd(b.path("."));
-        regenerate_step.dependOn(&run_generate_providers.step);
+    const regenerate_step = b.step("regenerate-providers", "Re-generate provider clients from OpenAPI specs (requires -Dregenerate-providers=true)");
+    if (regenerate_providers) {
+        if (b.lazyDependency("openapi2zig", .{
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+        })) |openapi2zig| {
+            const generate_providers = b.addExecutable(.{
+                .name = "generate_providers",
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path("tools/generate_providers.zig"),
+                    .target = b.graph.host,
+                    .optimize = .ReleaseSafe,
+                }),
+            });
+            generate_providers.root_module.addImport("openapi2zig", openapi2zig.module("openapi2zig"));
+
+            const run_generate_providers = b.addRunArtifact(generate_providers);
+            // It rewrites files under src/providers, so it must run every time
+            // rather than being cached away.
+            run_generate_providers.has_side_effects = true;
+            run_generate_providers.setCwd(b.path("."));
+            regenerate_step.dependOn(&run_generate_providers.step);
+        }
+    } else {
+        regenerate_step.dependOn(&b.addFail("pass -Dregenerate-providers=true to fetch openapi2zig and regenerate the provider clients").step);
     }
 }
 
