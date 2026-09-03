@@ -15,7 +15,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/review", "Review the current branch");
     try printCommand(writer, "/orchestrate [task]", "Implement, review, and fix until merge worthy");
     try printCommand(writer, "/model [id]", "Switch to another model");
-    try printCommand(writer, "/provider [name]", "Switch to another provider");
+    try printCommand(writer, "/provider", "Open the provider picker");
     try printCommand(writer, "/thinking [level]", "Change reasoning effort");
     try printCommand(writer, "/sessions", "List saved sessions");
     try printCommand(writer, "/resume [id]", "Resume a saved session");
@@ -45,9 +45,9 @@ test "showHelp lists all commands" {
     const text = output.written();
 
     const commands = [_][]const u8{
-        "/quit, /exit",        "/new, /reset", "/stats",      "/config",          "/plan [task]",
-        "/build [task]",       "/review",      "/model [id]", "/provider [name]", "/thinking [level]",
-        "/sessions",           "/resume [id]", "/prune",      "/skills",          "/file [path|url]",
+        "/quit, /exit",        "/new, /reset", "/stats",      "/config",   "/plan [task]",
+        "/build [task]",       "/review",      "/model [id]", "/provider", "/thinking [level]",
+        "/sessions",           "/resume [id]", "/prune",      "/skills",   "/file [path|url]",
         "/orchestrate [task]", "/help",        "@path",
     };
     for (commands) |command| {
@@ -77,10 +77,10 @@ test "printCommand does not pad an exactly 20-byte command name" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    // "/provider [name]xyzz" is exactly command_column_width bytes; no padding
+    // This command is exactly command_column_width bytes; no padding
     // may appear before the description.
-    try printCommand(&output.writer, "/provider [name]xyzz", "Desc");
-    try std.testing.expectEqualStrings("  \x1b[32m/provider [name]xyzz\x1b[0m Desc\n", output.written());
+    try printCommand(&output.writer, "/command-12345678901", "Desc");
+    try std.testing.expectEqualStrings("  \x1b[32m/command-12345678901\x1b[0m Desc\n", output.written());
 }
 
 test "printCommand does not pad long command names" {
@@ -90,8 +90,8 @@ test "printCommand does not pad long command names" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    try printCommand(&output.writer, "/provider [name] is long", "Desc");
-    try std.testing.expectEqualStrings("  \x1b[32m/provider [name] is long\x1b[0m Desc\n", output.written());
+    try printCommand(&output.writer, "/command-12345678901 extra", "Desc");
+    try std.testing.expectEqualStrings("  \x1b[32m/command-12345678901 extra\x1b[0m Desc\n", output.written());
 }
 
 test "showHelp renders the full command table when called out of line" {
