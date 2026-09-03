@@ -183,10 +183,11 @@ zig build run
 
 ### OpenCode Zen
 
-Sign in to [OpenCode Zen](https://opencode.ai/zen), copy your API key, then:
+Sign in to [OpenCode Zen](https://opencode.ai/zen), copy your API key, and set
+it in `PUNY_API_KEY` (or use `--api-key-file`), then:
 
 ```bash
-puny --provider opencode_zen --api-key YOUR_API_KEY
+puny --provider opencode_zen
 ```
 
 Puny connects to `https://opencode.ai/zen` and shows the model picker.
@@ -199,10 +200,12 @@ Puny chooses the streaming transport from the model ID:
 
 ### OpenCode Go
 
-Sign in to [OpenCode Zen](https://opencode.ai/zen), subscribe to Go, copy your API key (same key for Zen and Go), then:
+Sign in to [OpenCode Zen](https://opencode.ai/zen), subscribe to Go, copy your
+API key (the same key works for Zen and Go), and set it in `PUNY_API_KEY` (or
+use `--api-key-file`), then:
 
 ```bash
-puny --provider opencode_go --api-key YOUR_API_KEY
+puny --provider opencode_go
 ```
 
 Puny connects to `https://opencode.ai/zen/go` and shows the model picker.
@@ -463,7 +466,7 @@ OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), and GitHub Copilot
 field in `config.json`.
 
 ```bash
-puny --provider opencode_zen --api-key YOUR_API_KEY
+puny --provider opencode_zen
 ```
 
 Precedence is: `--provider` > `PUNY_PROVIDER` > `config.json` > `lmstudio`.
@@ -478,12 +481,10 @@ puny --url http://192.168.1.42:1234
 
 ### Authenticate
 
-If your provider requires an API token, provide it via CLI, environment variable, config file, or `--reconfigure`:
+If your provider requires an API token, provide it through the environment, a
+key file, or the encrypted config:
 
 ```bash
-# CLI flag (session only)
-puny --api-key lmstudio-token-123
-
 # Environment variable (session only)
 export PUNY_API_KEY=lmstudio-token-123
 puny
@@ -496,6 +497,8 @@ puny --reconfigure
 ```
 
 Precedence is: `--api-key` > `--api-key-file` > `PUNY_API_KEY` > `config.json`.
+The `--api-key` flag is available for ephemeral use, but its value can appear
+in shell history and process listings; prefer the sources shown above.
 
 OpenCode Zen and OpenCode Go require an API key. Puny exits early with a hint if the key is missing.
 
