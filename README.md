@@ -275,6 +275,21 @@ The model replies in the terminal. You can keep sending follow-up messages; Puny
 The project has source files under src/, including main.c, utils.h, and a tests/ folder.
 ```
 
+### Attach files to a prompt
+
+Type `@` at the start of a prompt or after whitespace to open a searchable file
+picker rooted at the current directory. Selecting a file inserts an `@path`
+mention:
+
+```text
+> Explain @src/main.zig and compare it with @src/config/config.zig
+```
+
+You can also type `@path` mentions directly. Before sending the prompt, Puny
+appends the contents of each readable file. Each attachment is limited to
+64 KiB; unreadable files, larger files, and paths containing whitespace are not
+attached.
+
 ### One-shot prompt
 
 Run a single prompt and exit. Useful for scripts or quick tasks:
