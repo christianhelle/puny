@@ -1,4 +1,5 @@
 const std = @import("std");
+const version = @import("../version.zig");
 
 /// Default timeout applied to web_fetch when the model does not provide one.
 pub const web_fetch_timeout_ns: i96 = 15 * std.time.ns_per_s;
@@ -38,6 +39,7 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
     const result = client.fetch(.{
         .location = .{ .uri = uri },
         .method = .GET,
+        .headers = .{ .user_agent = .{ .override = version.user_agent } },
         .response_writer = &file_writer.interface,
     }) catch |err| return err;
 
@@ -62,6 +64,7 @@ pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]con
     _ = try client.fetch(.{
         .location = .{ .uri = uri },
         .method = .GET,
+        .headers = .{ .user_agent = .{ .override = version.user_agent } },
         .response_writer = &response_body.writer,
     });
     if (response_body.written().len == 0) return "";
@@ -230,6 +233,8 @@ const HttpGetTestCtx = struct {
     server: std.Io.net.Server,
     body: []const u8,
     done: std.atomic.Value(bool) = .init(false),
+    user_agent: [128]u8 = undefined,
+    user_agent_len: usize = 0,
 
     fn serve(self: *@This()) void {
         defer self.done.store(true, .release);
@@ -243,6 +248,14 @@ const HttpGetTestCtx = struct {
 
         var http_server = std.http.Server.init(&reader.interface, &writer.interface);
         var request = http_server.receiveHead() catch return;
+        var it = request.iterateHeaders();
+        while (it.next()) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "user-agent")) {
+                const len = @min(header.value.len, self.user_agent.len);
+                @memcpy(self.user_agent[0..len], header.value[0..len]);
+                self.user_agent_len = len;
+            }
+        }
         request.respond(self.body, .{}) catch return;
     }
 };
@@ -395,4 +408,23 @@ test "httpGetTimed returns the body from a local server" {
     try std.testing.expectEqualStrings("timed body", body);
 
     waitForHttpGetTestServer(&ctx, thread, &server);
+}
+
+test "httpGet identifies itself as puny with its version" {
+    var server = try listenForHttpGetTest(std.testing.io);
+    var ctx = HttpGetTestCtx{ .io = std.testing.io, .server = server, .body = "get body" };
+    const thread = try std.Thread.spawn(.{}, HttpGetTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/get", .{port});
+    defer std.testing.allocator.free(url);
+
+    const body = try httpGet(std.testing.allocator, std.testing.io, url);
+    defer std.testing.allocator.free(body);
+
+    waitForHttpGetTestServer(&ctx, thread, &server);
+
+    const received = ctx.user_agent[0..ctx.user_agent_len];
+    try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
+    try std.testing.expectEqualStrings(version.user_agent, received);
 }
