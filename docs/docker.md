@@ -34,8 +34,8 @@ docker run --rm -it \
 
 On the first run, Puny opens the setup wizard. Later containers reuse the
 provider, model, credentials, and sessions stored in `puny-home`. The image runs
-as the non-root user `puny` (UID 1001), so that user must have write permission
-to files Puny should edit on Linux hosts.
+as the non-root user `puny` (UID/GID 1001), so that user must have write
+permission to files Puny should edit on Linux hosts.
 
 ## One-shot prompt
 
@@ -148,6 +148,17 @@ docker run --rm -it \
   --api-key-file /run/secrets/api-key
 ```
 
-Create `${HOME}/.config/puny-secrets/api-key` before running the command and
-restrict its host permissions. Alternatively, save the key during setup; Puny
-encrypts it in the `puny-home` volume.
+Create `${HOME}/.config/puny-secrets/api-key` before running the command. On
+Linux, keep yourself as the owner while granting the container's numeric group
+read access:
+
+```bash
+sudo chgrp 1001 "${HOME}/.config/puny-secrets" \
+  "${HOME}/.config/puny-secrets/api-key"
+chmod 750 "${HOME}/.config/puny-secrets"
+chmod 640 "${HOME}/.config/puny-secrets/api-key"
+```
+
+Mode `0640` limits the key to its owner and the container's GID 1001, while
+mode `0750` lets that group traverse the secrets directory. Alternatively, save
+the key during setup; Puny encrypts it in the `puny-home` volume.
