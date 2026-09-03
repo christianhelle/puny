@@ -220,7 +220,7 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
     const start = std.Io.Clock.awake.now(chat_client.io);
     var req = chat_client.http.request(.POST, uri, .{
         .redirect_behavior = .unhandled,
-        .headers = .{ .accept_encoding = .{ .override = "identity" } },
+        .headers = .{ .accept_encoding = .{ .override = "identity" }, .user_agent = .{ .override = client.user_agent } },
         .extra_headers = headers.items,
     }) catch |err| {
         if (chat_client.http_observer) |obs| {
@@ -742,6 +742,8 @@ const ChatServer = struct {
     status: std.http.Status,
     body: []const u8,
     thread: std.Thread = undefined,
+    user_agent: [128]u8 = undefined,
+    user_agent_len: usize = 0,
 
     fn serve(self: *@This()) void {
         var stream = self.server.accept(self.io) catch return;
@@ -754,7 +756,19 @@ const ChatServer = struct {
 
         var http_server = std.http.Server.init(&reader.interface, &writer.interface);
         var request = http_server.receiveHead() catch return;
+        var it = request.iterateHeaders();
+        while (it.next()) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "user-agent")) {
+                const len = @min(header.value.len, self.user_agent.len);
+                @memcpy(self.user_agent[0..len], header.value[0..len]);
+                self.user_agent_len = len;
+            }
+        }
         request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+
+    fn receivedUserAgent(self: *const @This()) []const u8 {
+        return self.user_agent[0..self.user_agent_len];
     }
 };
 
@@ -1031,4 +1045,36 @@ test "chatStreaming propagates SSE parse errors from a local server" {
         return error.ExpectedSseParseFailure;
     } else |_| {}
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
+
+test "chatStreaming identifies itself as puny with its version" {
+    const ctx = try startChatServer(.ok, "data: [DONE]\n\n");
+    defer stopChatServer(ctx);
+
+    const url = try chatServerUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var c = client.Client.init(std.testing.allocator, std.testing.io, "test-key");
+    defer c.deinit();
+    c.withBaseUrl(url);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+
+    const request = ChatRequest{
+        .model = "test-model",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreaming(&c, request, recorder.callback());
+
+    const received = ctx.receivedUserAgent();
+    try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
+    try std.testing.expectEqualStrings(client.user_agent, received);
 }
