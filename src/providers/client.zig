@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const version = @import("../version.zig");
 
 ///////////////////////////////////////////
 // Shared app model-list types
@@ -247,6 +248,7 @@ pub fn requestRawWithContentType(client: *Client, method: std.http.Method, url: 
         .extra_headers = headers.items,
         .payload = payload,
         .response_writer = &response_body.writer,
+        .headers = .{ .user_agent = .{ .override = user_agent } },
     }) catch |err| {
         if (client.http_observer) |obs| {
             if (obs.onError) |cb| cb(obs.ctx, method, url, @errorName(err));
@@ -275,6 +277,9 @@ pub fn parseRawResponse(comptime T: type, raw: RawResponse) !ApiResult(T) {
     };
     return .{ .ok = .{ .allocator = raw.allocator, .body = raw.body, .parsed = parsed } };
 }
+
+/// User-Agent identifying this client and its version to providers.
+pub const user_agent = "puny/" ++ version.version;
 
 /// Header OpenCode uses to group requests belonging to the same conversation.
 pub const session_header_name = "x-opencode-session";
@@ -1146,4 +1151,74 @@ test "appendClientHeaders omits the OpenCode session header without a session id
     defer if (auth_header) |value| allocator.free(value);
 
     try std.testing.expect(findHeader(headers.items, "x-opencode-session") == null);
+}
+
+const UserAgentServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    user_agent: [128]u8 = undefined,
+    user_agent_len: usize = 0,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        var it = request.iterateHeaders();
+        while (it.next()) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "user-agent")) {
+                const len = @min(header.value.len, self.user_agent.len);
+                @memcpy(self.user_agent[0..len], header.value[0..len]);
+                self.user_agent_len = len;
+            }
+        }
+        request.respond("{}", .{ .status = .ok }) catch return;
+    }
+
+    fn received(self: *const @This()) []const u8 {
+        return self.user_agent[0..self.user_agent_len];
+    }
+};
+
+fn startUserAgentServer() !*UserAgentServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = std.testing.allocator.create(UserAgentServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
+    ctx.* = .{ .io = std.testing.io, .server = server };
+    ctx.thread = try std.Thread.spawn(.{}, UserAgentServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopUserAgentServer(ctx: *UserAgentServer) void {
+    ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
+    std.testing.allocator.destroy(ctx);
+}
+
+test "requestRaw identifies itself as puny with its version" {
+    const ctx = try startUserAgentServer();
+    defer stopUserAgentServer(ctx);
+
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+
+    var client = Client.init(std.testing.allocator, std.testing.io, "");
+    defer client.deinit();
+
+    var raw = try requestRaw(&client, .GET, url, null);
+    defer raw.deinit();
+
+    const received = ctx.received();
+    try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
+    try std.testing.expectEqualStrings(version.version, received["puny/".len..]);
 }
