@@ -373,6 +373,9 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
     try headers.append(allocator, .{ .name = "x-goog-api-key", .value = client.api_key });
     try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
     try headers.append(allocator, .{ .name = "accept", .value = "text/event-stream" });
+    if (client.session_id) |session_id| {
+        try headers.append(allocator, .{ .name = http_client.session_header_name, .value = session_id });
+    }
 
     if (client.http_observer) |obs| {
         if (obs.onRequest) |cb| cb(obs.ctx, .POST, url, headers.items, payload);
@@ -1330,4 +1333,56 @@ test "chatStreamingGoogle propagates SSE parse errors from a local server" {
         return error.ExpectedSseParseFailure;
     } else |_| {}
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
+
+const SessionHeaderObserver = struct {
+    value: ?[]const u8 = null,
+
+    fn onRequest(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+        _ = method;
+        _ = url;
+        _ = body;
+        const self: *@This() = @ptrCast(@alignCast(ctx.?));
+        for (headers) |header| {
+            if (std.mem.eql(u8, header.name, "x-opencode-session")) self.value = header.value;
+        }
+    }
+};
+
+test "chatStreamingGoogle sends the OpenCode session header when a session id is set" {
+    const ctx = try startGoogleServer(.ok, "data: [DONE]\n\n");
+    defer stopGoogleServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try googleClientForServer(ctx, arena);
+    defer c.deinit();
+    c.session_id = "9f1c2b3a";
+
+    var observer = SessionHeaderObserver{};
+    c.http_observer = .{
+        .ctx = &observer,
+        .onRequest = SessionHeaderObserver.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    var events = std.ArrayList(TestEvent).empty;
+    var sse_callback = TestSseCallback{ .allocator = arena, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{ .event = TestSseCallback.event },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreamingGoogle(&c, request, callback);
+
+    try std.testing.expectEqualStrings("9f1c2b3a", observer.value.?);
 }
