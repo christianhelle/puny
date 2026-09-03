@@ -91,6 +91,7 @@ fn httpRequest(
     const result = self.inner.http.fetch(.{
         .location = .{ .uri = uri },
         .method = method,
+        .headers = .{ .user_agent = .{ .override = user_agent } },
         .extra_headers = extra_headers,
         .payload = payload,
         .response_writer = &response_body.writer,
@@ -164,7 +165,6 @@ pub fn ensureCopilotToken(self: *Client) ![]const u8 {
         .{ .name = "accept", .value = "application/json" },
         .{ .name = "editor-version", .value = editor_version },
         .{ .name = "editor-plugin-version", .value = editor_plugin_version },
-        .{ .name = "user-agent", .value = user_agent },
         .{ .name = "x-github-api-version", .value = api_version },
     };
 
@@ -251,7 +251,6 @@ fn appendCopilotHeaders(
     try headers.append(allocator, .{ .name = "copilot-integration-id", .value = integration_id });
     try headers.append(allocator, .{ .name = "editor-version", .value = editor_version });
     try headers.append(allocator, .{ .name = "editor-plugin-version", .value = editor_plugin_version });
-    try headers.append(allocator, .{ .name = "user-agent", .value = user_agent });
     try headers.append(allocator, .{ .name = "openai-intent", .value = openai_intent });
     try headers.append(allocator, .{ .name = "x-github-api-version", .value = api_version });
     try headers.append(allocator, .{ .name = "x-request-id", .value = request_id });
@@ -1577,4 +1576,100 @@ test "chatStreaming propagates SSE parse errors from a local server" {
         return error.ExpectedSseParseFailure;
     } else |_| {}
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
+
+// ── User-agent wire tests ─────────────────────────────────────────────
+
+/// Records every `user-agent` header a request arrives with, so the tests can
+/// tell a single Copilot identity apart from one shadowed by std.http's default.
+const UserAgentServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    body: []const u8,
+    thread: std.Thread = undefined,
+    count: usize = 0,
+    first: [128]u8 = undefined,
+    first_len: usize = 0,
+
+    fn serve(self: *@This()) void {
+        var stream = self.server.accept(self.io) catch return;
+        defer stream.close(self.io);
+
+        var in_buf: [4096]u8 = undefined;
+        var out_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &in_buf);
+        var writer = stream.writer(self.io, &out_buf);
+
+        var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+        var request = http_server.receiveHead() catch return;
+        var it = request.iterateHeaders();
+        while (it.next()) |header| {
+            if (!std.ascii.eqlIgnoreCase(header.name, "user-agent")) continue;
+            if (self.count == 0) {
+                const len = @min(header.value.len, self.first.len);
+                @memcpy(self.first[0..len], header.value[0..len]);
+                self.first_len = len;
+            }
+            self.count += 1;
+        }
+        request.respond(self.body, .{ .status = .ok }) catch return;
+    }
+
+    fn firstUserAgent(self: *const @This()) []const u8 {
+        return self.first[0..self.first_len];
+    }
+};
+
+fn startUserAgentServer(body: []const u8) !*UserAgentServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = std.testing.allocator.create(UserAgentServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
+    ctx.* = .{ .io = std.testing.io, .server = server, .body = body };
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
+    ctx.thread = try std.Thread.spawn(.{}, UserAgentServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopUserAgentServer(ctx: *UserAgentServer) void {
+    ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
+    std.testing.allocator.destroy(ctx);
+}
+
+fn userAgentServerUrl(ctx: *UserAgentServer, allocator: std.mem.Allocator) ![]u8 {
+    return std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+}
+
+/// Seeds a Copilot token far enough in the future that requests skip the token
+/// exchange and go straight to the loopback server.
+fn clientWithSeededToken(ctx: *UserAgentServer, allocator: std.mem.Allocator) !Client {
+    const url = try userAgentServerUrl(ctx, allocator);
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_token");
+    c.withBaseUrl(url);
+    c.copilot_token = try std.testing.allocator.dupe(u8, "tid=seeded");
+    c.copilot_token_expires_at = std.math.maxInt(i64);
+    return c;
+}
+
+test "listModels sends exactly one Copilot user agent" {
+    const ctx = try startUserAgentServer("{\"data\":[]}");
+    defer stopUserAgentServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var c = try clientWithSeededToken(ctx, arena_state.allocator());
+    defer c.deinit();
+
+    var owned = try listModels(&c);
+    owned.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), ctx.count);
+    try std.testing.expectEqualStrings(user_agent, ctx.firstUserAgent());
 }
