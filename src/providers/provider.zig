@@ -305,6 +305,8 @@ const ProviderTestServer = struct {
     request_path: std.ArrayList(u8) = .empty,
     request_path_mutex: std.atomic.Mutex = .unlocked,
     thread: std.Thread = undefined,
+    session_header: [64]u8 = undefined,
+    session_header_len: usize = 0,
 
     fn lockMutex(m: *std.atomic.Mutex) void {
         while (!m.tryLock()) {
@@ -328,7 +330,19 @@ const ProviderTestServer = struct {
             defer self.request_path_mutex.unlock();
             self.request_path.appendSlice(std.testing.allocator, request.head.target) catch {};
         }
+        var it = request.iterateHeaders();
+        while (it.next()) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, client.session_header_name)) {
+                const len = @min(header.value.len, self.session_header.len);
+                @memcpy(self.session_header[0..len], header.value[0..len]);
+                self.session_header_len = len;
+            }
+        }
         request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+
+    fn getSessionHeader(self: *const @This()) []const u8 {
+        return self.session_header[0..self.session_header_len];
     }
 
     fn getRequestPath(self: *@This()) []const u8 {
@@ -1268,4 +1282,57 @@ test "chatStreamingOpenAi normalizes trailing slash in base_url" {
         try prov.chatStreaming(request, rec.callback());
         try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
     }
+}
+
+test "Provider.chatStreaming sends the session header on the OpenAI transport" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url, .session_id = "9f1c2b3a" });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "deepseek-v4-pro",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
+    try std.testing.expectEqualStrings("9f1c2b3a", ctx.getSessionHeader());
+}
+
+test "Provider.chatStreaming sends the session header on the Anthropic transport" {
+    const ctx = try startProviderTestServer(.ok, "data: [DONE]\n\n");
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url, .session_id = "9f1c2b3a" });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "minimax-m3",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/messages", ctx.getRequestPath());
+    try std.testing.expectEqualStrings("9f1c2b3a", ctx.getSessionHeader());
 }
