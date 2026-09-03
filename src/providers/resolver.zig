@@ -422,3 +422,23 @@ test "createProvider tags only the OpenCode clients with the session id" {
         try std.testing.expect(prov.lmstudio.session_id == null);
     }
 }
+
+test "applySessionId retags OpenCode clients and leaves others alone" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var prov = createProvider(false, .opencode_go, "http://go", "key", allocator, std.testing.io, "first-id");
+    defer prov.deinit();
+
+    applySessionId(&prov, "second-id");
+    try std.testing.expectEqualStrings("second-id", prov.opencode_go.session_id.?);
+
+    applySessionId(&prov, "");
+    try std.testing.expectEqualStrings("second-id", prov.opencode_go.session_id.?);
+
+    var other = createProvider(false, .lmstudio, "http://lm", "key", allocator, std.testing.io, "");
+    defer other.deinit();
+    applySessionId(&other, "second-id");
+    try std.testing.expect(other.lmstudio.session_id == null);
+}

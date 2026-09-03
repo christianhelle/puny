@@ -144,6 +144,7 @@ pub const ChatSession = struct {
                     try installBaseContext(ctx);
 
                     ctx.session.* = try core_session.Session.init(ctx.arena, ctx.session.base, ctx.random, ctx.io);
+                    resolver.applySessionId(ctx.prov, ctx.session.id);
 
                     ctx.session_stats.deinit();
                     ctx.session_stats.* = stats.SessionStats.init(ctx.arena, ctx.io);
