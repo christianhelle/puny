@@ -267,7 +267,7 @@
             <code>docker pull christianhelle/puny:latest</code>
           </div>
           <div class="install-code">
-            <code>docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny</code>
+            <code>docker volume create puny-home<br>docker run --rm -it --mount "type=bind,source=${PWD},target=/workspace" --mount "type=volume,source=puny-home,target=/app" --workdir /workspace christianhelle/puny:latest</code>
           </div>
         </div>
       </div>
@@ -380,8 +380,9 @@
             <code>docker pull christianhelle/puny:latest</code>
           </div>
           <div class="install-code">
-            <code>docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny</code>
+            <code>docker volume create puny-home<br>docker run --rm -it --mount "type=bind,source=${PWD},target=/workspace" --mount "type=volume,source=puny-home,target=/app" --workdir /workspace christianhelle/puny:latest</code>
           </div>
+          <p>The project is mounted at <code>/workspace</code>, while <code>puny-home</code> persists configuration, sessions, and encrypted credentials under <code>/app</code>.</p>
           <p>For detailed Docker documentation, including LM Studio integration, one-shot prompts, and building locally, see the <a href="https://github.com/christianhelle/puny/blob/main/docs/docker.md">Docker guide</a>.</p>
         </div>
       </div>

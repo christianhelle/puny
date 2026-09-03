@@ -18,20 +18,35 @@ docker pull ghcr.io/christianhelle/puny:latest
 
 ## Run interactively
 
-Mount your project directory into `/app` and allocate a TTY so Puny can read and edit files:
+Keep the project and Puny's state on separate mounts. The project is available
+at `/workspace`; the `puny-home` volume persists configuration, sessions, and
+the encryption key under `/app`:
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny
+docker volume create puny-home
+
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  christianhelle/puny:latest
 ```
 
-Puny starts in the current directory and shows the model picker.
+On the first run, Puny opens the setup wizard. Later containers reuse the
+provider, model, credentials, and sessions stored in `puny-home`. The image runs
+as the non-root user `puny` (UID 1001), so that user must have write permission
+to files Puny should edit on Linux hosts.
 
 ## One-shot prompt
 
 Run a single prompt and exit:
 
 ```bash
-docker run --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --prompt "List all source files" --oneshot
+docker run --rm \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  christianhelle/puny:latest --prompt "List all source files" --oneshot
 ```
 
 ## LM Studio
@@ -39,19 +54,31 @@ docker run --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --p
 LM Studio must be reachable from inside the container. If it is running on the Docker host, use the host's address or `host.docker.internal` on Docker Desktop:
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --url http://host.docker.internal:1234
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  christianhelle/puny:latest --url http://host.docker.internal:1234
 ```
 
 ## OpenCode Zen
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode_zen --api-key YOUR_API_KEY
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  christianhelle/puny:latest --provider opencode_zen --api-key YOUR_API_KEY
 ```
 
 ## OpenCode Go
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" christianhelle/puny --provider opencode_go --api-key YOUR_API_KEY
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  christianhelle/puny:latest --provider opencode_go --api-key YOUR_API_KEY
 ```
 
 ## GitHub Copilot
@@ -61,7 +88,12 @@ login needs an interactive terminal). Replace `gho_...` below with your actual t
 
 ```bash
 # Replace gho_... with your GitHub OAuth token
-docker run -it --mount "type=bind,source=${PWD},target=/app" -e PUNY_API_KEY=gho_... christianhelle/puny --provider copilot
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  -e PUNY_API_KEY=gho_... \
+  christianhelle/puny:latest --provider copilot
 ```
 
 ## Available tags
@@ -83,7 +115,11 @@ This is equivalent to `zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-linux -
 Run the locally built image the same way as the published one:
 
 ```bash
-docker run -it --mount "type=bind,source=${PWD},target=/app" puny:local
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  puny:local
 ```
 
 ## API key security

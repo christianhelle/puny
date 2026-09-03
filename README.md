@@ -547,10 +547,10 @@ is written with `0600` permissions on POSIX.
 - **Backups**: back up `config.json` **together with** the key file. A config
   without its key file degrades gracefully — Puny warns and treats the stored
   keys as unset until you re-enter them with `--reconfigure`.
-- **Docker**: the key file lives in the container's writable layer
-  (`/app/.local/share/puny/encryption.key`). Recreating the container loses it,
-  so mount a volume for `/app/.local/share/puny` (or `/app`) to keep stored
-  keys across container recreation.
+- **Docker**: the image uses `/app` as its home directory. Mount the project at
+  `/workspace` and a named volume at `/app`, as shown in the
+  [Docker guide](docs/docker.md), to keep config, sessions, and the encryption
+  key across container recreation without writing them into the project.
 - **No keys at rest**: if you prefer not to persist credentials at all, pass
   `--api-key`, `--api-key-file`, `PUNY_API_KEY`, or
   `GITHUB_COPILOT_OAUTH_TOKEN` per session — these are never written to disk.
