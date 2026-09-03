@@ -142,6 +142,15 @@ pub const Client = struct {
         if (config.session_id) |id| self.session_id = id;
     }
 
+    /// The OpenCode session header to send, or null when this client carries
+    /// no usable session id.
+    pub fn sessionHeader(self: *const Client) ?std.http.Header {
+        const session_id = self.session_id orelse return null;
+        const value = sessionHeaderValue(session_id);
+        if (value.len == 0) return null;
+        return .{ .name = session_header_name, .value = value };
+    }
+
     pub fn clearLastHttpFailure(self: *Client) void {
         if (self.last_http_failure) |failure| self.allocator.free(failure.body);
         self.last_http_failure = null;
@@ -315,8 +324,8 @@ pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList
     for (client.default_headers) |header| {
         try headers.append(allocator, header);
     }
-    if (client.session_id) |session_id| {
-        try headers.append(allocator, .{ .name = session_header_name, .value = sessionHeaderValue(session_id) });
+    if (client.sessionHeader()) |session_header| {
+        try headers.append(allocator, session_header);
     }
     return auth_header;
 }
@@ -1272,4 +1281,23 @@ test "appendClientHeaders sends only the session id prefix" {
     defer if (auth_header) |value| allocator.free(value);
 
     try std.testing.expectEqualStrings("363313fc", findHeader(headers.items, "x-opencode-session").?.value);
+}
+
+test "appendClientHeaders omits the OpenCode session header for an empty session id" {
+    const allocator = std.testing.allocator;
+    var client = Client{
+        .allocator = allocator,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "",
+        .session_id = "",
+    };
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth_header = try appendClientHeaders(allocator, &headers, &client, "application/json", "application/json");
+    defer if (auth_header) |value| allocator.free(value);
+
+    try std.testing.expect(findHeader(headers.items, "x-opencode-session") == null);
 }
