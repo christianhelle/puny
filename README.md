@@ -210,9 +210,10 @@ and Anthropic `/v1/messages` (MiniMax, Qwen) transports.
 Requests to OpenCode Zen and OpenCode Go carry an `x-opencode-session` header
 holding the first 8 characters of the current session id — the same prefix
 `--session` matches on, and short enough to read whole in OpenCode's usage
-metrics — so OpenCode can group the requests belonging to one conversation. Starting a new session with `/new` or `/reset` sends a new id;
-resuming a session with `/resume` or `--session` keeps the original one. Puny
-also identifies itself as `puny/<version>` in the `User-Agent` of every request.
+metrics — so OpenCode can group the requests belonging to one conversation.
+Starting a new session with `/new` or `/reset` sends a new id; resuming a
+session with `/resume` or `--session` keeps the original one. Puny also
+identifies itself as `puny/<version>` in the `User-Agent` of every request.
 
 ### GitHub Copilot
 
