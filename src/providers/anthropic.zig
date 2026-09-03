@@ -229,7 +229,7 @@ fn appendAnthropicHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(
         try headers.append(allocator, .{ .name = "x-api-key", .value = client.api_key });
     }
     if (client.session_id) |session_id| {
-        try headers.append(allocator, .{ .name = http_client.session_header_name, .value = session_id });
+        try headers.append(allocator, .{ .name = http_client.session_header_name, .value = http_client.sessionHeaderValue(session_id) });
     }
 }
 
@@ -1254,4 +1254,26 @@ test "chatStreaming identifies itself as puny with its version" {
     const received = ctx.user_agent[0..ctx.user_agent_len];
     try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
     try std.testing.expectEqualStrings(http_client.user_agent, received);
+}
+
+test "appendAnthropicHeaders sends only the session id prefix" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    var c = http_client.Client.init(allocator, std.testing.io, "my-key");
+    defer c.deinit();
+    c.session_id = "363313fc-7071-4450-bcc2-bd3eaaf93886";
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+    try appendAnthropicHeaders(allocator, &headers, &c);
+
+    var found_session = false;
+    for (headers.items) |h| {
+        if (std.mem.eql(u8, h.name, "x-opencode-session")) {
+            found_session = true;
+            try std.testing.expectEqualStrings("363313fc", h.value);
+        }
+    }
+    try std.testing.expect(found_session);
 }
