@@ -374,7 +374,7 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
     try headers.append(allocator, .{ .name = "content-type", .value = "application/json" });
     try headers.append(allocator, .{ .name = "accept", .value = "text/event-stream" });
     if (client.session_id) |session_id| {
-        try headers.append(allocator, .{ .name = http_client.session_header_name, .value = session_id });
+        try headers.append(allocator, .{ .name = http_client.session_header_name, .value = http_client.sessionHeaderValue(session_id) });
     }
 
     if (client.http_observer) |obs| {
@@ -1426,4 +1426,42 @@ test "chatStreamingGoogle identifies itself as puny with its version" {
     const received = ctx.user_agent[0..ctx.user_agent_len];
     try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
     try std.testing.expectEqualStrings(http_client.user_agent, received);
+}
+
+test "chatStreamingGoogle sends only the session id prefix" {
+    const ctx = try startGoogleServer(.ok, "data: [DONE]\n\n");
+    defer stopGoogleServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try googleClientForServer(ctx, arena);
+    defer c.deinit();
+    c.session_id = "363313fc-7071-4450-bcc2-bd3eaaf93886";
+
+    var observer = SessionHeaderObserver{};
+    c.http_observer = .{
+        .ctx = &observer,
+        .onRequest = SessionHeaderObserver.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    var events = std.ArrayList(TestEvent).empty;
+    var sse_callback = TestSseCallback{ .allocator = arena, .events = &events };
+    const callback = openai.StreamCallback{
+        .context = &sse_callback,
+        .vtable = &.{ .event = TestSseCallback.event },
+    };
+
+    const request = openai.ChatRequest{
+        .model = "gemini-3.5-flash",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    cancel.reset();
+    try chatStreamingGoogle(&c, request, callback);
+
+    try std.testing.expectEqualStrings("363313fc", observer.value.?);
 }
