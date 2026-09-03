@@ -286,6 +286,14 @@ pub const user_agent = version.user_agent;
 /// Header OpenCode uses to group requests belonging to the same conversation.
 pub const session_header_name = "x-opencode-session";
 
+/// OpenCode's usage metrics only surface a short slice of the session id, so
+/// requests carry the same 8-character prefix `--session` matches on.
+pub const session_header_len = 8;
+
+pub fn sessionHeaderValue(session_id: []const u8) []const u8 {
+    return session_id[0..@min(session_id.len, session_header_len)];
+}
+
 pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), client: *Client, content_type: ?[]const u8, accept: []const u8) !?[]u8 {
     if (content_type) |ct| {
         try headers.append(allocator, .{ .name = "Content-Type", .value = ct });
@@ -308,7 +316,7 @@ pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList
         try headers.append(allocator, header);
     }
     if (client.session_id) |session_id| {
-        try headers.append(allocator, .{ .name = session_header_name, .value = session_id });
+        try headers.append(allocator, .{ .name = session_header_name, .value = sessionHeaderValue(session_id) });
     }
     return auth_header;
 }
@@ -1238,4 +1246,30 @@ test "setConfig applies the session id and preserves it when unset" {
 
     client.setConfig(.{ .base_url = "http://new.url" });
     try std.testing.expectEqualStrings("9f1c2b3a", client.session_id.?);
+}
+
+test "sessionHeaderValue keeps the first eight characters of a session id" {
+    try std.testing.expectEqualStrings("363313fc", sessionHeaderValue("363313fc-7071-4450-bcc2-bd3eaaf93886"));
+    try std.testing.expectEqualStrings("9f1c2b3a", sessionHeaderValue("9f1c2b3a"));
+    try std.testing.expectEqualStrings("short", sessionHeaderValue("short"));
+    try std.testing.expectEqualStrings("", sessionHeaderValue(""));
+}
+
+test "appendClientHeaders sends only the session id prefix" {
+    const allocator = std.testing.allocator;
+    var client = Client{
+        .allocator = allocator,
+        .io = undefined,
+        .http = undefined,
+        .api_key = "",
+        .session_id = "363313fc-7071-4450-bcc2-bd3eaaf93886",
+    };
+
+    var headers = std.ArrayList(std.http.Header).empty;
+    defer headers.deinit(allocator);
+
+    const auth_header = try appendClientHeaders(allocator, &headers, &client, "application/json", "application/json");
+    defer if (auth_header) |value| allocator.free(value);
+
+    try std.testing.expectEqualStrings("363313fc", findHeader(headers.items, "x-opencode-session").?.value);
 }
