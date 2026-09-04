@@ -22,7 +22,7 @@ pub const RecordingIo = struct {
     fn recordSleep(userdata: ?*anyopaque, timeout: std.Io.Timeout) std.Io.Cancelable!void {
         const self: *RecordingIo = @ptrCast(@alignCast(userdata.?));
         if (timeout == .duration) {
-            self.sleeps.append(self.allocator, timeout.duration.raw.nanoseconds) catch {};
+            self.sleeps.append(self.allocator, timeout.duration.raw.nanoseconds) catch unreachable;
         }
     }
 
