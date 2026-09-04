@@ -361,7 +361,7 @@ test "runChatWithRetry sleeps the canonical backoff delay between retries" {
     const expected_1: i96 = @intCast(retry.computeDelay(retry.default_config, 1, expect_prng.random()) * std.time.ns_per_ms);
     const expected_2: i96 = @intCast(retry.computeDelay(retry.default_config, 2, expect_prng.random()) * std.time.ns_per_ms);
 
-    for ([_]i96{ expected_1, expected_2 }) |expected| {
-        try std.testing.expect(std.mem.indexOfScalar(i96, recorder.sleeps.items, expected) != null);
-    }
+    try std.testing.expectEqual(@as(usize, 2), recorder.sleeps.items.len);
+    try std.testing.expectEqual(expected_1, recorder.sleeps.items[0]);
+    try std.testing.expectEqual(expected_2, recorder.sleeps.items[1]);
 }
