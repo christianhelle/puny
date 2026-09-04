@@ -320,12 +320,10 @@ pub const user_agent = version.user_agent;
 /// Header OpenCode uses to group requests belonging to the same conversation.
 pub const session_header_name = "x-opencode-session";
 
-/// OpenCode's usage metrics only surface a short slice of the session id, so
-/// requests carry the same 8-character prefix `--session` matches on.
-pub const session_header_len = 8;
-
+/// The full session id is sent so OpenCode can group requests belonging to one
+/// conversation exactly, without relying on a truncated prefix.
 pub fn sessionHeaderValue(session_id: []const u8) []const u8 {
-    return session_id[0..@min(session_id.len, session_header_len)];
+    return session_id;
 }
 
 pub fn appendClientHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), client: *Client, content_type: ?[]const u8, accept: []const u8) !?[]u8 {
@@ -1362,14 +1360,14 @@ test "setConfig applies the session id and preserves it when unset" {
     try std.testing.expectEqualStrings("9f1c2b3a", client.session_id.?);
 }
 
-test "sessionHeaderValue keeps the first eight characters of a session id" {
-    try std.testing.expectEqualStrings("363313fc", sessionHeaderValue("363313fc-7071-4450-bcc2-bd3eaaf93886"));
+test "sessionHeaderValue keeps the full session id without truncation" {
+    try std.testing.expectEqualStrings("363313fc-7071-4450-bcc2-bd3eaaf93886", sessionHeaderValue("363313fc-7071-4450-bcc2-bd3eaaf93886"));
     try std.testing.expectEqualStrings("9f1c2b3a", sessionHeaderValue("9f1c2b3a"));
     try std.testing.expectEqualStrings("short", sessionHeaderValue("short"));
     try std.testing.expectEqualStrings("", sessionHeaderValue(""));
 }
 
-test "appendClientHeaders sends only the session id prefix" {
+test "appendClientHeaders sends the full session id" {
     const allocator = std.testing.allocator;
     var client = Client{
         .allocator = allocator,
@@ -1385,7 +1383,7 @@ test "appendClientHeaders sends only the session id prefix" {
     const auth_header = try appendClientHeaders(allocator, &headers, &client, "application/json", "application/json");
     defer if (auth_header) |value| allocator.free(value);
 
-    try std.testing.expectEqualStrings("363313fc", findHeader(headers.items, "x-opencode-session").?.value);
+    try std.testing.expectEqualStrings("363313fc-7071-4450-bcc2-bd3eaaf93886", findHeader(headers.items, "x-opencode-session").?.value);
 }
 
 test "appendClientHeaders omits the OpenCode session header for an empty session id" {

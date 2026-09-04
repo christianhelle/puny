@@ -1478,7 +1478,7 @@ test "chatStreamingGoogle's http observer sees the user-agent header" {
     try std.testing.expectEqualStrings(http_client.user_agent, observer_ctx.value());
 }
 
-test "chatStreamingGoogle sends only the session id prefix" {
+test "chatStreamingGoogle sends the full session id" {
     const ctx = try startGoogleServer(.ok, "data: [DONE]\n\n");
     defer stopGoogleServer(ctx);
 
@@ -1513,7 +1513,7 @@ test "chatStreamingGoogle sends only the session id prefix" {
     cancel.reset();
     try chatStreamingGoogle(&c, request, callback);
 
-    try std.testing.expectEqualStrings("363313fc", observer.value.?);
+    try std.testing.expectEqualStrings("363313fc-7071-4450-bcc2-bd3eaaf93886", observer.value.?);
 }
 
 test "chatStreamingGoogle omits the OpenCode session header for an empty session id" {

@@ -1304,7 +1304,7 @@ test "chatStreamingOpenAi normalizes trailing slash in base_url" {
     }
 }
 
-test "Provider.chatStreaming sends the session header on the OpenAI transport" {
+test "Provider.chatStreaming sends the full session id header on the OpenAI transport" {
     const body =
         "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
         "data: [DONE]\n\n";
@@ -1329,10 +1329,10 @@ test "Provider.chatStreaming sends the session header on the OpenAI transport" {
     try prov.chatStreaming(request, rec.callback());
 
     try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
-    try std.testing.expectEqualStrings("363313fc", ctx.getSessionHeader());
+    try std.testing.expectEqualStrings("363313fc-7071-4450-bcc2-bd3eaaf93886", ctx.getSessionHeader());
 }
 
-test "Provider.chatStreaming sends the session header on the Anthropic transport" {
+test "Provider.chatStreaming sends the full session id header on the Anthropic transport" {
     const ctx = try startProviderTestServer(.ok, "data: [DONE]\n\n");
     defer stopProviderTestServer(ctx);
     const url = try providerTestUrl(ctx);
@@ -1354,5 +1354,5 @@ test "Provider.chatStreaming sends the session header on the Anthropic transport
     try prov.chatStreaming(request, rec.callback());
 
     try std.testing.expectEqualStrings("/v1/messages", ctx.getRequestPath());
-    try std.testing.expectEqualStrings("363313fc", ctx.getSessionHeader());
+    try std.testing.expectEqualStrings("363313fc-7071-4450-bcc2-bd3eaaf93886", ctx.getSessionHeader());
 }
