@@ -1306,7 +1306,7 @@ test "chatStreaming's http observer sees the user-agent header" {
     try std.testing.expectEqualStrings(http_client.user_agent, observer_ctx.value());
 }
 
-test "appendAnthropicHeaders sends only the session id prefix" {
+test "appendAnthropicHeaders sends the full session id" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -1322,7 +1322,7 @@ test "appendAnthropicHeaders sends only the session id prefix" {
     for (headers.items) |h| {
         if (std.mem.eql(u8, h.name, "x-opencode-session")) {
             found_session = true;
-            try std.testing.expectEqualStrings("363313fc", h.value);
+            try std.testing.expectEqualStrings("363313fc-7071-4450-bcc2-bd3eaaf93886", h.value);
         }
     }
     try std.testing.expect(found_session);
