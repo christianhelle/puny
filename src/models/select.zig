@@ -125,11 +125,7 @@ pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, compti
             retry_count += 1;
             if (retry_count > retries or !retry.isTransientError(err)) return err;
 
-            var delay_ms: u64 = cfg.base_delay_ms;
-            var i: usize = 1;
-            while (i < retry_count) : (i += 1) delay_ms *= 2;
-            delay_ms += random.intRangeAtMost(u64, 0, cfg.jitter_max_ms);
-
+            const delay_ms = retry.computeDelay(cfg, retry_count, random);
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
