@@ -2,10 +2,9 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
-- Improve documentation correctness and usage ([#189](https://github.com/christianhelle/puny/pull/189)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Use shared computeDelay backoff for chat and model-list retries ([#192](https://github.com/christianhelle/puny/pull/192)) ([@christianhelle](https://github.com/christianhelle/))
+- Improve documentation correctness and usage ([#189](https://github.com/christianhelle/puny/pull/189)) ([@christianhelle](https://github.com/christianhelle/))
 - send full session id in the x-opencode-session header ([#191](https://github.com/christianhelle/puny/pull/191)) ([@christianhelle](https://github.com/christianhelle/))
 - Include the User-Agent header in the debug HTTP log ([#190](https://github.com/christianhelle/puny/pull/190)) ([@christianhelle](https://github.com/christianhelle/))
 - Generate provider clients via the openapi2zig library instead of the CLI ([#188](https://github.com/christianhelle/puny/pull/188)) ([@christianhelle](https://github.com/christianhelle/))
