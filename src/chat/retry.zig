@@ -4,6 +4,7 @@ const openai = @import("../providers/openai.zig");
 const http_client = @import("../providers/client.zig");
 const redact = @import("redact.zig");
 const retry = @import("../core/retry.zig");
+const test_support = @import("../test_support.zig");
 
 pub const ChatRetryOutcome = union(enum) {
     success,
@@ -313,4 +314,58 @@ test "formatHttpFailure drops Unicode terminal control characters" {
     defer std.testing.allocator.free(formatted);
 
     try std.testing.expectEqualStrings("HTTP 502 Bad Gateway: bad: 2J ok", formatted);
+}
+
+const FakeChatProvider = struct {
+    failures_left: usize = 0,
+
+    pub fn chatStreaming(self: *@This(), request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+        _ = request;
+        _ = callback;
+        if (self.failures_left > 0) {
+            self.failures_left -= 1;
+            return error.ConnectionRefused;
+        }
+    }
+};
+
+fn noopStreamCallback() openai.StreamCallback {
+    return .{
+        .context = undefined,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(_: *anyopaque, _: openai.StreamEvent) anyerror!void {}
+            }.event,
+        },
+    };
+}
+
+test "runChatWithRetry sleeps the canonical backoff delay between retries" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    var fake = FakeChatProvider{ .failures_left = 2 };
+    var prng = std.Random.DefaultPrng.init(42);
+    const outcome = try runChatWithRetry(
+        &fake,
+        std.testing.allocator,
+        .{ .model = "test-model", .messages = &.{}, .tools = &.{} },
+        noopStreamCallback(),
+        recorder.io,
+        prng.random(),
+        &output.writer,
+    );
+    try std.testing.expect(outcome == .success);
+
+    var expect_prng = std.Random.DefaultPrng.init(42);
+    const expected_1: i96 = @intCast(retry.computeDelay(retry.default_config, 1, expect_prng.random()) * std.time.ns_per_ms);
+    const expected_2: i96 = @intCast(retry.computeDelay(retry.default_config, 2, expect_prng.random()) * std.time.ns_per_ms);
+
+    for ([_]i96{ expected_1, expected_2 }) |expected| {
+        try std.testing.expect(std.mem.indexOfScalar(i96, recorder.sleeps.items, expected) != null);
+    }
 }
