@@ -7,6 +7,7 @@ const model_picker = @import("../tui/model_picker.zig");
 const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const retry = @import("../core/retry.zig");
+const test_support = @import("../test_support.zig");
 
 pub const SelectionResult = struct {
     model_key: []const u8,
@@ -192,6 +193,31 @@ test "listModelsWithRetry gives up when retries exhausted" {
     const result = listModelsWithRetry(&prov, undefined, testRandom(), 0);
     try std.testing.expectError(error.ConnectionRefused, result);
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
+}
+
+test "listModelsWithRetry sleeps the canonical backoff delay between retries" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
+    var prov = TestProvider{
+        .allocator = std.testing.allocator,
+        .fail_count = 2,
+        .err = error.ConnectionRefused,
+    };
+    var prng = std.Random.DefaultPrng.init(42);
+    var result = try listModelsWithRetry(&prov, recorder.io, prng.random(), 2);
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 3), prov.calls);
+
+    var expect_prng = std.Random.DefaultPrng.init(42);
+    const expected_1: i96 = @intCast(retry.computeDelay(retry.default_config, 1, expect_prng.random()) * std.time.ns_per_ms);
+    const expected_2: i96 = @intCast(retry.computeDelay(retry.default_config, 2, expect_prng.random()) * std.time.ns_per_ms);
+
+    try std.testing.expectEqual(@as(usize, 2), recorder.sleeps.items.len);
+    try std.testing.expectEqual(expected_1, recorder.sleeps.items[0]);
+    try std.testing.expectEqual(expected_2, recorder.sleeps.items[1]);
 }
 
 test "select skips validation when requested" {
