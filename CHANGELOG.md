@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Fix streamed reasoning breaking one line per delta ([#193](https://github.com/christianhelle/puny/pull/193)) ([@christianhelle](https://github.com/christianhelle/))
 - Use shared computeDelay backoff for chat and model-list retries ([#192](https://github.com/christianhelle/puny/pull/192)) ([@christianhelle](https://github.com/christianhelle/))
 - Improve documentation correctness and usage ([#189](https://github.com/christianhelle/puny/pull/189)) ([@christianhelle](https://github.com/christianhelle/))
 - send full session id in the x-opencode-session header ([#191](https://github.com/christianhelle/puny/pull/191)) ([@christianhelle](https://github.com/christianhelle/))
