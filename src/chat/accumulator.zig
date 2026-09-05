@@ -125,6 +125,18 @@ pub const OpenAiAccumulator = struct {
         };
     }
 
+    /// End an open streamed-reasoning block so whatever is printed next starts
+    /// on its own line. Does nothing when no reasoning block is open.
+    pub fn finishReasoning(self: *@This()) !void {
+        if (!self.reasoning_shown) return;
+        self.reasoning_shown = false;
+        if (self.stdout) |stdout| {
+            try stdout.print("\r\n", .{});
+            try stdout.flush();
+        }
+        self.lines_printed += 1;
+    }
+
     fn recordFirstToken(self: *@This()) void {
         if (self.first_token_recorded) return;
         self.first_token_recorded = true;
@@ -150,12 +162,7 @@ pub const OpenAiAccumulator = struct {
                 self.has_streamed_output = true;
                 self.recordFirstToken();
                 if (self.reasoning_shown) {
-                    self.reasoning_shown = false;
-                    if (self.stdout) |stdout| {
-                        try stdout.print("\r\n", .{});
-                        try stdout.flush();
-                    }
-                    self.lines_printed += 1;
+                    try self.finishReasoning();
                     self.content_start_line = self.lines_printed;
                     self.content_started = true;
                 }
@@ -640,6 +647,28 @@ test "OpenAiAccumulator keeps reasoning on one line when empty content deltas in
     // Only the newline that opens the reasoning block; none between deltas.
     try std.testing.expectEqual(@as(usize, 1), breaks);
     try std.testing.expectEqual(@as(usize, 0), acc.content.items.len);
+}
+
+test "OpenAiAccumulator finishReasoning closes the block once" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, &output.writer, &session_stats);
+    defer acc.deinit();
+    acc.show_thinking = true;
+
+    try acc.onEvent(.{ .reasoning = "planning" });
+    const before = output.written().len;
+    try acc.finishReasoning();
+    try std.testing.expectEqualStrings("\r\n", output.written()[before..]);
+
+    const after_first = output.written().len;
+    try acc.finishReasoning();
+    try std.testing.expectEqual(after_first, output.written().len);
 }
 test "OpenAiAccumulator cancellation clears content and tool calls" {
     cancel.reset();

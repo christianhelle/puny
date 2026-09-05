@@ -109,6 +109,10 @@ pub fn runTurnWithMode(
         },
     }
 
+    // Close an open reasoning block so tool-call lines and the turn footer
+    // start on their own line instead of running into the thinking text.
+    try acc.finishReasoning();
+
     const turn_usage_estimated = acc.usage == null;
     const turn_usage = if (acc.usage) |u| u else usage_estimator.estimateUsage(messages.items, acc.estimatedOutputChars());
 
