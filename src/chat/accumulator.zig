@@ -142,6 +142,11 @@ pub const OpenAiAccumulator = struct {
         }
         switch (ev) {
             .content => |text| {
+                // Providers may send `"content": ""` alongside every reasoning
+                // delta. Such a delta carries no output, and treating it as
+                // content would close the reasoning block, breaking streamed
+                // thinking text onto a new line for every delta.
+                if (text.len == 0) return;
                 self.has_streamed_output = true;
                 self.recordFirstToken();
                 if (self.reasoning_shown) {
@@ -606,6 +611,36 @@ test "OpenAiAccumulator prints dimmed reasoning when show thinking is enabled" {
     try std.testing.expectEqualStrings("answer", acc.content.items);
 }
 
+test "OpenAiAccumulator keeps reasoning on one line when empty content deltas interleave" {
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    session_stats.beginTurn("model-a", 0);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, &output.writer, &session_stats);
+    defer acc.deinit();
+    acc.show_thinking = true;
+
+    // Some providers send `"content": ""` alongside every reasoning delta.
+    try acc.onEvent(.{ .content = "" });
+    try acc.onEvent(.{ .reasoning = "Windows environment." });
+    try acc.onEvent(.{ .content = "" });
+    try acc.onEvent(.{ .reasoning = " Let me use different commands." });
+    try acc.onEvent(.{ .content = "" });
+
+    const written = output.written();
+    var breaks: usize = 0;
+    var i: usize = 0;
+    while (std.mem.indexOfPos(u8, written, i, "\r\n")) |pos| {
+        breaks += 1;
+        i = pos + 2;
+    }
+    // Only the newline that opens the reasoning block; none between deltas.
+    try std.testing.expectEqual(@as(usize, 1), breaks);
+    try std.testing.expectEqual(@as(usize, 0), acc.content.items.len);
+}
 test "OpenAiAccumulator cancellation clears content and tool calls" {
     cancel.reset();
     defer cancel.reset();
