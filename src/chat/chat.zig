@@ -137,6 +137,12 @@ pub fn runTurnWithMode(
             }
         }
 
+        // Close an open reasoning block so the tool-call lines start on their
+        // own line instead of running into the thinking text. Only done here:
+        // when nothing follows the reasoning, the extra line would shift the
+        // cursor the indicator rewinds over to clear its "Thinking..." line.
+        try acc.finishReasoning();
+
         var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
             try printToolCall(arena, stdout_writer, tc);
