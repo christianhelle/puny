@@ -109,10 +109,6 @@ pub fn runTurnWithMode(
         },
     }
 
-    // Close an open reasoning block so tool-call lines and the turn footer
-    // start on their own line instead of running into the thinking text.
-    try acc.finishReasoning();
-
     const turn_usage_estimated = acc.usage == null;
     const turn_usage = if (acc.usage) |u| u else usage_estimator.estimateUsage(messages.items, acc.estimatedOutputChars());
 
@@ -140,6 +136,12 @@ pub fn runTurnWithMode(
                 log.print("[ASSISTANT]\n{s}\n\n", .{c}) catch {};
             }
         }
+
+        // Close an open reasoning block so the tool-call lines start on their
+        // own line instead of running into the thinking text. Only done here:
+        // when nothing follows the reasoning, the extra line would shift the
+        // cursor the indicator rewinds over to clear its "Thinking..." line.
+        try acc.finishReasoning();
 
         var tool_output_lines: usize = 0;
         for (assistant_content.tool_calls.?) |tc| {
