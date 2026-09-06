@@ -15,9 +15,10 @@ pub fn formatTokens(buf: []u8, n: i64) []const u8 {
 
 /// Formats a count exactly, grouping thousands with commas (`1,000,000`).
 /// Use where the precise number matters and only its readability is at stake;
-/// `formatTokens` is the compact alternative. Writes into `buf` (which must be
-/// large enough) and returns a slice of it.
-pub fn formatGrouped(buf: []u8, n: i64) []const u8 {
+/// `formatTokens` is the compact alternative. Accepts any integer type so
+/// callers never have to narrow a `usize` to fit. Writes into `buf` (which
+/// must be large enough) and returns a slice of it.
+pub fn formatGrouped(buf: []u8, n: anytype) []const u8 {
     var digits_buf: [20]u8 = undefined;
     const digits = std.fmt.bufPrint(&digits_buf, "{d}", .{@abs(n)}) catch return buf[0..0];
 
@@ -78,6 +79,13 @@ test "formatGrouped separates thousands with commas" {
     try std.testing.expectEqualStrings("1,000", formatGrouped(&buf, 1000));
     try std.testing.expectEqualStrings("12,345", formatGrouped(&buf, 12345));
     try std.testing.expectEqualStrings("1,000,000", formatGrouped(&buf, 1_000_000));
+}
+
+test "formatGrouped accepts unsigned counts without narrowing them" {
+    var buf: [32]u8 = undefined;
+    const turns: usize = 12_345;
+    try std.testing.expectEqualStrings("12,345", formatGrouped(&buf, turns));
+    try std.testing.expectEqualStrings("18,446,744,073,709,551,615", formatGrouped(&buf, std.math.maxInt(u64)));
 }
 
 test "formatGrouped keeps the sign of negative counts" {

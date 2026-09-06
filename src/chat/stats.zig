@@ -164,13 +164,13 @@ pub const SessionStats = struct {
         defer self.allocator.free(session_label);
         try writer.print("\n\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
         var session_turns_buf: [32]u8 = undefined;
-        try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, @intCast(self.totalTurns()))});
+        try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, self.totalTurns())});
         for (self.models.items) |entry| {
             const stats = entry.stats;
             if (stats.turn_count == 0 and stats.input_tokens == 0 and stats.output_tokens == 0) continue;
             try writer.print("\n{s}─── {s} ───{s}\n", .{ ansi.dim, entry.model_key, ansi.reset });
             var turns_buf: [32]u8 = undefined;
-            const turns = token_stats.formatGrouped(&turns_buf, @intCast(stats.turn_count));
+            const turns = token_stats.formatGrouped(&turns_buf, stats.turn_count);
             if (stats.turn_count == 0) {
                 try writer.print("  Turns:               {s} (no completed turns)\n", .{turns});
             } else {
