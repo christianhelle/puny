@@ -163,15 +163,18 @@ pub const SessionStats = struct {
             try std.fmt.allocPrint(self.allocator, "─── Session Stats ───", .{});
         defer self.allocator.free(session_label);
         try writer.print("\n\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
-        try writer.print("  Turns:               {d}\n", .{self.totalTurns()});
+        var session_turns_buf: [32]u8 = undefined;
+        try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, @intCast(self.totalTurns()))});
         for (self.models.items) |entry| {
             const stats = entry.stats;
             if (stats.turn_count == 0 and stats.input_tokens == 0 and stats.output_tokens == 0) continue;
             try writer.print("\n{s}─── {s} ───{s}\n", .{ ansi.dim, entry.model_key, ansi.reset });
+            var turns_buf: [32]u8 = undefined;
+            const turns = token_stats.formatGrouped(&turns_buf, @intCast(stats.turn_count));
             if (stats.turn_count == 0) {
-                try writer.print("  Turns:               {d} (no completed turns)\n", .{stats.turn_count});
+                try writer.print("  Turns:               {s} (no completed turns)\n", .{turns});
             } else {
-                try writer.print("  Turns:               {d}\n", .{stats.turn_count});
+                try writer.print("  Turns:               {s}\n", .{turns});
             }
             var input_buf: [32]u8 = undefined;
             var output_buf: [32]u8 = undefined;
@@ -368,6 +371,20 @@ test "SessionStats.print groups large token counts with commas" {
     try std.testing.expect(std.mem.indexOf(u8, written, "Input tokens:        1,234,567") != null);
     try std.testing.expect(std.mem.indexOf(u8, written, "Output tokens:       86,667 (reasoning: 2,345)") != null);
     try std.testing.expect(std.mem.indexOf(u8, written, "Total tokens:        1,323,579") != null);
+}
+
+test "SessionStats.print groups large turn counts with commas" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 1);
+    stats.models.items[0].stats.turn_count = 12_345;
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "Turns:               12,345") != null);
 }
 
 test "SessionStats.print shows model with partial turn" {
