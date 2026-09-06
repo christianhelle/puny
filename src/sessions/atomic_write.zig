@@ -44,7 +44,12 @@ pub fn writeAtomically(
     var file_open = true;
     errdefer {
         if (file_open) file.close(io);
-        cwd.deleteFile(io, tmp_path) catch {};
+        // A cleanup that cannot delete its own staging file is the only way a
+        // still-running process leaks one, so say so rather than dropping the
+        // error and leaving an unexplained file behind.
+        cwd.deleteFile(io, tmp_path) catch |err| {
+            std.log.warn("failed to remove staging file {s} after a failed write: {s}", .{ tmp_path, @errorName(err) });
+        };
     }
 
     file.writeStreamingAll(io, contents) catch |err| {
