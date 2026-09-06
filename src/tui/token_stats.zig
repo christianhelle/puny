@@ -13,6 +13,35 @@ pub fn formatTokens(buf: []u8, n: i64) []const u8 {
     return std.fmt.bufPrint(buf, "{d:.1}k", .{value / 1000.0}) catch buf[0..0];
 }
 
+/// Formats a count exactly, grouping thousands with commas (`1,000,000`).
+/// Use where the precise number matters and only its readability is at stake;
+/// `formatTokens` is the compact alternative. Accepts any integer type so
+/// callers never have to narrow a `usize` to fit. Writes into `buf` (which
+/// must be large enough) and returns a slice of it.
+pub fn formatGrouped(buf: []u8, n: anytype) []const u8 {
+    var digits_buf: [20]u8 = undefined;
+    const digits = std.fmt.bufPrint(&digits_buf, "{d}", .{@abs(n)}) catch return buf[0..0];
+
+    const separators = (digits.len - 1) / 3;
+    const total = @as(usize, @intFromBool(n < 0)) + digits.len + separators;
+    if (total > buf.len) return buf[0..0];
+
+    var i: usize = 0;
+    if (n < 0) {
+        buf[i] = '-';
+        i += 1;
+    }
+    for (digits, 0..) |digit, d| {
+        if (d > 0 and (digits.len - d) % 3 == 0) {
+            buf[i] = ',';
+            i += 1;
+        }
+        buf[i] = digit;
+        i += 1;
+    }
+    return buf[0..i];
+}
+
 /// Prints the per-response token footer as a single dim line, e.g.
 /// `⏱ tokens: in 140 | out 120 | total 260 (session 12.4k)`. Per-turn numbers
 /// are prefixed with `~` when the turn used estimated (not provider-reported)
@@ -41,6 +70,39 @@ pub fn printTokenFooter(
         ansi.reset,
     });
     try writer.flush();
+}
+
+test "formatGrouped separates thousands with commas" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("0", formatGrouped(&buf, 0));
+    try std.testing.expectEqualStrings("999", formatGrouped(&buf, 999));
+    try std.testing.expectEqualStrings("1,000", formatGrouped(&buf, 1000));
+    try std.testing.expectEqualStrings("12,345", formatGrouped(&buf, 12345));
+    try std.testing.expectEqualStrings("1,000,000", formatGrouped(&buf, 1_000_000));
+}
+
+test "formatGrouped accepts unsigned counts without narrowing them" {
+    var buf: [32]u8 = undefined;
+    const turns: usize = 12_345;
+    try std.testing.expectEqualStrings("12,345", formatGrouped(&buf, turns));
+    try std.testing.expectEqualStrings("18,446,744,073,709,551,615", formatGrouped(&buf, std.math.maxInt(u64)));
+}
+
+test "formatGrouped keeps the sign of negative counts" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("-1", formatGrouped(&buf, -1));
+    try std.testing.expectEqualStrings("-1,234", formatGrouped(&buf, -1234));
+}
+
+test "formatGrouped groups the extremes of i64" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("9,223,372,036,854,775,807", formatGrouped(&buf, std.math.maxInt(i64)));
+    try std.testing.expectEqualStrings("-9,223,372,036,854,775,808", formatGrouped(&buf, std.math.minInt(i64)));
+}
+
+test "formatGrouped yields an empty slice when the buffer is too small" {
+    var buf: [4]u8 = undefined;
+    try std.testing.expectEqualStrings("", formatGrouped(&buf, 1000));
 }
 
 test "formatTokens prints exact numbers below ten thousand" {
