@@ -171,6 +171,89 @@ pub fn write(
     try file.writeStreamingAll(io, body);
 }
 
+/// A crash report waiting to be submitted or discarded.
+pub const Report = struct {
+    /// Absolute path of the report file.
+    path: []const u8,
+    /// Session the crashed run belonged to, taken from the file name.
+    session_id: []const u8,
+    modified_ns: i96,
+};
+
+/// Frees a slice returned by `list`.
+pub fn freeReports(allocator: std.mem.Allocator, reports: []const Report) void {
+    for (reports) |r| {
+        allocator.free(r.path);
+        allocator.free(r.session_id);
+    }
+    allocator.free(reports);
+}
+
+fn newerFirst(_: void, a: Report, b: Report) bool {
+    return a.modified_ns > b.modified_ns;
+}
+
+/// Lists the pending crash reports, most recent first. A missing crash
+/// directory yields an empty slice. The result is owned by `allocator`; free it
+/// with `freeReports`.
+pub fn list(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+) ![]const Report {
+    const dir_path = try crashDir(allocator, environ_map);
+    defer allocator.free(dir_path);
+
+    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return &[_]Report{},
+        else => |e| return e,
+    };
+    defer dir.close(io);
+
+    var reports: std.ArrayList(Report) = .empty;
+    errdefer {
+        for (reports.items) |r| {
+            allocator.free(r.path);
+            allocator.free(r.session_id);
+        }
+        reports.deinit(allocator);
+    }
+
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        const id = sessionIdFromFileName(entry.name) orelse continue;
+
+        const path = try std.fs.path.join(allocator, &.{ dir_path, entry.name });
+        errdefer allocator.free(path);
+        const stat = std.Io.Dir.cwd().statFile(io, path, .{}) catch {
+            allocator.free(path);
+            continue;
+        };
+        const session_id = try allocator.dupe(u8, id);
+        errdefer allocator.free(session_id);
+
+        try reports.append(allocator, .{
+            .path = path,
+            .session_id = session_id,
+            .modified_ns = stat.mtime.nanoseconds,
+        });
+    }
+
+    const owned = try reports.toOwnedSlice(allocator);
+    std.mem.sort(Report, owned, {}, newerFirst);
+    return owned;
+}
+
+/// Extracts the session id from a crash report file name, or null when the
+/// name does not belong to puny.
+fn sessionIdFromFileName(name: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, name, file_prefix)) return null;
+    if (!std.mem.endsWith(u8, name, ".md")) return null;
+    const id = name[file_prefix.len .. name.len - ".md".len];
+    return if (id.len == 0) null else id;
+}
+
 /// Environment map pointing the config dir at a scratch directory, wiped so a
 /// crashed run's leftovers cannot leak into the next test run.
 fn testEnv(allocator: std.mem.Allocator, io: std.Io, base: []const u8) !std.process.Environ.Map {
@@ -216,4 +299,58 @@ test "write stores the report at the path reportPath resolves" {
 
     try std.testing.expect(std.mem.indexOf(u8, content, "error.OutOfMemory") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "write-1") != null);
+}
+
+fn writeTestReport(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    session_id: []const u8,
+    modified_ns: i96,
+) !void {
+    try write(io, allocator, env, .{
+        .session_id = session_id,
+        .error_name = "OutOfMemory",
+        .phase = "chat turn",
+    });
+    const path = try reportPath(allocator, env, session_id);
+    defer allocator.free(path);
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{ .mode = .read_write });
+    defer file.close(io);
+    try file.setTimestamps(io, .{ .modify_timestamp = .{ .new = std.Io.Timestamp.fromNanoseconds(modified_ns) } });
+}
+
+test "list returns pending reports newest first and ignores other files" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var env = try testEnv(allocator, io, "test-crash-list");
+    defer testEnvCleanup(allocator, io, &env);
+
+    try writeTestReport(allocator, io, &env, "older", 1_000_000_000_000);
+    try writeTestReport(allocator, io, &env, "newer", 2_000_000_000_000);
+
+    const dir = try crashDir(allocator, &env);
+    defer allocator.free(dir);
+    const stray = try std.fs.path.join(allocator, &.{ dir, "notes.txt" });
+    defer allocator.free(stray);
+    var stray_file = try std.Io.Dir.cwd().createFile(io, stray, .{});
+    stray_file.close(io);
+
+    const reports = try list(io, allocator, &env);
+    defer freeReports(allocator, reports);
+
+    try std.testing.expectEqual(@as(usize, 2), reports.len);
+    try std.testing.expectEqualStrings("newer", reports[0].session_id);
+    try std.testing.expectEqualStrings("older", reports[1].session_id);
+}
+
+test "list is empty when no crash directory exists" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var env = try testEnv(allocator, io, "test-crash-empty");
+    defer testEnvCleanup(allocator, io, &env);
+
+    const reports = try list(io, allocator, &env);
+    defer freeReports(allocator, reports);
+    try std.testing.expectEqual(@as(usize, 0), reports.len);
 }
