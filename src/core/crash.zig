@@ -245,6 +245,29 @@ pub fn list(
     return owned;
 }
 
+/// Reads the value of a `- **Field**: value` line out of a report body.
+fn reportField(body: []const u8, field: []const u8) ?[]const u8 {
+    var buf: [64]u8 = undefined;
+    const needle = std.fmt.bufPrint(&buf, "- **{s}**: ", .{field}) catch return null;
+    const start = std.mem.indexOf(u8, body, needle) orelse return null;
+    const rest = body[start + needle.len ..];
+    const end = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+    const value = std.mem.trim(u8, rest[0..end], " " ++ "\r");
+    return if (value.len == 0) null else value;
+}
+
+/// Builds the GitHub issue title for a report body. The returned slice is
+/// owned by `allocator`.
+pub fn titleFromReport(allocator: std.mem.Allocator, body: []const u8) ![]const u8 {
+    const err = reportField(body, "Error") orelse
+        return allocator.dupe(u8, "crash: unknown failure");
+    const phase = reportField(body, "Phase") orelse "an unknown phase";
+    if (reportField(body, "Version")) |ver| {
+        return std.fmt.allocPrint(allocator, "crash: {s} during {s} (v{s})", .{ err, phase, ver });
+    }
+    return std.fmt.allocPrint(allocator, "crash: {s} during {s}", .{ err, phase });
+}
+
 /// How many pending reports are kept. A crash that repeats every startup must
 /// not fill the config directory.
 pub const max_pending_reports: usize = 5;
@@ -412,4 +435,24 @@ test "prune keeps only the newest reports" {
     try std.testing.expectEqual(@as(usize, 2), reports.len);
     try std.testing.expectEqualStrings("newest", reports[0].session_id);
     try std.testing.expectEqualStrings("middle", reports[1].session_id);
+}
+
+test "titleFromReport summarises the failure for the issue title" {
+    const allocator = std.testing.allocator;
+    const body =
+        "# puny crash report\n\n" ++
+        "- **Error**: error.ConnectionRefused\n" ++
+        "- **Phase**: chat turn\n" ++
+        "- **Version**: 0.3.5\n";
+
+    const title = try titleFromReport(allocator, body);
+    defer allocator.free(title);
+    try std.testing.expectEqualStrings("crash: error.ConnectionRefused during chat turn (v0.3.5)", title);
+}
+
+test "titleFromReport falls back when the report is unrecognised" {
+    const allocator = std.testing.allocator;
+    const title = try titleFromReport(allocator, "not a puny crash report");
+    defer allocator.free(title);
+    try std.testing.expectEqualStrings("crash: unknown failure", title);
 }
