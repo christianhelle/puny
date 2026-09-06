@@ -149,3 +149,71 @@ test "formatReport omits provider and model when they are unknown" {
     try std.testing.expect(std.mem.indexOf(u8, report, "Model") == null);
     try std.testing.expect(std.mem.indexOf(u8, report, "error.AccessDenied") != null);
 }
+
+/// Writes a crash report for `details` into the crash directory, creating it
+/// when missing. Callers on the failure path should ignore errors: a crash
+/// report that cannot be written must not replace the original failure.
+pub fn write(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    details: Details,
+) !void {
+    const path = try reportPath(allocator, environ_map, details.session_id);
+    defer allocator.free(path);
+    const body = try formatReport(allocator, details);
+    defer allocator.free(body);
+
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, std.fs.path.dirname(path).?);
+    var file = try cwd.createFile(io, path, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, body);
+}
+
+/// Environment map pointing the config dir at a scratch directory, wiped so a
+/// crashed run's leftovers cannot leak into the next test run.
+fn testEnv(allocator: std.mem.Allocator, io: std.Io, base: []const u8) !std.process.Environ.Map {
+    var env = std.process.Environ.Map.init(allocator);
+    errdefer env.deinit();
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd);
+    const dir = try std.fs.path.join(allocator, &.{ cwd, "zig-out", base });
+    defer allocator.free(dir);
+    std.Io.Dir.cwd().deleteTree(io, dir) catch {};
+    if (comptime builtin.os.tag == .windows) {
+        try env.put("APPDATA", dir);
+    } else {
+        try env.put("XDG_CONFIG_HOME", dir);
+    }
+    return env;
+}
+
+fn testEnvCleanup(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ.Map) void {
+    if (crashDir(allocator, env)) |dir| {
+        defer allocator.free(dir);
+        std.Io.Dir.cwd().deleteTree(io, dir) catch {};
+    } else |_| {}
+    env.deinit();
+}
+
+test "write stores the report at the path reportPath resolves" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var env = try testEnv(allocator, io, "test-crash-write");
+    defer testEnvCleanup(allocator, io, &env);
+
+    try write(io, allocator, &env, .{
+        .session_id = "write-1",
+        .error_name = "OutOfMemory",
+        .phase = "chat turn",
+    });
+
+    const path = try reportPath(allocator, &env, "write-1");
+    defer allocator.free(path);
+    const content = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+
+    try std.testing.expect(std.mem.indexOf(u8, content, "error.OutOfMemory") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "write-1") != null);
+}
