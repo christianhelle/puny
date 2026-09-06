@@ -81,7 +81,7 @@ fn printReport(
         io,
         report.path,
         arena,
-        std.Io.Limit.limited(64 * 1024),
+        std.Io.Limit.limited(crash.max_report_bytes),
     ) catch {
         try writer.print("\nCould not read {s}\n", .{report.path});
         try writer.flush();

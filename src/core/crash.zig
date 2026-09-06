@@ -393,9 +393,9 @@ pub fn parseSubmitOutput(output: []const u8) SubmitOutcome {
     return .{ .failed = "gh could not create the issue" };
 }
 
-/// Largest report body read back for submission. Reports are a few hundred
-/// bytes; anything beyond this is not one puny wrote.
-const max_report_bytes = 64 * 1024;
+/// Largest report body read back from disk. Reports are a few hundred bytes;
+/// anything beyond this is not one puny wrote.
+pub const max_report_bytes = 64 * 1024;
 
 const ProcessRunner = struct {
     io: std.Io,
