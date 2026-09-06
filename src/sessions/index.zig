@@ -56,10 +56,30 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
         return try rebuildSessionsIndex(arena, io, base_dir);
     }
 
+    return (try readIndex(arena, io, base_dir)) orelse
+        try rebuildSessionsIndex(arena, io, base_dir);
+}
+
+/// Reads the index file and returns its entries sorted by id, or null when it
+/// is missing, oversized, corrupt, or carries an invalid session id: the cases
+/// that need a directory scan to recover. Whether the index is stale against
+/// the sessions directory is not considered here, so callers that already know
+/// what changed can skip the scan.
+///
+/// Only the returned entries are allocated in `arena`; all transient path and
+/// parse memory is released before returning.
+fn readIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) !?[]SessionInfo {
+    var scratch_arena = std.heap.ArenaAllocator.init(arena);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    const index_path = try std.fs.path.join(scratch, &.{ base_dir, index_filename });
+
     const data = std.Io.Dir.cwd().readFileAlloc(io, index_path, scratch, std.Io.Limit.limited(index_read_limit)) catch |err| switch (err) {
+        error.FileNotFound => return null,
         error.StreamTooLong => {
             std.log.warn("sessions index at {s} exceeds the read limit; rebuilding", .{index_path});
-            return try rebuildSessionsIndex(arena, io, base_dir);
+            return null;
         },
         else => |e| return e,
     };
@@ -69,7 +89,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
         .allocate = .alloc_if_needed,
     }) catch |err| {
         std.log.warn("failed to parse sessions index at {s}: {s}; rebuilding", .{ index_path, @errorName(err) });
-        return try rebuildSessionsIndex(arena, io, base_dir);
+        return null;
     };
     defer parsed.deinit();
 
@@ -79,7 +99,7 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     for (parsed.value) |s| {
         if (!isValidSessionId(s.id)) {
             std.log.warn("sessions index at {s} contains an invalid session id; rebuilding", .{index_path});
-            return try rebuildSessionsIndex(arena, io, base_dir);
+            return null;
         }
     }
 
@@ -92,6 +112,18 @@ pub fn listSessions(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) 
     }
     std.mem.sort(SessionInfo, entries, {}, lessThan);
     return entries;
+}
+
+/// The entry list a single-entry index update starts from. Unlike
+/// `listSessions` this never rescans just because the index looks stale
+/// against the sessions directory: the caller already knows what changed, and
+/// on the chat exit path that scan costs one filesystem round trip per session
+/// ever created. A missing or unusable index still falls back to a full scan,
+/// and `listSessions` keeps the staleness check for every read path, so drift
+/// from outside still heals where it is observed.
+fn indexForUpdate(arena: std.mem.Allocator, io: std.Io, base_dir: []const u8) ![]SessionInfo {
+    return (try readIndex(arena, io, base_dir)) orelse
+        try rebuildSessionsIndex(arena, io, base_dir);
 }
 
 /// Full directory scan: computes every `SessionInfo` field from the session
@@ -206,7 +238,7 @@ pub fn upsertSessionInfo(arena: std.mem.Allocator, io: std.Io, base_dir: []const
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
 
-    const current = try listSessions(scratch, io, base_dir);
+    const current = try indexForUpdate(scratch, io, base_dir);
 
     const id = try scratch.dupe(u8, info.id);
     const first_prompt = if (info.first_prompt) |p| try truncateFirstPrompt(scratch, p) else null;
@@ -245,7 +277,7 @@ pub fn removeSessionFromIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
 
-    const current = try listSessions(scratch, io, base_dir);
+    const current = try indexForUpdate(scratch, io, base_dir);
     var entries: std.ArrayList(SessionInfo) = .empty;
     defer entries.deinit(scratch);
     for (current) |s| {
@@ -812,6 +844,50 @@ test "upsertSessionInfo adds a new entry and reads it back" {
     try std.testing.expect(!sessions[0].planning_mode);
     try std.testing.expectEqualStrings("hello", sessions[0].first_prompt.?);
     try std.testing.expectEqual(@as(u64, 100), sessions[0].last_modified);
+}
+
+test "upsertSessionInfo updates the index without rescanning the sessions directory" {
+    const f = @import("fixtures.zig");
+    const test_dir = try f.testBaseDir(std.testing.allocator, std.testing.io, @src().fn_name);
+    defer {
+        f.cleanupTestDir(std.testing.io, test_dir);
+        std.testing.allocator.free(test_dir);
+    }
+    try f.createTestSessionDir(std.testing.io, test_dir, "a-1", false);
+
+    const initial = try listSessions(std.testing.allocator, std.testing.io, test_dir);
+    defer {
+        for (initial) |s| std.testing.allocator.free(s.id);
+        std.testing.allocator.free(initial);
+    }
+    try std.testing.expectEqual(@as(usize, 1), initial.len);
+
+    const index_path = try std.fs.path.join(std.testing.allocator, &.{ test_dir, index_filename });
+    defer std.testing.allocator.free(index_path);
+
+    // Reproduce the shape of a real run: the index was written by an earlier
+    // one, and this run adds its own session directory. That makes the index
+    // look stale, which is what used to drag a full directory scan onto every
+    // exit. A single-entry upsert already knows what changed, so it must apply
+    // the change to the index it finds and leave the scan to the read path.
+    try f.setFileMtime(std.testing.io, index_path, std.Io.Timestamp.fromNanoseconds(1_000_000_000_000));
+    try f.createTestSessionDir(std.testing.io, test_dir, "b-2", false);
+
+    try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
+        .id = "a-1",
+        .has_prd = false,
+        .has_conversation = true,
+        .mode = .build,
+        .planning_mode = false,
+        .first_prompt = "hello",
+        .last_modified = 100,
+    });
+
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, index_path, std.testing.allocator, std.Io.Limit.limited(64 * 1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expect(std.mem.indexOf(u8, data, "\"a-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "\"hello\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "\"b-2\"") == null);
 }
 
 test "upsertSessionInfo updates an existing entry and refreshes last_modified" {
