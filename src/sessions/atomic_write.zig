@@ -350,3 +350,146 @@ test "writeAtomically stamps the target newer than a file reference" {
     const out_stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
     try std.testing.expect(out_stat.mtime.nanoseconds >= ref_stat.mtime.nanoseconds);
 }
+
+/// Backdates `path` far enough into the past that the sweep treats it as
+/// abandoned, standing in for a staging file left by a run that was killed.
+fn backdate(path: []const u8) !void {
+    var file = try std.Io.Dir.cwd().openFile(std.testing.io, path, .{ .mode = .read_write });
+    defer file.close(std.testing.io);
+    try file.setTimestamps(std.testing.io, .{ .modify_timestamp = .{ .new = std.Io.Timestamp.fromNanoseconds(1_000_000_000_000) } });
+}
+
+fn exists(path: []const u8) bool {
+    _ = std.Io.Dir.cwd().statFile(std.testing.io, path, .{}) catch return false;
+    return true;
+}
+
+test "writeAtomically sweeps a staging file left by an interrupted run" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep");
+    defer std.testing.allocator.free(dir);
+
+    const orphan = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.437900257935400.tmp" });
+    defer std.testing.allocator.free(orphan);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = orphan, .data = "ORPHAN" });
+    try backdate(orphan);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    try std.testing.expect(!exists(orphan));
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("fresh\n", data);
+}
+
+test "writeAtomically sweeps every staging file an interrupted run left" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-many");
+    defer std.testing.allocator.free(dir);
+
+    for (0..5) |i| {
+        const orphan = try std.fmt.allocPrint(std.testing.allocator, "{s}/out.json.{d}.tmp", .{ dir, i });
+        defer std.testing.allocator.free(orphan);
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = orphan, .data = "ORPHAN" });
+        try backdate(orphan);
+    }
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    var out_dir = try std.Io.Dir.cwd().openDir(std.testing.io, dir, .{ .iterate = true });
+    defer out_dir.close(std.testing.io);
+    var it = out_dir.iterate();
+    var names: usize = 0;
+    while (try it.next(std.testing.io)) |entry| {
+        try std.testing.expect(!std.mem.endsWith(u8, entry.name, ".tmp"));
+        names += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), names);
+}
+
+test "writeAtomically keeps a staging file a concurrent write may still own" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-young");
+    defer std.testing.allocator.free(dir);
+
+    const in_flight = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.437900257935400.tmp" });
+    defer std.testing.allocator.free(in_flight);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = in_flight, .data = "IN FLIGHT" });
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    const kept = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, in_flight, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(kept);
+    try std.testing.expectEqualStrings("IN FLIGHT", kept);
+}
+
+test "writeAtomically sweeps only staging files for the target it writes" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-scope");
+    defer std.testing.allocator.free(dir);
+
+    // Old, but none of these are staging files this module would have made for
+    // out.json: another target's staging file, a name with no timestamp, and a
+    // name whose suffix is not a timestamp at all.
+    const survivors = [_][]const u8{ "other.json.1.tmp", "out.json.tmp", "out.json.draft.tmp" };
+    for (survivors) |name| {
+        const path = try std.fs.path.join(std.testing.allocator, &.{ dir, name });
+        defer std.testing.allocator.free(path);
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "KEEP" });
+        try backdate(path);
+    }
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    for (survivors) |name| {
+        const path = try std.fs.path.join(std.testing.allocator, &.{ dir, name });
+        defer std.testing.allocator.free(path);
+        try std.testing.expect(exists(path));
+    }
+}
+
+test "writeAtomically still writes when the directory cannot be swept" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-blocked");
+    defer std.testing.allocator.free(dir);
+
+    // A subdirectory named like a staging file is not something the sweep can
+    // delete; the write must go through regardless.
+    const decoy = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.1.tmp" });
+    defer std.testing.allocator.free(decoy);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, decoy);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("fresh\n", data);
+    try std.testing.expect(exists(decoy));
+}
+
+test "isStagingName matches only this module's staging names" {
+    try std.testing.expect(isStagingName("out.json.437900257935400.tmp", "out.json"));
+    try std.testing.expect(isStagingName("out.json.0.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json..tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.12a.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.1.tmp.bak", "out.json"));
+    try std.testing.expect(!isStagingName("other.json.1.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.1.tmp", "sessions.json"));
+}
