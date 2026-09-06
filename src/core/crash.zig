@@ -217,6 +217,19 @@ pub fn write(
     try file.writeStreamingAll(io, body);
 }
 
+/// Captures a failed run as a pending crash report and trims older ones.
+/// Errors are swallowed: the original failure is what matters, and a crash
+/// report that cannot be written must not mask it.
+pub fn record(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    error_name: []const u8,
+) void {
+    write(io, allocator, environ_map, detailsFor(error_name)) catch return;
+    prune(io, allocator, environ_map, max_pending_reports) catch {};
+}
+
 /// A crash report waiting to be submitted or discarded.
 pub const Report = struct {
     /// Absolute path of the report file.
@@ -735,4 +748,27 @@ test "detailsFor works before a session exists" {
     try std.testing.expectEqualStrings("unknown", details.session_id);
     try std.testing.expectEqualStrings("startup", details.phase);
     try std.testing.expect(details.provider == null);
+}
+
+test "record captures the failure as a pending report" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var env = try testEnv(allocator, io, "test-crash-record");
+    defer testEnvCleanup(allocator, io, &env);
+
+    setContext(.{ .session_id = "rec-1" });
+    defer resetContext();
+    setPhase("chat turn");
+
+    record(io, allocator, &env, "OutOfMemory");
+
+    const reports = try list(io, allocator, &env);
+    defer freeReports(allocator, reports);
+    try std.testing.expectEqual(@as(usize, 1), reports.len);
+    try std.testing.expectEqualStrings("rec-1", reports[0].session_id);
+
+    const content = try std.Io.Dir.cwd().readFileAlloc(io, reports[0].path, allocator, std.Io.Limit.limited(64 * 1024));
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "error.OutOfMemory") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "chat turn") != null);
 }
