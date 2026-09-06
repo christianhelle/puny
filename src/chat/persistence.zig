@@ -26,17 +26,14 @@ pub fn saveMessages(ctx: *ChatLoopContext) !void {
         std.log.warn("failed to create temp file: {s}", .{@errorName(err)});
         return;
     };
-    errdefer {
+
+    // A write failure is reported and swallowed so it cannot abort the turn,
+    // which means no error ever leaves this function and an errdefer here
+    // would never run. The staging file and its handle are released inline.
+    writeConversation(ctx.io, &file, buffer) catch |err| {
+        std.log.warn("failed to write messages: {s}", .{@errorName(err)});
         file.close(ctx.io);
         cwd.deleteFile(ctx.io, tmp_path) catch {};
-    }
-
-    file.writeStreamingAll(ctx.io, buffer) catch |err| {
-        std.log.warn("failed to write messages: {s}", .{@errorName(err)});
-        return;
-    };
-    file.writeStreamingAll(ctx.io, "\n") catch |err| {
-        std.log.warn("failed to write newline: {s}", .{@errorName(err)});
         return;
     };
     file.close(ctx.io);
@@ -45,6 +42,13 @@ pub fn saveMessages(ctx: *ChatLoopContext) !void {
         std.log.warn("failed to rename messages file: {s}", .{@errorName(err)});
         std.Io.Dir.cwd().deleteFile(ctx.io, tmp_path) catch {};
     };
+}
+
+/// Writes the serialized conversation plus the trailing newline that the
+/// loader and the project's other JSON writers expect.
+fn writeConversation(io: std.Io, file: *std.Io.File, buffer: []const u8) !void {
+    try file.writeStreamingAll(io, buffer);
+    try file.writeStreamingAll(io, "\n");
 }
 
 /// Persists the session metadata (`session.json`) with the current planning
