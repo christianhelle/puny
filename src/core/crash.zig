@@ -8,6 +8,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const core_session = @import("session.zig");
 const version = @import("../version.zig");
+const run_command = @import("../tools/run_command.zig");
 
 /// Directory holding pending crash reports, inside the puny config directory.
 /// The returned slice is owned by `allocator`.
@@ -278,6 +279,37 @@ pub fn parseSubmitOutput(output: []const u8) SubmitOutcome {
         if (rest.len > 0) return .{ .failed = rest };
     }
     return .{ .failed = "gh could not create the issue" };
+}
+
+/// Largest report body read back for submission. Reports are a few hundred
+/// bytes; anything beyond this is not one puny wrote.
+const max_report_bytes = 64 * 1024;
+
+const ProcessRunner = struct {
+    io: std.Io,
+
+    fn run(ctx: *anyopaque, allocator: std.mem.Allocator, argv: []const []const u8) anyerror![]const u8 {
+        const self: *ProcessRunner = @ptrCast(@alignCast(ctx));
+        return run_command.runCommand(allocator, self.io, argv, null);
+    }
+};
+
+/// Files the report at `path` as a GitHub issue using the `gh` CLI. Slices in
+/// the outcome are owned by `allocator`.
+pub fn submit(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !SubmitOutcome {
+    const body = try std.Io.Dir.cwd().readFileAlloc(
+        io,
+        path,
+        allocator,
+        std.Io.Limit.limited(max_report_bytes),
+    );
+    defer allocator.free(body);
+
+    var process_runner = ProcessRunner{ .io = io };
+    return submitWithRunner(allocator, path, body, .{
+        .ctx = &process_runner,
+        .run = ProcessRunner.run,
+    });
 }
 
 /// Frees the strings in an outcome returned by `submitWithRunner`.
