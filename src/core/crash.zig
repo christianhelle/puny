@@ -248,11 +248,16 @@ fn fallbackSessionId(buf: []u8, now_ns: i96) []const u8 {
 
 /// Failures that are the user hanging up rather than puny breaking, so they
 /// never become crash reports.
-const ignored_errors = [_][]const u8{ "Canceled", "BrokenPipe" };
+const hangup_errors = [_][]const u8{ "Canceled", "BrokenPipe" };
+
+/// Failures that mean puny is misconfigured rather than broken. Each one is
+/// raised alongside a message telling the user how to fix it, so filing an
+/// issue about it would waste everyone's time.
+const configuration_errors = [_][]const u8{ "MissingApiKey", "NoConfigDir", "BadPath" };
 
 /// Whether a failure is worth reporting as a crash.
 pub fn isReportable(error_name: []const u8) bool {
-    for (ignored_errors) |ignored| {
+    for (hangup_errors ++ configuration_errors) |ignored| {
         if (std.mem.eql(u8, error_name, ignored)) return false;
     }
     return true;
@@ -847,7 +852,7 @@ test "early failures without a session do not overwrite each other" {
 
     resetContext();
     record(io, allocator, &env, "AccessDenied");
-    record(io, allocator, &env, "NoConfigDir");
+    record(io, allocator, &env, "ConnectionRefused");
 
     const reports = try list(io, allocator, &env);
     defer freeReports(allocator, reports);
@@ -866,4 +871,10 @@ test "fallbackSessionId is distinct per failure" {
 
     try std.testing.expectEqualStrings("unknown-1000", a);
     try std.testing.expectEqualStrings("unknown-2000", b);
+}
+
+test "configuration problems are not crashes" {
+    try std.testing.expect(!isReportable("MissingApiKey"));
+    try std.testing.expect(!isReportable("NoConfigDir"));
+    try std.testing.expect(!isReportable("BadPath"));
 }
