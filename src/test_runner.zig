@@ -236,6 +236,9 @@ test "include tui.model_picker tests" {
 test "include tui.provider_picker tests" {
     _ = @import("tui/provider_picker.zig");
 }
+test "include tui.crash_prompt tests" {
+    _ = @import("tui/crash_prompt.zig");
+}
 test "include tui.terminal tests" {
     _ = @import("tui/terminal.zig");
 }
