@@ -239,6 +239,18 @@ pub fn shouldPrompt(session: Session) bool {
     return session.terminal;
 }
 
+/// Failures that are the user hanging up rather than puny breaking, so they
+/// never become crash reports.
+const ignored_errors = [_][]const u8{ "Canceled", "BrokenPipe" };
+
+/// Whether a failure is worth reporting as a crash.
+pub fn isReportable(error_name: []const u8) bool {
+    for (ignored_errors) |ignored| {
+        if (std.mem.eql(u8, error_name, ignored)) return false;
+    }
+    return true;
+}
+
 /// Captures a failed run as a pending crash report and trims older ones.
 /// Errors are swallowed: the original failure is what matters, and a crash
 /// report that cannot be written must not mask it.
@@ -248,6 +260,7 @@ pub fn record(
     environ_map: *const std.process.Environ.Map,
     error_name: []const u8,
 ) void {
+    if (!isReportable(error_name)) return;
     write(io, allocator, environ_map, detailsFor(error_name)) catch return;
     prune(io, allocator, environ_map, max_pending_reports) catch {};
 }
@@ -803,4 +816,11 @@ test "shouldPrompt only asks in a plain interactive session" {
     try std.testing.expect(!shouldPrompt(.{ .mock = true }));
     try std.testing.expect(!shouldPrompt(.{ .prefilled_prompt = true }));
     try std.testing.expect(!shouldPrompt(.{ .terminal = false }));
+}
+
+test "cancellation and broken pipes are not crashes" {
+    try std.testing.expect(isReportable("OutOfMemory"));
+    try std.testing.expect(isReportable("ConnectionRefused"));
+    try std.testing.expect(!isReportable("Canceled"));
+    try std.testing.expect(!isReportable("BrokenPipe"));
 }
