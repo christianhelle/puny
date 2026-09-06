@@ -245,6 +245,34 @@ pub fn list(
     return owned;
 }
 
+/// What came of handing a report to `gh`.
+pub const SubmitOutcome = union(enum) {
+    /// The issue was created; holds its URL.
+    submitted: []const u8,
+    /// Submission failed; holds what gh said, or a short explanation.
+    failed: []const u8,
+};
+
+/// Interprets `runCommand` output from `gh issue create`. Slices in the result
+/// borrow from `output`.
+pub fn parseSubmitOutput(output: []const u8) SubmitOutcome {
+    const succeeded = std.mem.startsWith(u8, output, "Exit code: 0");
+    if (succeeded) {
+        if (std.mem.indexOf(u8, output, "https://")) |start| {
+            const rest = output[start..];
+            const end = std.mem.indexOfAny(u8, rest, " \n\r") orelse rest.len;
+            return .{ .submitted = rest[0..end] };
+        }
+        return .{ .failed = "gh reported success but printed no issue URL" };
+    }
+
+    if (std.mem.indexOf(u8, output, "STDERR:\n")) |start| {
+        const rest = std.mem.trim(u8, output[start + "STDERR:\n".len ..], " \n\r");
+        if (rest.len > 0) return .{ .failed = rest };
+    }
+    return .{ .failed = "gh could not create the issue" };
+}
+
 /// Repository crash reports are filed against.
 pub const repo = "christianhelle/puny";
 
@@ -491,4 +519,24 @@ test "submitArgv builds a gh issue create command for the report file" {
     try std.testing.expectEqualStrings("crash: error.X during startup", argv[6]);
     try std.testing.expectEqualStrings("--body-file", argv[7]);
     try std.testing.expectEqualStrings("/tmp/puny_crash_x.md", argv[8]);
+}
+
+test "parseSubmitOutput reports the issue url gh printed" {
+    const output = "Exit code: 0\nSTDOUT:\nhttps://github.com/christianhelle/puny/issues/42\n";
+    const outcome = parseSubmitOutput(output);
+    try std.testing.expectEqualStrings(
+        "https://github.com/christianhelle/puny/issues/42",
+        outcome.submitted,
+    );
+}
+
+test "parseSubmitOutput surfaces the failure gh reported" {
+    const output = "Exit code: 1\nSTDERR:\ngh: not authenticated\n";
+    const outcome = parseSubmitOutput(output);
+    try std.testing.expectEqualStrings("gh: not authenticated", outcome.failed);
+}
+
+test "parseSubmitOutput fails when gh succeeded without printing a url" {
+    const outcome = parseSubmitOutput("Exit code: 0\n");
+    try std.testing.expect(outcome == .failed);
 }
