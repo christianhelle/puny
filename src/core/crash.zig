@@ -245,6 +245,23 @@ pub fn list(
     return owned;
 }
 
+/// How many pending reports are kept. A crash that repeats every startup must
+/// not fill the config directory.
+pub const max_pending_reports: usize = 5;
+
+/// Deletes all but the `keep` most recent reports.
+pub fn prune(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    keep: usize,
+) !void {
+    const reports = try list(io, allocator, environ_map);
+    defer freeReports(allocator, reports);
+    if (reports.len <= keep) return;
+    for (reports[keep..]) |r| try discard(io, r.path);
+}
+
 /// Deletes a crash report. A file that is already gone is not an error.
 pub fn discard(io: std.Io, path: []const u8) !void {
     std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
@@ -376,4 +393,23 @@ test "discard removes a report and tolerates a missing file" {
     try discard(io, path);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(io, path, .{}));
     try discard(io, path);
+}
+
+test "prune keeps only the newest reports" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var env = try testEnv(allocator, io, "test-crash-prune");
+    defer testEnvCleanup(allocator, io, &env);
+
+    try writeTestReport(allocator, io, &env, "oldest", 1_000_000_000_000);
+    try writeTestReport(allocator, io, &env, "middle", 2_000_000_000_000);
+    try writeTestReport(allocator, io, &env, "newest", 3_000_000_000_000);
+
+    try prune(io, allocator, &env, 2);
+
+    const reports = try list(io, allocator, &env);
+    defer freeReports(allocator, reports);
+    try std.testing.expectEqual(@as(usize, 2), reports.len);
+    try std.testing.expectEqualStrings("newest", reports[0].session_id);
+    try std.testing.expectEqualStrings("middle", reports[1].session_id);
 }
