@@ -217,6 +217,28 @@ pub fn write(
     try file.writeStreamingAll(io, body);
 }
 
+/// The parts of a run that decide whether asking about crash reports is
+/// appropriate. Defaults describe a plain interactive session.
+pub const Session = struct {
+    oneshot: bool = false,
+    review: bool = false,
+    orchestrate: bool = false,
+    mock: bool = false,
+    /// A prompt was supplied on the command line, so the run has work queued
+    /// before the user ever reaches the input line.
+    prefilled_prompt: bool = false,
+    /// stdin is a terminal that can answer a question.
+    terminal: bool = true,
+};
+
+/// Whether this run should offer to submit pending crash reports. Automated
+/// runs are never interrupted by the question.
+pub fn shouldPrompt(session: Session) bool {
+    if (session.oneshot or session.review or session.orchestrate) return false;
+    if (session.mock or session.prefilled_prompt) return false;
+    return session.terminal;
+}
+
 /// Captures a failed run as a pending crash report and trims older ones.
 /// Errors are swallowed: the original failure is what matters, and a crash
 /// report that cannot be written must not mask it.
@@ -771,4 +793,14 @@ test "record captures the failure as a pending report" {
     defer allocator.free(content);
     try std.testing.expect(std.mem.indexOf(u8, content, "error.OutOfMemory") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "chat turn") != null);
+}
+
+test "shouldPrompt only asks in a plain interactive session" {
+    try std.testing.expect(shouldPrompt(.{}));
+    try std.testing.expect(!shouldPrompt(.{ .oneshot = true }));
+    try std.testing.expect(!shouldPrompt(.{ .review = true }));
+    try std.testing.expect(!shouldPrompt(.{ .orchestrate = true }));
+    try std.testing.expect(!shouldPrompt(.{ .mock = true }));
+    try std.testing.expect(!shouldPrompt(.{ .prefilled_prompt = true }));
+    try std.testing.expect(!shouldPrompt(.{ .terminal = false }));
 }
