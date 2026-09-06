@@ -243,6 +243,7 @@ fn run(init: std.process.Init) !u8 {
     // The session id is generated before the provider so every request,
     // the model list included, is attributed to this conversation.
     const session_id = if (restore_target) |s| s.id else try core_sess.generateUuid(random, arena);
+    crash.setContext(.{ .session_id = session_id });
 
     var prov: provider.Provider = undefined;
     var selected_provider: ModelProvider = undefined;
@@ -265,6 +266,11 @@ fn run(init: std.process.Init) !u8 {
         &reasoning_effort,
         session_id,
     );
+    crash.setContext(.{
+        .session_id = session_id,
+        .provider = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
+        .model = model_key,
+    });
 
     var session_restored = false;
     var restore_incomplete = false;
@@ -409,6 +415,7 @@ fn run(init: std.process.Init) !u8 {
     };
 
     var chat_session = session.ChatSession.init(ctx);
+    crash.setPhase("chat turn");
     try chat_session.run();
 
     // After the interactive session ends, surface a pending update notice
