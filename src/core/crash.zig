@@ -245,6 +245,25 @@ pub fn list(
     return owned;
 }
 
+/// Repository crash reports are filed against.
+pub const repo = "christianhelle/puny";
+
+/// Command that files `path` as an issue. Submission goes through the `gh`
+/// CLI so it uses the user's own GitHub credentials; puny never ships or asks
+/// for a token. The returned slice is owned by `allocator`; the strings inside
+/// borrow from `title` and `path`.
+pub fn submitArgv(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    title: []const u8,
+) ![]const []const u8 {
+    return allocator.dupe([]const u8, &[_][]const u8{
+        "gh",     "issue",       "create",
+        "--repo", repo,          "--title",
+        title,    "--body-file", path,
+    });
+}
+
 /// Reads the value of a `- **Field**: value` line out of a report body.
 fn reportField(body: []const u8, field: []const u8) ?[]const u8 {
     var buf: [64]u8 = undefined;
@@ -455,4 +474,21 @@ test "titleFromReport falls back when the report is unrecognised" {
     const title = try titleFromReport(allocator, "not a puny crash report");
     defer allocator.free(title);
     try std.testing.expectEqualStrings("crash: unknown failure", title);
+}
+
+test "submitArgv builds a gh issue create command for the report file" {
+    const allocator = std.testing.allocator;
+    const argv = try submitArgv(allocator, "/tmp/puny_crash_x.md", "crash: error.X during startup");
+    defer allocator.free(argv);
+
+    try std.testing.expectEqual(@as(usize, 9), argv.len);
+    try std.testing.expectEqualStrings("gh", argv[0]);
+    try std.testing.expectEqualStrings("issue", argv[1]);
+    try std.testing.expectEqualStrings("create", argv[2]);
+    try std.testing.expectEqualStrings("--repo", argv[3]);
+    try std.testing.expectEqualStrings("christianhelle/puny", argv[4]);
+    try std.testing.expectEqualStrings("--title", argv[5]);
+    try std.testing.expectEqualStrings("crash: error.X during startup", argv[6]);
+    try std.testing.expectEqualStrings("--body-file", argv[7]);
+    try std.testing.expectEqualStrings("/tmp/puny_crash_x.md", argv[8]);
 }
