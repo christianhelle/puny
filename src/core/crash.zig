@@ -239,6 +239,13 @@ pub fn shouldPrompt(session: Session) bool {
     return session.terminal;
 }
 
+/// Session id for a run that failed before it had a session. The timestamp
+/// keeps repeated early failures from overwriting one another, which a bare
+/// "unknown" would do.
+fn fallbackSessionId(buf: []u8, now_ns: i96) []const u8 {
+    return std.fmt.bufPrint(buf, "unknown-{d}", .{now_ns}) catch "unknown";
+}
+
 /// Failures that are the user hanging up rather than puny breaking, so they
 /// never become crash reports.
 const ignored_errors = [_][]const u8{ "Canceled", "BrokenPipe" };
@@ -261,7 +268,14 @@ pub fn record(
     error_name: []const u8,
 ) void {
     if (!isReportable(error_name)) return;
-    write(io, allocator, environ_map, detailsFor(error_name)) catch return;
+
+    var details = detailsFor(error_name);
+    var id_buf: [48]u8 = undefined;
+    if (context.session_id == null) {
+        details.session_id = fallbackSessionId(&id_buf, std.Io.Timestamp.now(io, .awake).nanoseconds);
+    }
+
+    write(io, allocator, environ_map, details) catch return;
     prune(io, allocator, environ_map, max_pending_reports) catch {};
 }
 
@@ -823,4 +837,33 @@ test "cancellation and broken pipes are not crashes" {
     try std.testing.expect(isReportable("ConnectionRefused"));
     try std.testing.expect(!isReportable("Canceled"));
     try std.testing.expect(!isReportable("BrokenPipe"));
+}
+
+test "early failures without a session do not overwrite each other" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var env = try testEnv(allocator, io, "test-crash-early");
+    defer testEnvCleanup(allocator, io, &env);
+
+    resetContext();
+    record(io, allocator, &env, "AccessDenied");
+    record(io, allocator, &env, "NoConfigDir");
+
+    const reports = try list(io, allocator, &env);
+    defer freeReports(allocator, reports);
+
+    try std.testing.expectEqual(@as(usize, 2), reports.len);
+    for (reports) |r| {
+        try std.testing.expect(std.mem.startsWith(u8, r.session_id, "unknown-"));
+    }
+}
+
+test "fallbackSessionId is distinct per failure" {
+    var a_buf: [48]u8 = undefined;
+    var b_buf: [48]u8 = undefined;
+    const a = fallbackSessionId(&a_buf, 1_000);
+    const b = fallbackSessionId(&b_buf, 2_000);
+
+    try std.testing.expectEqualStrings("unknown-1000", a);
+    try std.testing.expectEqualStrings("unknown-2000", b);
 }
