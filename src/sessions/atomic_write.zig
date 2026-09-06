@@ -13,10 +13,69 @@ pub const WriteOptions = struct {
     restrict_permissions: bool = false,
 };
 
+/// Staging files younger than this are left alone. A staging file that has
+/// only just appeared may belong to a concurrent writer that is still filling
+/// it in, and deleting that one would break a write that is going fine.
+const stale_staging_age_ns: i96 = 5 * std.time.ns_per_min;
+
+/// Whether `name` is a staging file this module would have created for
+/// `filename`, i.e. `<filename>.<digits>.tmp`. The digit check keeps the sweep
+/// off unrelated `.tmp` files that happen to share the directory.
+fn isStagingName(name: []const u8, filename: []const u8) bool {
+    const suffix = ".tmp";
+    if (!std.mem.startsWith(u8, name, filename)) return false;
+    if (!std.mem.endsWith(u8, name, suffix)) return false;
+    const middle = name[filename.len .. name.len - suffix.len];
+    if (middle.len < 2 or middle[0] != '.') return false;
+    for (middle[1..]) |c| {
+        if (!std.ascii.isDigit(c)) return false;
+    }
+    return true;
+}
+
+/// Deletes staging files in `dir_path` left over from earlier writes of
+/// `filename` that never reached their rename, which is what a process killed
+/// mid-write leaves behind and no errdefer can cover. Only files older than
+/// `stale_staging_age_ns` are removed, so an in-flight write by another
+/// process is never disturbed. Best-effort throughout: a directory that cannot
+/// be opened, scanned, or pruned must not stop the write that follows.
+fn sweepStaleStagingFiles(io: std.Io, scratch: std.mem.Allocator, dir_path: []const u8, filename: []const u8) void {
+    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(io);
+
+    // Compared against mtime, so this needs the wall clock the filesystem
+    // stamps with, not the monotonic clock used for staging-name uniqueness.
+    const now_ns = std.Io.Timestamp.now(io, .real).nanoseconds;
+
+    // Names are collected first because the iterator's `name` points into a
+    // buffer the next step reuses, and because deleting entries from a
+    // directory while iterating it is not portable.
+    var stale: std.ArrayList([]const u8) = .empty;
+    var it = dir.iterate();
+    while (true) {
+        const entry = (it.next(io) catch break) orelse break;
+        if (entry.kind != .file) continue;
+        if (!isStagingName(entry.name, filename)) continue;
+        const stat = dir.statFile(io, entry.name, .{}) catch continue;
+        if (now_ns - stat.mtime.nanoseconds < stale_staging_age_ns) continue;
+        const name = scratch.dupe(u8, entry.name) catch continue;
+        stale.append(scratch, name) catch continue;
+    }
+
+    for (stale.items) |name| {
+        dir.deleteFile(io, name) catch |err| {
+            std.log.warn("failed to sweep stale staging file {s}: {s}", .{ name, @errorName(err) });
+            continue;
+        };
+        std.log.debug("swept stale staging file {s}", .{name});
+    }
+}
+
 /// Atomically writes `contents` to `<dir_path>/<filename>` through a
 /// uniquely-named temporary file and a rename, so an interrupted write never
 /// leaves the target empty or truncated. A trailing newline is appended to
-/// match the project's JSON writers. The staging file is removed on failure.
+/// match the project's JSON writers. The staging file is removed on failure,
+/// and staging files orphaned by earlier interrupted writes are swept first.
 pub fn writeAtomically(
     io: std.Io,
     allocator: std.mem.Allocator,
@@ -36,6 +95,11 @@ pub fn writeAtomically(
     const tmp_name = try std.fmt.allocPrint(scratch, "{s}.{d}.tmp", .{ filename, ts.nanoseconds });
     const tmp_path = try std.fs.path.join(scratch, &.{ dir_path, tmp_name });
     const final_path = try std.fs.path.join(scratch, &.{ dir_path, filename });
+
+    // Reclaim staging files abandoned by an earlier run before adding another,
+    // so a write interrupted between create and rename is cleaned up by the
+    // next write rather than accumulating in the directory forever.
+    sweepStaleStagingFiles(io, scratch, dir_path, filename);
 
     var file = cwd.createFile(io, tmp_path, .{}) catch |err| {
         std.log.warn("failed to create temp file {s}: {s}", .{ tmp_path, @errorName(err) });
