@@ -76,6 +76,51 @@ test "reportPath names the file after the session id inside the crash dir" {
     );
 }
 
+/// What the run knows about itself, recorded as it starts up so the failure
+/// path can describe the crash without threading state through every call.
+/// The slices live in the process arena, which outlives any failure.
+const Context = struct {
+    session_id: ?[]const u8 = null,
+    provider: ?[]const u8 = null,
+    model: ?[]const u8 = null,
+    /// Static string naming what puny is doing, e.g. "startup".
+    phase: []const u8 = "startup",
+};
+
+var context: Context = .{};
+
+/// Records the session the run belongs to and the model it talks to.
+pub fn setContext(ctx: struct {
+    session_id: ?[]const u8 = null,
+    provider: ?[]const u8 = null,
+    model: ?[]const u8 = null,
+}) void {
+    context.session_id = ctx.session_id;
+    context.provider = ctx.provider;
+    context.model = ctx.model;
+}
+
+/// Records what puny is doing now. Pass a static string.
+pub fn setPhase(phase: []const u8) void {
+    context.phase = phase;
+}
+
+/// Clears the recorded context. Only tests need this.
+pub fn resetContext() void {
+    context = .{};
+}
+
+/// Describes a failure with `error_name` using the recorded context.
+pub fn detailsFor(error_name: []const u8) Details {
+    return .{
+        .session_id = context.session_id orelse "unknown",
+        .error_name = error_name,
+        .phase = context.phase,
+        .provider = context.provider,
+        .model = context.model,
+    };
+}
+
 /// What a crash report says about the failed run. Deliberately narrow: no
 /// prompts, conversation content, file paths, argv values or credentials, so a
 /// report can be pasted into a public issue as-is.
@@ -669,4 +714,25 @@ test "submitWithRunner explains a missing gh instead of failing the startup" {
     defer freeOutcome(allocator, outcome);
 
     try std.testing.expect(std.mem.indexOf(u8, outcome.failed, "gh") != null);
+}
+
+test "detailsFor describes the failure using the recorded context" {
+    setContext(.{ .session_id = "ctx-1", .provider = "GitHub Copilot", .model = "gpt-5" });
+    defer resetContext();
+    setPhase("chat turn");
+
+    const details = detailsFor("ConnectionRefused");
+    try std.testing.expectEqualStrings("ctx-1", details.session_id);
+    try std.testing.expectEqualStrings("ConnectionRefused", details.error_name);
+    try std.testing.expectEqualStrings("chat turn", details.phase);
+    try std.testing.expectEqualStrings("GitHub Copilot", details.provider.?);
+    try std.testing.expectEqualStrings("gpt-5", details.model.?);
+}
+
+test "detailsFor works before a session exists" {
+    resetContext();
+    const details = detailsFor("NoConfigDir");
+    try std.testing.expectEqualStrings("unknown", details.session_id);
+    try std.testing.expectEqualStrings("startup", details.phase);
+    try std.testing.expect(details.provider == null);
 }
