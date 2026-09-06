@@ -8,6 +8,7 @@ const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const core_sess = @import("core/session.zig");
+const crash = @import("core/crash.zig");
 const AgentMode = @import("core/mode.zig").AgentMode;
 const git_root = @import("core/git_root.zig");
 const sessions = @import("sessions/sessions.zig");
@@ -38,8 +39,9 @@ const ChatLog = session.ChatLog;
 
 pub fn main(init: std.process.Init) !u8 {
     return run(init) catch |err| {
-        if (!branch_review.isActive()) return err;
         const arena = init.arena.allocator();
+        crash.record(init.io, arena, init.environ_map, @errorName(err));
+        if (!branch_review.isActive()) return err;
         const reason = try std.fmt.allocPrint(arena, "Review execution failed: {s}", .{@errorName(err)});
         const saved = branch_review.finish(arena, init.io, reason) catch |write_err| {
             branch_review.reset();
