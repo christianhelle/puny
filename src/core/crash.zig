@@ -245,6 +245,13 @@ pub fn list(
     return owned;
 }
 
+/// How a submission actually runs the command. Injected so the submission
+/// flow can be tested without spawning `gh`.
+pub const Runner = struct {
+    ctx: *anyopaque,
+    run: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator, argv: []const []const u8) anyerror![]const u8,
+};
+
 /// What came of handing a report to `gh`.
 pub const SubmitOutcome = union(enum) {
     /// The issue was created; holds its URL.
@@ -271,6 +278,44 @@ pub fn parseSubmitOutput(output: []const u8) SubmitOutcome {
         if (rest.len > 0) return .{ .failed = rest };
     }
     return .{ .failed = "gh could not create the issue" };
+}
+
+/// Frees the strings in an outcome returned by `submitWithRunner`.
+pub fn freeOutcome(allocator: std.mem.Allocator, outcome: SubmitOutcome) void {
+    switch (outcome) {
+        .submitted => |url| allocator.free(url),
+        .failed => |msg| allocator.free(msg),
+    }
+}
+
+/// Files `path` as a GitHub issue through `runner`, titling it from `body`.
+/// Slices in the outcome are owned by `allocator`.
+pub fn submitWithRunner(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    body: []const u8,
+    runner: Runner,
+) !SubmitOutcome {
+    const title = try titleFromReport(allocator, body);
+    defer allocator.free(title);
+
+    const argv = try submitArgv(allocator, path, title);
+    defer allocator.free(argv);
+
+    const output = runner.run(runner.ctx, allocator, argv) catch |err| switch (err) {
+        error.FileNotFound => return .{
+            .failed = try allocator.dupe(u8, "the GitHub CLI (gh) is not installed or not on PATH"),
+        },
+        else => return .{
+            .failed = try std.fmt.allocPrint(allocator, "could not run gh: {s}", .{@errorName(err)}),
+        },
+    };
+    defer allocator.free(output);
+
+    return switch (parseSubmitOutput(output)) {
+        .submitted => |url| .{ .submitted = try allocator.dupe(u8, url) },
+        .failed => |msg| .{ .failed = try allocator.dupe(u8, msg) },
+    };
 }
 
 /// Repository crash reports are filed against.
@@ -539,4 +584,57 @@ test "parseSubmitOutput surfaces the failure gh reported" {
 test "parseSubmitOutput fails when gh succeeded without printing a url" {
     const outcome = parseSubmitOutput("Exit code: 0\n");
     try std.testing.expect(outcome == .failed);
+}
+
+const FakeRunner = struct {
+    output: []const u8 = "",
+    fail_with: ?anyerror = null,
+    /// Copy of the title argv slot: submitWithRunner frees argv before it
+    /// returns, so the test cannot hold on to the original slices.
+    title_buf: [256]u8 = undefined,
+    title_len: usize = 0,
+
+    fn run(ctx: *anyopaque, allocator: std.mem.Allocator, argv: []const []const u8) anyerror![]const u8 {
+        const self: *FakeRunner = @ptrCast(@alignCast(ctx));
+        if (argv.len > 6) {
+            @memcpy(self.title_buf[0..argv[6].len], argv[6]);
+            self.title_len = argv[6].len;
+        }
+        if (self.fail_with) |err| return err;
+        return allocator.dupe(u8, self.output);
+    }
+
+    fn title(self: *const FakeRunner) []const u8 {
+        return self.title_buf[0..self.title_len];
+    }
+
+    fn runner(self: *FakeRunner) Runner {
+        return .{ .ctx = self, .run = FakeRunner.run };
+    }
+};
+
+test "submitWithRunner returns the created issue url" {
+    const allocator = std.testing.allocator;
+    var fake = FakeRunner{ .output = "Exit code: 0\nSTDOUT:\nhttps://github.com/christianhelle/puny/issues/7\n" };
+
+    const outcome = try submitWithRunner(
+        allocator,
+        "/tmp/puny_crash_x.md",
+        "- **Error**: error.X\n- **Phase**: startup\n",
+        fake.runner(),
+    );
+    defer freeOutcome(allocator, outcome);
+
+    try std.testing.expectEqualStrings("https://github.com/christianhelle/puny/issues/7", outcome.submitted);
+    try std.testing.expectEqualStrings("crash: error.X during startup", fake.title());
+}
+
+test "submitWithRunner explains a missing gh instead of failing the startup" {
+    const allocator = std.testing.allocator;
+    var fake = FakeRunner{ .fail_with = error.FileNotFound };
+
+    const outcome = try submitWithRunner(allocator, "/tmp/puny_crash_x.md", "", fake.runner());
+    defer freeOutcome(allocator, outcome);
+
+    try std.testing.expect(std.mem.indexOf(u8, outcome.failed, "gh") != null);
 }
