@@ -245,6 +245,14 @@ pub fn list(
     return owned;
 }
 
+/// Deletes a crash report. A file that is already gone is not an error.
+pub fn discard(io: std.Io, path: []const u8) !void {
+    std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => |e| return e,
+    };
+}
+
 /// Extracts the session id from a crash report file name, or null when the
 /// name does not belong to puny.
 fn sessionIdFromFileName(name: []const u8) ?[]const u8 {
@@ -353,4 +361,19 @@ test "list is empty when no crash directory exists" {
     const reports = try list(io, allocator, &env);
     defer freeReports(allocator, reports);
     try std.testing.expectEqual(@as(usize, 0), reports.len);
+}
+
+test "discard removes a report and tolerates a missing file" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var env = try testEnv(allocator, io, "test-crash-discard");
+    defer testEnvCleanup(allocator, io, &env);
+
+    try writeTestReport(allocator, io, &env, "gone", 1_000_000_000_000);
+    const path = try reportPath(allocator, &env, "gone");
+    defer allocator.free(path);
+
+    try discard(io, path);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(io, path, .{}));
+    try discard(io, path);
 }
