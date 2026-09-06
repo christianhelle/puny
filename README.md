@@ -869,6 +869,10 @@ pending reports and asks what to do with each one:
 - **Delete it** removes the file.
 - **Not now** leaves it for later.
 
+Configuration problems are not crashes: a missing API key, an unresolvable
+config directory, or a bad config path already print how to fix them, so they
+never produce a report. Neither does interrupting a run with Ctrl+C.
+
 A report holds the error name, what puny was doing, the version and commit,
 the platform and build mode, and the session id, provider and model. It never
 contains prompts, conversation content, file paths, command-line values, or
