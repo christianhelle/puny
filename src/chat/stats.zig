@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const memory = @import("../core/memory.zig");
+const token_stats = @import("../tui/token_stats.zig");
 const openai = @import("../providers/openai.zig");
 
 pub const PerModelStats = struct {
@@ -172,9 +173,19 @@ pub const SessionStats = struct {
             } else {
                 try writer.print("  Turns:               {d}\n", .{stats.turn_count});
             }
-            try writer.print("  Input tokens:        {d}\n", .{stats.input_tokens});
-            try writer.print("  Output tokens:       {d} (reasoning: {d})\n", .{ stats.output_tokens, stats.reasoning_output_tokens });
-            try writer.print("  Total tokens:        {d}\n", .{stats.input_tokens + stats.output_tokens + stats.reasoning_output_tokens});
+            var input_buf: [32]u8 = undefined;
+            var output_buf: [32]u8 = undefined;
+            var reasoning_buf: [32]u8 = undefined;
+            var total_buf: [32]u8 = undefined;
+            try writer.print("  Input tokens:        {s}\n", .{token_stats.formatGrouped(&input_buf, stats.input_tokens)});
+            try writer.print("  Output tokens:       {s} (reasoning: {s})\n", .{
+                token_stats.formatGrouped(&output_buf, stats.output_tokens),
+                token_stats.formatGrouped(&reasoning_buf, stats.reasoning_output_tokens),
+            });
+            try writer.print("  Total tokens:        {s}\n", .{token_stats.formatGrouped(
+                &total_buf,
+                stats.input_tokens + stats.output_tokens + stats.reasoning_output_tokens,
+            )});
             if (stats.tps_count > 0) {
                 try writer.print("  Avg tokens/sec:      {d:.1}\n", .{stats.tps_sum / @as(f64, @floatFromInt(stats.tps_count))});
             }
@@ -341,6 +352,22 @@ test "SessionStats.print per-model total includes reasoning tokens" {
 
     // 12 in + 5 plain out + 3 reasoning = 20.
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Total tokens:        20") != null);
+}
+
+test "SessionStats.print groups large token counts with commas" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 1_234_567);
+    stats.finalizeTurn(.{ .input_tokens = 1_234_567, .output_tokens = 89_012, .reasoning_output_tokens = 2_345 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "Input tokens:        1,234,567") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "Output tokens:       86,667 (reasoning: 2,345)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "Total tokens:        1,323,579") != null);
 }
 
 test "SessionStats.print shows model with partial turn" {
