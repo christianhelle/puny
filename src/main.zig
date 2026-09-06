@@ -25,6 +25,7 @@ const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
 const branch_review = @import("review/review.zig");
 const welcome = @import("tui/welcome.zig");
+const crash_prompt = @import("tui/crash_prompt.zig");
 const ansi = @import("tui/ansi.zig");
 const vt = @import("tui/vt.zig");
 const update_check = @import("update_check.zig");
@@ -312,6 +313,15 @@ fn run(init: std.process.Init) !u8 {
     if (!parsed.oneshot and !parsed.mock) {
         update_check.spawnBackgroundCheck(init.io, arena, init.environ_map);
     }
+
+    crash_prompt.offer(arena, init.io, init.environ_map, .{
+        .oneshot = parsed.oneshot,
+        .review = parsed.review,
+        .orchestrate = parsed.orchestrate,
+        .mock = parsed.mock,
+        .prefilled_prompt = parsed.prompt != null,
+        .terminal = std.Io.File.stdin().isTty(init.io) catch false,
+    }, stdout_writer);
 
     if (restore_target) |s| {
         const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
