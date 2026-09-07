@@ -27,9 +27,9 @@ pub fn saveMessages(ctx: *ChatLoopContext) !void {
         return;
     };
 
-    // A write failure is reported and swallowed so it cannot abort the turn,
-    // which means no error ever leaves this function and an errdefer here
-    // would never run. The staging file and its handle are released inline.
+    // A write failure is reported and swallowed so it cannot abort the turn.
+    // No error is returned once the staging file exists, so an errdefer from
+    // here on would never run; its handle and file are released inline.
     writeConversation(ctx.io, &file, buffer) catch |err| {
         std.log.warn("failed to write messages: {s}", .{@errorName(err)});
         file.close(ctx.io);
