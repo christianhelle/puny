@@ -25,6 +25,28 @@ fn writeFile(allocator: std.mem.Allocator, io: std.Io, params: WriteFileParams) 
     return "File written successfully.";
 }
 
+const EditFileParams = struct {
+    path: []const u8,
+    old_string: []const u8,
+    new_string: []const u8,
+    replace_all: bool = false,
+};
+
+fn editFile(allocator: std.mem.Allocator, io: std.Io, params: EditFileParams) ![]const u8 {
+    if (core_session.isWriteBlocked()) {
+        return "Write blocked: app is in planning or review mode. Exit to build mode with /build or use the mode-specific save tool.";
+    }
+
+    _ = helpers.editFile(allocator, io, params.path, params.old_string, params.new_string, params.replace_all) catch |err| switch (err) {
+        error.NoMatch => return "No match found for old_string.",
+        error.MultipleMatches => return "Multiple matches found for old_string. Make it unique or set replace_all to true.",
+        error.EmptySearchString => return "old_string must not be empty.",
+        else => return err,
+    };
+
+    return "File edited successfully.";
+}
+
 const ListDirectoryParams = struct {
     path: []const u8,
 };
@@ -45,6 +67,13 @@ pub const write_file = tools.defineTool(
     "Write content to a file at the given path. Overwrites existing files.",
     WriteFileParams,
     writeFile,
+);
+
+pub const edit_file = tools.defineTool(
+    "edit_file",
+    "Edit a single file by replacing old_string with new_string. Set replace_all to true to replace every occurrence.",
+    EditFileParams,
+    editFile,
 );
 
 pub const list_directory = tools.defineTool(
@@ -130,9 +159,11 @@ test "writeFile errors when the parent directory does not exist" {
 test "filesystem tool definitions expose their metadata" {
     try std.testing.expectEqualStrings("read_file", read_file.name);
     try std.testing.expectEqualStrings("write_file", write_file.name);
+    try std.testing.expectEqualStrings("edit_file", edit_file.name);
     try std.testing.expectEqualStrings("list_directory", list_directory.name);
     try std.testing.expect(std.mem.indexOf(u8, read_file.description, "Read") != null);
     try std.testing.expect(std.mem.indexOf(u8, write_file.description, "Write") != null);
+    try std.testing.expect(std.mem.indexOf(u8, edit_file.description, "Edit") != null);
     try std.testing.expect(std.mem.indexOf(u8, list_directory.description, "List") != null);
 }
 
@@ -168,6 +199,25 @@ test "write_file executes through the tool wrapper" {
     const content = try readFile(std.testing.allocator, std.testing.io, .{ .path = path });
     defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("from tool", content);
+}
+
+test "edit_file executes through the tool wrapper" {
+    const path = "puny-test-fs-tool-edit.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "before" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const args_json = try std.fmt.allocPrint(arena.allocator(), "{{\"path\":\"{s}\",\"old_string\":\"before\",\"new_string\":\"after\"}}", .{path});
+    const parsed = try std.json.parseFromSlice(std.json.Value, arena.allocator(), args_json, .{});
+    defer parsed.deinit();
+
+    const result = try edit_file.execute(std.testing.allocator, std.testing.io, parsed.value);
+    try std.testing.expectEqualStrings("File edited successfully.", result);
+
+    const content = try readFile(std.testing.allocator, std.testing.io, .{ .path = path });
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("after", content);
 }
 
 test "list_directory executes through the tool wrapper" {
