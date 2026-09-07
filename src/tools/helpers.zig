@@ -37,6 +37,8 @@ pub fn editFile(
     new_string: []const u8,
     replace_all: bool,
 ) !usize {
+    if (old_string.len == 0) return error.EmptySearchString;
+
     const content = try readFileAlloc(allocator, io, path, 1024 * 1024);
     defer allocator.free(content);
 
@@ -179,4 +181,12 @@ test "editFile replaces all occurrences when replace_all is set" {
     const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
     defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("a dog and a dog", content);
+}
+
+test "editFile rejects an empty old_string" {
+    const path = "puny-test-helpers-edit-empty.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "hello");
+
+    try std.testing.expectError(error.EmptySearchString, editFile(std.testing.allocator, std.testing.io, path, "", "x", false));
 }
