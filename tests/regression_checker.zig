@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const ansi_green = "\x1b[32m";
+const ansi_red = "\x1b[31m";
+const ansi_reset = "\x1b[0m";
+
 const FileContains = struct {
     path: []const u8,
     patterns: []const []const u8,
@@ -354,13 +358,13 @@ pub fn main(init: std.process.Init) !u8 {
         std.debug.print("  {s}... ", .{test_case.name});
 
         const result = runTest(params, test_case) catch |err| {
-            std.debug.print("FAILED ({s})\n", .{@errorName(err)});
+            std.debug.print(ansi_red ++ "FAILED ({s})" ++ ansi_reset ++ "\n", .{@errorName(err)});
             failed += 1;
             continue;
         };
 
         if (result) {
-            std.debug.print("PASSED\n", .{});
+            std.debug.print(ansi_green ++ "PASSED" ++ ansi_reset ++ "\n", .{});
             passed += 1;
         } else {
             failed += 1;
@@ -518,41 +522,41 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
     switch (result.term) {
         .exited => |code| {
             if (code != expected_exit) {
-                std.debug.print("FAILED (exit {d}, expected {d})\n", .{ code, expected_exit });
+                std.debug.print(ansi_red ++ "FAILED (exit {d}, expected {d})" ++ ansi_reset ++ "\n", .{ code, expected_exit });
                 return false;
             }
         },
         .signal => |sig| {
-            std.debug.print("FAILED (signal {s})\n", .{@tagName(sig)});
+            std.debug.print(ansi_red ++ "FAILED (signal {s})" ++ ansi_reset ++ "\n", .{@tagName(sig)});
             return false;
         },
         .stopped => |sig| {
-            std.debug.print("FAILED (stopped {s})\n", .{@tagName(sig)});
+            std.debug.print(ansi_red ++ "FAILED (stopped {s})" ++ ansi_reset ++ "\n", .{@tagName(sig)});
             return false;
         },
         .unknown => |code| {
-            std.debug.print("FAILED (unknown {d})\n", .{code});
+            std.debug.print(ansi_red ++ "FAILED (unknown {d})" ++ ansi_reset ++ "\n", .{code});
             return false;
         },
     }
 
     for (test_case.expect) |expected| {
         if (std.mem.indexOf(u8, result.stdout, expected) == null) {
-            std.debug.print("FAILED\n    missing: '{s}'\n", .{expected});
+            std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    missing: '{s}'\n", .{expected});
             return false;
         }
     }
 
     for (test_case.not_expect) |not_expected| {
         if (std.mem.indexOf(u8, result.stdout, not_expected) != null) {
-            std.debug.print("FAILED\n    unexpected: '{s}'\n", .{not_expected});
+            std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    unexpected: '{s}'\n", .{not_expected});
             return false;
         }
     }
 
     for (test_case.expect_stderr) |expected| {
         if (std.mem.indexOf(u8, result.stderr, expected) == null) {
-            std.debug.print("FAILED\n    missing in stderr: '{s}'\n", .{expected});
+            std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    missing in stderr: '{s}'\n", .{expected});
             return false;
         }
     }
@@ -560,7 +564,7 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
     if (test_case.evidence) |evidence| {
         for (evidence.file_exists) |path| {
             const file = target_dir.openFile(io, path, .{}) catch {
-                std.debug.print("FAILED\n    evidence file not found: '{s}'\n", .{path});
+                std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    evidence file not found: '{s}'\n", .{path});
                 return false;
             };
             file.close(io);
@@ -568,25 +572,25 @@ fn runTest(params: RunParams, test_case: TestCase) !bool {
         for (evidence.file_not_exists) |path| {
             if (target_dir.openFile(io, path, .{})) |file| {
                 file.close(io);
-                std.debug.print("FAILED\n    unexpected evidence file found: '{s}'\n", .{path});
+                std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    unexpected evidence file found: '{s}'\n", .{path});
                 return false;
             } else |err| switch (err) {
                 error.FileNotFound => {},
                 else => {
-                    std.debug.print("FAILED\n    could not inspect absent evidence file: '{s}'\n", .{path});
+                    std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    could not inspect absent evidence file: '{s}'\n", .{path});
                     return false;
                 },
             }
         }
         if (evidence.file_contains) |fc| {
             const content = target_dir.readFileAlloc(io, fc.path, allocator, .limited(1024 * 1024)) catch {
-                std.debug.print("FAILED\n    could not read evidence file: '{s}'\n", .{fc.path});
+                std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    could not read evidence file: '{s}'\n", .{fc.path});
                 return false;
             };
             defer allocator.free(content);
             for (fc.patterns) |pattern| {
                 if (std.mem.indexOf(u8, content, pattern) == null) {
-                    std.debug.print("FAILED\n    missing pattern in '{s}': '{s}'\n", .{ fc.path, pattern });
+                    std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    missing pattern in '{s}': '{s}'\n", .{ fc.path, pattern });
                     return false;
                 }
             }
