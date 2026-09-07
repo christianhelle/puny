@@ -702,15 +702,18 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         try printReviewResult(ctx.stdout_writer, saved);
     }
 
-    try persistence.saveMessages(ctx);
-    try persistence.saveSessionMeta(ctx);
-    upsertCurrentSession(ctx);
-
+    // A one-shot run ends here, and `finalizeSession` saves exactly the state
+    // this turn just produced. Saving first would serialize the whole
+    // conversation and rewrite the whole index twice over, back to back.
     if (honor_oneshot and ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});
         finalizeSession(ctx);
         return .{ .cancelled = turn_cancelled, .had_error = turn_had_error, .exited = true };
     }
+
+    try persistence.saveMessages(ctx);
+    try persistence.saveSessionMeta(ctx);
+    upsertCurrentSession(ctx);
 
     return .{ .cancelled = turn_cancelled, .had_error = turn_had_error };
 }
