@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Collect crash reports and offer to file them as GitHub issues ([#195](https://github.com/christianhelle/puny/pull/195)) ([@christianhelle](https://github.com/christianhelle/))
 - Stop rescanning every session directory on exit ([#197](https://github.com/christianhelle/puny/pull/197)) ([@christianhelle](https://github.com/christianhelle/))
 - Sweep orphaned staging files left by interrupted atomic writes ([#196](https://github.com/christianhelle/puny/pull/196)) ([@christianhelle](https://github.com/christianhelle/))
 - Make session stats numbers human friendly ([#194](https://github.com/christianhelle/puny/pull/194)) ([@christianhelle](https://github.com/christianhelle/))
