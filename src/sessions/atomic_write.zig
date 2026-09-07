@@ -13,10 +13,69 @@ pub const WriteOptions = struct {
     restrict_permissions: bool = false,
 };
 
+/// Staging files younger than this are left alone. A staging file that has
+/// only just appeared may belong to a concurrent writer that is still filling
+/// it in, and deleting that one would break a write that is going fine.
+const stale_staging_age_ns: i96 = 5 * std.time.ns_per_min;
+
+/// Whether `name` is a staging file this module would have created for
+/// `filename`, i.e. `<filename>.<digits>.tmp`. The digit check keeps the sweep
+/// off unrelated `.tmp` files that happen to share the directory.
+fn isStagingName(name: []const u8, filename: []const u8) bool {
+    const suffix = ".tmp";
+    if (!std.mem.startsWith(u8, name, filename)) return false;
+    if (!std.mem.endsWith(u8, name, suffix)) return false;
+    const middle = name[filename.len .. name.len - suffix.len];
+    if (middle.len < 2 or middle[0] != '.') return false;
+    for (middle[1..]) |c| {
+        if (!std.ascii.isDigit(c)) return false;
+    }
+    return true;
+}
+
+/// Deletes staging files in `dir_path` left over from earlier writes of
+/// `filename` that never reached their rename, which is what a process killed
+/// mid-write leaves behind and no errdefer can cover. Only files older than
+/// `stale_staging_age_ns` are removed, so an in-flight write by another
+/// process is never disturbed. Best-effort throughout: a directory that cannot
+/// be opened, scanned, or pruned must not stop the write that follows.
+fn sweepStaleStagingFiles(io: std.Io, scratch: std.mem.Allocator, dir_path: []const u8, filename: []const u8) void {
+    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(io);
+
+    // Compared against mtime, so this needs the wall clock the filesystem
+    // stamps with, not the monotonic clock used for staging-name uniqueness.
+    const now_ns = std.Io.Timestamp.now(io, .real).nanoseconds;
+
+    // Names are collected first because the iterator's `name` points into a
+    // buffer the next step reuses, and because deleting entries from a
+    // directory while iterating it is not portable.
+    var stale: std.ArrayList([]const u8) = .empty;
+    var it = dir.iterate();
+    while (true) {
+        const entry = (it.next(io) catch break) orelse break;
+        if (entry.kind != .file) continue;
+        if (!isStagingName(entry.name, filename)) continue;
+        const stat = dir.statFile(io, entry.name, .{}) catch continue;
+        if (now_ns - stat.mtime.nanoseconds < stale_staging_age_ns) continue;
+        const name = scratch.dupe(u8, entry.name) catch continue;
+        stale.append(scratch, name) catch continue;
+    }
+
+    for (stale.items) |name| {
+        dir.deleteFile(io, name) catch |err| {
+            std.log.warn("failed to sweep stale staging file {s}: {s}", .{ name, @errorName(err) });
+            continue;
+        };
+        std.log.debug("swept stale staging file {s}", .{name});
+    }
+}
+
 /// Atomically writes `contents` to `<dir_path>/<filename>` through a
 /// uniquely-named temporary file and a rename, so an interrupted write never
 /// leaves the target empty or truncated. A trailing newline is appended to
-/// match the project's JSON writers. The staging file is removed on failure.
+/// match the project's JSON writers. The staging file is removed on failure,
+/// and staging files orphaned by earlier interrupted writes are swept first.
 pub fn writeAtomically(
     io: std.Io,
     allocator: std.mem.Allocator,
@@ -37,6 +96,11 @@ pub fn writeAtomically(
     const tmp_path = try std.fs.path.join(scratch, &.{ dir_path, tmp_name });
     const final_path = try std.fs.path.join(scratch, &.{ dir_path, filename });
 
+    // Reclaim staging files abandoned by an earlier run before adding another,
+    // so a write interrupted between create and rename is cleaned up by the
+    // next write rather than accumulating in the directory forever.
+    sweepStaleStagingFiles(io, scratch, dir_path, filename);
+
     var file = cwd.createFile(io, tmp_path, .{}) catch |err| {
         std.log.warn("failed to create temp file {s}: {s}", .{ tmp_path, @errorName(err) });
         return err;
@@ -44,7 +108,12 @@ pub fn writeAtomically(
     var file_open = true;
     errdefer {
         if (file_open) file.close(io);
-        cwd.deleteFile(io, tmp_path) catch {};
+        // A cleanup that cannot delete its own staging file is the only way a
+        // still-running process leaks one, so say so rather than dropping the
+        // error and leaving an unexplained file behind.
+        cwd.deleteFile(io, tmp_path) catch |err| {
+            std.log.warn("failed to remove staging file {s} after a failed write: {s}", .{ tmp_path, @errorName(err) });
+        };
     }
 
     file.writeStreamingAll(io, contents) catch |err| {
@@ -406,4 +475,147 @@ test "writeAtomically stamps the target newer than a file reference" {
     defer std.testing.allocator.free(path);
     const out_stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
     try std.testing.expect(out_stat.mtime.nanoseconds >= ref_stat.mtime.nanoseconds);
+}
+
+/// Backdates `path` far enough into the past that the sweep treats it as
+/// abandoned, standing in for a staging file left by a run that was killed.
+fn backdate(path: []const u8) !void {
+    var file = try std.Io.Dir.cwd().openFile(std.testing.io, path, .{ .mode = .read_write });
+    defer file.close(std.testing.io);
+    try file.setTimestamps(std.testing.io, .{ .modify_timestamp = .{ .new = std.Io.Timestamp.fromNanoseconds(1_000_000_000_000) } });
+}
+
+fn exists(path: []const u8) bool {
+    _ = std.Io.Dir.cwd().statFile(std.testing.io, path, .{}) catch return false;
+    return true;
+}
+
+test "writeAtomically sweeps a staging file left by an interrupted run" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep");
+    defer std.testing.allocator.free(dir);
+
+    const orphan = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.437900257935400.tmp" });
+    defer std.testing.allocator.free(orphan);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = orphan, .data = "ORPHAN" });
+    try backdate(orphan);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    try std.testing.expect(!exists(orphan));
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("fresh\n", data);
+}
+
+test "writeAtomically sweeps every staging file an interrupted run left" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-many");
+    defer std.testing.allocator.free(dir);
+
+    for (0..5) |i| {
+        const orphan = try std.fmt.allocPrint(std.testing.allocator, "{s}/out.json.{d}.tmp", .{ dir, i });
+        defer std.testing.allocator.free(orphan);
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = orphan, .data = "ORPHAN" });
+        try backdate(orphan);
+    }
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    var out_dir = try std.Io.Dir.cwd().openDir(std.testing.io, dir, .{ .iterate = true });
+    defer out_dir.close(std.testing.io);
+    var it = out_dir.iterate();
+    var names: usize = 0;
+    while (try it.next(std.testing.io)) |entry| {
+        try std.testing.expect(!std.mem.endsWith(u8, entry.name, ".tmp"));
+        names += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), names);
+}
+
+test "writeAtomically keeps a staging file a concurrent write may still own" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-young");
+    defer std.testing.allocator.free(dir);
+
+    const in_flight = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.437900257935400.tmp" });
+    defer std.testing.allocator.free(in_flight);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = in_flight, .data = "IN FLIGHT" });
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    const kept = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, in_flight, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(kept);
+    try std.testing.expectEqualStrings("IN FLIGHT", kept);
+}
+
+test "writeAtomically sweeps only staging files for the target it writes" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-scope");
+    defer std.testing.allocator.free(dir);
+
+    // Old, but none of these are staging files this module would have made for
+    // out.json: another target's staging file, a name with no timestamp, and a
+    // name whose suffix is not a timestamp at all.
+    const survivors = [_][]const u8{ "other.json.1.tmp", "out.json.tmp", "out.json.draft.tmp" };
+    for (survivors) |name| {
+        const path = try std.fs.path.join(std.testing.allocator, &.{ dir, name });
+        defer std.testing.allocator.free(path);
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "KEEP" });
+        try backdate(path);
+    }
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    for (survivors) |name| {
+        const path = try std.fs.path.join(std.testing.allocator, &.{ dir, name });
+        defer std.testing.allocator.free(path);
+        try std.testing.expect(exists(path));
+    }
+}
+
+test "writeAtomically still writes when the directory cannot be swept" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep-blocked");
+    defer std.testing.allocator.free(dir);
+
+    // A subdirectory named like a staging file is not something the sweep can
+    // delete; the write must go through regardless.
+    const decoy = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.1.tmp" });
+    defer std.testing.allocator.free(decoy);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, decoy);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("fresh\n", data);
+    try std.testing.expect(exists(decoy));
+}
+
+test "isStagingName matches only this module's staging names" {
+    try std.testing.expect(isStagingName("out.json.437900257935400.tmp", "out.json"));
+    try std.testing.expect(isStagingName("out.json.0.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json..tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.12a.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.1.tmp.bak", "out.json"));
+    try std.testing.expect(!isStagingName("other.json.1.tmp", "out.json"));
+    try std.testing.expect(!isStagingName("out.json", "out.json"));
+    try std.testing.expect(!isStagingName("out.json.1.tmp", "sessions.json"));
 }
