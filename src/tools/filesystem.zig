@@ -145,6 +145,22 @@ test "writeFile is blocked in planning mode" {
     try std.testing.expectError(error.FileNotFound, readFile(std.testing.allocator, std.testing.io, .{ .path = path }));
 }
 
+test "edit_file is blocked in planning mode" {
+    const path = "puny-test-fs-edit-blocked.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = path, .content = "original" });
+
+    core_session.setWriteBlocked(true);
+    defer core_session.setWriteBlocked(false);
+
+    const result = try editFile(std.testing.allocator, std.testing.io, .{ .path = path, .old_string = "original", .new_string = "changed" });
+    try std.testing.expect(std.mem.indexOf(u8, result, "Write blocked") != null);
+
+    const content = try readFile(std.testing.allocator, std.testing.io, .{ .path = path });
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("original", content);
+}
+
 test "listDirectory errors on a missing directory" {
     const path = "puny-test-fs-no-such-dir";
     std.Io.Dir.cwd().deleteDir(std.testing.io, path) catch {};
