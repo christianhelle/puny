@@ -1127,7 +1127,7 @@ fn finalizeSession(ctx: *ChatLoopContext) void {
 /// paths write entries into the same index and `findLatestSession` compares
 /// them against each other.
 fn indexTimestamp(io: std.Io) u64 {
-    return @intCast(std.Io.Clock.Timestamp.now(io, .real).raw.nanoseconds);
+    return @intCast(std.Io.Timestamp.now(io, .real).nanoseconds);
 }
 
 /// Refreshes the current session's entry in the sessions index after a content

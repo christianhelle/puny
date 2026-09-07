@@ -131,7 +131,7 @@ pub fn writeAtomically(
         if (cwd.statFile(io, reference_path, .{}) catch null) |ref_stat| {
             // Wall clock, not monotonic: this is compared against file
             // mtimes, which are epoch-based.
-            const now_ns = std.Io.Clock.Timestamp.now(io, .real).raw.nanoseconds;
+            const now_ns = std.Io.Timestamp.now(io, .real).nanoseconds;
             const desired = std.Io.Timestamp.fromNanoseconds(@max(now_ns, ref_stat.mtime.nanoseconds) + std.time.ns_per_s);
             var stamp_file = cwd.openFile(io, tmp_path, .{ .mode = .read_write }) catch null;
             if (stamp_file) |*f| {
@@ -151,52 +151,6 @@ pub fn writeAtomically(
         std.log.warn("failed to rename {s} into place: {s}", .{ final_path, @errorName(err) });
         return err;
     };
-
-    sweepAbandonedStagingFiles(io, scratch, cwd, dir_path, filename);
-}
-
-/// How long a staging file may sit before it is treated as abandoned. Well
-/// past any real write, so a staging file another process is using right now
-/// is never mistaken for garbage.
-const staging_lifetime_ns: i128 = std.time.ns_per_hour;
-
-/// Deletes `<dir_path>/<filename>.*.tmp` staging files older than
-/// `staging_lifetime_ns`. A run that is killed between creating its staging
-/// file and renaming it leaves one behind, and nothing else ever removes them,
-/// so without this they accumulate next to the target forever. Best effort
-/// throughout: a staging file that cannot be listed, stat'd, or removed is
-/// left alone rather than failing the write that just succeeded.
-fn sweepAbandonedStagingFiles(
-    io: std.Io,
-    scratch: std.mem.Allocator,
-    cwd: std.Io.Dir,
-    dir_path: []const u8,
-    filename: []const u8,
-) void {
-    const prefix = std.fmt.allocPrint(scratch, "{s}.", .{filename}) catch return;
-    const cutoff = std.Io.Clock.Timestamp.now(io, .real).raw.nanoseconds - staging_lifetime_ns;
-
-    var dir = cwd.openDir(io, dir_path, .{ .iterate = true }) catch return;
-    defer dir.close(io);
-
-    // Names are collected before anything is deleted; removing entries while
-    // the iterator is live is not defined across platforms.
-    var abandoned: std.ArrayList([]const u8) = .empty;
-    var it = dir.iterate();
-    while (it.next(io) catch null) |entry| {
-        if (entry.kind != .file) continue;
-        if (!std.mem.startsWith(u8, entry.name, prefix)) continue;
-        if (!std.mem.endsWith(u8, entry.name, ".tmp")) continue;
-        const name = scratch.dupe(u8, entry.name) catch continue;
-        abandoned.append(scratch, name) catch continue;
-    }
-
-    for (abandoned.items) |name| {
-        const path = std.fs.path.join(scratch, &.{ dir_path, name }) catch continue;
-        const stat = cwd.statFile(io, path, .{}) catch continue;
-        if (stat.mtime.nanoseconds >= cutoff) continue;
-        cwd.deleteFile(io, path) catch {};
-    }
 }
 
 fn testDir(allocator: std.mem.Allocator, tmp: *std.testing.TmpDir, name: []const u8) ![]const u8 {
@@ -261,55 +215,6 @@ test "writeAtomically does not clobber a stale temp file" {
     try std.testing.expectEqualStrings("STALE", stale);
 }
 
-test "writeAtomically removes staging files left behind by an earlier run" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    const dir = try testDir(std.testing.allocator, &tmp, "atomic-sweep");
-    defer std.testing.allocator.free(dir);
-
-    const now_ns = std.Io.Clock.Timestamp.now(std.testing.io, .real).raw.nanoseconds;
-
-    // Abandoned by a killed run: same target, long past the staging window.
-    const abandoned = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.111.tmp" });
-    defer std.testing.allocator.free(abandoned);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = abandoned, .data = "ABANDONED" });
-    try setMtime(abandoned, now_ns - 2 * std.time.ns_per_hour);
-
-    // Being staged right now by a concurrent writer: must survive.
-    const in_flight = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json.222.tmp" });
-    defer std.testing.allocator.free(in_flight);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = in_flight, .data = "IN FLIGHT" });
-
-    // Staging for a different target, and a plain file: neither is ours.
-    const other = try std.fs.path.join(std.testing.allocator, &.{ dir, "other.json.333.tmp" });
-    defer std.testing.allocator.free(other);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = other, .data = "OTHER" });
-    try setMtime(other, now_ns - 2 * std.time.ns_per_hour);
-
-    const unrelated = try std.fs.path.join(std.testing.allocator, &.{ dir, "notes.txt" });
-    defer std.testing.allocator.free(unrelated);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = unrelated, .data = "NOTES" });
-    try setMtime(unrelated, now_ns - 2 * std.time.ns_per_hour);
-
-    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "fresh", .{});
-
-    try std.testing.expectError(
-        error.FileNotFound,
-        std.Io.Dir.cwd().statFile(std.testing.io, abandoned, .{}),
-    );
-    _ = try std.Io.Dir.cwd().statFile(std.testing.io, in_flight, .{});
-    _ = try std.Io.Dir.cwd().statFile(std.testing.io, other, .{});
-    _ = try std.Io.Dir.cwd().statFile(std.testing.io, unrelated, .{});
-}
-
-fn setMtime(path: []const u8, ns: i128) !void {
-    var file = try std.Io.Dir.cwd().openFile(std.testing.io, path, .{ .mode = .read_write });
-    defer file.close(std.testing.io);
-    try file.setTimestamps(std.testing.io, .{
-        .modify_timestamp = .{ .new = std.Io.Timestamp.fromNanoseconds(@intCast(ns)) },
-    });
-}
 
 test "writeAtomically restricts permissions to owner-only" {
     if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
@@ -372,7 +277,7 @@ test "writeAtomically stamps the target at present time for an ancient reference
     const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
     defer std.testing.allocator.free(path);
     const out_stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
-    const now = std.Io.Clock.Timestamp.now(std.testing.io, .real).raw.nanoseconds;
+    const now = std.Io.Timestamp.now(std.testing.io, .real).nanoseconds;
     try std.testing.expect(out_stat.mtime.nanoseconds > now - std.time.ns_per_min);
 }
 
