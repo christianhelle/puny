@@ -75,9 +75,12 @@ fn renderKnown(
     }
 
     if (std.mem.eql(u8, name, "edit_file")) {
-        const path = getString(args, "path") orelse return false;
-        try output.appendSlice(allocator, "Editing ");
-        try appendJsonString(output, allocator, path);
+        if (getString(args, "path")) |path| {
+            try output.appendSlice(allocator, "Editing ");
+            try appendJsonString(output, allocator, path);
+        } else {
+            try output.appendSlice(allocator, "Editing a file");
+        }
         return true;
     }
 
@@ -375,6 +378,18 @@ test "does not expose edit content in summaries" {
     defer std.testing.allocator.free(rendered);
 
     try std.testing.expectEqualStrings("Editing \"secret.txt\"", rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "old secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "new secret") == null);
+}
+
+test "edit_file without a path does not expose edit content" {
+    const rendered = try renderToolCall(
+        std.testing.allocator,
+        makeToolCall("edit_file", "{\"old_string\":\"old secret\",\"new_string\":\"new secret\"}"),
+    );
+    defer std.testing.allocator.free(rendered);
+
+    try std.testing.expectEqualStrings("Editing a file", rendered);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "old secret") == null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "new secret") == null);
 }
