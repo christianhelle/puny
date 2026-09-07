@@ -49,7 +49,12 @@ pub fn editFile(
     const updated = try std.mem.replaceOwned(u8, allocator, content, old_string, new_string);
     defer allocator.free(updated);
 
-    try writeFile(io, path, updated);
+    const cwd = std.Io.Dir.cwd();
+    var atomic_file = try cwd.createFileAtomic(io, path, .{ .replace = true });
+    defer atomic_file.deinit(io);
+
+    try atomic_file.file.writeStreamingAll(io, updated);
+    try atomic_file.replace(io);
     return count;
 }
 
@@ -189,4 +194,24 @@ test "editFile rejects an empty old_string" {
     try writeFile(std.testing.io, path, "hello");
 
     try std.testing.expectError(error.EmptySearchString, editFile(std.testing.allocator, std.testing.io, path, "", "x", false));
+}
+
+test "editFile preserves the original when the directory is read-only" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path, "target.txt" });
+    defer std.testing.allocator.free(path);
+    try writeFile(std.testing.io, path, "original");
+
+    try tmp.dir.setPermissions(std.testing.io, std.Io.File.Permissions.default_dir.setReadOnly(true));
+    defer tmp.dir.setPermissions(std.testing.io, std.Io.File.Permissions.default_dir) catch {};
+
+    try std.testing.expectError(error.AccessDenied, editFile(std.testing.allocator, std.testing.io, path, "original", "changed", false));
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("original", content);
 }
