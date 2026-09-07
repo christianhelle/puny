@@ -21,7 +21,7 @@ and stays out of your way.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
 - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
-  - Read, write, and list files in your project
+  - Read, edit, write, and list files in your project
   - Run shell commands
   - Search your codebase
   - Load skills
@@ -700,6 +700,7 @@ Tool-call status lines use concise action-oriented summaries instead of raw JSON
 🔧 Reading "src/main.zig"
 🔧 Running "zig build test"
 🔧 Writing 12 lines (384 bytes) to "README.md"
+🔧 Editing "src/chat/chat.zig"
 ```
 
 Large payloads, such as file writes, are summarized rather than printed in full.
