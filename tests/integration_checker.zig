@@ -4,6 +4,21 @@ const ansi_green = "\x1b[32m";
 const ansi_red = "\x1b[31m";
 const ansi_reset = "\x1b[0m";
 
+const Color = struct {
+    green: []const u8 = "",
+    red: []const u8 = "",
+    reset: []const u8 = "",
+};
+
+/// Resolves color codes, empty unless stderr is a TTY and NO_COLOR is unset.
+fn colorFrom(io: std.Io, environ_map: *const std.process.Environ.Map) Color {
+    const tty = std.Io.File.stderr().isTty(io) catch false;
+    if (!tty) return .{};
+    if (environ_map.get("NO_COLOR")) |v|
+        if (v.len > 0) return .{};
+    return .{ .green = ansi_green, .red = ansi_red, .reset = ansi_reset };
+}
+
 const Spec = struct {
     default_args: []const []const u8 = &.{},
     tests: []const TestCase,
@@ -55,18 +70,19 @@ pub fn main(init: std.process.Init) !u8 {
 
     var passed: usize = 0;
     var failed: usize = 0;
+    const color = colorFrom(io, init.environ_map);
 
     for (spec.tests) |test_case| {
         std.debug.print("  {s}... ", .{test_case.name});
 
-        const result = runTest(allocator, io, binary_path, spec.default_args, test_case) catch |err| {
-            std.debug.print(ansi_red ++ "FAILED ({s})" ++ ansi_reset ++ "\n", .{@errorName(err)});
+        const result = runTest(allocator, io, binary_path, spec.default_args, test_case, color) catch |err| {
+            std.debug.print("{s}FAILED ({s}){s}\n", .{ color.red, @errorName(err), color.reset });
             failed += 1;
             continue;
         };
 
         if (result) {
-            std.debug.print(ansi_green ++ "PASSED" ++ ansi_reset ++ "\n", .{});
+            std.debug.print("{s}PASSED{s}\n", .{ color.green, color.reset });
             passed += 1;
         } else {
             failed += 1;
@@ -100,6 +116,7 @@ fn runTest(
     binary_path: []const u8,
     default_args: []const []const u8,
     test_case: TestCase,
+    color: Color,
 ) !bool {
     removeEvidenceFiles(io, test_case);
     const child_argv = try buildArgv(allocator, binary_path, default_args, test_case.args);
@@ -114,7 +131,7 @@ fn runTest(
             .clock = .real,
         } },
     }) catch |err| {
-        std.debug.print(ansi_red ++ "FAILED (error: {s})" ++ ansi_reset ++ "\n", .{@errorName(err)});
+        std.debug.print("{s}FAILED (error: {s}){s}\n", .{ color.red, @errorName(err), color.reset });
         return false;
     };
     defer allocator.free(result.stdout);
@@ -123,30 +140,32 @@ fn runTest(
     switch (result.term) {
         .exited => |code| {
             if (code != 0) {
-                std.debug.print(ansi_red ++ "FAILED (exit {d})" ++ ansi_reset ++ "\n", .{code});
+                std.debug.print("{s}FAILED (exit {d}){s}\n", .{ color.red, code, color.reset });
                 printStderr(result.stderr);
                 return false;
             }
         },
         .signal => |sig| {
-            std.debug.print(ansi_red ++ "FAILED (signal {s})" ++ ansi_reset ++ "\n", .{@tagName(sig)});
+            std.debug.print("{s}FAILED (signal {s}){s}\n", .{ color.red, @tagName(sig), color.reset });
             printStderr(result.stderr);
             return false;
         },
         .stopped => |sig| {
-            std.debug.print(ansi_red ++ "FAILED (stopped {s})" ++ ansi_reset ++ "\n", .{@tagName(sig)});
+            std.debug.print("{s}FAILED (stopped {s}){s}\n", .{ color.red, @tagName(sig), color.reset });
             printStderr(result.stderr);
             return false;
         },
         .unknown => |code| {
-            std.debug.print(ansi_red ++ "FAILED (unknown {d})" ++ ansi_reset ++ "\n", .{code});
+            std.debug.print("{s}FAILED (unknown {d}){s}\n", .{ color.red, code, color.reset });
             printStderr(result.stderr);
             return false;
         },
     }
 
     if (test_case.min_output_length > 0 and result.stdout.len < test_case.min_output_length) {
-        std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    stdout too short: {d} bytes (min {d})\n", .{
+        std.debug.print("{s}FAILED{s}\n    stdout too short: {d} bytes (min {d})\n", .{
+            color.red,
+            color.reset,
             result.stdout.len,
             test_case.min_output_length,
         });
@@ -156,7 +175,7 @@ fn runTest(
 
     for (test_case.expect) |expected| {
         if (std.mem.indexOf(u8, result.stdout, expected) == null) {
-            std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    missing: '{s}'\n", .{expected});
+            std.debug.print("{s}FAILED{s}\n    missing: '{s}'\n", .{ color.red, color.reset, expected });
             printStderr(result.stderr);
             return false;
         }
@@ -164,7 +183,7 @@ fn runTest(
 
     for (test_case.not_expect) |not_expected| {
         if (std.mem.indexOf(u8, result.stdout, not_expected) != null) {
-            std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    unexpected: '{s}'\n", .{not_expected});
+            std.debug.print("{s}FAILED{s}\n    unexpected: '{s}'\n", .{ color.red, color.reset, not_expected });
             printStderr(result.stderr);
             return false;
         }
@@ -173,21 +192,21 @@ fn runTest(
     if (test_case.evidence) |evidence| {
         for (evidence.file_exists) |path| {
             if (!fileExists(io, path)) {
-                std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    evidence file not found: '{s}'\n", .{path});
+                std.debug.print("{s}FAILED{s}\n    evidence file not found: '{s}'\n", .{ color.red, color.reset, path });
                 printStderr(result.stderr);
                 return false;
             }
         }
         if (evidence.file_contains) |fc| {
             const content = std.Io.Dir.cwd().readFileAlloc(io, fc.path, allocator, .limited(1024 * 1024)) catch {
-                std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    could not read evidence file: '{s}'\n", .{fc.path});
+                std.debug.print("{s}FAILED{s}\n    could not read evidence file: '{s}'\n", .{ color.red, color.reset, fc.path });
                 printStderr(result.stderr);
                 return false;
             };
             defer allocator.free(content);
             for (fc.patterns) |pattern| {
                 if (std.mem.indexOf(u8, content, pattern) == null) {
-                    std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    missing pattern in '{s}': '{s}'\n", .{ fc.path, pattern });
+                    std.debug.print("{s}FAILED{s}\n    missing pattern in '{s}': '{s}'\n", .{ color.red, color.reset, fc.path, pattern });
                     printStderr(result.stderr);
                     return false;
                 }
@@ -201,7 +220,7 @@ fn runTest(
                 if (std.mem.indexOf(u8, line, " - ")) |idx| {
                     const path = std.mem.trim(u8, line[idx + 3 ..], " \t\r");
                     if (path.len > 0 and looksLikeAbsolutePath(path) and !fileExists(io, path)) {
-                        std.debug.print(ansi_red ++ "FAILED" ++ ansi_reset ++ "\n    evidence file not found: '{s}'\n", .{path});
+                        std.debug.print("{s}FAILED{s}\n    evidence file not found: '{s}'\n", .{ color.red, color.reset, path });
                         printStderr(result.stderr);
                         return false;
                     }
