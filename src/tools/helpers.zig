@@ -167,3 +167,16 @@ test "editFile errors on multiple matches unless replace_all is set" {
     defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("a cat and a cat", content);
 }
+
+test "editFile replaces all occurrences when replace_all is set" {
+    const path = "puny-test-helpers-edit-all.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "a cat and a cat");
+
+    const replacements = try editFile(std.testing.allocator, std.testing.io, path, "cat", "dog", true);
+    try std.testing.expectEqual(@as(usize, 2), replacements);
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("a dog and a dog", content);
+}
