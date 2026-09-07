@@ -37,12 +37,12 @@ pub fn editFile(
     new_string: []const u8,
     replace_all: bool,
 ) !usize {
-    _ = replace_all;
     const content = try readFileAlloc(allocator, io, path, 1024 * 1024);
     defer allocator.free(content);
 
     const count = std.mem.count(u8, content, old_string);
     if (count == 0) return error.NoMatch;
+    if (!replace_all and count > 1) return error.MultipleMatches;
 
     const updated = try std.mem.replaceOwned(u8, allocator, content, old_string, new_string);
     defer allocator.free(updated);
@@ -154,4 +154,16 @@ test "editFile errors when old_string is not found" {
     try writeFile(std.testing.io, path, "hello world");
 
     try std.testing.expectError(error.NoMatch, editFile(std.testing.allocator, std.testing.io, path, "nope", "x", false));
+}
+
+test "editFile errors on multiple matches unless replace_all is set" {
+    const path = "puny-test-helpers-edit-multi.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "a cat and a cat");
+
+    try std.testing.expectError(error.MultipleMatches, editFile(std.testing.allocator, std.testing.io, path, "cat", "dog", false));
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("a cat and a cat", content);
 }
