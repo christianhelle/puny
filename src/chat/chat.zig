@@ -297,10 +297,12 @@ test "executeTool runs edit_file on a real file" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
+    const arguments = try std.fmt.allocPrint(arena_state.allocator(), "{{\"path\":\"{s}\",\"old_string\":\"before\",\"new_string\":\"after\"}}", .{path});
+
     const result = try executeTool(
         arena_state.allocator(),
         std.testing.io,
-        .{ .id = "call_1", .function = .{ .name = "edit_file", .arguments = "{\"path\":\"puny-test-chat-edit.txt\",\"old_string\":\"before\",\"new_string\":\"after\"}" } },
+        .{ .id = "call_1", .function = .{ .name = "edit_file", .arguments = arguments } },
         .build,
     );
     try std.testing.expectEqualStrings("File edited successfully.", result);
