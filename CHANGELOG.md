@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Color PASSED and FAILED output in regression and integration test results ([#199](https://github.com/christianhelle/puny/pull/199)) ([@christianhelle](https://github.com/christianhelle/))
 - Edit file tool ([#198](https://github.com/christianhelle/puny/pull/198)) ([@christianhelle](https://github.com/christianhelle/))
 - Collect crash reports and offer to file them as GitHub issues ([#195](https://github.com/christianhelle/puny/pull/195)) ([@christianhelle](https://github.com/christianhelle/))
 - Stop rescanning every session directory on exit ([#197](https://github.com/christianhelle/puny/pull/197)) ([@christianhelle](https://github.com/christianhelle/))
