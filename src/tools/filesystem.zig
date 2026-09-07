@@ -161,6 +161,35 @@ test "edit_file is blocked in planning mode" {
     try std.testing.expectEqualStrings("original", content);
 }
 
+test "edit_file maps edit failures to friendly messages" {
+    const no_match = "puny-test-fs-edit-no-match.txt";
+    const multiple = "puny-test-fs-edit-multiple.txt";
+    const empty = "puny-test-fs-edit-empty.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, no_match) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, multiple) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, empty) catch {};
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = no_match, .content = "alpha" });
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = multiple, .content = "a cat and a cat" });
+    _ = try writeFile(std.testing.allocator, std.testing.io, .{ .path = empty, .content = "hello" });
+
+    try std.testing.expectEqualStrings(
+        "No match found for old_string.",
+        try editFile(std.testing.allocator, std.testing.io, .{ .path = no_match, .old_string = "nope", .new_string = "x" }),
+    );
+    try std.testing.expectEqualStrings(
+        "Multiple matches found for old_string. Make it unique or set replace_all to true.",
+        try editFile(std.testing.allocator, std.testing.io, .{ .path = multiple, .old_string = "cat", .new_string = "dog" }),
+    );
+    try std.testing.expectEqualStrings(
+        "old_string must not be empty.",
+        try editFile(std.testing.allocator, std.testing.io, .{ .path = empty, .old_string = "", .new_string = "x" }),
+    );
+
+    const content = try readFile(std.testing.allocator, std.testing.io, .{ .path = no_match });
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("alpha", content);
+}
+
 test "listDirectory errors on a missing directory" {
     const path = "puny-test-fs-no-such-dir";
     std.Io.Dir.cwd().deleteDir(std.testing.io, path) catch {};
