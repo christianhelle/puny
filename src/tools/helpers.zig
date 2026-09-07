@@ -29,6 +29,25 @@ pub fn writeFile(io: std.Io, path: []const u8, content: []const u8) !void {
     try file.writeStreamingAll(io, content);
 }
 
+pub fn editFile(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    path: []const u8,
+    old_string: []const u8,
+    new_string: []const u8,
+    replace_all: bool,
+) !usize {
+    _ = replace_all;
+    const content = try readFileAlloc(allocator, io, path, 1024 * 1024);
+    defer allocator.free(content);
+
+    const updated = try std.mem.replaceOwned(u8, allocator, content, old_string, new_string);
+    defer allocator.free(updated);
+
+    try writeFile(io, path, updated);
+    return 1;
+}
+
 pub fn listDirectory(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
     const cwd = std.Io.Dir.cwd();
     var dir = try cwd.openDir(io, path, .{ .iterate = true });
@@ -111,4 +130,17 @@ test "listDirectory returns an empty string for an empty directory" {
     const listing = try listDirectory(std.testing.allocator, std.testing.io, path);
     defer std.testing.allocator.free(listing);
     try std.testing.expectEqualStrings("", listing);
+}
+
+test "editFile replaces a single occurrence" {
+    const path = "puny-test-helpers-edit-single.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "hello world");
+
+    const replacements = try editFile(std.testing.allocator, std.testing.io, path, "world", "zig", false);
+    try std.testing.expectEqual(@as(usize, 1), replacements);
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("hello zig", content);
 }
