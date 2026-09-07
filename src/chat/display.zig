@@ -74,6 +74,16 @@ fn renderKnown(
         return true;
     }
 
+    if (std.mem.eql(u8, name, "edit_file")) {
+        if (getString(args, "path")) |path| {
+            try output.appendSlice(allocator, "Editing ");
+            try appendJsonString(output, allocator, path);
+        } else {
+            try output.appendSlice(allocator, "Editing a file");
+        }
+        return true;
+    }
+
     if (std.mem.eql(u8, name, "list_directory")) {
         const path = getString(args, "path") orelse return false;
         try output.appendSlice(allocator, "Listing ");
@@ -315,6 +325,7 @@ test "renders current tool calls as actions" {
     try expectRendered("read_file", "{\"path\":\"src/main.zig\"}", "Reading \"src/main.zig\"");
     try expectRendered("write_file", "{\"path\":\"src/main.zig\",\"content\":\"abc\\nxyz\"}", "Writing 2 lines (7 bytes) to \"src/main.zig\"");
     try expectRendered("write_file", "{\"path\":\"empty.txt\",\"content\":\"\"}", "Writing an empty file to \"empty.txt\"");
+    try expectRendered("edit_file", "{\"path\":\"src/main.zig\",\"old_string\":\"x\",\"new_string\":\"y\"}", "Editing \"src/main.zig\"");
     try expectRendered("list_directory", "{\"path\":\".\"}", "Listing \".\"");
     try expectRendered("execute_shell", "{\"command\":\"zig test\",\"working_directory\":\"src\"}", "Running \"zig test\" in \"src\"");
     try expectRendered("grep_search", "{\"query\":\"TODO\"}", "Searching for \"TODO\" in current directory");
@@ -357,6 +368,30 @@ test "does not expose write content in summaries" {
 
     try std.testing.expectEqualStrings("Writing 1 line (12 bytes) to \"secret.txt\"", rendered);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "secret value") == null);
+}
+
+test "does not expose edit content in summaries" {
+    const rendered = try renderToolCall(
+        std.testing.allocator,
+        makeToolCall("edit_file", "{\"path\":\"secret.txt\",\"old_string\":\"old secret\",\"new_string\":\"new secret\"}"),
+    );
+    defer std.testing.allocator.free(rendered);
+
+    try std.testing.expectEqualStrings("Editing \"secret.txt\"", rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "old secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "new secret") == null);
+}
+
+test "edit_file without a path does not expose edit content" {
+    const rendered = try renderToolCall(
+        std.testing.allocator,
+        makeToolCall("edit_file", "{\"old_string\":\"old secret\",\"new_string\":\"new secret\"}"),
+    );
+    defer std.testing.allocator.free(rendered);
+
+    try std.testing.expectEqualStrings("Editing a file", rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "old secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "new secret") == null);
 }
 
 test "renders remaining tool call variants" {

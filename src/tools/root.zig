@@ -57,6 +57,7 @@ pub const registry = blk: {
     break :blk &[_]Tool{
         filesystem.read_file,
         filesystem.write_file,
+        filesystem.edit_file,
         filesystem.list_directory,
         shell.execute_shell,
         search.grep_search,
@@ -114,6 +115,7 @@ pub fn dispatchForMode(name: []const u8, mode: AgentMode) ?Tool {
 test "dispatch returns known tools" {
     try std.testing.expect(dispatch("read_file") != null);
     try std.testing.expect(dispatch("write_file") != null);
+    try std.testing.expect(dispatch("edit_file") != null);
     try std.testing.expect(dispatch("list_directory") != null);
     try std.testing.expect(dispatch("execute_shell") != null);
     try std.testing.expect(dispatch("grep_search") != null);
@@ -129,16 +131,19 @@ test "review registry permits checks and the report tool but not source writes" 
     var has_shell = false;
     var has_report = false;
     var has_write_file = false;
+    var has_edit_file = false;
     var has_save_prd = false;
     for (review_registry) |tool| {
         has_shell = has_shell or std.mem.eql(u8, tool.name, "execute_shell");
         has_report = has_report or std.mem.eql(u8, tool.name, "save_review_results");
         has_write_file = has_write_file or std.mem.eql(u8, tool.name, "write_file");
+        has_edit_file = has_edit_file or std.mem.eql(u8, tool.name, "edit_file");
         has_save_prd = has_save_prd or std.mem.eql(u8, tool.name, "save_prd");
     }
     try std.testing.expect(has_shell);
     try std.testing.expect(has_report);
     try std.testing.expect(!has_write_file);
+    try std.testing.expect(!has_edit_file);
     try std.testing.expect(!has_save_prd);
 }
 
@@ -199,6 +204,11 @@ test "dispatchForMode isolates tool allowlist per mode" {
     try std.testing.expect(dispatchForMode("write_file", .build) != null);
     try std.testing.expect(dispatchForMode("write_file", .review) == null);
     try std.testing.expect(dispatchForMode("write_file", .planning) == null);
+
+    // edit_file is a build-only write like write_file.
+    try std.testing.expect(dispatchForMode("edit_file", .build) != null);
+    try std.testing.expect(dispatchForMode("edit_file", .review) == null);
+    try std.testing.expect(dispatchForMode("edit_file", .planning) == null);
 
     // save_prd only in planning.
     try std.testing.expect(dispatchForMode("save_prd", .planning) != null);

@@ -29,6 +29,35 @@ pub fn writeFile(io: std.Io, path: []const u8, content: []const u8) !void {
     try file.writeStreamingAll(io, content);
 }
 
+pub fn editFile(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    path: []const u8,
+    old_string: []const u8,
+    new_string: []const u8,
+    replace_all: bool,
+) !usize {
+    if (old_string.len == 0) return error.EmptySearchString;
+
+    const content = try readFileAlloc(allocator, io, path, 1024 * 1024);
+    defer allocator.free(content);
+
+    const count = std.mem.count(u8, content, old_string);
+    if (count == 0) return error.NoMatch;
+    if (!replace_all and count > 1) return error.MultipleMatches;
+
+    const updated = try std.mem.replaceOwned(u8, allocator, content, old_string, new_string);
+    defer allocator.free(updated);
+
+    const cwd = std.Io.Dir.cwd();
+    var atomic_file = try cwd.createFileAtomic(io, path, .{ .replace = true });
+    defer atomic_file.deinit(io);
+
+    try atomic_file.file.writeStreamingAll(io, updated);
+    try atomic_file.replace(io);
+    return count;
+}
+
 pub fn listDirectory(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
     const cwd = std.Io.Dir.cwd();
     var dir = try cwd.openDir(io, path, .{ .iterate = true });
@@ -111,4 +140,78 @@ test "listDirectory returns an empty string for an empty directory" {
     const listing = try listDirectory(std.testing.allocator, std.testing.io, path);
     defer std.testing.allocator.free(listing);
     try std.testing.expectEqualStrings("", listing);
+}
+
+test "editFile replaces a single occurrence" {
+    const path = "puny-test-helpers-edit-single.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "hello world");
+
+    const replacements = try editFile(std.testing.allocator, std.testing.io, path, "world", "zig", false);
+    try std.testing.expectEqual(@as(usize, 1), replacements);
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("hello zig", content);
+}
+
+test "editFile errors when old_string is not found" {
+    const path = "puny-test-helpers-edit-no-match.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "hello world");
+
+    try std.testing.expectError(error.NoMatch, editFile(std.testing.allocator, std.testing.io, path, "nope", "x", false));
+}
+
+test "editFile errors on multiple matches unless replace_all is set" {
+    const path = "puny-test-helpers-edit-multi.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "a cat and a cat");
+
+    try std.testing.expectError(error.MultipleMatches, editFile(std.testing.allocator, std.testing.io, path, "cat", "dog", false));
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("a cat and a cat", content);
+}
+
+test "editFile replaces all occurrences when replace_all is set" {
+    const path = "puny-test-helpers-edit-all.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "a cat and a cat");
+
+    const replacements = try editFile(std.testing.allocator, std.testing.io, path, "cat", "dog", true);
+    try std.testing.expectEqual(@as(usize, 2), replacements);
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("a dog and a dog", content);
+}
+
+test "editFile rejects an empty old_string" {
+    const path = "puny-test-helpers-edit-empty.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "hello");
+
+    try std.testing.expectError(error.EmptySearchString, editFile(std.testing.allocator, std.testing.io, path, "", "x", false));
+}
+
+test "editFile preserves the original when the directory is read-only" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path, "target.txt" });
+    defer std.testing.allocator.free(path);
+    try writeFile(std.testing.io, path, "original");
+
+    try tmp.dir.setPermissions(std.testing.io, std.Io.File.Permissions.default_dir.setReadOnly(true));
+    defer tmp.dir.setPermissions(std.testing.io, std.Io.File.Permissions.default_dir) catch {};
+
+    try std.testing.expectError(error.AccessDenied, editFile(std.testing.allocator, std.testing.io, path, "original", "changed", false));
+
+    const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("original", content);
 }
