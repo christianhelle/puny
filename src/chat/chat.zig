@@ -287,6 +287,29 @@ test "executeTool runs write_file on a real file" {
     try std.testing.expectEqualStrings("File written successfully.", result);
 }
 
+test "executeTool runs edit_file on a real file" {
+    const helpers = @import("../tools/helpers.zig");
+    const path = "puny-test-chat-edit.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+
+    try helpers.writeFile(std.testing.io, path, "before");
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const result = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "edit_file", .arguments = "{\"path\":\"puny-test-chat-edit.txt\",\"old_string\":\"before\",\"new_string\":\"after\"}" } },
+        .build,
+    );
+    try std.testing.expectEqualStrings("File edited successfully.", result);
+
+    const content = try helpers.readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("after", content);
+}
+
 test "executeTool enforces mode allowlist" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
