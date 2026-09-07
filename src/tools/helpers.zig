@@ -41,11 +41,14 @@ pub fn editFile(
     const content = try readFileAlloc(allocator, io, path, 1024 * 1024);
     defer allocator.free(content);
 
+    const count = std.mem.count(u8, content, old_string);
+    if (count == 0) return error.NoMatch;
+
     const updated = try std.mem.replaceOwned(u8, allocator, content, old_string, new_string);
     defer allocator.free(updated);
 
     try writeFile(io, path, updated);
-    return 1;
+    return count;
 }
 
 pub fn listDirectory(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
@@ -143,4 +146,12 @@ test "editFile replaces a single occurrence" {
     const content = try readFileAlloc(std.testing.allocator, std.testing.io, path, 1024);
     defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("hello zig", content);
+}
+
+test "editFile errors when old_string is not found" {
+    const path = "puny-test-helpers-edit-no-match.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    try writeFile(std.testing.io, path, "hello world");
+
+    try std.testing.expectError(error.NoMatch, editFile(std.testing.allocator, std.testing.io, path, "nope", "x", false));
 }
