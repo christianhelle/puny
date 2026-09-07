@@ -702,15 +702,18 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         try printReviewResult(ctx.stdout_writer, saved);
     }
 
-    try persistence.saveMessages(ctx);
-    try persistence.saveSessionMeta(ctx);
-    upsertCurrentSession(ctx);
-
+    // A one-shot run ends here, and `finalizeSession` saves exactly the state
+    // this turn just produced. Saving first would serialize the whole
+    // conversation and rewrite the whole index twice over, back to back.
     if (honor_oneshot and ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n", .{});
         finalizeSession(ctx);
         return .{ .cancelled = turn_cancelled, .had_error = turn_had_error, .exited = true };
     }
+
+    try persistence.saveMessages(ctx);
+    try persistence.saveSessionMeta(ctx);
+    upsertCurrentSession(ctx);
 
     return .{ .cancelled = turn_cancelled, .had_error = turn_had_error };
 }
@@ -820,6 +823,27 @@ fn printExit(
     try session_stats.print(io, stdout_writer);
     try stdout_writer.print("\nGoodbye.\n", .{});
     try stdout_writer.flush();
+}
+
+test "indexTimestamp shares the epoch that session file mtimes use" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(dir);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "stamp-probe" });
+    defer std.testing.allocator.free(path);
+
+    // The directory scan takes last_modified straight off a session file,
+    // so a freshly written file is the independent source of truth for what
+    // epoch an index stamp has to be on.
+    var file = try std.Io.Dir.cwd().createFile(std.testing.io, path, .{});
+    file.close(std.testing.io);
+    const stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
+    const file_mtime: i128 = stat.mtime.nanoseconds;
+
+    const stamp: i128 = indexTimestamp(std.testing.io);
+    const skew = if (stamp > file_mtime) stamp - file_mtime else file_mtime - stamp;
+    try std.testing.expect(skew < std.time.ns_per_min);
 }
 
 test "include chat retry tests" {
@@ -1098,11 +1122,19 @@ fn finalizeSession(ctx: *ChatLoopContext) void {
     printExit(ctx.session_stats, ctx.io, ctx.stdout_writer) catch {};
 }
 
+/// The `last_modified` stamp an index entry carries. It has to sit on the
+/// same epoch as the file mtimes the directory scan reads, because the two
+/// paths write entries into the same index and `findLatestSession` compares
+/// them against each other.
+fn indexTimestamp(io: std.Io) u64 {
+    return @intCast(std.Io.Timestamp.now(io, .real).nanoseconds);
+}
+
 /// Refreshes the current session's entry in the sessions index after a content
 /// mutation. Best-effort like saveMessages/saveSessionMeta: a failed index
 /// write must not interrupt the chat loop.
 fn upsertCurrentSession(ctx: *ChatLoopContext) void {
-    const now_ns: u64 = @intCast(std.Io.Timestamp.now(ctx.io, .awake).nanoseconds);
+    const now_ns: u64 = indexTimestamp(ctx.io);
     sessions.upsertSessionInfo(ctx.arena, ctx.io, ctx.session.base, .{
         .id = ctx.session.id,
         .has_prd = core_session.sessionHasPlan(ctx.io, ctx.session.dir),

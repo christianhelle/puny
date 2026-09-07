@@ -129,7 +129,9 @@ pub fn writeAtomically(
 
     if (options.newer_than) |reference_path| {
         if (cwd.statFile(io, reference_path, .{}) catch null) |ref_stat| {
-            const now_ns = std.Io.Timestamp.now(io, .awake).nanoseconds;
+            // Wall clock, not monotonic: this is compared against file
+            // mtimes, which are epoch-based.
+            const now_ns = std.Io.Timestamp.now(io, .real).nanoseconds;
             const desired = std.Io.Timestamp.fromNanoseconds(@max(now_ns, ref_stat.mtime.nanoseconds) + std.time.ns_per_s);
             var stamp_file = cwd.openFile(io, tmp_path, .{ .mode = .read_write }) catch null;
             if (stamp_file) |*f| {
@@ -248,6 +250,34 @@ test "writeAtomically stamps the target newer than the reference" {
     defer std.testing.allocator.free(path);
     const out_stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
     try std.testing.expect(out_stat.mtime.nanoseconds >= ref_stat.mtime.nanoseconds);
+}
+
+test "writeAtomically stamps the target at present time for an ancient reference" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-ancient-ref");
+    defer std.testing.allocator.free(dir);
+
+    // A reference older than the machine's uptime. The stamp is meant to land
+    // a second past the later of the reference and now, so it must stay a
+    // present-day timestamp rather than following a monotonic clock back to
+    // the epoch, which would leave the target looking permanently stale.
+    const reference = try std.fs.path.join(std.testing.allocator, &.{ dir, "reference" });
+    defer std.testing.allocator.free(reference);
+    var ref_file = try std.Io.Dir.cwd().createFile(std.testing.io, reference, .{});
+    ref_file.close(std.testing.io);
+    var ref_rw = try std.Io.Dir.cwd().openFile(std.testing.io, reference, .{ .mode = .read_write });
+    try ref_rw.setTimestamps(std.testing.io, .{ .modify_timestamp = .{ .new = std.Io.Timestamp.fromNanoseconds(1000) } });
+    ref_rw.close(std.testing.io);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "payload", .{ .newer_than = reference });
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "out.json" });
+    defer std.testing.allocator.free(path);
+    const out_stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
+    const now = std.Io.Timestamp.now(std.testing.io, .real).nanoseconds;
+    try std.testing.expect(out_stat.mtime.nanoseconds > now - std.time.ns_per_min);
 }
 
 test "writeAtomically overwrites an existing file" {
