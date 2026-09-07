@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Sweep orphaned staging files left by interrupted atomic writes ([#196](https://github.com/christianhelle/puny/pull/196)) ([@christianhelle](https://github.com/christianhelle/))
 - Make session stats numbers human friendly ([#194](https://github.com/christianhelle/puny/pull/194)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix streamed reasoning breaking one line per delta ([#193](https://github.com/christianhelle/puny/pull/193)) ([@christianhelle](https://github.com/christianhelle/))
 - Use shared computeDelay backoff for chat and model-list retries ([#192](https://github.com/christianhelle/puny/pull/192)) ([@christianhelle](https://github.com/christianhelle/))
