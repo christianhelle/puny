@@ -215,7 +215,6 @@ test "writeAtomically does not clobber a stale temp file" {
     try std.testing.expectEqualStrings("STALE", stale);
 }
 
-
 test "writeAtomically restricts permissions to owner-only" {
     if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
 
