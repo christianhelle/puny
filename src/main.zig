@@ -8,6 +8,7 @@ const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const core_sess = @import("core/session.zig");
+const crash = @import("core/crash.zig");
 const AgentMode = @import("core/mode.zig").AgentMode;
 const git_root = @import("core/git_root.zig");
 const sessions = @import("sessions/sessions.zig");
@@ -24,6 +25,7 @@ const skills = @import("skills/skills.zig");
 const tools = @import("tools/root.zig");
 const branch_review = @import("review/review.zig");
 const welcome = @import("tui/welcome.zig");
+const crash_prompt = @import("tui/crash_prompt.zig");
 const ansi = @import("tui/ansi.zig");
 const vt = @import("tui/vt.zig");
 const update_check = @import("update_check.zig");
@@ -38,8 +40,9 @@ const ChatLog = session.ChatLog;
 
 pub fn main(init: std.process.Init) !u8 {
     return run(init) catch |err| {
-        if (!branch_review.isActive()) return err;
         const arena = init.arena.allocator();
+        crash.record(init.io, arena, init.environ_map, @errorName(err));
+        if (!branch_review.isActive()) return err;
         const reason = try std.fmt.allocPrint(arena, "Review execution failed: {s}", .{@errorName(err)});
         const saved = branch_review.finish(arena, init.io, reason) catch |write_err| {
             branch_review.reset();
@@ -241,6 +244,7 @@ fn run(init: std.process.Init) !u8 {
     // The session id is generated before the provider so every request,
     // the model list included, is attributed to this conversation.
     const session_id = if (restore_target) |s| s.id else try core_sess.generateUuid(random, arena);
+    crash.setContext(.{ .session_id = session_id });
 
     var prov: provider.Provider = undefined;
     var selected_provider: ModelProvider = undefined;
@@ -263,6 +267,11 @@ fn run(init: std.process.Init) !u8 {
         &reasoning_effort,
         session_id,
     );
+    crash.setContext(.{
+        .session_id = session_id,
+        .provider = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
+        .model = model_key,
+    });
 
     var session_restored = false;
     var restore_incomplete = false;
@@ -304,6 +313,15 @@ fn run(init: std.process.Init) !u8 {
     if (!parsed.oneshot and !parsed.mock) {
         update_check.spawnBackgroundCheck(init.io, arena, init.environ_map);
     }
+
+    crash_prompt.offer(arena, init.io, init.environ_map, .{
+        .oneshot = parsed.oneshot,
+        .review = parsed.review,
+        .orchestrate = parsed.orchestrate,
+        .mock = parsed.mock,
+        .prefilled_prompt = parsed.prompt != null,
+        .terminal = std.Io.File.stdin().isTty(init.io) catch false,
+    }, stdout_writer);
 
     if (restore_target) |s| {
         const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
@@ -407,6 +425,7 @@ fn run(init: std.process.Init) !u8 {
     };
 
     var chat_session = session.ChatSession.init(ctx);
+    crash.setPhase("chat turn");
     try chat_session.run();
 
     // After the interactive session ends, surface a pending update notice

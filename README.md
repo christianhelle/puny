@@ -18,6 +18,8 @@ and stays out of your way.
 - **Session management**: each run, `/new`, or `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
 - **Branch review mode**: review committed branch changes against the latest `origin/main` and produce an automation-ready merge-worthiness report.
 - **Orchestrate loop**: `/orchestrate` and `--orchestrate` run implement → review → fix until the branch is merge worthy, each phase from a fresh context.
+- **Crash reports**: a run that fails writes a small markdown report to the config
+  directory; the next interactive start offers to file it as a GitHub issue.
 - **Tool calling**: the LLM can use built-in tools to work with your project.
 - **Skills system**: extend Puny with reusable prompt-engineering skills stored in markdown files.
 - **Built-in tools**:
@@ -849,6 +851,40 @@ Run `/review` inside a chat to perform the same branch review as `--review`
 without exiting Puny. After the report is written, the session remains in
 read-only review mode for follow-up questions. Use `/build` to allow source
 changes again or `/plan` to enter planning mode.
+
+### Crash reports
+
+When a run fails, puny writes a crash report to
+`puny_crash_<session id>.md` in its config directory
+(`%APPDATA%\puny\crashes` on Windows, `$XDG_CONFIG_HOME/puny/crashes` or
+`~/.config/puny/crashes` elsewhere). The next plain interactive start finds
+pending reports and asks what to do with each one:
+
+- **Submit it as a GitHub issue** files it against `christianhelle/puny` using
+  the `gh` CLI, so it goes out under your own GitHub account. puny neither
+  ships nor asks for a token. If `gh` is missing or not authenticated, the
+  report is kept and the path is printed.
+- **Show me the report first** prints the whole report so you can see exactly
+  what would be posted.
+- **Delete it** removes the file.
+- **Not now** leaves it for later.
+
+Configuration problems are not crashes: a missing API key, an unresolvable
+config directory, or a bad config path already print how to fix them, so they
+never produce a report. Neither does interrupting a run with Ctrl+C.
+
+A report holds the error name, what puny was doing, the version and commit,
+the platform and build mode, and the session id, provider and model. It never
+contains prompts, conversation content, file paths, command-line values, or
+credentials. The five most recent reports are kept; older ones are pruned.
+
+You are never asked during a `--oneshot`, `--review`, `--orchestrate`, `--mock`
+or `--prompt` run, or when stdin is not a terminal, so automation is never
+blocked by the question.
+
+Because release builds are `ReleaseSmall`, runtime safety checks are compiled
+out: reports cover failures that surface as returned errors, not memory-safety
+panics or segfaults.
 
 ## Development / testing
 

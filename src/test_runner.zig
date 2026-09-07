@@ -4,6 +4,9 @@
 test "include core session tests" {
     _ = @import("core/session.zig");
 }
+test "include core crash tests" {
+    _ = @import("core/crash.zig");
+}
 test "include core mode tests" {
     _ = @import("core/mode.zig");
 }
@@ -232,6 +235,9 @@ test "include tui.model_picker tests" {
 }
 test "include tui.provider_picker tests" {
     _ = @import("tui/provider_picker.zig");
+}
+test "include tui.crash_prompt tests" {
+    _ = @import("tui/crash_prompt.zig");
 }
 test "include tui.terminal tests" {
     _ = @import("tui/terminal.zig");
