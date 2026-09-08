@@ -1,6 +1,8 @@
 const std = @import("std");
 const version = @import("../version.zig");
 const provider = @import("../providers/provider.zig");
+const openai = @import("../providers/openai.zig");
+const effort_picker = @import("../tui/effort_picker.zig");
 
 pub const default_max_iterations: usize = 5;
 
@@ -11,6 +13,7 @@ pub const Options = struct {
     api_key_file: ?[]const u8 = null,
     model: ?[]const u8 = null,
     model_explicit: bool = false,
+    effort: ?openai.ReasoningEffort = null,
     prompt: ?[]const u8 = null,
     prompt_file: ?[]const u8 = null,
     oneshot: bool = false,
@@ -144,6 +147,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.debug = true;
         } else if (std.mem.eql(u8, arg, "--chat-log")) {
             opts.chat_log = true;
+        } else if (std.mem.eql(u8, arg, "--effort")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.effort = effort_picker.parseEffort(args[i]) orelse
+                fatal(io, "Unknown reasoning effort '{s}'. Valid levels: default, none, minimal, low, medium, high, xhigh.\n\n", .{args[i]});
         } else if (std.mem.eql(u8, arg, "--no-skills")) {
             opts.no_skills = true;
         } else if (std.mem.eql(u8, arg, "--session")) {
@@ -641,4 +649,17 @@ test "printHelp prints the version and usage" {
 test "printVersion prints the puny version line" {
     // printVersion writes to real stdout which is not drainable in test context.
     return error.SkipZigTest;
+}
+
+test "parseArgs sets effort from flag" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--effort", "low" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .low), opts.effort);
 }
