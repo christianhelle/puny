@@ -364,12 +364,319 @@ validate_args() {
   fi
 }
 
+ROLE_DIR=""
+PROMPT_DIR=""
+declare -a ROLE_ID=()
+declare -a ROLE_NAME=()
+declare -a ROLE_FILE=()
+
+# Loads the role briefs into parallel arrays, in seat order. Smoke runs use a
+# separate, keyword-safe set because the real briefs contain words the mock
+# provider treats as tool-call triggers.
+load_roles() {
+  local file base id name
+  local -a wanted=()
+  local want found i
+
+  ROLE_DIR="$ASSET_DIR/roles"
+  PROMPT_DIR="$ASSET_DIR/prompts"
+  if [[ "$SMOKE" -eq 1 ]]; then
+    ROLE_DIR="$ASSET_DIR/smoke/roles"
+    PROMPT_DIR="$ASSET_DIR/smoke/prompts"
+  fi
+
+  [[ -d "$ROLE_DIR" ]] || die "Role directory not found: $ROLE_DIR"
+  [[ -d "$PROMPT_DIR" ]] || die "Prompt directory not found: $PROMPT_DIR"
+
+  local -a all_id=() all_name=() all_file=()
+  for file in "$ROLE_DIR"/[0-9][0-9]-*.md; do
+    [[ -f "$file" ]] || continue
+    base="$(basename "$file" .md)"
+    id="${base#[0-9][0-9]-}"
+    name="$(head -1 "$file" | sed -e 's/^#[[:space:]]*//')"
+    [[ -n "$name" ]] || name="$id"
+    all_id+=("$id")
+    all_name+=("$name")
+    all_file+=("$file")
+  done
+
+  [[ "${#all_id[@]}" -gt 0 ]] || die "No role briefs found in $ROLE_DIR"
+
+  if [[ -n "$ROLE_FILTER" ]]; then
+    IFS=',' read -r -a wanted <<<"$ROLE_FILTER"
+    for want in "${wanted[@]}"; do
+      want="$(echo "$want" | tr -d '[:space:]')"
+      [[ -n "$want" ]] || continue
+      found=0
+      for i in "${!all_id[@]}"; do
+        if [[ "${all_id[$i]}" == "$want" ]]; then
+          ROLE_ID+=("${all_id[$i]}")
+          ROLE_NAME+=("${all_name[$i]}")
+          ROLE_FILE+=("${all_file[$i]}")
+          found=1
+          break
+        fi
+      done
+      [[ "$found" -eq 1 ]] || die "Unknown role '$want'. Available: ${all_id[*]}"
+    done
+    MEMBER_COUNT="${#ROLE_ID[@]}"
+    [[ "$MEMBER_COUNT" -gt 0 ]] || die "--roles selected no roles"
+  else
+    if [[ "$MEMBER_COUNT" -gt "${#all_id[@]}" ]]; then
+      die "Only ${#all_id[@]} role briefs exist in $ROLE_DIR, cannot seat $MEMBER_COUNT members"
+    fi
+    for ((i = 0; i < MEMBER_COUNT; i++)); do
+      ROLE_ID+=("${all_id[$i]}")
+      ROLE_NAME+=("${all_name[$i]}")
+      ROLE_FILE+=("${all_file[$i]}")
+    done
+  fi
+
+  if [[ $((MEMBER_COUNT % 2)) -ne 0 ]]; then
+    log_warning "Member count $MEMBER_COUNT is odd, so one seat has no adversarial opposite"
+  fi
+}
+
+declare -a MEMBER_PROVIDER=()
+declare -a MEMBER_MODEL=()
+declare -a MEMBER_PAIR=()
+declare -a MEMBER_SLUG=()
+CHAIR_PROVIDER=""
+CHAIR_MODEL=""
+
+# Assigns models round-robin across seats and pairs seat i with seat i XOR 1.
+seat_members() {
+  local -a specs=()
+  local i pair spec
+
+  if [[ "$SMOKE" -eq 1 ]]; then
+    specs=("mock")
+  elif [[ -n "$MODEL_SPECS" ]]; then
+    IFS=',' read -r -a specs <<<"$MODEL_SPECS"
+  else
+    specs=("")
+    log_info "No --models given; every member uses the model from your puny config"
+  fi
+
+  for i in "${!specs[@]}"; do
+    specs[$i]="$(echo "${specs[$i]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  done
+
+  if [[ "$SMOKE" -eq 0 ]]; then
+    if [[ "${#specs[@]}" -eq 1 ]] && [[ -n "${specs[0]}" ]]; then
+      log_warning "Only one model given; members will differ by role brief alone"
+    elif [[ $((${#specs[@]} % 2)) -ne 0 ]] && [[ "${#specs[@]}" -gt 1 ]]; then
+      log_warning "An odd number of models means some adversarial pairs share a model"
+    fi
+  fi
+
+  for ((i = 0; i < MEMBER_COUNT; i++)); do
+    spec="${specs[$((i % ${#specs[@]}))]}"
+    if [[ "$SMOKE" -eq 1 ]]; then
+      SPEC_PROVIDER=""
+      SPEC_MODEL=""
+    else
+      split_spec "$spec"
+    fi
+    MEMBER_PROVIDER+=("$SPEC_PROVIDER")
+    MEMBER_MODEL+=("$SPEC_MODEL")
+    MEMBER_SLUG+=("$(printf '%02d-%s' "$i" "${ROLE_ID[$i]}")")
+
+    pair=$((i ^ 1))
+    if [[ "$pair" -lt "$MEMBER_COUNT" ]]; then
+      MEMBER_PAIR+=("$pair")
+    else
+      MEMBER_PAIR+=("-1")
+    fi
+  done
+
+  if [[ "$SMOKE" -eq 1 ]]; then
+    CHAIR_PROVIDER=""
+    CHAIR_MODEL=""
+  elif [[ -n "$CHAIR_SPEC" ]]; then
+    split_spec "$CHAIR_SPEC"
+    CHAIR_PROVIDER="$SPEC_PROVIDER"
+    CHAIR_MODEL="$SPEC_MODEL"
+  else
+    CHAIR_PROVIDER="${MEMBER_PROVIDER[0]}"
+    CHAIR_MODEL="${MEMBER_MODEL[0]}"
+  fi
+}
+
+SUBJECT_PATH=""
+SUBJECT_LABEL=""
+
+slugify() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-40
+}
+
+init_out_dir() {
+  local stamp slug
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+  if [[ -z "$OUT_DIR" ]]; then
+    if [[ -n "$SUBJECT_FILE" ]]; then
+      slug="$(slugify "$(basename "$SUBJECT_FILE" .md)")"
+    elif [[ -n "$SUBJECT_DIFF" ]]; then
+      slug="$(slugify "diff-$SUBJECT_DIFF")"
+    else
+      slug="text"
+    fi
+    [[ -n "$slug" ]] || slug="subject"
+    OUT_DIR=".council/${stamp}-${slug}"
+  fi
+
+  mkdir -p "$OUT_DIR/round1" "$OUT_DIR/round2" "$OUT_DIR/round3"
+}
+
+# Writes the exact bytes every member will see into <out>/subject.md.
+resolve_subject() {
+  local bytes
+
+  SUBJECT_PATH="$OUT_DIR/subject.md"
+
+  if [[ -n "$SUBJECT_FILE" ]]; then
+    cat "$SUBJECT_FILE" >"$SUBJECT_PATH"
+    SUBJECT_LABEL="file $SUBJECT_FILE"
+    [[ -n "$SUBJECT_KIND" ]] || {
+      case "$SUBJECT_FILE" in
+      *.md | *.markdown) SUBJECT_KIND="plan" ;;
+      *.diff | *.patch) SUBJECT_KIND="diff" ;;
+      *) SUBJECT_KIND="text" ;;
+      esac
+    }
+  elif [[ -n "$SUBJECT_DIFF" ]]; then
+    git rev-parse --git-dir >/dev/null 2>&1 || die "--diff needs to run inside a git repository"
+    git rev-parse --verify "$SUBJECT_DIFF" >/dev/null 2>&1 ||
+      die "--diff base '$SUBJECT_DIFF' is not a valid revision"
+    {
+      echo "Summary of the change:"
+      echo
+      git diff --stat "$SUBJECT_DIFF...HEAD"
+      echo
+      echo "Full diff:"
+      echo
+      git diff "$SUBJECT_DIFF...HEAD"
+    } >"$SUBJECT_PATH"
+    SUBJECT_LABEL="git diff $SUBJECT_DIFF...HEAD"
+    SUBJECT_KIND="diff"
+  else
+    printf '%s\n' "$SUBJECT_TEXT" >"$SUBJECT_PATH"
+    SUBJECT_LABEL="inline text"
+    [[ -n "$SUBJECT_KIND" ]] || SUBJECT_KIND="text"
+  fi
+
+  bytes="$(wc -c <"$SUBJECT_PATH" | tr -d '[:space:]')"
+  [[ "$bytes" -gt 0 ]] || die "The subject is empty"
+  if [[ "$bytes" -gt 204800 ]]; then
+    log_warning "Subject is ${bytes} bytes; large subjects can exceed a model's context window"
+  fi
+  log_info "Subject: $SUBJECT_LABEL (${bytes} bytes, kind: $SUBJECT_KIND)"
+}
+
+# Replaces whole-line block markers in a single pass, so that text pulled in by
+# one marker is never rescanned for another. Inserted content is untrusted model
+# output, and a second pass over it would let it expand markers of its own.
+splice_all() {
+  local template="$1" out="$2"
+  local m1="${3:-}" f1="${4:-}" m2="${5:-}" f2="${6:-}"
+  local m3="${7:-}" f3="${8:-}" m4="${9:-}" f4="${10:-}"
+
+  awk -v m1="$m1" -v f1="$f1" -v m2="$m2" -v f2="$f2" \
+    -v m3="$m3" -v f3="$f3" -v m4="$m4" -v f4="$f4" '
+    function emit(f,   line) { while ((getline line < f) > 0) print line; close(f) }
+    {
+      if (m1 != "" && $0 == m1) { emit(f1); next }
+      if (m2 != "" && $0 == m2) { emit(f2); next }
+      if (m3 != "" && $0 == m3) { emit(f3); next }
+      if (m4 != "" && $0 == m4) { emit(f4); next }
+      print
+    }
+  ' "$template" >"$out"
+}
+
+# Substitutes the short scalar markers, then checks that nothing but the known
+# block markers is left. This runs on the template only, before any subject or
+# peer text is spliced in, so a subject that happens to contain "{{SUBJECT}}"
+# cannot trip the check.
+render_scalars() {
+  local template="$1" out="$2" member_n="$3" role_name="$4" pair_name="$5" n_members="$6"
+  local leftover
+
+  sed \
+    -e "s|{{MEMBER_N}}|${member_n}|g" \
+    -e "s|{{ROLE_NAME}}|${role_name}|g" \
+    -e "s|{{PAIR_NAME}}|${pair_name}|g" \
+    -e "s|{{N_MEMBERS}}|${n_members}|g" \
+    "$template" >"$out"
+
+  leftover="$(grep -o '{{[A-Z_0-9]*}}' "$out" | sort -u |
+    grep -vxE '\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2)\}\}' || true)"
+
+  if [[ -n "$leftover" ]]; then
+    die "Unsubstituted marker(s) in $(basename "$template"): $(echo "$leftover" | tr '\n' ' ')"
+  fi
+}
+
+# The mock provider dispatches tool calls and faults on whole-word matches in the
+# last user message, so a mock run whose prompt contains one of these silently
+# returns something other than a critique. Refuse rather than debug it later.
+MOCK_TRIGGER_WORDS="long fast slow echo empty partial usage error timeout fail read search shell review table markdown reasoning"
+guard_mock_keywords() {
+  local file="$1" word hits=""
+
+  for word in $MOCK_TRIGGER_WORDS; do
+    if grep -qiwE "$word" "$file"; then
+      hits="$hits $word"
+    fi
+  done
+
+  if [[ -n "$hits" ]]; then
+    die "Mock trigger word(s) in $(basename "$file"):$hits -- fix the smoke fixtures"
+  fi
+}
+
+compose_round1_prompt() {
+  local index="$1" out="$2"
+  local template scratch pair_name
+
+  template="$PROMPT_DIR/round1-${SUBJECT_KIND}.md"
+  [[ -f "$template" ]] || template="$PROMPT_DIR/round1.md"
+  [[ -f "$template" ]] || die "No round-one template for kind '$SUBJECT_KIND' in $PROMPT_DIR"
+
+  pair_name="none"
+  if [[ "${MEMBER_PAIR[$index]}" -ge 0 ]]; then
+    pair_name="${ROLE_NAME[${MEMBER_PAIR[$index]}]}"
+  fi
+
+  scratch="${out}.scalars"
+  render_scalars "$template" "$scratch" \
+    "$(printf '%02d' "$index")" "${ROLE_NAME[$index]}" "$pair_name" "$MEMBER_COUNT"
+  splice_all "$scratch" "$out" \
+    "{{ROLE_BRIEF}}" "${ROLE_FILE[$index]}" \
+    "{{SUBJECT}}" "$SUBJECT_PATH"
+  rm -f "$scratch"
+
+  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$out"
+  return 0
+}
+
 main() {
   init_colors
   parse_args "$@"
   check_dependencies
   validate_args
   resolve_binary
+  load_roles
+  seat_members
+  init_out_dir
+  resolve_subject
+
+  local i
+  for ((i = 0; i < MEMBER_COUNT; i++)); do
+    compose_round1_prompt "$i" "$OUT_DIR/round1/${MEMBER_SLUG[$i]}.prompt.md"
+  done
+  log_success "Composed $MEMBER_COUNT round-one prompts in $OUT_DIR/round1"
 }
 
 main "$@"
