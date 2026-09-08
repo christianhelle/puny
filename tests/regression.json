@@ -389,5 +389,24 @@
     "skills": [
       { "name": "mock-skill", "body": "mock-skill-body" }
     ]
+  },
+  {
+    "name": "Reasoning effort flag reaches the session",
+    "args": ["--mock", "--model", "mock-model", "--effort", "low", "--prompt", "hello world", "--oneshot"],
+    "expect": ["low", "mock response"],
+    "not_expect": []
+  },
+  {
+    "name": "Chat log no longer forces high reasoning effort",
+    "args": ["--mock", "--model", "mock-model", "--chat-log", "--effort", "low", "--prompt", "hello world", "--oneshot"],
+    "expect": ["low", "mock response"],
+    "not_expect": ["high"]
+  },
+  {
+    "name": "An unknown reasoning effort is rejected",
+    "args": ["--mock", "--model", "mock-model", "--effort", "enthusiastic", "--prompt", "hello world", "--oneshot"],
+    "expect": ["Unknown reasoning effort 'enthusiastic'"],
+    "not_expect": ["mock response"],
+    "exit_code": 1
   }
 ]
