@@ -256,6 +256,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -k, --api-key <key>          Provider API token (CLI > file > env > config; session only)
         \\      --api-key-file <path>    Read API token from file (below --api-key in precedence)
         \\  -m, --model <id>             Model identifier (skip picker if found in running models)
+        \\      --effort <level>         Reasoning effort: default, none, minimal, low, medium, high, xhigh (CLI > env > config)
         \\  -p, --prompt <text>          Pre-fill prompt as first user message
         \\      --prompt-file <path|url> Read first prompt from a file or URL
         \\  -1, --oneshot, --one-shot    Exit after processing the prompt (requires --prompt or --prompt-file)
