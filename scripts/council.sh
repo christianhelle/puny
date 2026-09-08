@@ -895,6 +895,84 @@ member_ok() {
   [[ "$(read_status_field "$OUT_DIR/$1/${MEMBER_SLUG[$2]}.status" 1)" == "ok" ]]
 }
 
+# Concatenates every other surviving member's round-one critique, in seat order
+# so that the ordering never hints at which model is which, and truncated so one
+# verbose member cannot crowd out the rest of the council.
+build_peer_file() {
+  local self="$1" out="$2"
+  shift 2
+  local -a survivors=("$@")
+  local peer src bytes
+
+  : >"$out"
+  for peer in "${survivors[@]}"; do
+    [[ "$peer" -ne "$self" ]] || continue
+    src="$OUT_DIR/round1/${MEMBER_SLUG[$peer]}.md"
+    [[ -s "$src" ]] || continue
+
+    printf -- '--- Member %02d (%s) [%s] ---\n\n' \
+      "$peer" "${ROLE_NAME[$peer]}" "$(model_label "$peer")" >>"$out"
+
+    bytes="$(wc -c <"$src" | tr -d '[:space:]')"
+    if [[ "$bytes" -gt "$MAX_PEER_CHARS" ]]; then
+      head -c "$MAX_PEER_CHARS" "$src" >>"$out"
+      printf '\n[TRUNCATED: %d chars omitted]\n' "$((bytes - MAX_PEER_CHARS))" >>"$out"
+    else
+      cat "$src" >>"$out"
+    fi
+    printf '\n\n' >>"$out"
+  done
+
+  [[ -s "$out" ]] || printf '(no other member reported)\n' >"$out"
+}
+
+compose_round2_prompt() {
+  local index="$1" out="$2"
+  shift 2
+  local -a survivors=("$@")
+  local template scratch peers pair pair_name="none" pair_alive=0 p
+
+  pair="${MEMBER_PAIR[$index]}"
+  if [[ "$pair" -ge 0 ]]; then
+    for p in "${survivors[@]}"; do
+      [[ "$p" -eq "$pair" ]] && pair_alive=1 && break
+    done
+  fi
+
+  if [[ "$pair_alive" -eq 1 ]]; then
+    template="$PROMPT_DIR/round2.md"
+    pair_name="${ROLE_NAME[$pair]}"
+  else
+    template="$PROMPT_DIR/round2-nopair.md"
+    [[ "$pair" -ge 0 ]] && log_info "Seat $(printf '%02d' "$index") lost its opposite; it will attack the strongest claims instead"
+  fi
+  [[ -f "$template" ]] || die "Round-two template not found: $template"
+
+  peers="$TEMP_ROOT/peers-$(printf '%02d' "$index").md"
+  build_peer_file "$index" "$peers" "${survivors[@]}"
+
+  scratch="${out}.scalars"
+  render_scalars "$template" "$scratch" \
+    "$(printf '%02d' "$index")" "${ROLE_NAME[$index]}" "$pair_name" "$MEMBER_COUNT"
+  splice_all "$scratch" "$out" \
+    "{{ROLE_BRIEF}}" "${ROLE_FILE[$index]}" \
+    "{{SUBJECT}}" "$SUBJECT_PATH" \
+    "{{OWN_ROUND1}}" "$OUT_DIR/round1/${MEMBER_SLUG[$index]}.md" \
+    "{{PEER_CRITIQUES}}" "$peers"
+  rm -f "$scratch"
+
+  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$out"
+  return 0
+}
+
+warn_if_prompt_large() {
+  local file="$1" bytes
+  bytes="$(wc -c <"$file" | tr -d '[:space:]')"
+  if [[ "$bytes" -gt 204800 ]]; then
+    log_warning "$(basename "$file") is ${bytes} bytes and may exceed the model's context window"
+  fi
+}
+
 main() {
   init_colors
   parse_args "$@"
@@ -937,6 +1015,18 @@ main() {
   if [[ "${#survivors[@]}" -lt "$MIN_MEMBERS" ]]; then
     log_error "Only ${#survivors[@]} member(s) reported, below the --min-members floor of $MIN_MEMBERS"
     exit 2
+  fi
+
+  local -a round2_seats=()
+  if [[ "$SKIP_CROSS" -eq 1 ]]; then
+    log_info "Skipping round two"
+  else
+    for i in "${survivors[@]}"; do
+      compose_round2_prompt "$i" "$OUT_DIR/round2/${MEMBER_SLUG[$i]}.prompt.md" "${survivors[@]}"
+      warn_if_prompt_large "$OUT_DIR/round2/${MEMBER_SLUG[$i]}.prompt.md"
+      round2_seats+=("$i")
+    done
+    run_round round2 "${round2_seats[@]}"
   fi
 }
 
