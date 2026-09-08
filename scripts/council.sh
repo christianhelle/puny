@@ -661,6 +661,240 @@ compose_round1_prompt() {
   return 0
 }
 
+TEMP_ROOT=""
+SEED_CONFIG=""
+
+cleanup() {
+  if [[ -n "$TEMP_ROOT" ]] && [[ -d "$TEMP_ROOT" ]] && [[ "$KEEP_TEMP" -eq 0 ]]; then
+    rm -rf "$TEMP_ROOT"
+  fi
+}
+
+# puny is a native binary, so paths handed to it as arguments or environment
+# values must be in the host's own form, not the shell's.
+to_native() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    echo "$1"
+  fi
+}
+
+# Finds the real config.json so each member's isolated config directory can be
+# seeded with it. Without a seed, puny treats a missing config as a first run and
+# starts an interactive setup that would hang with no terminal attached.
+find_seed_config() {
+  local candidate
+
+  for candidate in \
+    "${XDG_CONFIG_HOME:-}/puny/config.json" \
+    "${APPDATA:-}/puny/config.json" \
+    "$HOME/.config/puny/config.json"; do
+    case "$candidate" in
+    /puny/config.json) continue ;;
+    esac
+    if [[ -f "$candidate" ]]; then
+      SEED_CONFIG="$candidate"
+      return
+    fi
+  done
+
+  if [[ "$ISOLATE_HOME" -eq 1 ]]; then
+    log_warning "No puny config.json found; sharing the real config directory instead of isolating"
+    log_warning "Members may race on the session index, and your session history will grow"
+    ISOLATE_HOME=0
+  fi
+}
+
+now_ms() {
+  local raw
+  raw="$(date -u +%s%3N 2>/dev/null || true)"
+  if [[ "$raw" =~ ^[0-9]+$ ]]; then
+    echo "$raw"
+  else
+    echo "$(($(date -u +%s) * 1000))"
+  fi
+}
+
+strip_ansi() {
+  # puny emits only SGR and simple cursor sequences, all CSI with an alphabetic
+  # final byte, so a narrow pattern is safer here than a maximal one.
+  sed -e $'s/\033\\[[0-9;?]*[a-zA-Z]//g' -e 's/\r//g' "$1"
+}
+
+# The chat log holds the model's raw markdown. Stdout does not: puny renders
+# markdown to the terminal before printing it, so bold, headings and tables are
+# destroyed and every line is hard-wrapped at 80 columns when piped.
+extract_from_chat_log() {
+  local log="$1"
+
+  [[ -s "$log" ]] || return 1
+
+  awk '
+    /^\[(USER|ASSISTANT|REASONING|TOOL_CALL|TOOL_RESULT)\]$/ {
+      if ($0 == "[ASSISTANT]") { buf = ""; capture = 1 } else { capture = 0 }
+      next
+    }
+    capture { buf = buf $0 "\n" }
+    END { printf "%s", buf }
+  ' "$log"
+}
+
+# Degraded fallback. Slices between the last thinking indicator and whichever
+# trailer appears first; the token footer is absent when a turn fails, so several
+# end anchors are needed.
+extract_from_stdout() {
+  local raw="$1"
+
+  strip_ansi "$raw" | awk '
+    /^Thinking\.\.\.$/           { buf = ""; capture = 1; next }
+    /^Thought for /              { capture = 0; next }
+    /^⏱ tokens: /                { capture = 0; next }
+    /^─── Session: /             { capture = 0 }
+    /^Goodbye\.$/                { capture = 0 }
+    capture && /^🔧 /            { next }
+    capture && /^Skill: /        { next }
+    capture                      { buf = buf $0 "\n" }
+    END { printf "%s", buf }
+  '
+}
+
+trim_blank_edges() {
+  awk 'BEGIN { started = 0 }
+    { lines[NR] = $0; if ($0 ~ /[^[:space:]]/) { if (!started) { first = NR; started = 1 } last = NR } }
+    END { if (started) for (i = first; i <= last; i++) print lines[i] }' "$1"
+}
+
+# Runs one member and writes <dest>/<slug>.md plus its raw logs and a status
+# line. Never exits the script: a member that fails is recorded and skipped.
+run_one() {
+  local slug="$1" provider="$2" model="$3" prompt="$4" dest="$5"
+  local work home status="ok" code=0 started ended answer_bytes
+  local -a cmd=()
+
+  work="$TEMP_ROOT/$slug"
+  mkdir -p "$work"
+
+  started="$(now_ms)"
+
+  if [[ "$TIMEOUT_SECS" -gt 0 ]]; then
+    cmd+=(timeout -s TERM -k 10 "$TIMEOUT_SECS")
+  fi
+  cmd+=(env)
+  if [[ "$ISOLATE_HOME" -eq 1 ]]; then
+    home="$work/home"
+    mkdir -p "$home/puny"
+    cp "$SEED_CONFIG" "$home/puny/config.json"
+    cmd+=("XDG_CONFIG_HOME=$(to_native "$home")" "APPDATA=$(to_native "$home")")
+  fi
+  cmd+=("$PUNY_BIN_PATH" --oneshot --no-skills --prompt-file "$(to_native "$prompt")")
+  [[ "$USE_CHAT_LOG" -eq 1 ]] && cmd+=(--chat-log)
+  [[ "$SMOKE" -eq 1 ]] && cmd+=(--mock)
+  [[ -n "$provider" ]] && cmd+=(--provider "$provider")
+  [[ -n "$model" ]] && cmd+=(-m "$model")
+
+  set +e
+  (cd "$work" && "${cmd[@]}") >"$dest/$slug.stdout.log" 2>"$dest/$slug.stderr.log"
+  code=$?
+  set -e
+
+  ended="$(now_ms)"
+
+  if [[ "$code" -eq 124 ]] || [[ "$code" -eq 137 ]]; then
+    status="timeout"
+  elif [[ "$code" -ne 0 ]]; then
+    status="exit:$code"
+  fi
+
+  if [[ -f "$work/puny_chat.log" ]]; then
+    cp "$work/puny_chat.log" "$dest/$slug.chat.log"
+  fi
+
+  # An exit code of 0 does not mean the turn produced anything: a plain one-shot
+  # run always exits 0, even when the provider fails outright. The size of what
+  # we could extract is the only honest success signal.
+  : >"$dest/$slug.md"
+  if [[ "$USE_CHAT_LOG" -eq 1 ]] && [[ -s "$dest/$slug.chat.log" ]]; then
+    extract_from_chat_log "$dest/$slug.chat.log" >"$dest/$slug.md.raw" || true
+  else
+    extract_from_stdout "$dest/$slug.stdout.log" >"$dest/$slug.md.raw" || true
+  fi
+  trim_blank_edges "$dest/$slug.md.raw" >"$dest/$slug.md"
+  rm -f "$dest/$slug.md.raw"
+
+  answer_bytes="$(wc -c <"$dest/$slug.md" | tr -d '[:space:]')"
+  if [[ "$answer_bytes" -lt "$MIN_ANSWER_CHARS" ]] && [[ "$status" == "ok" ]]; then
+    status="extract-empty"
+  fi
+
+  printf '%s\t%s\t%s\t%s\n' "$status" "$code" "$((ended - started))" "$answer_bytes" \
+    >"$dest/$slug.status"
+}
+
+wait_for_slot() {
+  while [[ "$(jobs -rp | wc -l)" -ge "$JOBS" ]]; do
+    sleep 0.2
+  done
+}
+
+read_status_field() {
+  local file="$1" field="$2"
+  [[ -f "$file" ]] || {
+    echo ""
+    return
+  }
+  cut -f"$field" <"$file"
+}
+
+# Fans members out, capped at --jobs, then reports each seat's outcome.
+run_round() {
+  local round="$1"
+  shift
+  local -a indices=("$@")
+  local dest="$OUT_DIR/$round"
+  local i slug status ok=0 bad=0
+
+  log_info "Round $round: ${#indices[@]} member(s), up to $JOBS at once"
+
+  for i in "${indices[@]}"; do
+    wait_for_slot
+    run_one "${MEMBER_SLUG[$i]}" "${MEMBER_PROVIDER[$i]}" "${MEMBER_MODEL[$i]}" \
+      "$dest/${MEMBER_SLUG[$i]}.prompt.md" "$dest" &
+  done
+  wait
+
+  for i in "${indices[@]}"; do
+    slug="${MEMBER_SLUG[$i]}"
+    status="$(read_status_field "$dest/$slug.status" 1)"
+    if [[ "$status" == "ok" ]]; then
+      log_success "$round $slug ($(model_label "$i"))"
+      ok=$((ok + 1))
+    else
+      log_error "$round $slug ($(model_label "$i")): $status"
+      bad=$((bad + 1))
+    fi
+  done
+
+  log_info "$round: $ok passed, $bad failed (of ${#indices[@]})"
+}
+
+model_label() {
+  local i="$1"
+  if [[ "$SMOKE" -eq 1 ]]; then
+    echo "mock"
+  elif [[ -n "${MEMBER_PROVIDER[$i]}" ]]; then
+    echo "${MEMBER_PROVIDER[$i]}:${MEMBER_MODEL[$i]}"
+  elif [[ -n "${MEMBER_MODEL[$i]}" ]]; then
+    echo "${MEMBER_MODEL[$i]}"
+  else
+    echo "config default"
+  fi
+}
+
+member_ok() {
+  [[ "$(read_status_field "$OUT_DIR/$1/${MEMBER_SLUG[$2]}.status" 1)" == "ok" ]]
+}
+
 main() {
   init_colors
   parse_args "$@"
@@ -671,12 +905,39 @@ main() {
   seat_members
   init_out_dir
   resolve_subject
+  find_seed_config
+
+  TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/council.XXXXXX")"
+  trap cleanup EXIT
 
   local i
+  local -a all_seats=()
   for ((i = 0; i < MEMBER_COUNT; i++)); do
     compose_round1_prompt "$i" "$OUT_DIR/round1/${MEMBER_SLUG[$i]}.prompt.md"
+    all_seats+=("$i")
   done
   log_success "Composed $MEMBER_COUNT round-one prompts in $OUT_DIR/round1"
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log_info "Dry run: prompts written, no models called"
+    return 0
+  fi
+
+  if [[ "$USE_CHAT_LOG" -eq 1 ]] && [[ "$SMOKE" -eq 0 ]]; then
+    log_warning "--chat-log forces high reasoning effort in puny, which costs more per call"
+  fi
+
+  run_round round1 "${all_seats[@]}"
+
+  local survivors=()
+  for ((i = 0; i < MEMBER_COUNT; i++)); do
+    member_ok round1 "$i" && survivors+=("$i")
+  done
+
+  if [[ "${#survivors[@]}" -lt "$MIN_MEMBERS" ]]; then
+    log_error "Only ${#survivors[@]} member(s) reported, below the --min-members floor of $MIN_MEMBERS"
+    exit 2
+  fi
 }
 
 main "$@"
