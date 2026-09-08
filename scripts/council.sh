@@ -706,6 +706,45 @@ find_seed_config() {
   fi
 }
 
+# Copilot performs an interactive device login the first time it runs without a
+# stored token, and writes the result back to config. Several members doing that
+# at once would race and prompt repeatedly, so refuse before any fan-out and let
+# the user log in once, deliberately.
+check_copilot_auth() {
+  local i uses_copilot=0 has_token=0
+
+  for ((i = 0; i < MEMBER_COUNT; i++)); do
+    [[ "${MEMBER_PROVIDER[$i]}" == "copilot" ]] && uses_copilot=1
+  done
+  [[ "$CHAIR_PROVIDER" == "copilot" ]] && uses_copilot=1
+  [[ "$uses_copilot" -eq 1 ]] || return 0
+
+  if [[ -n "${GITHUB_COPILOT_OAUTH_TOKEN:-}" ]]; then
+    has_token=1
+  elif [[ -n "$SEED_CONFIG" ]] && [[ -f "$SEED_CONFIG" ]]; then
+    if awk '
+      /"name":[[:space:]]*"copilot"/ { seen = 1; next }
+      seen && /"apiKey"/ { if ($0 !~ /null/) found = 1; seen = 0 }
+      END { exit(found ? 0 : 1) }
+    ' "$SEED_CONFIG"; then
+      has_token=1
+    fi
+  fi
+
+  if [[ "$has_token" -eq 0 ]]; then
+    log_error "The council includes a copilot member but no Copilot token is stored."
+    log_error "Run 'puny --provider copilot' once on a terminal to log in, then retry."
+    exit 1
+  fi
+}
+
+preflight() {
+  if ! "$PUNY_BIN_PATH" --version >/dev/null 2>&1; then
+    die "The puny binary at $PUNY_BIN_PATH did not run"
+  fi
+  check_copilot_auth
+}
+
 now_ms() {
   local raw
   raw="$(date -u +%s%3N 2>/dev/null || true)"
@@ -1208,6 +1247,7 @@ main() {
   init_out_dir
   resolve_subject
   find_seed_config
+  preflight
 
   TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/council.XXXXXX")"
   trap cleanup EXIT
