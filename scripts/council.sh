@@ -965,6 +965,230 @@ compose_round2_prompt() {
   return 0
 }
 
+verdict_of() {
+  local file="$1"
+  [[ -s "$file" ]] || {
+    echo "-"
+    return
+  }
+  grep -m1 -E '^VERDICT:' "$file" | sed -e 's/^VERDICT:[[:space:]]*//' -e 's/[[:space:]]*$//' |
+    cut -c1-40 | grep . || echo "-"
+}
+
+# Concatenates a whole round for the chair, in seat order, labelling each block
+# with its role and model so the chair can attribute findings.
+build_round_digest() {
+  local round="$1" out="$2"
+  shift 2
+  local -a seats=("$@")
+  local seat src
+
+  : >"$out"
+  for seat in "${seats[@]}"; do
+    src="$OUT_DIR/$round/${MEMBER_SLUG[$seat]}.md"
+    printf -- '--- Member %02d (%s) [%s] ---\n\n' \
+      "$seat" "${ROLE_NAME[$seat]}" "$(model_label "$seat")" >>"$out"
+    if [[ -s "$src" ]]; then
+      cat "$src" >>"$out"
+    else
+      printf '(no %s from this member)\n' "$round" >>"$out"
+    fi
+    printf '\n\n' >>"$out"
+  done
+
+  [[ -s "$out" ]] || printf '(nothing was filed in this round)\n' >"$out"
+}
+
+compose_chair_prompt() {
+  local out="$1"
+  shift
+  local -a survivors=("$@")
+  local template scratch r1 r2
+
+  template="$PROMPT_DIR/round3-chair.md"
+  [[ -f "$template" ]] || die "Chair template not found: $template"
+
+  r1="$TEMP_ROOT/all-round1.md"
+  r2="$TEMP_ROOT/all-round2.md"
+  build_round_digest round1 "$r1" "${survivors[@]}"
+  if [[ "$SKIP_CROSS" -eq 1 ]]; then
+    printf '(round two was skipped, so there are no cross-critiques)\n' >"$r2"
+  else
+    build_round_digest round2 "$r2" "${survivors[@]}"
+  fi
+
+  scratch="${out}.scalars"
+  render_scalars "$template" "$scratch" "chair" "Chair" "none" "${#survivors[@]}"
+  splice_all "$scratch" "$out" \
+    "{{SUBJECT}}" "$SUBJECT_PATH" \
+    "{{ALL_ROUND1}}" "$r1" \
+    "{{ALL_ROUND2}}" "$r2"
+  rm -f "$scratch"
+
+  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$out"
+  return 0
+}
+
+# Writes verdict.md. A failed chair must still leave something usable behind, so
+# the members' own round-two output becomes the fallback verdict.
+run_chair() {
+  local -a survivors=("$@")
+  local status
+
+  compose_chair_prompt "$OUT_DIR/round3/chair.prompt.md" "${survivors[@]}"
+  warn_if_prompt_large "$OUT_DIR/round3/chair.prompt.md"
+
+  log_info "Round three: the chair ($(chair_label)) synthesises the verdict"
+  run_one "chair" "$CHAIR_PROVIDER" "$CHAIR_MODEL" \
+    "$OUT_DIR/round3/chair.prompt.md" "$OUT_DIR/round3"
+
+  status="$(read_status_field "$OUT_DIR/round3/chair.status" 1)"
+  if [[ "$status" == "ok" ]]; then
+    cp "$OUT_DIR/round3/chair.md" "$OUT_DIR/verdict.md"
+    log_success "Chair verdict: $(verdict_of "$OUT_DIR/verdict.md")"
+    return 0
+  fi
+
+  log_error "The chair failed ($status); falling back to the members' own words"
+  {
+    printf 'CHAIR FAILED: %s\n\n' "$status"
+    printf 'No synthesis was produced. What follows is every surviving member as filed.\n\n'
+    if [[ "$SKIP_CROSS" -eq 1 ]]; then
+      cat "$TEMP_ROOT/all-round1.md"
+    else
+      cat "$TEMP_ROOT/all-round2.md"
+    fi
+  } >"$OUT_DIR/verdict.md"
+  return 3
+}
+
+chair_label() {
+  if [[ "$SMOKE" -eq 1 ]]; then
+    echo "mock"
+  elif [[ -n "$CHAIR_PROVIDER" ]]; then
+    echo "$CHAIR_PROVIDER:$CHAIR_MODEL"
+  elif [[ -n "$CHAIR_MODEL" ]]; then
+    echo "$CHAIR_MODEL"
+  else
+    echo "config default"
+  fi
+}
+
+write_manifest() {
+  local out="$OUT_DIR/manifest.tsv"
+  local round seat slug status file
+
+  printf 'round\tseat\trole\tmodel\tstatus\texit_code\telapsed_ms\tanswer_bytes\tverdict\n' >"$out"
+
+  for round in round1 round2; do
+    for ((seat = 0; seat < MEMBER_COUNT; seat++)); do
+      slug="${MEMBER_SLUG[$seat]}"
+      file="$OUT_DIR/$round/$slug.status"
+      if [[ ! -f "$file" ]]; then
+        [[ "$DRY_RUN" -eq 1 ]] && [[ "$round" == "round1" ]] || continue
+        printf '%s\t%02d\t%s\t%s\tPLANNED\t-\t-\t-\t-\n' \
+          "$round" "$seat" "${ROLE_ID[$seat]}" "$(model_label "$seat")" >>"$out"
+        continue
+      fi
+      status="$(read_status_field "$file" 1)"
+      printf '%s\t%02d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$round" "$seat" "${ROLE_ID[$seat]}" "$(model_label "$seat")" "$status" \
+        "$(read_status_field "$file" 2)" "$(read_status_field "$file" 3)" \
+        "$(read_status_field "$file" 4)" \
+        "$(verdict_of "$OUT_DIR/$round/$slug.md")" >>"$out"
+    done
+  done
+
+  file="$OUT_DIR/round3/chair.status"
+  if [[ -f "$file" ]]; then
+    printf 'round3\tchair\tchair\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$(chair_label)" "$(read_status_field "$file" 1)" "$(read_status_field "$file" 2)" \
+      "$(read_status_field "$file" 3)" "$(read_status_field "$file" 4)" \
+      "$(verdict_of "$OUT_DIR/verdict.md")" >>"$out"
+  fi
+}
+
+write_index() {
+  local out="$OUT_DIR/council.md"
+  local seat slug head_rev
+
+  head_rev="$(git rev-parse --short HEAD 2>/dev/null || echo "not a git repository")"
+
+  {
+    echo "# Council verdict"
+    echo
+    echo "| | |"
+    echo "|---|---|"
+    echo "| Subject | $SUBJECT_LABEL ($SUBJECT_KIND) |"
+    echo "| Run at | $(date -u '+%Y-%m-%d %H:%M:%SZ') |"
+    echo "| Repository HEAD | \`$head_rev\` |"
+    echo "| puny | \`$("$PUNY_BIN_PATH" --version 2>&1 | head -1 | tr -d '\r')\` |"
+    echo "| Members | $MEMBER_COUNT |"
+    echo "| Chair | $(chair_label) |"
+    echo "| Extraction | $([[ "$USE_CHAT_LOG" -eq 1 ]] && echo "puny_chat.log" || echo "stdout (lossy)") |"
+    echo
+
+    if [[ -s "$OUT_DIR/verdict.md" ]]; then
+      echo "## Verdict"
+      echo
+      sed -e 's/\r$//' "$OUT_DIR/verdict.md"
+      echo
+    elif [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "## Dry run"
+      echo
+      echo "No models were called. Round-one prompts are on disk and ready to inspect."
+      echo "Rounds two and three cannot be composed without round-one output."
+      echo
+    else
+      echo "## Verdict"
+      echo
+      echo "No verdict was produced."
+      echo
+    fi
+
+    echo "## Members"
+    echo
+    echo "| Seat | Role | Model | Round 1 | Round 2 |"
+    echo "|---|---|---|---|---|"
+    for ((seat = 0; seat < MEMBER_COUNT; seat++)); do
+      slug="${MEMBER_SLUG[$seat]}"
+      printf '| %02d | %s | %s | %s | %s |\n' \
+        "$seat" "${ROLE_NAME[$seat]}" "$(model_label "$seat")" \
+        "$(status_cell round1 "$slug")" "$(status_cell round2 "$slug")"
+    done
+    echo
+
+    echo "## Artifacts"
+    echo
+    echo "- [subject.md](subject.md) — exactly what every member was shown"
+    echo "- [manifest.tsv](manifest.tsv) — per-run status, timings and verdicts"
+    [[ -s "$OUT_DIR/verdict.md" ]] && echo "- [verdict.md](verdict.md) — the chair's synthesis"
+    echo
+    for ((seat = 0; seat < MEMBER_COUNT; seat++)); do
+      slug="${MEMBER_SLUG[$seat]}"
+      echo "- **${ROLE_NAME[$seat]}** —" \
+        "[round 1](round1/$slug.md) ·" \
+        "[prompt](round1/$slug.prompt.md)" \
+        "$([[ -s "$OUT_DIR/round2/$slug.md" ]] && echo "· [round 2](round2/$slug.md)")"
+    done
+  } >"$out"
+}
+
+status_cell() {
+  local round="$1" slug="$2" status verdict
+  status="$(read_status_field "$OUT_DIR/$round/$slug.status" 1)"
+  [[ -n "$status" ]] || {
+    echo "—"
+    return
+  }
+  if [[ "$status" == "ok" ]]; then
+    verdict="$(verdict_of "$OUT_DIR/$round/$slug.md")"
+    echo "$verdict"
+  else
+    echo "**$status**"
+  fi
+}
+
 warn_if_prompt_large() {
   local file="$1" bytes
   bytes="$(wc -c <"$file" | tr -d '[:space:]')"
@@ -997,7 +1221,10 @@ main() {
   log_success "Composed $MEMBER_COUNT round-one prompts in $OUT_DIR/round1"
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
+    write_manifest
+    write_index
     log_info "Dry run: prompts written, no models called"
+    log_success "Read $OUT_DIR/council.md"
     return 0
   fi
 
@@ -1028,6 +1255,19 @@ main() {
     done
     run_round round2 "${round2_seats[@]}"
   fi
+
+  local chair_rc=0
+  if [[ "$SKIP_CHAIR" -eq 1 ]]; then
+    log_info "Skipping round three"
+  else
+    run_chair "${survivors[@]}" || chair_rc=$?
+  fi
+
+  write_manifest
+  write_index
+  log_success "Read $OUT_DIR/council.md"
+
+  return "$chair_rc"
 }
 
 main "$@"
