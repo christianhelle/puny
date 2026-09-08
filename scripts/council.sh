@@ -1268,8 +1268,13 @@ main() {
     return 0
   fi
 
-  if [[ "$USE_CHAT_LOG" -eq 1 ]] && [[ "$SMOKE" -eq 0 ]]; then
-    log_warning "--chat-log forces high reasoning effort in puny, which costs more per call"
+  if [[ "$USE_CHAT_LOG" -eq 1 ]]; then
+    [[ "$SMOKE" -eq 0 ]] &&
+      log_warning "--chat-log forces high reasoning effort in puny, which costs more per call"
+  else
+    log_warning "Extracting from stdout: puny renders markdown before printing, so headings and"
+    log_warning "emphasis are lost, lines wrap at 80 columns, and repainted text can duplicate."
+    log_warning "Later rounds will critique that degraded text. Prefer the default channel."
   fi
 
   run_round round1 "${all_seats[@]}"

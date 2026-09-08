@@ -1057,8 +1057,15 @@ function Invoke-Main {
       return 0
     }
 
-    if (-not $NoChatLog -and -not $Smoke) {
-      Write-WarningMessage '--chat-log forces high reasoning effort in puny, which costs more per call'
+    if (-not $NoChatLog) {
+      if (-not $Smoke) {
+        Write-WarningMessage '--chat-log forces high reasoning effort in puny, which costs more per call'
+      }
+    }
+    else {
+      Write-WarningMessage 'Extracting from stdout: puny renders markdown before printing, so headings and'
+      Write-WarningMessage 'emphasis are lost, lines wrap at 80 columns, and repainted text can duplicate.'
+      Write-WarningMessage 'Later rounds will critique that degraded text. Prefer the default channel.'
     }
 
     Invoke-Round 'round1' $allSeats
