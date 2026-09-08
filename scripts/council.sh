@@ -1281,6 +1281,8 @@ main() {
 
   if [[ "${#survivors[@]}" -lt "$MIN_MEMBERS" ]]; then
     log_error "Only ${#survivors[@]} member(s) reported, below the --min-members floor of $MIN_MEMBERS"
+    write_manifest
+    write_index
     exit 2
   fi
 
