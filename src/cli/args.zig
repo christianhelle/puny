@@ -226,6 +226,13 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         }
     }
 
+    if (opts.effort == null) {
+        if (environ_map.get("PUNY_REASONING_EFFORT")) |value| {
+            opts.effort = effort_picker.parseEffort(value) orelse
+                fatal(io, "Unknown reasoning effort '{s}' in PUNY_REASONING_EFFORT. Valid levels: default, none, minimal, low, medium, high, xhigh.\n\n", .{value});
+        }
+    }
+
     if (!opts.no_skills) {
         if (environ_map.get("PUNY_NO_SKILLS")) |value| {
             opts.no_skills = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
@@ -662,4 +669,32 @@ test "parseArgs sets effort from flag" {
     const args = &[_][:0]const u8{ "puny", "--effort", "low" };
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .low), opts.effort);
+}
+
+test "parseArgs falls back to PUNY_REASONING_EFFORT env" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_REASONING_EFFORT", "minimal");
+
+    const args = &[_][:0]const u8{"puny"};
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .minimal), opts.effort);
+}
+
+test "parseArgs prefers the effort flag over the environment" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_REASONING_EFFORT", "minimal");
+
+    const args = &[_][:0]const u8{ "puny", "--effort", "xhigh" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), opts.effort);
 }
