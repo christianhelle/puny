@@ -357,8 +357,21 @@ resolve_binary() {
   die "Could not find the puny binary. Build it with 'zig build' or pass --bin PATH."
 }
 
+# Values that arrive through the environment never pass through the flag parser,
+# so they are checked here instead of blowing up later in an arithmetic test.
+require_whole_number() {
+  local label="$1" value="$2" minimum="$3"
+  if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -lt "$minimum" ]]; then
+    die "$label must be a whole number of at least $minimum, got '$value'"
+  fi
+}
+
 validate_args() {
   local chosen=0
+
+  require_whole_number "Member count (COUNCIL_MEMBERS)" "$MEMBER_COUNT" 1
+  require_whole_number "Job limit (COUNCIL_JOBS)" "$JOBS" 1
+  require_whole_number "Timeout (COUNCIL_TIMEOUT)" "$TIMEOUT_SECS" 0
 
   [[ -n "$SUBJECT_FILE" ]] && chosen=$((chosen + 1))
   [[ -n "$SUBJECT_DIFF" ]] && chosen=$((chosen + 1))

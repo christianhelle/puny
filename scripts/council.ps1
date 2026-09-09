@@ -102,11 +102,23 @@ Output:
   -Smoke                Self-test against the mock provider
   -Help                 Show this help text
 
-Environment: PUNY_BIN, COUNCIL_MODELS, COUNCIL_CHAIR, COUNCIL_OUT, COUNCIL_JOBS,
-COUNCIL_TIMEOUT
+Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR, COUNCIL_OUT,
+COUNCIL_JOBS, COUNCIL_TIMEOUT
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 '@
+}
+
+# Values that arrive through the environment never pass through the parameter
+# binder, so a stray "COUNCIL_JOBS=lots" would otherwise crash on the cast.
+function ConvertTo-WholeNumber {
+  param([string]$Label, [string]$Value, [int]$Minimum)
+  $parsed = 0
+  if (-not [int]::TryParse($Value, [ref]$parsed) -or $parsed -lt $Minimum) {
+    Write-Host "[ERROR] $Label must be a whole number of at least $Minimum, got '$Value'" -ForegroundColor Red
+    exit 1
+  }
+  return $parsed
 }
 
 function Stop-WithError {
@@ -218,7 +230,7 @@ function Test-Arguments {
   if ($SubjectFile -and -not (Test-Path -LiteralPath $SubjectFile -PathType Leaf)) {
     Stop-WithError "Subject file not found: $SubjectFile"
   }
-  foreach ($pair in @(@('Members', $Members), @('Jobs', $script:JobLimit),
+  foreach ($pair in @(@('Members', $script:MemberCount), @('Jobs', $script:JobLimit),
       @('MinAnswerChars', $MinAnswerChars), @('MaxPeerChars', $MaxPeerChars))) {
     if ($pair[1] -lt 1) { Stop-WithError "-$($pair[0]) requires a positive whole number, got '$($pair[1])'" }
   }
@@ -227,10 +239,10 @@ function Test-Arguments {
     Write-WarningMessage 'Running without a time limit; a hung member will block its slot indefinitely'
   }
 
-  if ($script:JobLimit -gt $Members) { $script:JobLimit = $Members }
+  if ($script:JobLimit -gt $script:MemberCount) { $script:JobLimit = $script:MemberCount }
 
   if ($script:MemberFloor -lt 1) {
-    $script:MemberFloor = [Math]::Max(2, [Math]::Ceiling($Members / 2))
+    $script:MemberFloor = [Math]::Max(2, [Math]::Ceiling($script:MemberCount / 2))
   }
   # Peer critiques are truncated on a line boundary, so a budget smaller than a
   # line of prose would drop the whole critique and leave only the marker.
@@ -238,8 +250,8 @@ function Test-Arguments {
     Stop-WithError "-MaxPeerChars must be at least 1000, got $MaxPeerChars"
   }
 
-  if ($script:MemberFloor -gt $Members) {
-    Stop-WithError "-MinMembers ($($script:MemberFloor)) exceeds the member count ($Members)"
+  if ($script:MemberFloor -gt $script:MemberCount) {
+    Stop-WithError "-MinMembers ($($script:MemberFloor)) exceeds the member count ($($script:MemberCount))"
   }
 }
 
@@ -281,11 +293,11 @@ function Import-Roles {
     if ($script:MemberTotal -eq 0) { Stop-WithError '-Roles selected no roles' }
   }
   else {
-    if ($Members -gt $all.Count) {
-      Stop-WithError "Only $($all.Count) role briefs exist in $($script:RoleDir), cannot seat $Members members"
+    if ($script:MemberCount -gt $all.Count) {
+      Stop-WithError "Only $($all.Count) role briefs exist in $($script:RoleDir), cannot seat $($script:MemberCount) members"
     }
-    $script:Seats = @($all | Select-Object -First $Members)
-    $script:MemberTotal = $Members
+    $script:Seats = @($all | Select-Object -First $script:MemberCount)
+    $script:MemberTotal = $script:MemberCount
   }
 
   if ($script:MemberTotal % 2 -ne 0) {
@@ -1149,8 +1161,16 @@ function Invoke-Main {
   $script:ModelList = if ($Models) { $Models } elseif ($env:COUNCIL_MODELS) { $env:COUNCIL_MODELS -split ',' } else { $null }
   $script:ChairSpec = if ($Chair) { $Chair } elseif ($env:COUNCIL_CHAIR) { $env:COUNCIL_CHAIR } else { '' }
   $script:OutDir = if ($Out) { $Out } elseif ($env:COUNCIL_OUT) { $env:COUNCIL_OUT } else { '' }
-  $script:JobLimit = if ($PSBoundParameters.ContainsKey('Jobs')) { $Jobs } elseif ($env:COUNCIL_JOBS) { [int]$env:COUNCIL_JOBS } else { $Jobs }
-  $script:Timeout = if ($PSBoundParameters.ContainsKey('TimeoutSec')) { $TimeoutSec } elseif ($env:COUNCIL_TIMEOUT) { [int]$env:COUNCIL_TIMEOUT } else { $TimeoutSec }
+  $script:JobLimit = if ($PSBoundParameters.ContainsKey('Jobs')) { $Jobs }
+  elseif ($env:COUNCIL_JOBS) { ConvertTo-WholeNumber 'Job limit (COUNCIL_JOBS)' $env:COUNCIL_JOBS 1 }
+  else { $Jobs }
+  $script:Timeout = if ($PSBoundParameters.ContainsKey('TimeoutSec')) { $TimeoutSec }
+  elseif ($env:COUNCIL_TIMEOUT) { ConvertTo-WholeNumber 'Timeout (COUNCIL_TIMEOUT)' $env:COUNCIL_TIMEOUT 0 }
+  else { $TimeoutSec }
+  # council.sh honours COUNCIL_MEMBERS, so this runner must too.
+  $script:MemberCount = if ($PSBoundParameters.ContainsKey('Members')) { $Members }
+  elseif ($env:COUNCIL_MEMBERS) { ConvertTo-WholeNumber 'Member count (COUNCIL_MEMBERS)' $env:COUNCIL_MEMBERS 1 }
+  else { $Members }
   $script:MemberFloor = $MinMembers
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
