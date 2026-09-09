@@ -85,7 +85,7 @@ Council:
 
 Execution:
   -Jobs N               Maximum members running at once (default: 3)
-  -TimeoutSec N         Per-member time limit (default: 900)
+  -TimeoutSec N         Per-member time limit, or 0 for none (default: 900)
   -MinMembers N         Abort after round one below this many (default: half)
   -MinAnswerChars N     Shorter answers count as a failure (default: 200)
   -MaxPeerChars N       Truncate each peer critique in round two (default: 20000)
@@ -216,9 +216,13 @@ function Test-Arguments {
   if ($SubjectFile -and -not (Test-Path -LiteralPath $SubjectFile -PathType Leaf)) {
     Stop-WithError "Subject file not found: $SubjectFile"
   }
-  foreach ($pair in @(@('Members', $Members), @('Jobs', $script:JobLimit), @('TimeoutSec', $script:Timeout),
+  foreach ($pair in @(@('Members', $Members), @('Jobs', $script:JobLimit),
       @('MinAnswerChars', $MinAnswerChars), @('MaxPeerChars', $MaxPeerChars))) {
     if ($pair[1] -lt 1) { Stop-WithError "-$($pair[0]) requires a positive whole number, got '$($pair[1])'" }
+  }
+  if ($script:Timeout -lt 0) { Stop-WithError "-TimeoutSec requires a whole number, got '$($script:Timeout)'" }
+  if ($script:Timeout -eq 0) {
+    Write-WarningMessage 'Running without a time limit; a hung member will block its slot indefinitely'
   }
 
   if ($script:JobLimit -gt $Members) { $script:JobLimit = $Members }
@@ -855,7 +859,10 @@ function Complete-Member {
   param([pscustomobject]$Job)
 
   $status = 'ok'
-  if (-not $Job.Proc.WaitForExit($script:Timeout * 1000)) {
+  if ($script:Timeout -eq 0) {
+    $Job.Proc.WaitForExit()
+  }
+  elseif (-not $Job.Proc.WaitForExit($script:Timeout * 1000)) {
     try { $Job.Proc.Kill($true) } catch { }
     $status = 'timeout'
   }

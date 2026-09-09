@@ -92,7 +92,7 @@ Council:
 
 Execution:
   -j, --jobs N              Maximum members running at once (default: 3)
-      --timeout SECONDS     Per-member time limit (default: 900)
+      --timeout SECONDS     Per-member time limit, or 0 for none (default: 900)
       --min-members N       Abort after round one below this many (default: half)
       --min-answer-chars N  Shorter answers count as a failure (default: 200)
       --max-peer-chars N    Truncate each peer critique in round two (default: 20000)
@@ -123,6 +123,12 @@ require_value() {
   # Guards against a flag silently swallowing the next flag as its value.
   if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
     die "Option $1 requires a value"
+  fi
+}
+
+require_non_negative_int() {
+  if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+    die "Option $1 requires a whole number, got '$2'"
   fi
 }
 
@@ -193,7 +199,7 @@ parse_args() {
       shift 2
       ;;
     --timeout)
-      require_positive_int "$1" "${2:-}"
+      require_non_negative_int "$1" "${2:-}"
       TIMEOUT_SECS="$2"
       shift 2
       ;;
@@ -275,10 +281,17 @@ check_dependencies() {
     fi
   done
 
-  # A missing 'timeout' is survivable; a hung member is not worth aborting over.
-  if ! command -v timeout >/dev/null 2>&1; then
-    log_warning "'timeout' not found; members will run without a time limit"
-    TIMEOUT_SECS=0
+  # Without 'timeout' a hung provider blocks a slot forever and the run never
+  # finishes. Quietly dropping the limit turns a stated 900s bound into no bound
+  # at all, so make the caller choose that rather than inherit it.
+  if [[ "$TIMEOUT_SECS" -gt 0 ]] && ! command -v timeout >/dev/null 2>&1; then
+    log_error "'timeout' not found, so members cannot be time-limited."
+    log_error "Install coreutils, or pass --timeout 0 to accept unbounded runs."
+    exit 1
+  fi
+
+  if [[ "$TIMEOUT_SECS" -eq 0 ]]; then
+    log_warning "Running without a time limit; a hung member will block its slot indefinitely"
   fi
 }
 
