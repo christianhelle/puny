@@ -1501,6 +1501,21 @@ main() {
       round2_seats+=("$i")
     done
     run_round round2 "${round2_seats[@]}"
+
+    # Round two can drop members too; the chair must not synthesise a verdict
+    # from placeholder blocks for seats that stopped reporting.
+    local -a round2_survivors=()
+    for i in "${survivors[@]}"; do
+      member_ok round2 "$i" && round2_survivors+=("$i")
+    done
+    survivors=("${round2_survivors[@]}")
+
+    if [[ "${#survivors[@]}" -lt "$MIN_MEMBERS" ]]; then
+      log_error "Only ${#survivors[@]} member(s) cleared round two, below the --min-members floor of $MIN_MEMBERS"
+      write_manifest
+      write_index
+      exit 2
+    fi
   fi
 
   local chair_rc=0

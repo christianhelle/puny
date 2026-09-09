@@ -1294,6 +1294,20 @@ function Invoke-Main {
         Test-PromptSize $path
       }
       Invoke-Round 'round2' $survivors
+
+      # Round two can drop members too; the chair must not synthesise a verdict
+      # from placeholder blocks for seats that stopped reporting.
+      $survivors = @($survivors | Where-Object {
+          $path = Join-Path $script:OutDir "round2\$($script:Seats[$_].Slug).status"
+          ((Get-StatusField $path 1) -eq 'ok')
+        })
+
+      if ($survivors.Count -lt $script:MemberFloor) {
+        Write-ErrorMessage "Only $($survivors.Count) member(s) cleared round two, below the -MinMembers floor of $($script:MemberFloor)"
+        Write-Manifest
+        Write-Index
+        exit 2
+      }
     }
 
     $chairCode = 0
