@@ -27,6 +27,7 @@ param(
   [string[]]$Roles,
   [switch]$SkipCross,
   [switch]$SkipChair,
+  [switch]$SkipSummary,
   [int]$Jobs = 3,
   [int]$TimeoutSec = 900,
   [int]$MinMembers = 0,
@@ -81,6 +82,7 @@ Council:
   -Roles LIST           Role ids instead of the first N seats
   -SkipCross            Skip round two (the cross-critique)
   -SkipChair            Skip round three (the synthesis)
+  -SkipSummary          Skip the plain-language summary of the verdict
 
 Execution:
   -Jobs N               Maximum members running at once (default: 3)
@@ -340,6 +342,52 @@ function Get-ChairLabel {
   return 'config default'
 }
 
+# Condenses verdict.md into something readable without opening a file. The chair
+# writes for the record and runs to several thousand words; this is the version
+# you read in the terminal before deciding what to do.
+function Invoke-Summary {
+  $verdictPath = Join-Path $script:OutDir 'verdict.md'
+  if (-not (Test-Path -LiteralPath $verdictPath) -or (Get-FileByteCount $verdictPath) -eq 0) {
+    Write-WarningMessage 'No verdict to summarise'
+    return 1
+  }
+
+  $template = Join-Path $script:PromptDir 'round4-summary.md'
+  if (-not (Test-Path -LiteralPath $template)) { Stop-WithError "Summary template not found: $template" }
+
+  $prompt = Join-Path $script:OutDir 'round4\summary.prompt.md'
+  $scratch = "$prompt.scalars"
+  Expand-Scalars $template $scratch 'summary' 'Summary' 'none' $script:MemberTotal
+  Expand-Markers $scratch $prompt @{ '{{VERDICT_REPORT}}' = $verdictPath }
+  Remove-Item -LiteralPath $scratch -Force
+  if ($Smoke) { Assert-NoMockTriggers $prompt }
+
+  Write-Info "Summarising the verdict ($(Get-ChairLabel))"
+  $dest = Join-Path $script:OutDir 'round4'
+  $job = Start-Member 'summary' $script:ChairProvider $script:ChairModel $prompt $dest
+  $status = Complete-Member $job
+
+  if ($status -ne 'ok') {
+    Write-WarningMessage "The summary step failed ($status); the full verdict is still in verdict.md"
+    return 1
+  }
+
+  Copy-Item -LiteralPath (Join-Path $dest 'summary.md') -Destination (Join-Path $script:OutDir 'summary.md') -Force
+  return 0
+}
+
+# The summary is the deliverable, not a diagnostic, so it goes to the output
+# stream while every log line goes to the host.
+function Show-Summary {
+  $path = Join-Path $script:OutDir 'summary.md'
+  if (-not (Test-Path -LiteralPath $path) -or (Get-FileByteCount $path) -eq 0) { return }
+  Write-Output ''
+  Write-Output '──────── Council summary ────────'
+  Write-Output ''
+  Write-Output (Read-TextFile $path).TrimEnd()
+  Write-Output ''
+}
+
 function ConvertTo-Slug {
   param([string]$Text)
   $slug = ($Text.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
@@ -356,7 +404,7 @@ function Initialize-OutputDirectory {
     if (-not $slug) { $slug = 'subject' }
     $script:OutDir = Join-Path '.council' "$stamp-$slug"
   }
-  foreach ($sub in @('round1', 'round2', 'round3')) {
+  foreach ($sub in @('round1', 'round2', 'round3', 'round4')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $script:OutDir $sub) | Out-Null
   }
   $script:OutDir = (Resolve-Path -LiteralPath $script:OutDir).Path
@@ -434,7 +482,7 @@ function Expand-Scalars {
     [string]$MemberN, [string]$RoleName, [string]$PairName, [string]$MemberCount
   )
 
-  $known = '^\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2)\}\}$'
+  $known = '^\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2|VERDICT_REPORT)\}\}$'
   $lines = foreach ($line in Get-FileLines $TemplatePath) {
     $line.Replace('{{MEMBER_N}}', $MemberN).
     Replace('{{ROLE_NAME}}', $RoleName).
@@ -943,6 +991,16 @@ function Write-Manifest {
       ) -join "`t")
   }
 
+  $summaryStatus = Join-Path $script:OutDir 'round4\summary.status'
+  if (Test-Path -LiteralPath $summaryStatus) {
+    $lines += (@(
+        'round4', 'summary', 'summary', (Get-ChairLabel),
+        (Get-StatusField $summaryStatus 1), (Get-StatusField $summaryStatus 2),
+        (Get-StatusField $summaryStatus 3), (Get-StatusField $summaryStatus 4),
+        (Get-Verdict (Join-Path $script:OutDir 'summary.md'))
+      ) -join "`t")
+  }
+
   Write-TextFile (Join-Path $script:OutDir 'manifest.tsv') (Join-Lines $lines)
 }
 
@@ -974,6 +1032,13 @@ function Write-Index {
     ''
   )
 
+  $summaryPath = Join-Path $script:OutDir 'summary.md'
+  if ((Test-Path -LiteralPath $summaryPath) -and (Get-FileByteCount $summaryPath) -gt 0) {
+    $lines += @('## Summary', '')
+    $lines += (Get-FileLines $summaryPath)
+    $lines += ''
+  }
+
   if ((Test-Path -LiteralPath $verdictPath) -and (Get-FileByteCount $verdictPath) -gt 0) {
     $lines += @('## Verdict', '')
     $lines += (Get-FileLines $verdictPath)
@@ -999,6 +1064,9 @@ function Write-Index {
   $lines += @('## Artifacts', '',
     '- [subject.md](subject.md) — exactly what every member was shown',
     '- [manifest.tsv](manifest.tsv) — per-run status, timings and verdicts')
+  if ((Test-Path -LiteralPath $summaryPath) -and (Get-FileByteCount $summaryPath) -gt 0) {
+    $lines += '- [summary.md](summary.md) — the short version'
+  }
   if ((Test-Path -LiteralPath $verdictPath) -and (Get-FileByteCount $verdictPath) -gt 0) {
     $lines += "- [verdict.md](verdict.md) — the chair's synthesis"
   }
@@ -1103,8 +1171,16 @@ function Invoke-Main {
       $chairCode = Invoke-Chair $survivors
     }
 
+    if ($SkipSummary) {
+      Write-Info 'Skipping the summary'
+    }
+    elseif (-not $SkipChair -and $chairCode -eq 0) {
+      $null = Invoke-Summary
+    }
+
     Write-Manifest
     Write-Index
+    Show-Summary
     Write-Success "Read $(Join-Path $script:OutDir 'council.md')"
     return $chairCode
   }
