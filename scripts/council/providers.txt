@@ -1,0 +1,8 @@
+# Provider names council members may use in a [provider:]model spec.
+# Mirrors ModelProvider in src/providers/provider.zig, plus its aliases.
+# Both council.sh and council.ps1 read this file, so a new provider is one edit.
+lmstudio
+opencode_zen
+opencode
+opencode_go
+copilot

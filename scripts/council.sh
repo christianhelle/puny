@@ -11,7 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSET_DIR="$SCRIPT_DIR/council"
-KNOWN_PROVIDERS="lmstudio opencode_zen opencode opencode_go copilot"
+KNOWN_PROVIDERS=""
 
 MEMBER_COUNT="${COUNCIL_MEMBERS:-6}"
 MODEL_SPECS="${COUNCIL_MODELS:-}"
@@ -253,6 +253,16 @@ parse_args() {
       ;;
     esac
   done
+}
+
+# The provider names live in one file both runners read, so adding a provider
+# does not mean remembering to edit two scripts.
+load_providers() {
+  local file="$ASSET_DIR/providers.txt"
+  [[ -f "$file" ]] || die "Provider list not found: $file"
+  KNOWN_PROVIDERS="$(grep -vE '^[[:space:]]*(#|$)' "$file" | tr '
+' ' ' | sed -e 's/[[:space:]]*$//')"
+  [[ -n "$KNOWN_PROVIDERS" ]] || die "Provider list is empty: $file"
 }
 
 check_dependencies() {
@@ -1228,7 +1238,8 @@ write_index() {
     if [[ -s "$OUT_DIR/summary.md" ]]; then
       echo "## Summary"
       echo
-      sed -e 's/$//' "$OUT_DIR/summary.md"
+      sed -e 's/
+$//' "$OUT_DIR/summary.md"
       echo
     fi
 
@@ -1305,6 +1316,7 @@ warn_if_prompt_large() {
 main() {
   init_colors
   parse_args "$@"
+  load_providers
   check_dependencies
   validate_args
   resolve_binary

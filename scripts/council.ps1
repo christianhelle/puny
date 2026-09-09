@@ -48,7 +48,6 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AssetDir = Join-Path $ScriptDir 'council'
-$KnownProviders = @('lmstudio', 'opencode_zen', 'opencode', 'opencode_go', 'copilot')
 
 # The mock provider dispatches tool calls and faults on whole-word matches in the
 # last user message, so a mock run whose prompt contains one of these silently
@@ -153,17 +152,28 @@ function Split-ModelSpec {
   if ($Spec -notmatch ':') { return $result }
 
   $head = $Spec.Substring(0, $Spec.IndexOf(':'))
-  if ($KnownProviders -contains $head) {
+  if ($script:KnownProviders -contains $head) {
     $result.Provider = $head
     $result.Model = $Spec.Substring($head.Length + 1)
     return $result
   }
 
   if ($head -notmatch '/') {
-    Stop-WithError "Unknown provider '$head' in model spec '$Spec' (known: $($KnownProviders -join ' '))"
+    Stop-WithError "Unknown provider '$head' in model spec '$Spec' (known: $($script:KnownProviders -join ' '))"
   }
 
   return $result
+}
+
+# The provider names live in one file both runners read, so adding a provider
+# does not mean remembering to edit two scripts.
+function Import-Providers {
+  $file = Join-Path $AssetDir 'providers.txt'
+  if (-not (Test-Path -LiteralPath $file)) { Stop-WithError "Provider list not found: $file" }
+  $script:KnownProviders = @(Get-FileLines $file |
+    Where-Object { $_ -notmatch '^\s*(#|$)' } |
+    ForEach-Object { $_.Trim() })
+  if ($script:KnownProviders.Count -eq 0) { Stop-WithError "Provider list is empty: $file" }
 }
 
 function Resolve-PunyBinary {
@@ -1098,6 +1108,7 @@ function Invoke-Main {
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
 
+  Import-Providers
   Test-Arguments
   Resolve-PunyBinary
   Import-Roles
