@@ -90,7 +90,7 @@ Execution:
 Output:
   -Out DIR              Output directory (default: .council/<timestamp>-<slug>)
   -Force                Clear a non-empty output directory before running
-  -DryRun               Compose every prompt but call no models
+  -DryRun               Compose round-one prompts only, call no models
   -Smoke                Self-test against the mock provider
   -Help                 Show this help text
 
