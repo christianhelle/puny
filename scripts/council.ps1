@@ -50,14 +50,6 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AssetDir = Join-Path $ScriptDir 'council'
 
-# The mock provider dispatches tool calls and faults on whole-word matches in the
-# last user message, so a mock run whose prompt contains one of these silently
-# returns something other than a critique.
-$MockTriggerWords = @(
-  'long', 'fast', 'slow', 'echo', 'empty', 'partial', 'usage', 'error', 'timeout',
-  'fail', 'read', 'search', 'shell', 'review', 'table', 'markdown', 'reasoning'
-)
-
 function Write-Info { param([string]$Message) Write-Host "[INFO] $Message" -ForegroundColor Cyan }
 function Write-Success { param([string]$Message) Write-Host "[OK] $Message" -ForegroundColor Green }
 function Write-WarningMessage { param([string]$Message) Write-Host "[WARN] $Message" -ForegroundColor Yellow }
@@ -179,15 +171,21 @@ function Split-ModelSpec {
   return $result
 }
 
-# The provider names live in one file both runners read, so adding a provider
-# does not mean remembering to edit two scripts.
-function Import-Providers {
-  $file = Join-Path $AssetDir 'providers.txt'
-  if (-not (Test-Path -LiteralPath $file)) { Stop-WithError "Provider list not found: $file" }
-  $script:KnownProviders = @(Get-FileLines $file |
+# These lists live in files both runners read, so adding a provider or tracking a
+# new mock keyword does not mean remembering to edit two scripts.
+function Read-WordList {
+  param([string]$Path, [string]$Label)
+  if (-not (Test-Path -LiteralPath $Path)) { Stop-WithError "$Label not found: $Path" }
+  $words = @(Get-FileLines $Path |
     Where-Object { $_ -notmatch '^\s*(#|$)' } |
     ForEach-Object { $_.Trim() })
-  if ($script:KnownProviders.Count -eq 0) { Stop-WithError "Provider list is empty: $file" }
+  if ($words.Count -eq 0) { Stop-WithError "$Label is empty: $Path" }
+  return $words
+}
+
+function Import-SharedLists {
+  $script:KnownProviders = Read-WordList (Join-Path $AssetDir 'providers.txt') 'Provider list'
+  $script:MockTriggerWords = Read-WordList (Join-Path $AssetDir 'mock-triggers.txt') 'Mock trigger list'
 }
 
 function Resolve-PunyBinary {
@@ -577,7 +575,7 @@ function Assert-NoMockTriggers {
   param([string]$Path)
   $text = Read-TextFile $Path
   $hits = @()
-  foreach ($word in $MockTriggerWords) {
+  foreach ($word in $script:MockTriggerWords) {
     if ($text -match "(?i)(^|[^a-z0-9])$word([^a-z0-9]|$)") { $hits += $word }
   }
   if ($hits) {
@@ -1200,7 +1198,7 @@ function Invoke-Main {
   $script:SeedConfig = ''
   $script:ActiveProcesses = [System.Collections.ArrayList]::new()
 
-  Import-Providers
+  Import-SharedLists
   Test-Arguments
   Resolve-PunyBinary
   Import-Roles

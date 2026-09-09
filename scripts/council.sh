@@ -267,14 +267,20 @@ parse_args() {
   done
 }
 
-# The provider names live in one file both runners read, so adding a provider
-# does not mean remembering to edit two scripts.
-load_providers() {
-  local file="$ASSET_DIR/providers.txt"
-  [[ -f "$file" ]] || die "Provider list not found: $file"
-  KNOWN_PROVIDERS="$(grep -vE '^[[:space:]]*(#|$)' "$file" | tr '
+# These lists live in files both runners read, so adding a provider or tracking a
+# new mock keyword does not mean remembering to edit two scripts.
+read_word_list() {
+  local file="$1" label="$2" words
+  [[ -f "$file" ]] || die "$label not found: $file"
+  words="$(grep -vE '^[[:space:]]*(#|$)' "$file" | tr '
 ' ' ' | sed -e 's/[[:space:]]*$//')"
-  [[ -n "$KNOWN_PROVIDERS" ]] || die "Provider list is empty: $file"
+  [[ -n "$words" ]] || die "$label is empty: $file"
+  echo "$words"
+}
+
+load_shared_lists() {
+  KNOWN_PROVIDERS="$(read_word_list "$ASSET_DIR/providers.txt" "Provider list")"
+  MOCK_TRIGGER_WORDS="$(read_word_list "$ASSET_DIR/mock-triggers.txt" "Mock trigger list")"
 }
 
 check_dependencies() {
@@ -711,7 +717,7 @@ render_scalars() {
 # The mock provider dispatches tool calls and faults on whole-word matches in the
 # last user message, so a mock run whose prompt contains one of these silently
 # returns something other than a critique. Refuse rather than debug it later.
-MOCK_TRIGGER_WORDS="long fast slow echo empty partial usage error timeout fail read search shell review table markdown reasoning"
+MOCK_TRIGGER_WORDS=""
 guard_mock_keywords() {
   local file="$1" word hits=""
 
@@ -1412,7 +1418,7 @@ warn_if_prompt_large() {
 main() {
   init_colors
   parse_args "$@"
-  load_providers
+  load_shared_lists
   check_dependencies
   validate_args
   resolve_binary
