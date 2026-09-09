@@ -798,6 +798,27 @@ function Test-CopilotAuth {
 function Invoke-Preflight {
   & $script:BinPath --version 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) { Stop-WithError "The puny binary at $($script:BinPath) did not run" }
+
+  # The runners extract answers from puny_chat.log's [USER]/[ASSISTANT]/...
+  # markers. That format is the extraction contract; refuse an older puny
+  # rather than silently feeding the chair placeholder text.
+  $versionLine = & $script:BinPath --version 2>&1 | Select-Object -First 1
+  $m = [regex]::Match([string]$versionLine, '[0-9]+\.[0-9]+\.[0-9]+')
+  if (-not $m.Success) {
+    Stop-WithError "Could not read a version from '$($script:BinPath) --version'"
+  }
+  $min = @(0, 3, 5)
+  $parts = $m.Value.Split('.') | ForEach-Object { [int]$_ }
+  if (($parts[0] -gt $min[0]) -or
+      ($parts[0] -eq $min[0] -and $parts[1] -gt $min[1]) -or
+      ($parts[0] -eq $min[0] -and $parts[1] -eq $min[1] -and $parts[2] -ge $min[2])) {
+    # new enough
+  }
+  else {
+    Write-ErrorMessage "puny $($m.Value) is too old; the council needs the chat-log format from puny 0.3.5 or newer."
+    Stop-WithError "Build with 'zig build' or upgrade puny, then retry."
+  }
+
   Test-CopilotAuth
 }
 

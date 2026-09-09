@@ -863,6 +863,25 @@ preflight() {
   if ! "$PUNY_BIN_PATH" --version >/dev/null 2>&1; then
     die "The puny binary at $PUNY_BIN_PATH did not run"
   fi
+
+  # The runners extract answers from puny_chat.log's [USER]/[ASSISTANT]/...
+  # markers. That format is the extraction contract; refuse an older puny
+  # rather than silently feeding the chair placeholder text.
+  local version min_major min_minor min_patch major minor patch
+  version="$("$PUNY_BIN_PATH" --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  if [[ -z "$version" ]]; then
+    die "Could not read a version from '$PUNY_BIN_PATH --version'"
+  fi
+  min_major=0; min_minor=3; min_patch=5
+  IFS='.' read -r major minor patch <<<"$version"
+  [[ "$major" -gt "$min_major" ]] ||
+    { [[ "$major" -eq "$min_major" ]] && { [[ "$minor" -gt "$min_minor" ]] ||
+      { [[ "$minor" -eq "$min_minor" ]] && [[ "$patch" -ge "$min_patch" ]]; }; }; } || {
+    log_error "puny $version is too old; the council needs the chat-log format from puny $min_major.$min_minor.$min_patch or newer."
+    log_error "Build with 'zig build' or upgrade puny, then retry."
+    exit 1
+  }
+
   check_copilot_auth
 }
 
