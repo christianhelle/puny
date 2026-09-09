@@ -47,6 +47,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# PSBoundParameters is empty inside functions, so capture the script-level bound
+# params once here; Invoke-Main uses them to tell CLI flags from defaults.
+$script:ScriptBoundParameters = $PSBoundParameters
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AssetDir = Join-Path $ScriptDir 'council'
 
@@ -1217,7 +1221,7 @@ function Invoke-Main {
   if ($Help) { Show-Usage; exit 0 }
 
   $script:BinPath = if ($Bin) { $Bin } elseif ($env:PUNY_BIN) { $env:PUNY_BIN } else { '' }
-  $script:MemberCountExplicit = $PSBoundParameters.ContainsKey('Members') -or [bool]$env:COUNCIL_MEMBERS
+  $script:MemberCountExplicit = $script:ScriptBoundParameters.ContainsKey('Members') -or [bool]$env:COUNCIL_MEMBERS
   $script:ModelList = if ($Models) {
     @($Models | ForEach-Object { if ($_ -match ',') { $_ -split ',' } else { $_ } })
   }
@@ -1225,14 +1229,14 @@ function Invoke-Main {
   else { $null }
   $script:ChairSpec = if ($Chair) { $Chair } elseif ($env:COUNCIL_CHAIR) { $env:COUNCIL_CHAIR } else { '' }
   $script:OutDir = if ($Out) { $Out } elseif ($env:COUNCIL_OUT) { $env:COUNCIL_OUT } else { '' }
-  $script:JobLimit = if ($PSBoundParameters.ContainsKey('Jobs')) { $Jobs }
+  $script:JobLimit = if ($script:ScriptBoundParameters.ContainsKey('Jobs')) { $Jobs }
   elseif ($env:COUNCIL_JOBS) { ConvertTo-WholeNumber 'Job limit (COUNCIL_JOBS)' $env:COUNCIL_JOBS 1 }
   else { $Jobs }
-  $script:Timeout = if ($PSBoundParameters.ContainsKey('TimeoutSec')) { $TimeoutSec }
+  $script:Timeout = if ($script:ScriptBoundParameters.ContainsKey('TimeoutSec')) { $TimeoutSec }
   elseif ($env:COUNCIL_TIMEOUT) { ConvertTo-WholeNumber 'Timeout (COUNCIL_TIMEOUT)' $env:COUNCIL_TIMEOUT 0 }
   else { $TimeoutSec }
   # council.sh honours COUNCIL_MEMBERS, so this runner must too.
-  $script:MemberCount = if ($PSBoundParameters.ContainsKey('Members')) { $Members }
+  $script:MemberCount = if ($script:ScriptBoundParameters.ContainsKey('Members')) { $Members }
   elseif ($env:COUNCIL_MEMBERS) { ConvertTo-WholeNumber 'Member count (COUNCIL_MEMBERS)' $env:COUNCIL_MEMBERS 1 }
   else { $Members }
   $script:MemberFloor = $MinMembers
