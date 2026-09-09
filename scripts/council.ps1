@@ -245,19 +245,26 @@ function Test-Arguments {
     Stop-WithError '-Members and -Roles are mutually exclusive; let one of them decide the council size'
   }
 
-  if ($script:JobLimit -gt $script:MemberCount) { $script:JobLimit = $script:MemberCount }
-
-  if ($script:MemberFloor -lt 1) {
-    $script:MemberFloor = [Math]::Max(2, [Math]::Ceiling($script:MemberCount / 2))
-  }
   # Peer critiques are truncated on a line boundary, so a budget smaller than a
   # line of prose would drop the whole critique and leave only the marker.
   if ($MaxPeerChars -lt 1000) {
     Stop-WithError "-MaxPeerChars must be at least 1000, got $MaxPeerChars"
   }
+}
 
-  if ($script:MemberFloor -gt $script:MemberCount) {
-    Stop-WithError "-MinMembers ($($script:MemberFloor)) exceeds the member count ($($script:MemberCount))"
+# -Roles decides the council size, so anything derived from the member count has
+# to wait until the roles are loaded. Computing the quorum floor from the
+# requested count instead would seat two members, pay for both, and only then
+# reject the run for falling below a floor meant for six.
+function Set-FinalLimits {
+  if ($script:JobLimit -gt $script:MemberTotal) { $script:JobLimit = $script:MemberTotal }
+
+  if ($script:MemberFloor -lt 1) {
+    $script:MemberFloor = [Math]::Max(2, [Math]::Ceiling($script:MemberTotal / 2))
+  }
+
+  if ($script:MemberFloor -gt $script:MemberTotal) {
+    Stop-WithError "-MinMembers ($($script:MemberFloor)) exceeds the member count ($($script:MemberTotal))"
   }
 }
 
@@ -1248,6 +1255,7 @@ function Invoke-Main {
   Test-Arguments
   Resolve-PunyBinary
   Import-Roles
+  Set-FinalLimits
   Set-Seating
   Initialize-OutputDirectory
   Resolve-Subject

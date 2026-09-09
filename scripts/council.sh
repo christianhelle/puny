@@ -413,6 +413,18 @@ validate_args() {
     esac
   fi
 
+  # Peer critiques are truncated on a line boundary, so a budget smaller than a
+  # line of prose would drop the whole critique and leave only the marker.
+  if [[ "$MAX_PEER_CHARS" -lt 1000 ]]; then
+    die "--max-peer-chars must be at least 1000, got $MAX_PEER_CHARS"
+  fi
+}
+
+# --roles decides the council size, so anything derived from the member count has
+# to wait until the roles are loaded. Computing the quorum floor from the
+# requested count instead would seat two members, pay for both, and only then
+# reject the run for falling below a floor meant for six.
+finalize_limits() {
   if [[ "$JOBS" -gt "$MEMBER_COUNT" ]]; then
     JOBS="$MEMBER_COUNT"
   fi
@@ -420,12 +432,6 @@ validate_args() {
   if [[ -z "$MIN_MEMBERS" ]]; then
     MIN_MEMBERS=$(((MEMBER_COUNT + 1) / 2))
     [[ "$MIN_MEMBERS" -lt 2 ]] && MIN_MEMBERS=2
-  fi
-
-  # Peer critiques are truncated on a line boundary, so a budget smaller than a
-  # line of prose would drop the whole critique and leave only the marker.
-  if [[ "$MAX_PEER_CHARS" -lt 1000 ]]; then
-    die "--max-peer-chars must be at least 1000, got $MAX_PEER_CHARS"
   fi
 
   if [[ "$MIN_MEMBERS" -gt "$MEMBER_COUNT" ]]; then
@@ -1460,6 +1466,7 @@ main() {
   validate_args
   resolve_binary
   load_roles
+  finalize_limits
   seat_members
   init_out_dir
   resolve_subject
