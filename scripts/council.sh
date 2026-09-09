@@ -575,7 +575,9 @@ resolve_subject() {
       git diff "$SUBJECT_DIFF...HEAD"
     } >"$SUBJECT_PATH"
     SUBJECT_LABEL="git diff $SUBJECT_DIFF...HEAD"
-    SUBJECT_KIND="diff"
+    # An explicit --kind wins here too; silently overriding it would judge the
+    # change with a template the caller did not ask for.
+    [[ -n "$SUBJECT_KIND" ]] || SUBJECT_KIND="diff"
   else
     printf '%s\n' "$SUBJECT_TEXT" >"$SUBJECT_PATH"
     SUBJECT_LABEL="inline text"

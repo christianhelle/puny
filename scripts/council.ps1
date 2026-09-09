@@ -447,7 +447,9 @@ function Resolve-Subject {
     $lines += (& git diff "$Diff...HEAD")
     Write-TextFile $script:SubjectPath (Join-Lines $lines)
     $script:SubjectLabel = "git diff $Diff...HEAD"
-    $kind = 'diff'
+    # An explicit -Kind wins here too; silently overriding it would judge the
+    # change with a template the caller did not ask for.
+    if (-not $kind) { $kind = 'diff' }
   }
   else {
     Write-TextFile $script:SubjectPath ($Subject + "`n")
