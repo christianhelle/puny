@@ -14,6 +14,7 @@ ASSET_DIR="$SCRIPT_DIR/council"
 KNOWN_PROVIDERS=""
 
 MEMBER_COUNT="${COUNCIL_MEMBERS:-6}"
+MEMBER_COUNT_EXPLICIT=0
 MODEL_SPECS="${COUNCIL_MODELS:-}"
 CHAIR_SPEC="${COUNCIL_CHAIR:-}"
 SUBJECT_FILE=""
@@ -105,7 +106,7 @@ Execution:
 Output:
   -o, --out DIR             Output directory (default: .council/<timestamp>-<slug>)
       --force               Clear a non-empty output directory before running
-      --dry-run             Compose every prompt but call no models
+      --dry-run             Compose round-one prompts only, call no models
       --smoke               Self-test against the mock provider
   -h, --help                Show this help text
 
@@ -166,6 +167,7 @@ parse_args() {
     -n | --members)
       require_positive_int "$1" "${2:-}"
       MEMBER_COUNT="$2"
+      MEMBER_COUNT_EXPLICIT=1
       shift 2
       ;;
     -m | --models)
@@ -379,6 +381,10 @@ validate_args() {
   require_whole_number "Job limit (COUNCIL_JOBS)" "$JOBS" 1
   require_whole_number "Timeout (COUNCIL_TIMEOUT)" "$TIMEOUT_SECS" 0
 
+  if [[ "$MEMBER_COUNT_EXPLICIT" -eq 1 ]] && [[ -n "$ROLE_FILTER" ]]; then
+    die "--members and --roles are mutually exclusive; let one of them decide the council size"
+  fi
+
   [[ -n "$SUBJECT_FILE" ]] && chosen=$((chosen + 1))
   [[ -n "$SUBJECT_DIFF" ]] && chosen=$((chosen + 1))
   [[ -n "$SUBJECT_TEXT" ]] && chosen=$((chosen + 1))
@@ -436,7 +442,7 @@ declare -a ROLE_FILE=()
 load_roles() {
   local file base id name
   local -a wanted=()
-  local want found i
+  local want found i existing
 
   ROLE_DIR="$ASSET_DIR/roles"
   PROMPT_DIR="$ASSET_DIR/prompts"
@@ -468,6 +474,11 @@ load_roles() {
       want="$(echo "$want" | tr -d '[:space:]')"
       [[ -n "$want" ]] || continue
       found=0
+      for existing in "${ROLE_ID[@]}"; do
+        if [[ "$existing" == "$want" ]]; then
+          die "Role '$want' selected more than once"
+        fi
+      done
       for i in "${!all_id[@]}"; do
         if [[ "${all_id[$i]}" == "$want" ]]; then
           ROLE_ID+=("${all_id[$i]}")
