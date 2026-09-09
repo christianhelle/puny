@@ -913,7 +913,14 @@ run_one() {
   if [[ "$ISOLATE_HOME" -eq 1 ]]; then
     home="$work/home"
     mkdir -p "$home/puny"
-    cp "$SEED_CONFIG" "$home/puny/config.json"
+    # A mock member never calls a provider, so it has no business holding a copy
+    # of the real provider tokens.
+    if [[ "$SMOKE" -eq 1 ]]; then
+      sed -e 's/"apiKey": "[^"]*"/"apiKey": null/g' "$SEED_CONFIG" >"$home/puny/config.json"
+    else
+      cp "$SEED_CONFIG" "$home/puny/config.json"
+    fi
+    chmod 600 "$home/puny/config.json" 2>/dev/null || true
     cmd+=("XDG_CONFIG_HOME=$(to_native "$home")" "APPDATA=$(to_native "$home")")
   fi
   cmd+=("$PUNY_BIN_PATH" --oneshot --no-skills --prompt-file "$(to_native "$prompt")")
@@ -1403,7 +1410,15 @@ main() {
   preflight
 
   TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/council.XXXXXX")"
+  # mktemp is not guaranteed to give an owner-only directory on every platform,
+  # and each member's copy of the config carries provider tokens.
+  chmod 700 "$TEMP_ROOT" 2>/dev/null || true
   trap cleanup EXIT
+
+  if [[ "$KEEP_TEMP" -eq 1 ]] && [[ "$ISOLATE_HOME" -eq 1 ]] && [[ "$SMOKE" -eq 0 ]]; then
+    log_warning "--keep-temp leaves a copy of your puny config, provider tokens included,"
+    log_warning "in $TEMP_ROOT. Delete it when you are done."
+  fi
 
   local i
   local -a all_seats=()

@@ -878,7 +878,16 @@ function Start-Member {
   if ($script:Isolate) {
     $home_ = Join-Path $work 'home'
     New-Item -ItemType Directory -Force -Path (Join-Path $home_ 'puny') | Out-Null
-    Copy-Item -LiteralPath $script:SeedConfig -Destination (Join-Path $home_ 'puny\config.json') -Force
+    $memberConfig = Join-Path $home_ 'puny\config.json'
+    # A mock member never calls a provider, so it has no business holding a copy
+    # of the real provider tokens.
+    if ($Smoke) {
+      $stripped = (Read-TextFile $script:SeedConfig) -replace '"apiKey":\s*"[^"]*"', '"apiKey": null'
+      Write-TextFile $memberConfig $stripped
+    }
+    else {
+      Copy-Item -LiteralPath $script:SeedConfig -Destination $memberConfig -Force
+    }
     $psi.Environment['XDG_CONFIG_HOME'] = $home_
     $psi.Environment['APPDATA'] = $home_
   }
@@ -1200,6 +1209,19 @@ function Invoke-Main {
 
   $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("council." + [System.IO.Path]::GetRandomFileName())
   New-Item -ItemType Directory -Force -Path $script:TempRoot | Out-Null
+  # On Linux and macOS the temp root sits in a shared directory, and each
+  # member's copy of the config carries provider tokens.
+  if (-not $IsWindows) {
+    try {
+      [System.IO.Directory]::SetUnixFileMode($script:TempRoot, 'UserRead,UserWrite,UserExecute')
+    }
+    catch { Write-WarningMessage 'Could not restrict permissions on the temporary directory' }
+  }
+
+  if ($KeepTemp -and $script:Isolate -and -not $Smoke) {
+    Write-WarningMessage '-KeepTemp leaves a copy of your puny config, provider tokens included,'
+    Write-WarningMessage "in $($script:TempRoot). Delete it when you are done."
+  }
 
   try {
     $allSeats = @(0..($script:MemberTotal - 1))
