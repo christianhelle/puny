@@ -996,13 +996,12 @@ function Invoke-Round {
   Write-Info "Round ${Round}: $($Indices.Count) member(s), up to $($script:JobLimit) at once"
 
   $running = [System.Collections.ArrayList]::new()
-  $results = @{}
 
   foreach ($i in $Indices) {
     while (@($running | Where-Object { -not $_.Proc.HasExited }).Count -ge $script:JobLimit) {
       Start-Sleep -Milliseconds 200
       foreach ($done in @($running | Where-Object { $_.Proc.HasExited })) {
-        $results[$done.Slug] = Complete-Member $done
+        $null = Complete-Member $done
         $running.Remove($done)
       }
     }
@@ -1010,7 +1009,13 @@ function Invoke-Round {
     [void]$running.Add((Start-Member $seat.Slug $seat.Provider $seat.Model (Join-Path $dest "$($seat.Slug).prompt.md") $dest))
   }
 
-  foreach ($job in @($running)) { $results[$job.Slug] = Complete-Member $job }
+  # Complete-Member enforces the timeout itself by killing the process after
+  # -TimeoutSec and blocking on WaitForExit until it dies, so a hung member is
+  # stopped even when every other slot stays full.
+  foreach ($job in @($running)) {
+    $null = Complete-Member $job
+    $running.Remove($job)
+  }
 
   $ok = 0
   $bad = 0
