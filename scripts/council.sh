@@ -603,6 +603,19 @@ init_out_dir() {
   mkdir -p "$OUT_DIR/round1" "$OUT_DIR/round2" "$OUT_DIR/round3" "$OUT_DIR/round4"
 }
 
+# A three-dot diff is committed work only. Reviewing a branch with uncommitted
+# changes would otherwise return a verdict on code the author is not shipping,
+# with nothing on screen to say so.
+warn_if_working_tree_dirty() {
+  local dirty
+  dirty="$(git status --porcelain=v1 --untracked-files=normal 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [[ "$dirty" -gt 0 ]] || return 0
+
+  log_warning "$dirty uncommitted change(s) are NOT included in this review."
+  log_warning "The council will see committed work only. Commit them first, or pass the"
+  log_warning "output of 'git diff' through --subject-file to have them critiqued."
+}
+
 # Writes the exact bytes every member will see into <out>/subject.md.
 resolve_subject() {
   local bytes
@@ -632,6 +645,7 @@ resolve_subject() {
       echo
       git diff "$SUBJECT_DIFF...HEAD"
     } >"$SUBJECT_PATH"
+    warn_if_working_tree_dirty
     SUBJECT_LABEL="git diff $SUBJECT_DIFF...HEAD"
     # An explicit --kind wins here too; silently overriding it would judge the
     # change with a template the caller did not ask for.

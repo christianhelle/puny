@@ -466,6 +466,18 @@ function Initialize-OutputDirectory {
   $script:OutDir = (Resolve-Path -LiteralPath $script:OutDir).Path
 }
 
+# A three-dot diff is committed work only. Reviewing a branch with uncommitted
+# changes would otherwise return a verdict on code the author is not shipping,
+# with nothing on screen to say so.
+function Write-DirtyTreeWarning {
+  $dirty = @(& git status --porcelain=v1 --untracked-files=normal 2>$null)
+  if ($dirty.Count -eq 0) { return }
+
+  Write-WarningMessage "$($dirty.Count) uncommitted change(s) are NOT included in this review."
+  Write-WarningMessage 'The council will see committed work only. Commit them first, or pass the'
+  Write-WarningMessage "output of 'git diff' through -SubjectFile to have them critiqued."
+}
+
 # Writes the exact bytes every member will see into <out>/subject.md.
 function Resolve-Subject {
   $script:SubjectPath = Join-Path $script:OutDir 'subject.md'
@@ -492,6 +504,7 @@ function Resolve-Subject {
     $lines += @('', 'Full diff:', '')
     $lines += (& git diff "$Diff...HEAD")
     Write-TextFile $script:SubjectPath (Join-Lines $lines)
+    Write-DirtyTreeWarning
     $script:SubjectLabel = "git diff $Diff...HEAD"
     # An explicit -Kind wins here too; silently overriding it would judge the
     # change with a template the caller did not ask for.
