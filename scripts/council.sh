@@ -1142,6 +1142,9 @@ compose_round2_prompt() {
   scratch="${out}.scalars"
   render_scalars "$template" "$scratch" \
     "$(printf '%02d' "$index")" "${ROLE_NAME[$index]}" "$pair_name" "$MEMBER_COUNT"
+  # Guard the static template only, before peer text is spliced in: round-one
+  # output is real model text and may legitimately contain a trigger word.
+  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$scratch"
   splice_all "$scratch" "$out" \
     "{{ROLE_BRIEF}}" "${ROLE_FILE[$index]}" \
     "{{SUBJECT}}" "$SUBJECT_PATH" \
@@ -1149,7 +1152,6 @@ compose_round2_prompt() {
     "{{PEER_CRITIQUES}}" "$peers"
   rm -f "$scratch"
 
-  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$out"
   return 0
 }
 
@@ -1207,13 +1209,14 @@ compose_chair_prompt() {
 
   scratch="${out}.scalars"
   render_scalars "$template" "$scratch" "chair" "Chair" "none" "${#survivors[@]}"
+  # Guard the static template only; all-round-N files are real member output.
+  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$scratch"
   splice_all "$scratch" "$out" \
     "{{SUBJECT}}" "$SUBJECT_PATH" \
     "{{ALL_ROUND1}}" "$r1" \
     "{{ALL_ROUND2}}" "$r2"
   rm -f "$scratch"
 
-  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$out"
   return 0
 }
 
@@ -1278,9 +1281,10 @@ run_summary() {
   prompt="$OUT_DIR/round4/summary.prompt.md"
   scratch="${prompt}.scalars"
   render_scalars "$template" "$scratch" "summary" "Summary" "none" "$MEMBER_COUNT"
+  # Guard the static template only; verdict.md is real model output.
+  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$scratch"
   splice_all "$scratch" "$prompt" "{{VERDICT_REPORT}}" "$OUT_DIR/verdict.md"
   rm -f "$scratch"
-  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$prompt"
 
   log_info "Summarising the verdict ($(chair_label))"
   run_one "summary" "$CHAIR_PROVIDER" "$CHAIR_MODEL" "$prompt" "$OUT_DIR/round4"

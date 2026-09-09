@@ -399,9 +399,10 @@ function Invoke-Summary {
   $prompt = Join-Path $script:OutDir 'round4\summary.prompt.md'
   $scratch = "$prompt.scalars"
   Expand-Scalars $template $scratch 'summary' 'Summary' 'none' $script:MemberTotal
+  # Guard the static template only; verdict.md is real model output.
+  if ($Smoke) { Assert-NoMockTriggers $scratch }
   Expand-Markers $scratch $prompt @{ '{{VERDICT_REPORT}}' = $verdictPath }
   Remove-Item -LiteralPath $scratch -Force
-  if ($Smoke) { Assert-NoMockTriggers $prompt }
 
   Write-Info "Summarising the verdict ($(Get-ChairLabel))"
   $dest = Join-Path $script:OutDir 'round4'
@@ -679,6 +680,9 @@ function New-Round2Prompt {
 
   $scratch = "$OutPath.scalars"
   Expand-Scalars $template $scratch ('{0:d2}' -f $Index) $seat.Name $pairName $script:MemberTotal
+  # Guard the static template only, before peer text is spliced in: round-one
+  # output is real model text and may legitimately contain a trigger word.
+  if ($Smoke) { Assert-NoMockTriggers $scratch }
   Expand-Markers $scratch $OutPath @{
     '{{ROLE_BRIEF}}'      = $seat.File
     '{{SUBJECT}}'         = $script:SubjectPath
@@ -686,8 +690,6 @@ function New-Round2Prompt {
     '{{PEER_CRITIQUES}}'  = $peers
   }
   Remove-Item -LiteralPath $scratch -Force
-
-  if ($Smoke) { Assert-NoMockTriggers $OutPath }
 }
 
 # Concatenates a whole round for the chair, in seat order, labelling each block
@@ -731,14 +733,14 @@ function New-ChairPrompt {
 
   $scratch = "$OutPath.scalars"
   Expand-Scalars $template $scratch 'chair' 'Chair' 'none' $Survivors.Count
+  # Guard the static template only; all-round-N files are real member output.
+  if ($Smoke) { Assert-NoMockTriggers $scratch }
   Expand-Markers $scratch $OutPath @{
     '{{SUBJECT}}'     = $script:SubjectPath
     '{{ALL_ROUND1}}'  = $r1
     '{{ALL_ROUND2}}'  = $r2
   }
   Remove-Item -LiteralPath $scratch -Force
-
-  if ($Smoke) { Assert-NoMockTriggers $OutPath }
 }
 
 function Test-PromptSize {
