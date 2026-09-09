@@ -24,6 +24,7 @@ OUT_DIR="${COUNCIL_OUT:-}"
 ROLE_FILTER=""
 SKIP_CROSS=0
 SKIP_CHAIR=0
+SKIP_SUMMARY=0
 JOBS="${COUNCIL_JOBS:-3}"
 TIMEOUT_SECS="${COUNCIL_TIMEOUT:-900}"
 MIN_MEMBERS=""
@@ -87,6 +88,7 @@ Council:
       --roles LIST          Comma-separated role ids instead of the first N seats
       --no-cross            Skip round two (the cross-critique)
       --no-chair            Skip round three (the synthesis)
+      --no-summary          Skip the plain-language summary of the verdict
 
 Execution:
   -j, --jobs N              Maximum members running at once (default: 3)
@@ -179,6 +181,10 @@ parse_args() {
       ;;
     --no-chair)
       SKIP_CHAIR=1
+      shift
+      ;;
+    --no-summary)
+      SKIP_SUMMARY=1
       shift
       ;;
     -j | --jobs)
@@ -526,7 +532,7 @@ init_out_dir() {
     OUT_DIR=".council/${stamp}-${slug}"
   fi
 
-  mkdir -p "$OUT_DIR/round1" "$OUT_DIR/round2" "$OUT_DIR/round3"
+  mkdir -p "$OUT_DIR/round1" "$OUT_DIR/round2" "$OUT_DIR/round3" "$OUT_DIR/round4"
 }
 
 # Writes the exact bytes every member will see into <out>/subject.md.
@@ -611,7 +617,7 @@ render_scalars() {
     "$template" >"$out"
 
   leftover="$(grep -o '{{[A-Z_0-9]*}}' "$out" | sort -u |
-    grep -vxE '\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2)\}\}' || true)"
+    grep -vxE '\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2|VERDICT_REPORT)\}\}' || true)"
 
   if [[ -n "$leftover" ]]; then
     die "Unsubstituted marker(s) in $(basename "$template"): $(echo "$leftover" | tr '\n' ' ')"
@@ -1113,6 +1119,52 @@ chair_label() {
   fi
 }
 
+# Condenses verdict.md into something readable without opening a file. The chair
+# writes for the record and runs to several thousand words; this is the version
+# you read in the terminal before deciding what to do.
+run_summary() {
+  local template scratch status prompt
+
+  template="$PROMPT_DIR/round4-summary.md"
+  [[ -f "$template" ]] || die "Summary template not found: $template"
+  [[ -s "$OUT_DIR/verdict.md" ]] || {
+    log_warning "No verdict to summarise"
+    return 1
+  }
+
+  prompt="$OUT_DIR/round4/summary.prompt.md"
+  scratch="${prompt}.scalars"
+  render_scalars "$template" "$scratch" "summary" "Summary" "none" "$MEMBER_COUNT"
+  splice_all "$scratch" "$prompt" "{{VERDICT_REPORT}}" "$OUT_DIR/verdict.md"
+  rm -f "$scratch"
+  [[ "$SMOKE" -eq 1 ]] && guard_mock_keywords "$prompt"
+
+  log_info "Summarising the verdict ($(chair_label))"
+  run_one "summary" "$CHAIR_PROVIDER" "$CHAIR_MODEL" "$prompt" "$OUT_DIR/round4"
+
+  status="$(read_status_field "$OUT_DIR/round4/summary.status" 1)"
+  if [[ "$status" != "ok" ]]; then
+    log_warning "The summary step failed ($status); the full verdict is still in verdict.md"
+    return 1
+  fi
+
+  cp "$OUT_DIR/round4/summary.md" "$OUT_DIR/summary.md"
+  return 0
+}
+
+# The summary is the deliverable, not a diagnostic, so it goes to stdout while
+# every log line goes to stderr.
+print_summary() {
+  [[ -s "$OUT_DIR/summary.md" ]] || return 0
+  printf '
+%s
+
+' "──────── Council summary ────────"
+  cat "$OUT_DIR/summary.md"
+  printf '
+'
+}
+
 write_manifest() {
   local out="$OUT_DIR/manifest.tsv"
   local round seat slug status file
@@ -1145,6 +1197,12 @@ write_manifest() {
       "$(read_status_field "$file" 3)" "$(read_status_field "$file" 4)" \
       "$(verdict_of "$OUT_DIR/verdict.md")" >>"$out"
   fi
+
+  file="$OUT_DIR/round4/summary.status"
+  if [[ -f "$file" ]]; then
+    printf 'round4	summary	summary	%s	%s	%s	%s	%s	%s
+'       "$(chair_label)" "$(read_status_field "$file" 1)" "$(read_status_field "$file" 2)"       "$(read_status_field "$file" 3)" "$(read_status_field "$file" 4)"       "$(verdict_of "$OUT_DIR/summary.md")" >>"$out"
+  fi
 }
 
 write_index() {
@@ -1166,6 +1224,13 @@ write_index() {
     echo "| Chair | $(chair_label) |"
     echo "| Extraction | $([[ "$USE_CHAT_LOG" -eq 1 ]] && echo "puny_chat.log" || echo "stdout (lossy)") |"
     echo
+
+    if [[ -s "$OUT_DIR/summary.md" ]]; then
+      echo "## Summary"
+      echo
+      sed -e 's/$//' "$OUT_DIR/summary.md"
+      echo
+    fi
 
     if [[ -s "$OUT_DIR/verdict.md" ]]; then
       echo "## Verdict"
@@ -1201,6 +1266,7 @@ write_index() {
     echo
     echo "- [subject.md](subject.md) — exactly what every member was shown"
     echo "- [manifest.tsv](manifest.tsv) — per-run status, timings and verdicts"
+    [[ -s "$OUT_DIR/summary.md" ]] && echo "- [summary.md](summary.md) — the short version"
     [[ -s "$OUT_DIR/verdict.md" ]] && echo "- [verdict.md](verdict.md) — the chair's synthesis"
     echo
     for ((seat = 0; seat < MEMBER_COUNT; seat++)); do
@@ -1310,8 +1376,15 @@ main() {
     run_chair "${survivors[@]}" || chair_rc=$?
   fi
 
+  if [[ "$SKIP_SUMMARY" -eq 1 ]] || [[ "$SKIP_CHAIR" -eq 1 ]] || [[ "$chair_rc" -ne 0 ]]; then
+    [[ "$SKIP_SUMMARY" -eq 1 ]] && log_info "Skipping the summary"
+  else
+    run_summary || true
+  fi
+
   write_manifest
   write_index
+  print_summary
   log_success "Read $OUT_DIR/council.md"
 
   return "$chair_rc"
