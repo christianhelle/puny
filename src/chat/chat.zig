@@ -54,6 +54,22 @@ pub fn runTurn(
     );
 }
 
+/// Chooses the reasoning effort to request for a turn.
+///
+/// `--show-thinking` and `--chat-log` both want reasoning tokens to exist at
+/// all, so with nothing configured they raise the level to high. An explicit
+/// level always wins, including `.default`, which is how a caller opts out of
+/// that behaviour and lets the provider decide.
+fn effectiveEffort(
+    explicit: ?openai.ReasoningEffort,
+    show_thinking: bool,
+    has_chat_log: bool,
+) ?openai.ReasoningEffort {
+    if (explicit) |level| return level;
+    if (show_thinking or has_chat_log) return .high;
+    return null;
+}
+
 pub fn runTurnWithMode(
     prov: *provider.Provider,
     arena: std.mem.Allocator,
@@ -70,7 +86,7 @@ pub fn runTurnWithMode(
     chat_log: ?*std.Io.Writer,
     mode: AgentMode,
 ) !TurnResult {
-    const effective_effort = if (reasoning_effort) |e| e else if (show_thinking or chat_log != null) openai.ReasoningEffort.high else null;
+    const effective_effort = effectiveEffort(reasoning_effort, show_thinking, chat_log != null);
     const request = openai.ChatRequest{
         .model = model_key,
         .messages = messages.items,
@@ -626,4 +642,46 @@ test "runTurn completes an empty turn without appending a message" {
     try std.testing.expect(result.turn_complete);
     try std.testing.expect(result.usage_estimated);
     try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+}
+
+test "effectiveEffort keeps an explicit level even when the chat log is on" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .low),
+        effectiveEffort(.low, false, true),
+    );
+}
+
+test "effectiveEffort keeps an explicit level even when thinking is shown" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .minimal),
+        effectiveEffort(.minimal, true, false),
+    );
+}
+
+test "effectiveEffort honours an explicit default as the opt-out" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .default),
+        effectiveEffort(.default, true, true),
+    );
+}
+
+test "effectiveEffort raises to high when the chat log needs reasoning" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .high),
+        effectiveEffort(null, false, true),
+    );
+}
+
+test "effectiveEffort raises to high when thinking is shown" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .high),
+        effectiveEffort(null, true, false),
+    );
+}
+
+test "effectiveEffort leaves the level unset when nothing asks for reasoning" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, null),
+        effectiveEffort(null, false, false),
+    );
 }

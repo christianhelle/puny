@@ -724,6 +724,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
 | `--no-skills`           | Disable skill loading entirely (slash commands, triggers, and model invocation)          |
 | `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
+| `--effort <level>`      | Reasoning effort: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (CLI/env/config precedence) |
 | `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
 | `--prompt-file <file-or-url>` | Read first prompt from a file or URL (10 MiB limit) |
 | `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                              |
@@ -747,6 +748,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | Variable                     | Description                                         |
 | ---------------------------- | --------------------------------------------------- |
 | `PUNY_CHAT_LOG`              | Set to `1` or `true` to save full conversation to `puny_chat.log` |
+| `PUNY_REASONING_EFFORT`      | Reasoning effort level to request (below `--effort`)              |
 | `PUNY_PROVIDER`              | Default provider name (overrides config)            |
 | `PUNY_PROVIDER_URL`          | LM Studio endpoint URL (overrides config, unless `--url` is set) |
 | `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
@@ -943,6 +945,26 @@ final answer:
 ```bash
 zig build run -- --mock --model mock-model --prompt "respond with reasoning" --show-thinking --oneshot
 ```
+
+### Reasoning effort
+
+`--effort` sets how much reasoning to ask the model for. It takes precedence
+over `PUNY_REASONING_EFFORT` and over the level stored in your config:
+
+```bash
+puny --effort low
+```
+
+Both `--show-thinking` and `--chat-log` want reasoning tokens to exist at all,
+so on their own they raise the level to `high`. Passing `--effort` overrides
+that, which matters when you want the conversation log without paying for the
+extra reasoning:
+
+```bash
+puny --chat-log --effort low --oneshot --prompt "summarise this file"
+```
+
+Use `--effort default` to send no level at all and let the provider decide.
 
 ### HTTP debug logging
 

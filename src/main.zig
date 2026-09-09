@@ -666,11 +666,26 @@ fn initializeProviderAndModel(
         };
     };
     model_key.* = init_result.model_key;
-    if (init_result.reasoning_effort) |effort| {
-        reasoning_effort.* = effort;
-    } else if (cfg.providerEntry(selected_provider.*).reasoning_effort) |effort_str| {
-        reasoning_effort.* = std.meta.stringToEnum(openai.ReasoningEffort, effort_str);
-    }
+    reasoning_effort.* = resolveReasoningEffort(
+        parsed.effort,
+        init_result.reasoning_effort,
+        cfg.providerEntry(selected_provider.*).reasoning_effort,
+    );
+}
+
+/// Settles which reasoning effort a session starts with, following the same
+/// command line over environment over config order as every other option.
+/// `flag` already carries the environment fallback, `selected` comes from the
+/// interactive picker, and `configured` is the level stored for the provider.
+fn resolveReasoningEffort(
+    flag: ?openai.ReasoningEffort,
+    selected: ?openai.ReasoningEffort,
+    configured: ?[]const u8,
+) ?openai.ReasoningEffort {
+    if (flag) |effort| return effort;
+    if (selected) |effort| return effort;
+    if (configured) |text| return std.meta.stringToEnum(openai.ReasoningEffort, text);
+    return null;
 }
 
 fn buildPlanningToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.ArrayList(openai.ToolDefinition) {
@@ -877,4 +892,39 @@ test "debug logging is always enabled for debug builds" {
     const parse_idx = std.mem.indexOf(u8, data, "parseArgs") orelse 0;
     const mode_idx = std.mem.indexOf(u8, data, needle_mode) orelse 0;
     try std.testing.expect(mode_idx > parse_idx);
+}
+
+test "resolveReasoningEffort prefers the command line over everything else" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .low),
+        resolveReasoningEffort(.low, .high, "medium"),
+    );
+}
+
+test "resolveReasoningEffort uses the picked level when no flag is given" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .high),
+        resolveReasoningEffort(null, .high, "medium"),
+    );
+}
+
+test "resolveReasoningEffort falls back to the configured level" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, .medium),
+        resolveReasoningEffort(null, null, "medium"),
+    );
+}
+
+test "resolveReasoningEffort leaves the level unset when nothing is configured" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, null),
+        resolveReasoningEffort(null, null, null),
+    );
+}
+
+test "resolveReasoningEffort ignores an unrecognised configured level" {
+    try std.testing.expectEqual(
+        @as(?openai.ReasoningEffort, null),
+        resolveReasoningEffort(null, null, "enthusiastic"),
+    );
 }

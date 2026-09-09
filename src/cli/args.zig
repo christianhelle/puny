@@ -1,6 +1,8 @@
 const std = @import("std");
 const version = @import("../version.zig");
 const provider = @import("../providers/provider.zig");
+const openai = @import("../providers/openai.zig");
+const effort_picker = @import("../tui/effort_picker.zig");
 
 pub const default_max_iterations: usize = 5;
 
@@ -11,6 +13,7 @@ pub const Options = struct {
     api_key_file: ?[]const u8 = null,
     model: ?[]const u8 = null,
     model_explicit: bool = false,
+    effort: ?openai.ReasoningEffort = null,
     prompt: ?[]const u8 = null,
     prompt_file: ?[]const u8 = null,
     oneshot: bool = false,
@@ -144,6 +147,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.debug = true;
         } else if (std.mem.eql(u8, arg, "--chat-log")) {
             opts.chat_log = true;
+        } else if (std.mem.eql(u8, arg, "--effort")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.effort = effort_picker.parseEffort(args[i]) orelse
+                fatal(io, "Unknown reasoning effort '{s}'. Valid levels: default, none, minimal, low, medium, high, xhigh.\n\n", .{args[i]});
         } else if (std.mem.eql(u8, arg, "--no-skills")) {
             opts.no_skills = true;
         } else if (std.mem.eql(u8, arg, "--session")) {
@@ -218,6 +226,13 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         }
     }
 
+    if (opts.effort == null) {
+        if (environ_map.get("PUNY_REASONING_EFFORT")) |value| {
+            opts.effort = effort_picker.parseEffort(value) orelse
+                fatal(io, "Unknown reasoning effort '{s}' in PUNY_REASONING_EFFORT. Valid levels: default, none, minimal, low, medium, high, xhigh.\n\n", .{value});
+        }
+    }
+
     if (!opts.no_skills) {
         if (environ_map.get("PUNY_NO_SKILLS")) |value| {
             opts.no_skills = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
@@ -241,6 +256,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -k, --api-key <key>          Provider API token (CLI > file > env > config; session only)
         \\      --api-key-file <path>    Read API token from file (below --api-key in precedence)
         \\  -m, --model <id>             Model identifier (skip picker if found in running models)
+        \\      --effort <level>         Reasoning effort: default, none, minimal, low, medium, high, xhigh (CLI > env > config)
         \\  -p, --prompt <text>          Pre-fill prompt as first user message
         \\      --prompt-file <path|url> Read first prompt from a file or URL
         \\  -1, --oneshot, --one-shot    Exit after processing the prompt (requires --prompt or --prompt-file)
@@ -641,4 +657,45 @@ test "printHelp prints the version and usage" {
 test "printVersion prints the puny version line" {
     // printVersion writes to real stdout which is not drainable in test context.
     return error.SkipZigTest;
+}
+
+test "parseArgs sets effort from flag" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--effort", "low" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .low), opts.effort);
+}
+
+test "parseArgs falls back to PUNY_REASONING_EFFORT env" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_REASONING_EFFORT", "minimal");
+
+    const args = &[_][:0]const u8{"puny"};
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .minimal), opts.effort);
+}
+
+test "parseArgs prefers the effort flag over the environment" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    try env.put("PUNY_REASONING_EFFORT", "minimal");
+
+    const args = &[_][:0]const u8{ "puny", "--effort", "xhigh" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), opts.effort);
 }
