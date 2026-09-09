@@ -237,6 +237,10 @@ function Test-Arguments {
     Write-WarningMessage 'Running without a time limit; a hung member will block its slot indefinitely'
   }
 
+  if ($script:MemberCountExplicit -and $Roles) {
+    Stop-WithError '-Members and -Roles are mutually exclusive; let one of them decide the council size'
+  }
+
   if ($script:JobLimit -gt $script:MemberCount) { $script:JobLimit = $script:MemberCount }
 
   if ($script:MemberFloor -lt 1) {
@@ -280,12 +284,17 @@ function Import-Roles {
 
   $script:Seats = @()
   if ($Roles) {
-    foreach ($want in $Roles) {
-      $want = $want.Trim()
-      if (-not $want) { continue }
-      $match = $all | Where-Object { $_.Id -eq $want } | Select-Object -First 1
-      if (-not $match) { Stop-WithError "Unknown role '$want'. Available: $(($all.Id) -join ' ')" }
-      $script:Seats += $match
+    $seen = @{}
+    foreach ($item in $Roles) {
+      foreach ($want in ($item -split ',')) {
+        $want = $want.Trim()
+        if (-not $want) { continue }
+        if ($seen.ContainsKey($want)) { Stop-WithError "Role '$want' selected more than once" }
+        $seen[$want] = $true
+        $match = $all | Where-Object { $_.Id -eq $want } | Select-Object -First 1
+        if (-not $match) { Stop-WithError "Unknown role '$want'. Available: $(($all.Id) -join ' ')" }
+        $script:Seats += $match
+      }
     }
     $script:MemberTotal = $script:Seats.Count
     if ($script:MemberTotal -eq 0) { Stop-WithError '-Roles selected no roles' }
@@ -1180,7 +1189,12 @@ function Invoke-Main {
   if ($Help) { Show-Usage; exit 0 }
 
   $script:BinPath = if ($Bin) { $Bin } elseif ($env:PUNY_BIN) { $env:PUNY_BIN } else { '' }
-  $script:ModelList = if ($Models) { $Models } elseif ($env:COUNCIL_MODELS) { $env:COUNCIL_MODELS -split ',' } else { $null }
+  $script:MemberCountExplicit = $PSBoundParameters.ContainsKey('Members') -or [bool]$env:COUNCIL_MEMBERS
+  $script:ModelList = if ($Models) {
+    @($Models | ForEach-Object { if ($_ -match ',') { $_ -split ',' } else { $_ } })
+  }
+  elseif ($env:COUNCIL_MODELS) { @($env:COUNCIL_MODELS -split ',') }
+  else { $null }
   $script:ChairSpec = if ($Chair) { $Chair } elseif ($env:COUNCIL_CHAIR) { $env:COUNCIL_CHAIR } else { '' }
   $script:OutDir = if ($Out) { $Out } elseif ($env:COUNCIL_OUT) { $env:COUNCIL_OUT } else { '' }
   $script:JobLimit = if ($PSBoundParameters.ContainsKey('Jobs')) { $Jobs }
