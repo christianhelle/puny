@@ -1287,8 +1287,7 @@ write_index() {
     if [[ -s "$OUT_DIR/summary.md" ]]; then
       echo "## Summary"
       echo
-      sed -e 's/
-$//' "$OUT_DIR/summary.md"
+      sed -e 's/\r$//' "$OUT_DIR/summary.md"
       echo
     fi
 
