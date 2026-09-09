@@ -375,6 +375,12 @@ validate_args() {
     [[ "$MIN_MEMBERS" -lt 2 ]] && MIN_MEMBERS=2
   fi
 
+  # Peer critiques are truncated on a line boundary, so a budget smaller than a
+  # line of prose would drop the whole critique and leave only the marker.
+  if [[ "$MAX_PEER_CHARS" -lt 1000 ]]; then
+    die "--max-peer-chars must be at least 1000, got $MAX_PEER_CHARS"
+  fi
+
   if [[ "$MIN_MEMBERS" -gt "$MEMBER_COUNT" ]]; then
     die "--min-members ($MIN_MEMBERS) exceeds the member count ($MEMBER_COUNT)"
   fi
@@ -972,8 +978,10 @@ build_peer_file() {
 
     bytes="$(wc -c <"$src" | tr -d '[:space:]')"
     if [[ "$bytes" -gt "$MAX_PEER_CHARS" ]]; then
-      head -c "$MAX_PEER_CHARS" "$src" >>"$out"
-      printf '\n[TRUNCATED: %d chars omitted]\n' "$((bytes - MAX_PEER_CHARS))" >>"$out"
+      # Cut on a line boundary. A bare byte cut can land inside a multi-byte
+      # character and leave a broken byte in the middle of a peer's critique.
+      head -c "$MAX_PEER_CHARS" "$src" | sed -e '$d' >>"$out"
+      printf '[TRUNCATED: %d chars omitted]\n' "$((bytes - MAX_PEER_CHARS))" >>"$out"
     else
       cat "$src" >>"$out"
     fi

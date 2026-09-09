@@ -226,6 +226,12 @@ function Test-Arguments {
   if ($script:MemberFloor -lt 1) {
     $script:MemberFloor = [Math]::Max(2, [Math]::Ceiling($Members / 2))
   }
+  # Peer critiques are truncated on a line boundary, so a budget smaller than a
+  # line of prose would drop the whole critique and leave only the marker.
+  if ($MaxPeerChars -lt 1000) {
+    Stop-WithError "-MaxPeerChars must be at least 1000, got $MaxPeerChars"
+  }
+
   if ($script:MemberFloor -gt $Members) {
     Stop-WithError "-MinMembers ($($script:MemberFloor)) exceeds the member count ($Members)"
   }
@@ -567,8 +573,16 @@ function New-PeerDigest {
 
     $bytes = [System.IO.File]::ReadAllBytes($src)
     if ($bytes.Length -gt $MaxPeerChars) {
+      # Cut on a line boundary. A bare byte cut can land inside a multi-byte
+      # character and leave a broken byte in the middle of a peer's critique.
       $kept = [System.Text.Encoding]::UTF8.GetString($bytes, 0, $MaxPeerChars)
-      [void]$builder.Append($kept).Append("`n")
+      $keptLines = $kept -split "`n"
+      if ($keptLines.Count -gt 0 -and $keptLines[-1] -eq '') {
+        $keptLines = @($keptLines[0..($keptLines.Count - 2)])
+      }
+      if ($keptLines.Count -gt 1) {
+        [void]$builder.Append(($keptLines[0..($keptLines.Count - 2)] -join "`n")).Append("`n")
+      }
       [void]$builder.Append("[TRUNCATED: $($bytes.Length - $MaxPeerChars) chars omitted]").Append("`n")
     }
     else {
