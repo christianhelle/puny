@@ -899,6 +899,7 @@ function Start-Member {
   if ($Model) { [void]$psi.ArgumentList.Add('-m'); [void]$psi.ArgumentList.Add($Model) }
 
   $proc = [System.Diagnostics.Process]::Start($psi)
+  [void]$script:ActiveProcesses.Add($proc)
 
   return [pscustomobject]@{
     Slug    = $Slug
@@ -925,6 +926,7 @@ function Complete-Member {
     $status = 'timeout'
   }
   [void][System.Threading.Tasks.Task]::WaitAll(@($Job.Stdout, $Job.Stderr))
+  $script:ActiveProcesses.Remove($Job.Proc)
   $Job.Started.Stop()
 
   $code = $Job.Proc.ExitCode
@@ -1196,6 +1198,7 @@ function Invoke-Main {
   $script:MemberFloor = $MinMembers
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
+  $script:ActiveProcesses = [System.Collections.ArrayList]::new()
 
   Import-Providers
   Test-Arguments
@@ -1298,6 +1301,14 @@ function Invoke-Main {
     return $chairCode
   }
   finally {
+    # An interrupt does not stop the members, so without this an interrupted run
+    # leaves paid calls finishing unseen.
+    foreach ($proc in @($script:ActiveProcesses)) {
+      if (-not $proc.HasExited) {
+        Write-WarningMessage 'Stopping a member still in flight'
+        try { $proc.Kill($true) } catch { }
+      }
+    }
     if (-not $KeepTemp -and (Test-Path -LiteralPath $script:TempRoot)) {
       Remove-Item -LiteralPath $script:TempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

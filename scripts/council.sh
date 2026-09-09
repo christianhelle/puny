@@ -760,6 +760,20 @@ cleanup() {
   fi
 }
 
+# Background members are not stopped by the interrupt that reaches this script,
+# so without this an interrupted run leaves paid calls finishing unseen.
+terminate() {
+  local pid
+  trap - INT TERM
+  log_warning "Interrupted; stopping members still in flight"
+  for pid in $(jobs -rp); do
+    kill "$pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  cleanup
+  exit 130
+}
+
 # puny is a native binary, so paths handed to it as arguments or environment
 # values must be in the host's own form, not the shell's.
 to_native() {
@@ -1414,6 +1428,7 @@ main() {
   # and each member's copy of the config carries provider tokens.
   chmod 700 "$TEMP_ROOT" 2>/dev/null || true
   trap cleanup EXIT
+  trap terminate INT TERM
 
   if [[ "$KEEP_TEMP" -eq 1 ]] && [[ "$ISOLATE_HOME" -eq 1 ]] && [[ "$SMOKE" -eq 0 ]]; then
     log_warning "--keep-temp leaves a copy of your puny config, provider tokens included,"
