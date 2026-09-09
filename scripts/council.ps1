@@ -38,6 +38,7 @@ param(
   [switch]$NoChatLog,
   [switch]$NoIsolateHome,
   [switch]$KeepTemp,
+  [switch]$Force,
   [switch]$DryRun,
   [switch]$Smoke,
   [switch]$Help
@@ -96,6 +97,7 @@ Execution:
 
 Output:
   -Out DIR              Output directory (default: .council/<timestamp>-<slug>)
+  -Force                Clear a non-empty output directory before running
   -DryRun               Compose every prompt but call no models
   -Smoke                Self-test against the mock provider
   -Help                 Show this help text
@@ -415,6 +417,11 @@ function ConvertTo-Slug {
   return $slug
 }
 
+# Everything a run owns. Kept explicit so -Force clears the previous run
+# without touching anything else that happens to live in the directory.
+$CouncilArtifacts = @('round1', 'round2', 'round3', 'round4', 'subject.md',
+  'verdict.md', 'summary.md', 'council.md', 'manifest.tsv')
+
 function Initialize-OutputDirectory {
   if (-not $script:OutDir) {
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
@@ -424,6 +431,23 @@ function Initialize-OutputDirectory {
     if (-not $slug) { $slug = 'subject' }
     $script:OutDir = Join-Path '.council' "$stamp-$slug"
   }
+  # Reusing a directory silently mixes runs: seats that are not seated this time
+  # keep their old critiques, and a skipped chair leaves the previous verdict in
+  # place, which then gets reported and summarised as if it were this run's.
+  if ((Test-Path -LiteralPath $script:OutDir) -and
+      @(Get-ChildItem -LiteralPath $script:OutDir -Force).Count -gt 0) {
+    if (-not $Force) {
+      Write-ErrorMessage "Output directory is not empty: $($script:OutDir)"
+      Write-ErrorMessage 'Rerunning into it would report stale critiques and verdicts as current.'
+      Stop-WithError 'Pass -Force to clear the previous run, or choose a different -Out.'
+    }
+    Write-WarningMessage "Clearing the previous run in $($script:OutDir)"
+    foreach ($artifact in $CouncilArtifacts) {
+      $path = Join-Path $script:OutDir $artifact
+      if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+    }
+  }
+
   foreach ($sub in @('round1', 'round2', 'round3', 'round4')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $script:OutDir $sub) | Out-Null
   }

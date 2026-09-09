@@ -36,6 +36,7 @@ PUNY_BIN_PATH="${PUNY_BIN:-}"
 USE_CHAT_LOG=1
 ISOLATE_HOME=1
 KEEP_TEMP=0
+FORCE=0
 
 COLOR_GREEN=""
 COLOR_RED=""
@@ -103,6 +104,7 @@ Execution:
 
 Output:
   -o, --out DIR             Output directory (default: .council/<timestamp>-<slug>)
+      --force               Clear a non-empty output directory before running
       --dry-run             Compose every prompt but call no models
       --smoke               Self-test against the mock provider
   -h, --help                Show this help text
@@ -238,6 +240,10 @@ parse_args() {
       ;;
     --keep-temp)
       KEEP_TEMP=1
+      shift
+      ;;
+    --force)
+      FORCE=1
       shift
       ;;
     --dry-run)
@@ -545,8 +551,12 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-40
 }
 
+# Everything a run owns. Kept explicit so --force clears the previous run
+# without touching anything else that happens to live in the directory.
+COUNCIL_ARTIFACTS=(round1 round2 round3 round4 subject.md verdict.md summary.md council.md manifest.tsv)
+
 init_out_dir() {
-  local stamp slug
+  local stamp slug artifact
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
   if [[ -z "$OUT_DIR" ]]; then
@@ -559,6 +569,22 @@ init_out_dir() {
     fi
     [[ -n "$slug" ]] || slug="subject"
     OUT_DIR=".council/${stamp}-${slug}"
+  fi
+
+  # Reusing a directory silently mixes runs: seats that are not seated this time
+  # keep their old critiques, and a skipped chair leaves the previous verdict in
+  # place, which then gets reported and summarised as if it were this run's.
+  if [[ -d "$OUT_DIR" ]] && [[ -n "$(ls -A "$OUT_DIR" 2>/dev/null)" ]]; then
+    if [[ "$FORCE" -eq 0 ]]; then
+      log_error "Output directory is not empty: $OUT_DIR"
+      log_error "Rerunning into it would report stale critiques and verdicts as current."
+      log_error "Pass --force to clear the previous run, or choose a different --out."
+      exit 1
+    fi
+    log_warning "Clearing the previous run in $OUT_DIR"
+    for artifact in "${COUNCIL_ARTIFACTS[@]}"; do
+      rm -rf "${OUT_DIR:?}/$artifact"
+    done
   fi
 
   mkdir -p "$OUT_DIR/round1" "$OUT_DIR/round2" "$OUT_DIR/round3" "$OUT_DIR/round4"
