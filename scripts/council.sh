@@ -868,6 +868,9 @@ render_scalars() {
     -e "s|{{ROLE_NAME}}|${role_name}|g" \
     -e "s|{{PAIR_NAME}}|${pair_name}|g" \
     -e "s|{{N_MEMBERS}}|${n_members}|g" \
+    -e "s|{{BRANCH_A}}|${COMPARE_BRANCH_A}|g" \
+    -e "s|{{BRANCH_B}}|${COMPARE_BRANCH_B}|g" \
+    -e "s|{{BASE_DESC}}|${SUBJECT_COMPARE_BASE_DESC}|g" \
     "$template" >"$out"
 
   leftover="$(grep -o '{{[A-Z_0-9]*}}' "$out" | sort -u |
