@@ -12,18 +12,28 @@ fn writeAnthropicTextBlock(writer: anytype, text: []const u8) !void {
     try writer.writeByte('}');
 }
 
-fn writeAnthropicToolUseBlock(writer: anytype, id: []const u8, name: []const u8, arguments: []const u8) !void {
+fn writeAnthropicToolUseBlock(allocator: std.mem.Allocator, writer: anytype, id: []const u8, name: []const u8, arguments: []const u8) !void {
     try writer.writeAll("{\"type\":\"tool_use\",\"id\":");
     try std.json.Stringify.value(id, .{}, writer);
     try writer.writeAll(",\"name\":");
     try std.json.Stringify.value(name, .{}, writer);
     try writer.writeAll(",\"input\":");
-    if (std.mem.trim(u8, arguments, " \t\r\n").len > 0) {
+    // The arguments are spliced in as JSON rather than quoted, so anything the
+    // model left truncated would make the whole request body unparseable —
+    // rejected on this request and on every later one that message survives
+    // into. An empty object at least keeps the conversation usable.
+    if (try isJsonObject(allocator, arguments)) {
         try writer.writeAll(arguments);
     } else {
         try writer.writeAll("{}");
     }
     try writer.writeByte('}');
+}
+
+fn isJsonObject(allocator: std.mem.Allocator, text: []const u8) !bool {
+    const trimmed = std.mem.trim(u8, text, " \t\r\n");
+    if (trimmed.len == 0 or trimmed[0] != '{') return false;
+    return std.json.validate(allocator, trimmed);
 }
 
 fn writeAnthropicToolResultBlock(writer: anytype, tool_use_id: []const u8, content: []const u8) !void {
@@ -52,7 +62,7 @@ fn writeAnthropicTool(writer: anytype, tool: openai.ToolDefinition) !void {
     try writer.writeByte('}');
 }
 
-fn writeAnthropicMessage(writer: anytype, msg: openai.Message) !void {
+fn writeAnthropicMessage(allocator: std.mem.Allocator, writer: anytype, msg: openai.Message) !void {
     switch (msg) {
         .system => unreachable, // handled separately
         .user => |content| {
@@ -70,7 +80,7 @@ fn writeAnthropicMessage(writer: anytype, msg: openai.Message) !void {
             if (assistant.tool_calls) |tool_calls| {
                 for (tool_calls) |tc| {
                     if (!first) try writer.writeByte(',');
-                    try writeAnthropicToolUseBlock(writer, tc.id, tc.function.name, tc.function.arguments);
+                    try writeAnthropicToolUseBlock(allocator, writer, tc.id, tc.function.name, tc.function.arguments);
                     first = false;
                 }
             }
@@ -392,7 +402,7 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest)
             continue;
         }
 
-        try writeAnthropicMessage(w, msg);
+        try writeAnthropicMessage(allocator, w, msg);
         index += 1;
     }
     try w.writeByte(']');
@@ -798,6 +808,33 @@ test "requestPayload writes empty tool call arguments as empty input" {
     const block = parsed.value.object.get("messages").?.array.items[0].object.get("content").?.array.items[0].object;
     try std.testing.expectEqualStrings("tool_use", block.get("type").?.string);
     try std.testing.expectEqual(@as(usize, 0), block.get("input").?.object.count());
+}
+
+test "requestPayload writes malformed tool call arguments as empty input" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{
+            .{ .assistant = .{ .tool_calls = &.{
+                .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\": " } },
+            } } },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try requestPayload(allocator, request);
+
+    // Splicing the raw text in would make the whole request body invalid JSON,
+    // which the API rejects for every request the message survives into.
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const messages = parsed.value.object.get("messages").?.array.items;
+    const tool_use = messages[0].object.get("content").?.array.items[0].object;
+    try std.testing.expectEqual(@as(usize, 0), tool_use.get("input").?.object.count());
 }
 
 test "requestPayload groups parallel tool results into one user message" {
