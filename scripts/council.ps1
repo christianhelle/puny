@@ -968,7 +968,10 @@ function Complete-Member {
     $Job.Proc.WaitForExit()
   }
   elseif (-not $Job.Proc.WaitForExit($script:Timeout * 1000)) {
-    try { $Job.Proc.Kill($true) } catch { }
+    try { $Job.Proc.Kill($true) }
+    catch { Write-WarningMessage "Could not kill $($Job.Slug): $($_.Exception.Message)" }
+    # Kill is asynchronous; ExitCode below throws until the process has exited.
+    $Job.Proc.WaitForExit()
     $status = 'timeout'
   }
   [void][System.Threading.Tasks.Task]::WaitAll(@($Job.Stdout, $Job.Stderr))
@@ -1275,7 +1278,11 @@ function Invoke-Main {
     try {
       [System.IO.Directory]::SetUnixFileMode($script:TempRoot, 'UserRead,UserWrite,UserExecute')
     }
-    catch { Write-WarningMessage 'Could not restrict permissions on the temporary directory' }
+    catch {
+      # PowerShell 7.2 runs on .NET 6, which predates SetUnixFileMode.
+      & chmod 700 $script:TempRoot 2>$null
+      if ($LASTEXITCODE -ne 0) { Write-WarningMessage 'Could not restrict permissions on the temporary directory' }
+    }
   }
 
   if ($KeepTemp -and $script:Isolate -and -not $Smoke) {
@@ -1386,4 +1393,5 @@ function Invoke-Main {
   }
 }
 
-exit (Invoke-Main)
+$code = @(Invoke-Main)[-1]
+exit [int]$code
