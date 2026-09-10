@@ -691,11 +691,19 @@ function Expand-Scalars {
   )
 
   $known = '^\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2|VERDICT_REPORT)\}\}$'
+  $extra = @{
+    '{{BRANCH_A}}'  = $script:CompareBranchA
+    '{{BRANCH_B}}'  = $script:CompareBranchB
+    '{{BASE_DESC}}' = $script:CompareBaseDesc
+  }
   $lines = foreach ($line in Get-FileLines $TemplatePath) {
     $line.Replace('{{MEMBER_N}}', $MemberN).
     Replace('{{ROLE_NAME}}', $RoleName).
     Replace('{{PAIR_NAME}}', $PairName).
-    Replace('{{N_MEMBERS}}', $MemberCount)
+    Replace('{{N_MEMBERS}}', $MemberCount).
+    Replace('{{BRANCH_A}}', $extra['{{BRANCH_A}}']).
+    Replace('{{BRANCH_B}}', $extra['{{BRANCH_B}}']).
+    Replace('{{BASE_DESC}}', $extra['{{BASE_DESC}}'])
   }
   Write-TextFile $OutPath (Join-Lines $lines)
 
@@ -1391,6 +1399,15 @@ function Invoke-Main {
   $script:MemberFloor = $MinMembers
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
+  $script:CompareWarnBytes = 409600
+  $script:CompareBranchA = ''
+  $script:CompareBranchB = ''
+  $script:CompareDescA = ''
+  $script:CompareDescB = ''
+  $script:CompareBaseDesc = ''
+  $script:CompareEmptyA = $false
+  $script:CompareEmptyB = $false
+  $script:CompareIdentical = $false
   $script:ActiveProcesses = [System.Collections.ArrayList]::new()
 
   Import-SharedLists
