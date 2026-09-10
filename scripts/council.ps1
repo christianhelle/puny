@@ -637,9 +637,13 @@ function Resolve-CompareSubject {
   $script:CompareBranchB = $refB
 
   $statA = (& git diff --stat "$base...$shaA" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch A ($refA)" }
   $diffA = (& git diff "$base...$shaA" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch A ($refA)" }
   $statB = (& git diff --stat "$base...$shaB" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch B ($refB)" }
   $diffB = (& git diff "$base...$shaB" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch B ($refB)" }
   $emptyA = ((-join $diffA).Trim().Length -eq 0)
   $emptyB = ((-join $diffB).Trim().Length -eq 0)
   $script:CompareEmptyA = $emptyA
@@ -921,7 +925,8 @@ function Write-IdenticalVerdict {
     'ONE LINE: Both branches match the base; there is nothing to choose between.',
     '',
     "Both '$($script:CompareBranchA)' and '$($script:CompareBranchB)' are empty against base $($script:CompareBaseDesc).",
-    'No council was seated because no difference exists to judge.',
+    'Members were seated and their prompts composed, but no rounds ran:',
+    'there is no difference to judge, so no models were called.',
     ''
   )
   Write-TextFile $verdictPath (Join-Lines $lines)
