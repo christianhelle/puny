@@ -1289,10 +1289,18 @@ compose_round2_prompt() {
   fi
 
   if [[ "$pair_alive" -eq 1 ]]; then
-    template="$PROMPT_DIR/round2.md"
+    if [[ "$SUBJECT_KIND" == "compare" ]]; then
+      template="$PROMPT_DIR/round2-compare.md"
+    else
+      template="$PROMPT_DIR/round2.md"
+    fi
     pair_name="${ROLE_NAME[$pair]}"
   else
-    template="$PROMPT_DIR/round2-nopair.md"
+    if [[ "$SUBJECT_KIND" == "compare" ]]; then
+      template="$PROMPT_DIR/round2-compare-nopair.md"
+    else
+      template="$PROMPT_DIR/round2-nopair.md"
+    fi
     [[ "$pair" -ge 0 ]] && log_info "Seat $(printf '%02d' "$index") lost its opposite; it will attack the strongest claims instead"
   fi
   [[ -f "$template" ]] || die "Round-two template not found: $template"
@@ -1317,13 +1325,17 @@ compose_round2_prompt() {
 }
 
 verdict_of() {
-  local file="$1"
+  local file="$1" verdict
   [[ -s "$file" ]] || {
     echo "-"
     return
   }
-  grep -m1 -E '^VERDICT:' "$file" | sed -e 's/^VERDICT:[[:space:]]*//' -e 's/[[:space:]]*$//' |
-    cut -c1-40 | grep . || echo "-"
+  verdict="$(grep -m1 -E '^VERDICT:' "$file" | sed -e 's/^VERDICT:[[:space:]]*//' -e 's/[[:space:]]*$//' |
+    cut -c1-40 | grep . || echo "-")"
+  case "$verdict" in
+  A-wins | B-wins | tie | ship | ship-with-changes | do-not-ship) echo "$verdict" ;;
+  *) echo "-" ;;
+  esac
 }
 
 # Concatenates a whole round for the chair, in seat order, labelling each block
@@ -1357,6 +1369,9 @@ compose_chair_prompt() {
   local template scratch r1 r2
 
   template="$PROMPT_DIR/round3-chair.md"
+  if [[ "$SUBJECT_KIND" == "compare" ]]; then
+    template="$PROMPT_DIR/round3-chair-compare.md"
+  fi
   [[ -f "$template" ]] || die "Chair template not found: $template"
 
   r1="$TEMP_ROOT/all-round1.md"
