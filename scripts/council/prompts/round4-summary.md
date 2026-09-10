@@ -8,7 +8,7 @@ in a terminal before deciding what to do next.
 
 Plain text, no markdown headings, no bold, under 200 words. Exactly this shape:
 
-VERDICT: <copy the chair's verdict verbatim>
+VERDICT: <copy the chair's verdict verbatim when the chair succeeds; when it starts with "CHAIR FAILED:", write only "CHAIR FAILED: <status>" and summarise the following member output separately>
 
 <One paragraph, three sentences at most, saying what the change is and whether
 it should proceed. Lead with the consequence, not the process.>

@@ -1361,8 +1361,10 @@ write_manifest() {
 
   file="$OUT_DIR/round4/summary.status"
   if [[ -f "$file" ]]; then
-    printf 'round4	summary	summary	%s	%s	%s	%s	%s	%s
-'       "$(chair_label)" "$(read_status_field "$file" 1)" "$(read_status_field "$file" 2)"       "$(read_status_field "$file" 3)" "$(read_status_field "$file" 4)"       "$(verdict_of "$OUT_DIR/summary.md")" >>"$out"
+    printf 'round4\tsummary\tsummary\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$(chair_label)" "$(read_status_field "$file" 1)" "$(read_status_field "$file" 2)" \
+      "$(read_status_field "$file" 3)" "$(read_status_field "$file" 4)" \
+      "$(verdict_of "$OUT_DIR/summary.md")" >>"$out"
   fi
 }
 
