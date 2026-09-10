@@ -23,6 +23,9 @@ CHAIR_SPEC="${COUNCIL_CHAIR:-}"
 SUBJECT_FILE=""
 SUBJECT_DIFF=""
 SUBJECT_TEXT=""
+SUBJECT_COMPARE_A=""
+SUBJECT_COMPARE_B=""
+SUBJECT_COMPARE_BASE="${COUNCIL_COMPARE_BASE:-}"
 SUBJECT_KIND=""
 OUT_DIR="${COUNCIL_OUT:-}"
 ROLE_FILTER=""
@@ -84,7 +87,9 @@ Subject (exactly one is required):
   -f, --subject-file PATH   Critique the contents of a file
   -d, --diff BASE           Critique "git diff BASE...HEAD"
   -t, --subject TEXT        Critique the given text
-      --kind KIND           plan | diff | text (default: inferred)
+  --compare A B             Judge branch A against branch B from their merge base
+  --compare-base X          Compare from X instead of the merge base of A and B
+      --kind KIND           plan | diff | text | compare (default: inferred)
 
 Council:
   -n, --members N           Number of council members (default: 6, maximum: 8)
@@ -114,7 +119,7 @@ Output:
   -h, --help                Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR,
-COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, NO_COLOR
+COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE, NO_COLOR
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 USAGE
@@ -165,6 +170,19 @@ parse_args() {
     --kind)
       require_value "$1" "${2:-}"
       SUBJECT_KIND="$2"
+      shift 2
+      ;;
+    --compare)
+      if [[ -z "${2:-}" ]] || [[ "${2:-}" == -* ]] || [[ -z "${3:-}" ]] || [[ "${3:-}" == -* ]]; then
+        die "Option --compare requires two values: --compare A B"
+      fi
+      SUBJECT_COMPARE_A="$2"
+      SUBJECT_COMPARE_B="$3"
+      shift 3
+      ;;
+    --compare-base)
+      require_value "$1" "${2:-}"
+      SUBJECT_COMPARE_BASE="$2"
       shift 2
       ;;
     -n | --members)
@@ -384,6 +402,19 @@ validate_args() {
   require_whole_number "Job limit (COUNCIL_JOBS)" "$JOBS" 1
   require_whole_number "Timeout (COUNCIL_TIMEOUT)" "$TIMEOUT_SECS" 0
 
+  # The environment fallback keeps headless runs working without flags, but it
+  # must look like two refs, not one blob, or the comparison has no sides.
+  if [[ -z "$SUBJECT_COMPARE_A" ]] && [[ -n "${COUNCIL_COMPARE:-}" ]]; then
+    local -a compare_parts=()
+    read -r -a compare_parts <<<"${COUNCIL_COMPARE:-}"
+    if [[ "${#compare_parts[@]}" -eq 2 ]]; then
+      SUBJECT_COMPARE_A="${compare_parts[0]}"
+      SUBJECT_COMPARE_B="${compare_parts[1]}"
+    elif [[ -n "${COUNCIL_COMPARE:-}" ]]; then
+      die "COUNCIL_COMPARE must hold exactly two refs, got '${COUNCIL_COMPARE:-}'"
+    fi
+  fi
+
   if [[ "$MEMBER_COUNT_EXPLICIT" -eq 1 ]] && [[ -n "$ROLE_FILTER" ]]; then
     die "--members and --roles are mutually exclusive; let one of them decide the council size"
   fi
@@ -391,15 +422,26 @@ validate_args() {
   [[ -n "$SUBJECT_FILE" ]] && chosen=$((chosen + 1))
   [[ -n "$SUBJECT_DIFF" ]] && chosen=$((chosen + 1))
   [[ -n "$SUBJECT_TEXT" ]] && chosen=$((chosen + 1))
+  if [[ -n "$SUBJECT_COMPARE_A" ]] || [[ -n "$SUBJECT_COMPARE_B" ]]; then
+    [[ -n "$SUBJECT_COMPARE_A" ]] && [[ -n "$SUBJECT_COMPARE_B" ]] ||
+      die "--compare requires two branches: --compare A B"
+    chosen=$((chosen + 1))
+  fi
 
   if [[ "$chosen" -eq 0 ]]; then
-    log_error "No subject given. Pass one of --subject-file, --diff, or --subject."
+    log_error "No subject given. Pass one of --subject-file, --diff, --subject, or --compare."
     show_usage >&2
     exit 1
   fi
 
   if [[ "$chosen" -gt 1 ]]; then
-    die "--subject-file, --diff, and --subject are mutually exclusive"
+    die "--subject-file, --diff, --subject, and --compare are mutually exclusive"
+  fi
+
+  if [[ -n "$SUBJECT_COMPARE_A" ]] && [[ -n "$SUBJECT_COMPARE_BASE" ]]; then
+    : # a base override is only meaningful with --compare, which is present
+  elif [[ -n "$SUBJECT_COMPARE_BASE" ]]; then
+    die "--compare-base needs --compare A B"
   fi
 
   if [[ -n "$SUBJECT_FILE" ]] && [[ ! -f "$SUBJECT_FILE" ]]; then
@@ -408,9 +450,16 @@ validate_args() {
 
   if [[ -n "$SUBJECT_KIND" ]]; then
     case "$SUBJECT_KIND" in
-    plan | diff | text) ;;
-    *) die "--kind must be plan, diff, or text (got '$SUBJECT_KIND')" ;;
+    plan | diff | text | compare) ;;
+    *) die "--kind must be plan, diff, text, or compare (got '$SUBJECT_KIND')" ;;
     esac
+  fi
+
+  if [[ -n "$SUBJECT_COMPARE_A" ]]; then
+    if [[ -n "$SUBJECT_KIND" ]] && [[ "$SUBJECT_KIND" != "compare" ]]; then
+      die "--compare needs --kind compare (got '$SUBJECT_KIND')"
+    fi
+    SUBJECT_KIND="compare"
   fi
 
   # Peer critiques are truncated on a line boundary, so a budget smaller than a
