@@ -247,6 +247,10 @@ function Test-Arguments {
   $chosen = @($SubjectFile, $Diff, $Subject | Where-Object { $_ }).Count
   if ($script:CompareRefs.Count -eq 2) { $chosen++ }
 
+  if ($CompareBase -and $chosen -eq 0) {
+    Stop-WithError '-CompareBase needs -Compare A,B'
+  }
+
   if ($chosen -eq 0) {
     Write-ErrorMessage 'No subject given. Pass one of -SubjectFile, -Diff, -Subject, or -Compare.'
     Show-Usage
