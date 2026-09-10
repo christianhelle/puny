@@ -660,7 +660,7 @@ function New-PeerDigest {
       # the partial line on top of the over-budget bytes.
       $keptBytes = [System.Text.Encoding]::UTF8.GetByteCount($keptText)
       [void]$builder.Append($keptText)
-      [void]$builder.Append("[TRUNCATED: $($bytes.Length - $keptBytes) chars omitted]").Append("`n")
+      [void]$builder.Append("[TRUNCATED: $($bytes.Length - $keptBytes) bytes omitted]").Append("`n")
     }
     else {
       [void]$builder.Append((Read-TextFile $src))
@@ -960,6 +960,12 @@ function Start-Member {
   }
 }
 
+function Get-RemainingBudgetMs {
+  param([pscustomobject]$Job)
+  $spent = $Job.Started.Elapsed.TotalMilliseconds
+  return [int][Math]::Max(0, ($script:Timeout * 1000) - $spent)
+}
+
 function Complete-Member {
   param([pscustomobject]$Job)
 
@@ -967,7 +973,10 @@ function Complete-Member {
   if ($script:Timeout -eq 0) {
     $Job.Proc.WaitForExit()
   }
-  elseif (-not $Job.Proc.WaitForExit($script:Timeout * 1000)) {
+  # The budget runs from when the member started, not from when this function
+  # got around to waiting on it, so a job completed late is not handed a second
+  # full timeout.
+  elseif (-not $Job.Proc.WaitForExit((Get-RemainingBudgetMs $Job))) {
     try { $Job.Proc.Kill($true) }
     catch { Write-WarningMessage "Could not kill $($Job.Slug): $($_.Exception.Message)" }
     # Kill is asynchronous; ExitCode below throws until the process has exited.
@@ -1045,6 +1054,13 @@ function Invoke-Round {
       foreach ($done in @($running | Where-Object { $_.Proc.HasExited })) {
         $null = Complete-Member $done
         $running.Remove($done)
+      }
+      # Nothing else reaps a member that never exits, so its slot would stay
+      # occupied and the rest of the round would never start.
+      foreach ($expired in @($running | Where-Object {
+            $script:Timeout -gt 0 -and (Get-RemainingBudgetMs $_) -le 0 })) {
+        $null = Complete-Member $expired
+        $running.Remove($expired)
       }
     }
     $seat = $script:Seats[$i]

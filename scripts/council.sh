@@ -1118,7 +1118,7 @@ build_peer_file() {
       kept="$(wc -c <"$out.trunc" | tr -d '[:space:]')"
       cat "$out.trunc" >>"$out"
       rm -f "$out.trunc"
-      printf '[TRUNCATED: %d chars omitted]\n' "$((bytes - kept))" >>"$out"
+      printf '[TRUNCATED: %d bytes omitted]\n' "$((bytes - kept))" >>"$out"
     else
       cat "$src" >>"$out"
     fi
