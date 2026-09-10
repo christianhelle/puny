@@ -532,6 +532,26 @@ function Write-DirtyTreeWarning {
   Write-WarningMessage "output of 'git diff' through -SubjectFile to have them critiqued."
 }
 
+# Resolves a compare ref to a full SHA. A short or symbolic name would make the
+# subject header ambiguous when two branches point at nearby commits.
+function Resolve-CompareRef {
+  param([string]$Label, [string]$Ref)
+  $sha = (& git rev-parse --verify $Ref 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $sha) { Stop-WithError "Compare ref '$Ref' ($Label) is not a valid revision" }
+  $full = (& git rev-parse $sha 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $full) { Stop-WithError "Compare ref '$Ref' ($Label) is not a valid revision" }
+  return $full.Trim()
+}
+
+# One line of context for a compare header: short SHA plus the commit subject.
+function Describe-CompareRef {
+  param([string]$Sha)
+  $short = (& git rev-parse --short $Sha 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $short) { $short = $Sha }
+  $subject = (& git log -1 --format=%s $Sha 2>$null)
+  return ("$($short.ToString().Trim()) $($subject -join ' ')").Trim()
+}
+
 # Writes the exact bytes every member will see into <out>/subject.md.
 function Resolve-Subject {
   $script:SubjectPath = Join-Path $script:OutDir 'subject.md'
@@ -564,6 +584,10 @@ function Resolve-Subject {
     # change with a template the caller did not ask for.
     if (-not $kind) { $kind = 'diff' }
   }
+  elseif ($script:CompareRefs -and $script:CompareRefs.Count -eq 2) {
+    Resolve-CompareSubject
+    $kind = $script:SubjectKind
+  }
   else {
     Write-TextFile $script:SubjectPath ($Subject + "`n")
     $script:SubjectLabel = 'inline text'
@@ -573,10 +597,69 @@ function Resolve-Subject {
   $script:SubjectKind = $kind
   $bytes = Get-FileByteCount $script:SubjectPath
   if ($bytes -le 0) { Stop-WithError 'The subject is empty' }
-  if ($bytes -gt 204800) {
+  $warnLimit = 204800
+  if ($script:SubjectKind -eq 'compare') { $warnLimit = $script:CompareWarnBytes }
+  if ($bytes -gt $warnLimit) {
     Write-WarningMessage "Subject is $bytes bytes; large subjects can exceed a model's context window"
   }
   Write-Info "Subject: $($script:SubjectLabel) ($bytes bytes, kind: $kind)"
+}
+
+# Builds the two-sided compare subject: the shared base header plus the
+# base...A and base...B diffs. Both sides are judged on the same base so the
+# council compares approaches, not patch noise between the branches.
+function Resolve-CompareSubject {
+  & git rev-parse --git-dir 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) { Stop-WithError '-Compare needs to run inside a git repository' }
+  $refA = $script:CompareRefs[0]
+  $refB = $script:CompareRefs[1]
+  $shaA = Resolve-CompareRef 'branch A' $refA
+  $shaB = Resolve-CompareRef 'branch B' $refB
+  if ($CompareBase) {
+    $base = Resolve-CompareRef 'base' $CompareBase
+  }
+  else {
+    $base = (& git merge-base $shaA $shaB 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $base) {
+      Stop-WithError "No merge base between '$refA' and '$refB'; pass -CompareBase X"
+    }
+    $base = $base.Trim()
+  }
+
+  $script:CompareDescA = Describe-CompareRef $shaA
+  $script:CompareDescB = Describe-CompareRef $shaB
+  $script:CompareBaseDesc = Describe-CompareRef $base
+  $script:CompareBranchA = $refA
+  $script:CompareBranchB = $refB
+
+  $statA = (& git diff --stat "$base...$shaA" 2>$null)
+  $diffA = (& git diff "$base...$shaA" 2>$null)
+  $statB = (& git diff --stat "$base...$shaB" 2>$null)
+  $diffB = (& git diff "$base...$shaB" 2>$null)
+  $emptyA = ((-join $diffA).Trim().Length -eq 0)
+  $emptyB = ((-join $diffB).Trim().Length -eq 0)
+  $script:CompareEmptyA = $emptyA
+  $script:CompareEmptyB = $emptyB
+  $script:CompareIdentical = ($emptyA -and $emptyB)
+
+  $lines = @("# Compare: $refA vs $refB",
+    "Base: $($script:CompareBaseDesc)",
+    "Branch A: $refA $($script:CompareDescA)",
+    "Branch B: $refB $($script:CompareDescB)",
+    '',
+    "## Branch A — summary ($refA vs base)",
+    '')
+  if ($statA) { $lines += $statA } else { $lines += '(no changes vs base)' }
+  $lines += @('', "## Branch A — full diff ($refA vs base)", '')
+  if ($diffA) { $lines += $diffA } else { $lines += '(no changes vs base)' }
+  $lines += @('', "## Branch B — summary ($refB vs base)", '')
+  if ($statB) { $lines += $statB } else { $lines += '(no changes vs base)' }
+  $lines += @('', "## Branch B — full diff ($refB vs base)", '')
+  if ($diffB) { $lines += $diffB } else { $lines += '(no changes vs base)' }
+  Write-TextFile $script:SubjectPath (Join-Lines $lines)
+  Write-DirtyTreeWarning
+  $script:SubjectLabel = "compare $refA vs $refB (base $base)"
+  $script:SubjectKind = 'compare'
 }
 
 # Replaces whole-line block markers in a single pass, so that text pulled in by
