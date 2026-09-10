@@ -240,12 +240,12 @@ function Test-Arguments {
       ForEach-Object { $_.Trim() } | Where-Object { $_ })
   }
 
-  if ($script:CompareRefs -and $script:CompareRefs.Count -ne 2) {
+  if ($script:CompareRefs.Count -ne 2 -and ($Compare -or $env:COUNCIL_COMPARE)) {
     Stop-WithError '-Compare needs exactly two branches: -Compare A,B'
   }
 
   $chosen = @($SubjectFile, $Diff, $Subject | Where-Object { $_ }).Count
-  if ($script:CompareRefs) { $chosen++ }
+  if ($script:CompareRefs.Count -eq 2) { $chosen++ }
 
   if ($chosen -eq 0) {
     Write-ErrorMessage 'No subject given. Pass one of -SubjectFile, -Diff, -Subject, or -Compare.'
@@ -255,10 +255,10 @@ function Test-Arguments {
   if ($chosen -gt 1) {
     Stop-WithError '-SubjectFile, -Diff, -Subject, and -Compare are mutually exclusive'
   }
-  if ($CompareBase -and -not $script:CompareRefs) {
+  if ($CompareBase -and $script:CompareRefs.Count -ne 2) {
     Stop-WithError '-CompareBase needs -Compare A,B'
   }
-  if ($script:CompareRefs -and $Kind -and $Kind -ne 'compare') {
+  if ($script:CompareRefs.Count -eq 2 -and $Kind -and $Kind -ne 'compare') {
     Stop-WithError "-Compare needs -Kind compare (got '$Kind')"
   }
   if ($SubjectFile -and -not (Test-Path -LiteralPath $SubjectFile -PathType Leaf)) {
