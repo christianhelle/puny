@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add an AI council: adversarial multi-model review scripts ([#201](https://github.com/christianhelle/puny/pull/201)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --effort flag to control reasoning effort ([#200](https://github.com/christianhelle/puny/pull/200)) ([@christianhelle](https://github.com/christianhelle/))
 - Color PASSED and FAILED output in regression and integration test results ([#199](https://github.com/christianhelle/puny/pull/199)) ([@christianhelle](https://github.com/christianhelle/))
 - Edit file tool ([#198](https://github.com/christianhelle/puny/pull/198)) ([@christianhelle](https://github.com/christianhelle/))
