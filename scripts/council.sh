@@ -1620,11 +1620,39 @@ status_cell() {
 }
 
 warn_if_prompt_large() {
-  local file="$1" bytes
+  local file="$1" bytes limit=204800
+  [[ "$SUBJECT_KIND" == "compare" ]] && limit="$COMPARE_WARN_BYTES"
   bytes="$(wc -c <"$file" | tr -d '[:space:]')"
-  if [[ "$bytes" -gt 204800 ]]; then
+  if [[ "$bytes" -gt "$limit" ]]; then
     log_warning "$(basename "$file") is ${bytes} bytes and may exceed the model's context window"
   fi
+}
+
+# Both sides match the base, so there is nothing to judge. Write the tie
+# verdict directly instead of spending paid calls stating the obvious.
+write_identical_verdict() {
+  local verdict="$OUT_DIR/verdict.md"
+  {
+    echo "VERDICT: tie"
+    echo "ONE LINE: Both branches match the base; there is nothing to choose between."
+    echo
+    echo "Both '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B' are empty against base $SUBJECT_COMPARE_BASE_DESC."
+    echo "No council was seated because no difference exists to judge."
+  } >"$verdict"
+
+  local seat
+  {
+    printf 'round\tseat\trole\tmodel\tstatus\texit_code\telapsed_ms\tanswer_bytes\tverdict\n'
+    for ((seat = 0; seat < MEMBER_COUNT; seat++)); do
+      printf 'round1\t%02d\t%s\t%s\tPLANNED\t-\t-\t-\t-\n' \
+        "$seat" "${ROLE_ID[$seat]}" "$(model_label "$seat")"
+    done
+    printf 'round3\tchair\tchair\t%s\tSKIPPED\t-\t-\t-\ttie\n' "$(chair_label)"
+  } >"$OUT_DIR/manifest.tsv"
+
+  write_index
+  log_success "Branches are identical vs the base; recorded a tie with no models called"
+  log_success "Read $OUT_DIR/council.md"
 }
 
 main() {
@@ -1661,6 +1689,11 @@ main() {
     all_seats+=("$i")
   done
   log_success "Composed $MEMBER_COUNT round-one prompts in $OUT_DIR/round1"
+
+  if [[ "$COMPARE_IDENTICAL" -eq 1 ]]; then
+    write_identical_verdict
+    return 0
+  fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     write_manifest
