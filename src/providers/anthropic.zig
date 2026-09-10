@@ -76,12 +76,24 @@ fn writeAnthropicMessage(writer: anytype, msg: openai.Message) !void {
             }
             try writer.writeAll("]}");
         },
-        .tool => |tool| {
-            try writer.writeAll("{\"role\":\"user\",\"content\":[");
-            try writeAnthropicToolResultBlock(writer, tool.tool_call_id, tool.content);
-            try writer.writeAll("]}");
-        },
+        .tool => unreachable, // handled by writeAnthropicToolResultMessage
     }
+}
+
+/// Writes one user message carrying every tool result in `results`.
+///
+/// Anthropic answers an assistant turn's tool_use blocks by tool_use_id, and
+/// requires all of those tool_result blocks to arrive in the single message
+/// that follows it. One message per result leaves every id but the first
+/// unanswered, which the API rejects — and because the rejected turn stays in
+/// the history, so is every request after it.
+fn writeAnthropicToolResultMessage(writer: anytype, results: []const openai.Message) !void {
+    try writer.writeAll("{\"role\":\"user\",\"content\":[");
+    for (results, 0..) |msg, i| {
+        if (i > 0) try writer.writeByte(',');
+        try writeAnthropicToolResultBlock(writer, msg.tool.tool_call_id, msg.tool.content);
+    }
+    try writer.writeAll("]}");
 }
 
 const BlockType = enum {
@@ -361,17 +373,27 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest)
 
     try w.writeAll(",\"messages\":[");
     var first_msg = true;
-    for (request.messages) |msg| {
-        switch (msg) {
-            .system => |content| {
-                if (system == null) system = content;
-            },
-            else => {
-                if (!first_msg) try w.writeByte(',');
-                try writeAnthropicMessage(w, msg);
-                first_msg = false;
-            },
+    var index: usize = 0;
+    while (index < request.messages.len) {
+        const msg = request.messages[index];
+        if (msg == .system) {
+            if (system == null) system = msg.system;
+            index += 1;
+            continue;
         }
+
+        if (!first_msg) try w.writeByte(',');
+        first_msg = false;
+
+        if (msg == .tool) {
+            const start = index;
+            while (index < request.messages.len and request.messages[index] == .tool) index += 1;
+            try writeAnthropicToolResultMessage(w, request.messages[start..index]);
+            continue;
+        }
+
+        try writeAnthropicMessage(w, msg);
+        index += 1;
     }
     try w.writeByte(']');
 
@@ -776,6 +798,73 @@ test "requestPayload writes empty tool call arguments as empty input" {
     const block = parsed.value.object.get("messages").?.array.items[0].object.get("content").?.array.items[0].object;
     try std.testing.expectEqualStrings("tool_use", block.get("type").?.string);
     try std.testing.expectEqual(@as(usize, 0), block.get("input").?.object.count());
+}
+
+test "requestPayload groups parallel tool results into one user message" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{
+            .{ .user = "Read both files" },
+            .{ .assistant = .{ .tool_calls = &.{
+                .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+                .{ .id = "call_2", .function = .{ .name = "read_file", .arguments = "{}" } },
+            } } },
+            .{ .tool = .{ .tool_call_id = "call_1", .content = "first" } },
+            .{ .tool = .{ .tool_call_id = "call_2", .content = "second" } },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try requestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const messages = parsed.value.object.get("messages").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), messages.len);
+
+    // Every tool_use in the assistant turn is answered by the single user
+    // message that follows it, which is what the API requires.
+    try std.testing.expectEqualStrings("user", messages[2].object.get("role").?.string);
+    const blocks = messages[2].object.get("content").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), blocks.len);
+    try std.testing.expectEqualStrings("tool_result", blocks[0].object.get("type").?.string);
+    try std.testing.expectEqualStrings("call_1", blocks[0].object.get("tool_use_id").?.string);
+    try std.testing.expectEqualStrings("first", blocks[0].object.get("content").?.string);
+    try std.testing.expectEqualStrings("tool_result", blocks[1].object.get("type").?.string);
+    try std.testing.expectEqualStrings("call_2", blocks[1].object.get("tool_use_id").?.string);
+    try std.testing.expectEqualStrings("second", blocks[1].object.get("content").?.string);
+}
+
+test "requestPayload starts a new message after a run of tool results" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const request = openai.ChatRequest{
+        .model = "claude-sonnet-4.6",
+        .messages = &.{
+            .{ .assistant = .{ .tool_calls = &.{
+                .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+            } } },
+            .{ .tool = .{ .tool_call_id = "call_1", .content = "first" } },
+            .{ .user = "and now summarise" },
+        },
+        .tools = &.{},
+    };
+
+    const payload = try requestPayload(allocator, request);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const messages = parsed.value.object.get("messages").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), messages.len);
+    try std.testing.expectEqual(@as(usize, 1), messages[1].object.get("content").?.array.items.len);
+    try std.testing.expectEqualStrings("user", messages[2].object.get("role").?.string);
+    try std.testing.expectEqualStrings("and now summarise", messages[2].object.get("content").?.array.items[0].object.get("text").?.string);
 }
 
 test "requestPayload keeps only the first system message" {
