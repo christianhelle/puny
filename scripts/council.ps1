@@ -223,6 +223,7 @@ function Resolve-PunyBinary {
 }
 
 function Test-Arguments {
+  $script:CompareRefs = @()
   # The environment fallback keeps headless runs working without flags, but it
   # must look like two refs, not one blob, or the comparison has no sides.
   if ((-not $Compare -or $Compare.Count -eq 0) -and $env:COUNCIL_COMPARE) {
@@ -489,6 +490,9 @@ function Initialize-OutputDirectory {
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     if ($SubjectFile) { $slug = ConvertTo-Slug ([System.IO.Path]::GetFileNameWithoutExtension($SubjectFile)) }
     elseif ($Diff) { $slug = ConvertTo-Slug "diff-$Diff" }
+    elseif ($script:CompareRefs -and $script:CompareRefs.Count -eq 2) {
+      $slug = ConvertTo-Slug "compare-$($script:CompareRefs[0])-vs-$($script:CompareRefs[1])"
+    }
     else { $slug = 'text' }
     if (-not $slug) { $slug = 'subject' }
     $script:OutDir = Join-Path '.council' "$stamp-$slug"
