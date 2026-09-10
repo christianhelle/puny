@@ -663,7 +663,19 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
             break;
         }
 
-        turn_had_error = turn_had_error or result.had_error;
+        if (result.had_error) {
+            turn_had_error = true;
+            rollBackFailedTurn(ctx.messages);
+            while (skills.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
+            ctx.session_stats.finalizeTurn(result.usage, false);
+            try ctx.stdout_writer.print(
+                "\n{s}Removed that message from the conversation. Send it again to retry.{s}\n",
+                .{ ansi.dim, ansi.reset },
+            );
+            try ctx.stdout_writer.flush();
+            break;
+        }
+
         if (result.usage) |u| {
             turn_in += u.input_tokens;
             turn_out += u.output_tokens;

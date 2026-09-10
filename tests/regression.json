@@ -186,6 +186,12 @@
     "not_expect": ["mock response"]
   },
   {
+    "name": "Failed turn rolls the prompt back out of the conversation",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "trigger an error", "--oneshot"],
+    "expect": ["Chat failed", "Removed that message from the conversation"],
+    "not_expect": ["mock response"]
+  },
+  {
     "name": "Long text output",
     "args": ["--mock", "--model", "mock-model-long", "--prompt", "write something long", "--oneshot"],
     "expect": ["generates"],
