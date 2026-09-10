@@ -13,3 +13,10 @@ src/providers/anthropic/models.zig linguist-generated=true
 src/providers/anthropic/runtime.zig linguist-generated=true
 src/providers/google/client.zig linguist-generated=true
 src/providers/google/contracts.zig linguist-generated=true
+
+# Shell scripts must keep LF endings so they run after a Windows checkout
+*.sh text eol=lf
+
+# Council assets are spliced into prompts by both runners; CRLF here would make
+# the bash and PowerShell prompts differ on a Windows checkout.
+scripts/council/** text eol=lf

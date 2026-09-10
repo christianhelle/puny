@@ -1,0 +1,21 @@
+# Words the mock provider dispatches on, as whole words, in the last user
+# message. Mirrors MockKeyword in src/providers/mock.zig.
+# A smoke prompt containing one of these silently returns something other than a
+# critique, so both runners refuse to send one.
+long
+fast
+slow
+echo
+empty
+partial
+usage
+error
+timeout
+fail
+read
+search
+shell
+review
+table
+markdown
+reasoning
