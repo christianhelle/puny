@@ -20,7 +20,9 @@ param(
   [string]$SubjectFile,
   [string]$Diff,
   [string]$Subject,
-  [ValidateSet('plan', 'diff', 'text')][string]$Kind,
+  [string[]]$Compare,
+  [string]$CompareBase = $env:COUNCIL_COMPARE_BASE,
+  [ValidateSet('plan', 'diff', 'text', 'compare')][string]$Kind,
   [int]$Members = 6,
   [string[]]$Models,
   [string]$Chair,
@@ -69,7 +71,9 @@ Subject (exactly one is required):
   -SubjectFile PATH     Critique the contents of a file
   -Diff BASE            Critique "git diff BASE...HEAD"
   -Subject TEXT         Critique the given text
-  -Kind KIND            plan | diff | text (default: inferred)
+  -Compare A,B          Judge branch A against branch B from their merge base
+  -CompareBase X        Compare from X instead of the merge base of A and B
+  -Kind KIND            plan | diff | text | compare (default: inferred)
 
 Council:
   -Members N            Number of council members (default: 6, maximum: 8)
@@ -99,7 +103,7 @@ Output:
   -Help                 Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR, COUNCIL_OUT,
-COUNCIL_JOBS, COUNCIL_TIMEOUT
+COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 '@
@@ -219,15 +223,42 @@ function Resolve-PunyBinary {
 }
 
 function Test-Arguments {
+  # The environment fallback keeps headless runs working without flags, but it
+  # must look like two refs, not one blob, or the comparison has no sides.
+  if ((-not $Compare -or $Compare.Count -eq 0) -and $env:COUNCIL_COMPARE) {
+    $parts = @($env:COUNCIL_COMPARE -split '\s+' | Where-Object { $_ })
+    if ($parts.Count -eq 2) {
+      $script:CompareRefs = @($parts[0], $parts[1])
+    }
+    elseif ($env:COUNCIL_COMPARE) {
+      Stop-WithError "COUNCIL_COMPARE must hold exactly two refs, got '$env:COUNCIL_COMPARE'"
+    }
+  }
+  elseif ($Compare) {
+    $script:CompareRefs = @($Compare | ForEach-Object { $_ -split ',' } |
+      ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  }
+
+  if ($script:CompareRefs -and $script:CompareRefs.Count -ne 2) {
+    Stop-WithError '-Compare needs exactly two branches: -Compare A,B'
+  }
+
   $chosen = @($SubjectFile, $Diff, $Subject | Where-Object { $_ }).Count
+  if ($script:CompareRefs) { $chosen++ }
 
   if ($chosen -eq 0) {
-    Write-ErrorMessage 'No subject given. Pass one of -SubjectFile, -Diff, or -Subject.'
+    Write-ErrorMessage 'No subject given. Pass one of -SubjectFile, -Diff, -Subject, or -Compare.'
     Show-Usage
     exit 1
   }
   if ($chosen -gt 1) {
-    Stop-WithError '-SubjectFile, -Diff, and -Subject are mutually exclusive'
+    Stop-WithError '-SubjectFile, -Diff, -Subject, and -Compare are mutually exclusive'
+  }
+  if ($CompareBase -and -not $script:CompareRefs) {
+    Stop-WithError '-CompareBase needs -Compare A,B'
+  }
+  if ($script:CompareRefs -and $Kind -and $Kind -ne 'compare') {
+    Stop-WithError "-Compare needs -Kind compare (got '$Kind')"
   }
   if ($SubjectFile -and -not (Test-Path -LiteralPath $SubjectFile -PathType Leaf)) {
     Stop-WithError "Subject file not found: $SubjectFile"
