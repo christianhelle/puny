@@ -806,11 +806,21 @@ function New-Round2Prompt {
   $pairAlive = $seat.Pair -ge 0 -and ($Survivors -contains $seat.Pair)
 
   if ($pairAlive) {
-    $template = Join-Path $script:PromptDir 'round2.md'
+    if ($script:SubjectKind -eq 'compare') {
+      $template = Join-Path $script:PromptDir 'round2-compare.md'
+    }
+    else {
+      $template = Join-Path $script:PromptDir 'round2.md'
+    }
     $pairName = $script:Seats[$seat.Pair].Name
   }
   else {
-    $template = Join-Path $script:PromptDir 'round2-nopair.md'
+    if ($script:SubjectKind -eq 'compare') {
+      $template = Join-Path $script:PromptDir 'round2-compare-nopair.md'
+    }
+    else {
+      $template = Join-Path $script:PromptDir 'round2-nopair.md'
+    }
     if ($seat.Pair -ge 0) {
       Write-Info ('Seat {0:d2} lost its opposite; it will attack the strongest claims instead' -f $Index)
     }
@@ -861,6 +871,9 @@ function New-ChairPrompt {
   param([string]$OutPath, [int[]]$Survivors)
 
   $template = Join-Path $script:PromptDir 'round3-chair.md'
+  if ($script:SubjectKind -eq 'compare') {
+    $template = Join-Path $script:PromptDir 'round3-chair-compare.md'
+  }
   if (-not (Test-Path -LiteralPath $template)) { Stop-WithError "Chair template not found: $template" }
 
   $r1 = Join-Path $script:TempRoot 'all-round1.md'
@@ -1156,8 +1169,11 @@ function Get-Verdict {
   if (-not (Test-Path -LiteralPath $Path) -or (Get-FileByteCount $Path) -eq 0) { return '-' }
   foreach ($line in Get-FileLines $Path) {
     if ($line -match '^VERDICT:\s*(.*?)\s*$') {
-      $value = $Matches[1]
+      $value = $Matches[1].Trim()
       if (-not $value) { return '-' }
+      # Only machine-readable verdicts reach the manifest and member table; a
+      # free-form line is noise, not a verdict.
+      if ($value -notin @('A-wins', 'B-wins', 'tie', 'ship', 'ship-with-changes', 'do-not-ship')) { return '-' }
       if ($value.Length -gt 40) { $value = $value.Substring(0, 40) }
       return $value
     }
