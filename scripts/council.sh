@@ -720,7 +720,7 @@ describe_compare_ref() {
 
 # Writes the exact bytes every member will see into <out>/subject.md.
 resolve_subject() {
-  local bytes
+  local bytes compare_warn_limit
 
   SUBJECT_PATH="$OUT_DIR/subject.md"
 
@@ -795,10 +795,10 @@ resolve_compare_subject() {
   COMPARE_BRANCH_A="$SUBJECT_COMPARE_A"
   COMPARE_BRANCH_B="$SUBJECT_COMPARE_B"
 
-  stat_a="$(git diff --stat "$base...$sha_a" 2>/dev/null || true)"
-  diff_a="$(git diff "$base...$sha_a" 2>/dev/null || true)"
-  stat_b="$(git diff --stat "$base...$sha_b" 2>/dev/null || true)"
-  diff_b="$(git diff "$base...$sha_b" 2>/dev/null || true)"
+  stat_a="$(git diff --stat "$base...$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
+  diff_a="$(git diff "$base...$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
+  stat_b="$(git diff --stat "$base...$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
+  diff_b="$(git diff "$base...$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
   [[ -z "${diff_a//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_A=1 || SUBJECT_COMPARE_EMPTY_A=0
   [[ -z "${diff_b//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_B=1 || SUBJECT_COMPARE_EMPTY_B=0
   if [[ "$SUBJECT_COMPARE_EMPTY_A" -eq 1 ]] && [[ "$SUBJECT_COMPARE_EMPTY_B" -eq 1 ]]; then
@@ -863,15 +863,31 @@ render_scalars() {
   local template="$1" out="$2" member_n="$3" role_name="$4" pair_name="$5" n_members="$6"
   local leftover
 
-  sed \
-    -e "s|{{MEMBER_N}}|${member_n}|g" \
-    -e "s|{{ROLE_NAME}}|${role_name}|g" \
-    -e "s|{{PAIR_NAME}}|${pair_name}|g" \
-    -e "s|{{N_MEMBERS}}|${n_members}|g" \
-    -e "s|{{BRANCH_A}}|${COMPARE_BRANCH_A}|g" \
-    -e "s|{{BRANCH_B}}|${COMPARE_BRANCH_B}|g" \
-    -e "s|{{BASE_DESC}}|${SUBJECT_COMPARE_BASE_DESC}|g" \
-    "$template" >"$out"
+  # Values are passed as environment data, never as script text: a compare ref or
+  # commit subject containing '|', '&', '\' or a newline must substitute
+  # literally. A sed program with those bytes unescaped would be an injection.
+  SCALAR_MEMBER_N="$member_n" SCALAR_ROLE_NAME="$role_name" SCALAR_PAIR_NAME="$pair_name" \
+    SCALAR_N_MEMBERS="$n_members" SCALAR_BRANCH_A="$COMPARE_BRANCH_A" \
+    SCALAR_BRANCH_B="$COMPARE_BRANCH_B" SCALAR_BASE_DESC="$SUBJECT_COMPARE_BASE_DESC" \
+    awk '
+    function rep(s, find, repl,   i, out) {
+      while ((i = index(s, find)) > 0) {
+        out = out substr(s, 1, i - 1) repl
+        s = substr(s, i + length(find))
+      }
+      return out s
+    }
+    {
+      line = rep($0, "{{MEMBER_N}}", ENVIRON["SCALAR_MEMBER_N"])
+      line = rep(line, "{{ROLE_NAME}}", ENVIRON["SCALAR_ROLE_NAME"])
+      line = rep(line, "{{PAIR_NAME}}", ENVIRON["SCALAR_PAIR_NAME"])
+      line = rep(line, "{{N_MEMBERS}}", ENVIRON["SCALAR_N_MEMBERS"])
+      line = rep(line, "{{BRANCH_A}}", ENVIRON["SCALAR_BRANCH_A"])
+      line = rep(line, "{{BRANCH_B}}", ENVIRON["SCALAR_BRANCH_B"])
+      line = rep(line, "{{BASE_DESC}}", ENVIRON["SCALAR_BASE_DESC"])
+      print line
+    }
+  ' "$template" >"$out"
 
   leftover="$(grep -o '{{[A-Z_0-9]*}}' "$out" | sort -u |
     grep -vxE '\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2|VERDICT_REPORT)\}\}' || true)"
@@ -1637,7 +1653,8 @@ write_identical_verdict() {
     echo "ONE LINE: Both branches match the base; there is nothing to choose between."
     echo
     echo "Both '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B' are empty against base $SUBJECT_COMPARE_BASE_DESC."
-    echo "No council was seated because no difference exists to judge."
+    echo "Members were seated and their prompts composed, but no rounds ran:"
+    echo "there is no difference to judge, so no models were called."
   } >"$verdict"
 
   local seat
