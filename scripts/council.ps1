@@ -900,10 +900,39 @@ function New-ChairPrompt {
 
 function Test-PromptSize {
   param([string]$Path)
+  $limit = 204800
+  if ($script:SubjectKind -eq 'compare') { $limit = $script:CompareWarnBytes }
   $bytes = Get-FileByteCount $Path
-  if ($bytes -gt 204800) {
+  if ($bytes -gt $limit) {
     Write-WarningMessage "$(Split-Path -Leaf $Path) is $bytes bytes and may exceed the model's context window"
   }
+}
+
+# Both sides match the base, so there is nothing to judge. Write the tie
+# verdict directly instead of spending paid calls stating the obvious.
+function Write-IdenticalVerdict {
+  $verdictPath = Join-Path $script:OutDir 'verdict.md'
+  $lines = @(
+    'VERDICT: tie',
+    'ONE LINE: Both branches match the base; there is nothing to choose between.',
+    '',
+    "Both '$($script:CompareBranchA)' and '$($script:CompareBranchB)' are empty against base $($script:CompareBaseDesc).",
+    'No council was seated because no difference exists to judge.',
+    ''
+  )
+  Write-TextFile $verdictPath (Join-Lines $lines)
+
+  $manifest = @('round`tseat`trole`tmodel`tstatus`texit_code`telapsed_ms`tanswer_bytes`tverdict'.Replace('`t', "`t"))
+  for ($seat = 0; $seat -lt $script:MemberTotal; $seat++) {
+    $entry = $script:Seats[$seat]
+    $manifest += ('round1`t{0:d2}`t{1}`t{2}`tPLANNED`t-`t-`t-`t-' -f $seat, $entry.Id, (Get-ModelLabel $seat)).Replace('`t', "`t")
+  }
+  $manifest += ('round3`tchair`tchair`t{0}`tSKIPPED`t-`t-`t-`ttie' -f (Get-ChairLabel)).Replace('`t', "`t")
+  Write-TextFile (Join-Path $script:OutDir 'manifest.tsv') (Join-Lines $manifest)
+
+  Write-Index
+  Write-Success 'Branches are identical vs the base; recorded a tie with no models called'
+  Write-Success "Read $(Join-Path $script:OutDir 'council.md')"
 }
 
 # Finds the real config.json so each member's isolated config directory can be
@@ -1463,6 +1492,11 @@ function Invoke-Main {
       New-Round1Prompt $i (Join-Path $script:OutDir "round1\$($script:Seats[$i].Slug).prompt.md")
     }
     Write-Success "Composed $($script:MemberTotal) round-one prompts in $(Join-Path $script:OutDir 'round1')"
+
+    if ($script:CompareIdentical) {
+      Write-IdenticalVerdict
+      return 0
+    }
 
     if ($DryRun) {
       Write-Manifest
