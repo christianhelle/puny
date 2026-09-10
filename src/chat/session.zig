@@ -957,6 +957,58 @@ test "rollBackCancelledTurn rolls back partial tool messages but keeps the user 
     try std.testing.expectEqualDeep(openai.Message{ .user = "Read the file" }, messages.items[1]);
 }
 
+test "rollBackFailedTurn drops the user message that failed" {
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "You are a helpful assistant." });
+    try messages.append(std.testing.allocator, .{ .user = "Hello!" });
+
+    rollBackFailedTurn(&messages);
+
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .system = "You are a helpful assistant." }, messages.items[0]);
+}
+
+test "rollBackFailedTurn drops partial tool messages and the user message" {
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "You are a helpful assistant." });
+    try messages.append(std.testing.allocator, .{ .user = "Read the file" });
+    try messages.append(std.testing.allocator, .{ .assistant = .{ .content = null, .tool_calls = &.{
+        .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+    } } });
+    try messages.append(std.testing.allocator, .{ .tool = .{ .tool_call_id = "call_1", .content = "file contents" } });
+
+    rollBackFailedTurn(&messages);
+
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .system = "You are a helpful assistant." }, messages.items[0]);
+}
+
+test "rollBackFailedTurn keeps an earlier completed turn" {
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .user = "First" });
+    try messages.append(std.testing.allocator, .{ .assistant = .{ .content = "Answered" } });
+    try messages.append(std.testing.allocator, .{ .user = "Second" });
+
+    rollBackFailedTurn(&messages);
+
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "First" }, messages.items[0]);
+    try std.testing.expectEqualDeep(openai.Message{ .assistant = .{ .content = "Answered" } }, messages.items[1]);
+}
+
+test "rollBackFailedTurn leaves a conversation with nothing to roll back" {
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "You are a helpful assistant." });
+
+    rollBackFailedTurn(&messages);
+
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+}
+
 fn sessionHasContent(messages: []const openai.Message) bool {
     for (messages) |msg| {
         switch (msg) {
@@ -978,6 +1030,19 @@ fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
             else => break,
         }
     }
+}
+
+/// Returns the conversation to the state it had before the prompt that failed.
+///
+/// A cancelled turn keeps its user message so the next prompt can build on it.
+/// A failed turn cannot: the payload the provider rejected stays in the
+/// history, so every later request in the session is rejected the same way and
+/// `/resume` restores the same dead conversation. The prompt itself is already
+/// in the input history, so the user can send it again.
+fn rollBackFailedTurn(messages: *std.ArrayList(openai.Message)) void {
+    rollBackCancelledTurn(messages);
+    if (messages.items.len == 0) return;
+    if (messages.items[messages.items.len - 1] == .user) _ = messages.pop();
 }
 
 /// Returns the entry to record in prompt history for `command`, or `null` when
