@@ -209,7 +209,13 @@ fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall,
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
     };
 
-    var parsed = try std.json.parseFromSlice(std.json.Value, arena, tool_call.function.arguments, .{ .ignore_unknown_fields = true });
+    // Arguments the model streamed can be truncated or malformed. Reporting
+    // that back as the tool's result keeps every tool_call paired with a tool
+    // message; letting it unwind would leave the assistant's tool_calls
+    // orphaned, which the provider rejects on every later request.
+    var parsed = std.json.parseFromSlice(std.json.Value, arena, tool_call.function.arguments, .{ .ignore_unknown_fields = true }) catch |err| {
+        return std.fmt.allocPrint(arena, "Tool {s} failed: invalid arguments: {}", .{ tool_call.function.name, err });
+    };
     defer parsed.deinit();
 
     return tool.execute(arena, io, parsed.value) catch |err| {
@@ -253,6 +259,19 @@ test "executeTool reports unknown tools" {
         .build,
     );
     try std.testing.expectEqualStrings("Unknown tool: definitely_not_a_tool", result);
+}
+
+test "executeTool reports malformed tool arguments as a tool result" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const result = try executeTool(
+        arena_state.allocator(),
+        std.testing.io,
+        .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\": " } },
+        .build,
+    );
+    try std.testing.expect(std.mem.startsWith(u8, result, "Tool read_file failed: invalid arguments: error."));
 }
 
 test "executeTool reports failures for a missing file" {
