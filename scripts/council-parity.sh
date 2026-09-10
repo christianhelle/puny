@@ -79,25 +79,34 @@ run_both() {
 }
 
 compare_prompts() {
-  local round prompt name passed=0 failed=0
+  local round prompt name passed=0 failed=0 seen=" "
 
   for round in round1 round2 round3 round4; do
-    for prompt in "$WORK_DIR/bash/$round"/*.prompt.md; do
+    # Compare the union of both runners' prompts: a prompt composed by only one
+    # side is drift even when every shared prompt matches.
+    for prompt in "$WORK_DIR/bash/$round"/*.prompt.md "$WORK_DIR/pwsh/$round"/*.prompt.md; do
       [[ -e "$prompt" ]] || continue
       name="$round/$(basename "$prompt")"
+      case " $seen " in *" $name "*) continue ;; esac
+      seen="$seen$name "
 
+      if [[ ! -f "$WORK_DIR/bash/$name" ]]; then
+        echo "  $name... ${ANSI_RED}FAILED${ANSI_RESET} (council.sh produced no such prompt)"
+        failed=$((failed + 1))
+        continue
+      fi
       if [[ ! -f "$WORK_DIR/pwsh/$name" ]]; then
         echo "  $name... ${ANSI_RED}FAILED${ANSI_RESET} (council.ps1 produced no such prompt)"
         failed=$((failed + 1))
         continue
       fi
 
-      if diff -q "$prompt" "$WORK_DIR/pwsh/$name" >/dev/null 2>&1; then
+      if diff -q "$WORK_DIR/bash/$name" "$WORK_DIR/pwsh/$name" >/dev/null 2>&1; then
         echo "  $name... ${ANSI_GREEN}PASSED${ANSI_RESET}"
         passed=$((passed + 1))
       else
         echo "  $name... ${ANSI_RED}FAILED${ANSI_RESET}"
-        diff -u "$prompt" "$WORK_DIR/pwsh/$name" | head -20 | sed 's/^/    /'
+        diff -u "$WORK_DIR/bash/$name" "$WORK_DIR/pwsh/$name" | head -20 | sed 's/^/    /' || true
         failed=$((failed + 1))
       fi
     done
