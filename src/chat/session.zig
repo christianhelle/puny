@@ -1011,6 +1011,26 @@ test "rollBackFailedTurn keeps an earlier completed turn" {
     try std.testing.expectEqualDeep(openai.Message{ .assistant = .{ .content = "Answered" } }, messages.items[1]);
 }
 
+test "rollBackFailedTurn drops a skill loaded above the failed prompt" {
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "You are a helpful assistant." });
+    try messages.append(std.testing.allocator, .{ .user = "Review the file" });
+    // A triggered skill is appended after the prompt it matched, and a skill
+    // the model loads mid-turn lands after the tool exchange.
+    try messages.append(std.testing.allocator, .{ .system = "Skill: review" });
+    try messages.append(std.testing.allocator, .{ .assistant = .{ .content = null, .tool_calls = &.{
+        .{ .id = "call_1", .function = .{ .name = "load_skill", .arguments = "{}" } },
+    } } });
+    try messages.append(std.testing.allocator, .{ .tool = .{ .tool_call_id = "call_1", .content = "loaded" } });
+    try messages.append(std.testing.allocator, .{ .system = "Skill: tdd" });
+
+    rollBackFailedTurn(&messages);
+
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .system = "You are a helpful assistant." }, messages.items[0]);
+}
+
 test "rollBackFailedTurn leaves a conversation with nothing to roll back" {
     var messages = std.ArrayList(openai.Message).empty;
     defer messages.deinit(std.testing.allocator);
@@ -1052,9 +1072,22 @@ fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
 /// `/resume` restores the same dead conversation. The prompt itself is already
 /// in the input history, so the user can send it again.
 fn rollBackFailedTurn(messages: *std.ArrayList(openai.Message)) void {
+    // Everything after the prompt belongs to the turn it started: the assistant
+    // and tool messages, and any skill the prompt triggered or the model loaded
+    // mid-turn. Stopping at the first non-assistant message would leave the
+    // rejected prompt behind whenever a skill sits above it.
+    var index = messages.items.len;
+    while (index > 0) {
+        index -= 1;
+        if (messages.items[index] == .user) {
+            messages.shrinkRetainingCapacity(index);
+            return;
+        }
+    }
+
+    // No prompt to roll back to, so drop only the partial tail and leave the
+    // standing system context in place.
     rollBackCancelledTurn(messages);
-    if (messages.items.len == 0) return;
-    if (messages.items[messages.items.len - 1] == .user) _ = messages.pop();
 }
 
 /// Returns the entry to record in prompt history for `command`, or `null` when
