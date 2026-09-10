@@ -634,6 +634,15 @@ seat_members() {
 
 SUBJECT_PATH=""
 SUBJECT_LABEL=""
+SUBJECT_COMPARE_DESC_A=""
+SUBJECT_COMPARE_DESC_B=""
+SUBJECT_COMPARE_BASE_DESC=""
+SUBJECT_COMPARE_EMPTY_A=0
+SUBJECT_COMPARE_EMPTY_B=0
+COMPARE_IDENTICAL=0
+COMPARE_BRANCH_A=""
+COMPARE_BRANCH_B=""
+COMPARE_WARN_BYTES=409600
 
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-40
@@ -652,6 +661,8 @@ init_out_dir() {
       slug="$(slugify "$(basename "$SUBJECT_FILE" .md)")"
     elif [[ -n "$SUBJECT_DIFF" ]]; then
       slug="$(slugify "diff-$SUBJECT_DIFF")"
+    elif [[ -n "$SUBJECT_COMPARE_A" ]]; then
+      slug="$(slugify "compare-$SUBJECT_COMPARE_A-vs-$SUBJECT_COMPARE_B")"
     else
       slug="text"
     fi
@@ -691,6 +702,22 @@ warn_if_working_tree_dirty() {
   log_warning "output of 'git diff' through --subject-file to have them critiqued."
 }
 
+# Resolves a compare ref to a full SHA. A short or symbolic name would make the
+# subject header ambiguous when two branches point at nearby commits.
+resolve_compare_ref() {
+  local label="$1" ref="$2" sha
+  sha="$(git rev-parse --verify "$ref" 2>/dev/null)" ||
+    die "Compare ref '$ref' ($label) is not a valid revision"
+  sha="$(git rev-parse "$sha" 2>/dev/null)" || die "Compare ref '$ref' ($label) is not a valid revision"
+  echo "$sha"
+}
+
+# One line of context for a compare header: short SHA plus the commit subject.
+describe_compare_ref() {
+  local sha="$1"
+  echo "$(git rev-parse --short "$sha" 2>/dev/null || echo "$sha") $(git log -1 --format=%s "$sha" 2>/dev/null || true)"
+}
+
 # Writes the exact bytes every member will see into <out>/subject.md.
 resolve_subject() {
   local bytes
@@ -725,6 +752,8 @@ resolve_subject() {
     # An explicit --kind wins here too; silently overriding it would judge the
     # change with a template the caller did not ask for.
     [[ -n "$SUBJECT_KIND" ]] || SUBJECT_KIND="diff"
+  elif [[ -n "$SUBJECT_COMPARE_A" ]]; then
+    resolve_compare_subject
   else
     printf '%s\n' "$SUBJECT_TEXT" >"$SUBJECT_PATH"
     SUBJECT_LABEL="inline text"
@@ -733,10 +762,76 @@ resolve_subject() {
 
   bytes="$(wc -c <"$SUBJECT_PATH" | tr -d '[:space:]')"
   [[ "$bytes" -gt 0 ]] || die "The subject is empty"
-  if [[ "$bytes" -gt 204800 ]]; then
+  if [[ "$SUBJECT_KIND" == "compare" ]]; then
+    compare_warn_limit="$COMPARE_WARN_BYTES"
+  else
+    compare_warn_limit=204800
+  fi
+  if [[ "$bytes" -gt "$compare_warn_limit" ]]; then
     log_warning "Subject is ${bytes} bytes; large subjects can exceed a model's context window"
   fi
   log_info "Subject: $SUBJECT_LABEL (${bytes} bytes, kind: $SUBJECT_KIND)"
+}
+
+# Builds the two-sided compare subject: the shared base header plus the
+# base...A and base...B diffs. Both sides are judged on the same base so the
+# council compares approaches, not patch noise between the branches.
+resolve_compare_subject() {
+  local sha_a sha_b base stat_a stat_b diff_a diff_b
+
+  git rev-parse --git-dir >/dev/null 2>&1 || die "--compare needs to run inside a git repository"
+  sha_a="$(resolve_compare_ref "branch A" "$SUBJECT_COMPARE_A")"
+  sha_b="$(resolve_compare_ref "branch B" "$SUBJECT_COMPARE_B")"
+  if [[ -n "$SUBJECT_COMPARE_BASE" ]]; then
+    base="$(resolve_compare_ref "base" "$SUBJECT_COMPARE_BASE")"
+  else
+    base="$(git merge-base "$sha_a" "$sha_b" 2>/dev/null)" ||
+      die "No merge base between '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B'; pass --compare-base X"
+  fi
+
+  SUBJECT_COMPARE_DESC_A="$(describe_compare_ref "$sha_a")"
+  SUBJECT_COMPARE_DESC_B="$(describe_compare_ref "$sha_b")"
+  SUBJECT_COMPARE_BASE_DESC="$(describe_compare_ref "$base")"
+  COMPARE_BRANCH_A="$SUBJECT_COMPARE_A"
+  COMPARE_BRANCH_B="$SUBJECT_COMPARE_B"
+
+  stat_a="$(git diff --stat "$base...$sha_a" 2>/dev/null || true)"
+  diff_a="$(git diff "$base...$sha_a" 2>/dev/null || true)"
+  stat_b="$(git diff --stat "$base...$sha_b" 2>/dev/null || true)"
+  diff_b="$(git diff "$base...$sha_b" 2>/dev/null || true)"
+  [[ -z "${diff_a//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_A=1 || SUBJECT_COMPARE_EMPTY_A=0
+  [[ -z "${diff_b//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_B=1 || SUBJECT_COMPARE_EMPTY_B=0
+  if [[ "$SUBJECT_COMPARE_EMPTY_A" -eq 1 ]] && [[ "$SUBJECT_COMPARE_EMPTY_B" -eq 1 ]]; then
+    COMPARE_IDENTICAL=1
+  else
+    COMPARE_IDENTICAL=0
+  fi
+
+  {
+    echo "# Compare: $SUBJECT_COMPARE_A vs $SUBJECT_COMPARE_B"
+    echo "Base: $SUBJECT_COMPARE_BASE_DESC"
+    echo "Branch A: $SUBJECT_COMPARE_A $SUBJECT_COMPARE_DESC_A"
+    echo "Branch B: $SUBJECT_COMPARE_B $SUBJECT_COMPARE_DESC_B"
+    echo
+    echo "## Branch A — summary ($SUBJECT_COMPARE_A vs base)"
+    echo
+    if [[ -n "$stat_a" ]]; then echo "$stat_a"; else echo "(no changes vs base)"; fi
+    echo
+    echo "## Branch A — full diff ($SUBJECT_COMPARE_A vs base)"
+    echo
+    if [[ -n "$diff_a" ]]; then echo "$diff_a"; else echo "(no changes vs base)"; fi
+    echo
+    echo "## Branch B — summary ($SUBJECT_COMPARE_B vs base)"
+    echo
+    if [[ -n "$stat_b" ]]; then echo "$stat_b"; else echo "(no changes vs base)"; fi
+    echo
+    echo "## Branch B — full diff ($SUBJECT_COMPARE_B vs base)"
+    echo
+    if [[ -n "$diff_b" ]]; then echo "$diff_b"; else echo "(no changes vs base)"; fi
+  } >"$SUBJECT_PATH"
+  warn_if_working_tree_dirty
+  SUBJECT_LABEL="compare $SUBJECT_COMPARE_A vs $SUBJECT_COMPARE_B (base $base)"
+  [[ -n "$SUBJECT_KIND" ]] || SUBJECT_KIND="compare"
 }
 
 # Replaces whole-line block markers in a single pass, so that text pulled in by
