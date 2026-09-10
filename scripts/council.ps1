@@ -647,15 +647,20 @@ function New-PeerDigest {
     if ($bytes.Length -gt $MaxPeerChars) {
       # Cut on a line boundary. A bare byte cut can land inside a multi-byte
       # character and leave a broken byte in the middle of a peer's critique.
-      $kept = [System.Text.Encoding]::UTF8.GetString($bytes, 0, $MaxPeerChars)
-      $keptLines = $kept -split "`n"
+      $cut = [System.Text.Encoding]::UTF8.GetString($bytes, 0, $MaxPeerChars)
+      $keptLines = $cut -split "`n"
       if ($keptLines.Count -gt 0 -and $keptLines[-1] -eq '') {
         $keptLines = @($keptLines[0..($keptLines.Count - 2)])
       }
+      $keptText = ''
       if ($keptLines.Count -gt 1) {
-        [void]$builder.Append(($keptLines[0..($keptLines.Count - 2)] -join "`n")).Append("`n")
+        $keptText = ($keptLines[0..($keptLines.Count - 2)] -join "`n") + "`n"
       }
-      [void]$builder.Append("[TRUNCATED: $($bytes.Length - $MaxPeerChars) chars omitted]").Append("`n")
+      # The count is what was actually dropped: the line-boundary cut discards
+      # the partial line on top of the over-budget bytes.
+      $keptBytes = [System.Text.Encoding]::UTF8.GetByteCount($keptText)
+      [void]$builder.Append($keptText)
+      [void]$builder.Append("[TRUNCATED: $($bytes.Length - $keptBytes) chars omitted]").Append("`n")
     }
     else {
       [void]$builder.Append((Read-TextFile $src))

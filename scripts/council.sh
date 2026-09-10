@@ -1097,7 +1097,7 @@ build_peer_file() {
   local self="$1" out="$2"
   shift 2
   local -a survivors=("$@")
-  local peer src bytes
+  local peer src bytes kept
 
   : >"$out"
   for peer in "${survivors[@]}"; do
@@ -1112,8 +1112,13 @@ build_peer_file() {
     if [[ "$bytes" -gt "$MAX_PEER_CHARS" ]]; then
       # Cut on a line boundary. A bare byte cut can land inside a multi-byte
       # character and leave a broken byte in the middle of a peer's critique.
-      head -c "$MAX_PEER_CHARS" "$src" | sed -e '$d' >>"$out"
-      printf '[TRUNCATED: %d chars omitted]\n' "$((bytes - MAX_PEER_CHARS))" >>"$out"
+      # The count is what was actually dropped: the line-boundary cut discards
+      # the partial line on top of the over-budget bytes.
+      head -c "$MAX_PEER_CHARS" "$src" | sed -e '$d' >"$out.trunc"
+      kept="$(wc -c <"$out.trunc" | tr -d '[:space:]')"
+      cat "$out.trunc" >>"$out"
+      rm -f "$out.trunc"
+      printf '[TRUNCATED: %d chars omitted]\n' "$((bytes - kept))" >>"$out"
     else
       cat "$src" >>"$out"
     fi
