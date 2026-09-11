@@ -6,6 +6,7 @@
 - Recover the conversation after a failed turn ([#202](https://github.com/christianhelle/puny/pull/202)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Add branch-compare mode to council ([#203](https://github.com/christianhelle/puny/pull/203)) ([@christianhelle](https://github.com/christianhelle/))
 - Add an AI council: adversarial multi-model review scripts ([#201](https://github.com/christianhelle/puny/pull/201)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --effort flag to control reasoning effort ([#200](https://github.com/christianhelle/puny/pull/200)) ([@christianhelle](https://github.com/christianhelle/))
 - Color PASSED and FAILED output in regression and integration test results ([#199](https://github.com/christianhelle/puny/pull/199)) ([@christianhelle](https://github.com/christianhelle/))
