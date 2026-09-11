@@ -32,7 +32,9 @@ ROLE_FILTER=""
 SKIP_CROSS=0
 SKIP_CHAIR=0
 SKIP_SUMMARY=0
-JOBS="${COUNCIL_JOBS:-3}"
+# Empty means all members at once; finalize_limits fills in the member count.
+# --jobs and COUNCIL_JOBS remain as an opt-in throttle.
+JOBS="${COUNCIL_JOBS:-}"
 TIMEOUT_SECS="${COUNCIL_TIMEOUT:-900}"
 MIN_MEMBERS=""
 MIN_ANSWER_CHARS=200
@@ -101,7 +103,7 @@ Council:
       --no-summary          Skip the plain-language summary of the verdict
 
 Execution:
-  -j, --jobs N              Maximum members running at once (default: 3)
+  -j, --jobs N              Maximum members running at once (default: all members)
       --timeout SECONDS     Per-member time limit, or 0 for none (default: 900)
       --min-members N       Abort after round one below this many (default: half)
       --min-answer-chars N  Shorter answers count as a failure (default: 200)
@@ -399,7 +401,8 @@ validate_args() {
   local chosen=0
 
   require_whole_number "Member count (COUNCIL_MEMBERS)" "$MEMBER_COUNT" 1
-  require_whole_number "Job limit (COUNCIL_JOBS)" "$JOBS" 1
+  # Empty means all members at once; finalize_limits fills in the member count.
+  [[ -n "$JOBS" ]] && require_whole_number "Job limit (COUNCIL_JOBS)" "$JOBS" 1
   require_whole_number "Timeout (COUNCIL_TIMEOUT)" "$TIMEOUT_SECS" 0
 
   # The environment fallback keeps headless runs working without flags, but it
@@ -484,7 +487,10 @@ validate_args() {
 # requested count instead would seat two members, pay for both, and only then
 # reject the run for falling below a floor meant for six.
 finalize_limits() {
-  if [[ "$JOBS" -gt "$MEMBER_COUNT" ]]; then
+  # Empty means no throttle was requested: run all members at once.
+  if [[ -z "$JOBS" ]]; then
+    JOBS="$MEMBER_COUNT"
+  elif [[ "$JOBS" -gt "$MEMBER_COUNT" ]]; then
     JOBS="$MEMBER_COUNT"
   fi
 
