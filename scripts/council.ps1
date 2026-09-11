@@ -30,7 +30,7 @@ param(
   [switch]$SkipCross,
   [switch]$SkipChair,
   [switch]$SkipSummary,
-  [int]$Jobs = 3,
+  [int]$Jobs = 0, # 0 means all members at once
   [int]$TimeoutSec = 900,
   [int]$MinMembers = 0,
   [int]$MinAnswerChars = 200,
@@ -85,7 +85,7 @@ Council:
   -SkipSummary          Skip the plain-language summary of the verdict
 
 Execution:
-  -Jobs N               Maximum members running at once (default: 3)
+  -Jobs N               Maximum members running at once (default: all members)
   -TimeoutSec N         Per-member time limit, or 0 for none (default: 900)
   -MinMembers N         Abort after round one below this many (default: half)
   -MinAnswerChars N     Shorter answers count as a failure (default: 200)
@@ -271,10 +271,12 @@ function Test-Arguments {
   if ($SubjectFile -and -not (Test-Path -LiteralPath $SubjectFile -PathType Leaf)) {
     Stop-WithError "Subject file not found: $SubjectFile"
   }
-  foreach ($pair in @(@('Members', $script:MemberCount), @('Jobs', $script:JobLimit),
+  foreach ($pair in @(@('Members', $script:MemberCount),
       @('MinAnswerChars', $MinAnswerChars), @('MaxPeerChars', $MaxPeerChars))) {
     if ($pair[1] -lt 1) { Stop-WithError "-$($pair[0]) requires a positive whole number, got '$($pair[1])'" }
   }
+  # 0 means all members at once; Set-FinalLimits fills in the member count.
+  if ($script:JobLimit -lt 0) { Stop-WithError "-Jobs requires 0 or a positive whole number, got '$($script:JobLimit)'" }
   if ($script:Timeout -lt 0) { Stop-WithError "-TimeoutSec requires a whole number, got '$($script:Timeout)'" }
   if ($script:Timeout -eq 0) {
     Write-WarningMessage 'Running without a time limit; a hung member will block its slot indefinitely'
@@ -296,7 +298,9 @@ function Test-Arguments {
 # requested count instead would seat two members, pay for both, and only then
 # reject the run for falling below a floor meant for six.
 function Set-FinalLimits {
-  if ($script:JobLimit -gt $script:MemberTotal) { $script:JobLimit = $script:MemberTotal }
+  # 0 means no throttle was requested: run all members at once.
+  if ($script:JobLimit -le 0) { $script:JobLimit = $script:MemberTotal }
+  elseif ($script:JobLimit -gt $script:MemberTotal) { $script:JobLimit = $script:MemberTotal }
 
   if ($script:MemberFloor -lt 1) {
     $script:MemberFloor = [Math]::Max(2, [Math]::Ceiling($script:MemberTotal / 2))
@@ -1472,7 +1476,7 @@ function Invoke-Main {
   $script:ChairSpec = if ($Chair) { $Chair } elseif ($env:COUNCIL_CHAIR) { $env:COUNCIL_CHAIR } else { '' }
   $script:OutDir = if ($Out) { $Out } elseif ($env:COUNCIL_OUT) { $env:COUNCIL_OUT } else { '' }
   $script:JobLimit = if ($script:ScriptBoundParameters.ContainsKey('Jobs')) { $Jobs }
-  elseif ($env:COUNCIL_JOBS) { ConvertTo-WholeNumber 'Job limit (COUNCIL_JOBS)' $env:COUNCIL_JOBS 1 }
+  elseif ($env:COUNCIL_JOBS) { ConvertTo-WholeNumber 'Job limit (COUNCIL_JOBS)' $env:COUNCIL_JOBS 0 }
   else { $Jobs }
   $script:Timeout = if ($script:ScriptBoundParameters.ContainsKey('TimeoutSec')) { $TimeoutSec }
   elseif ($env:COUNCIL_TIMEOUT) { ConvertTo-WholeNumber 'Timeout (COUNCIL_TIMEOUT)' $env:COUNCIL_TIMEOUT 0 }
