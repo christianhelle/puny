@@ -406,7 +406,13 @@ validate_args() {
   # must look like two refs, not one blob, or the comparison has no sides.
   if [[ -z "$SUBJECT_COMPARE_A" ]] && [[ -n "${COUNCIL_COMPARE:-}" ]]; then
     local -a compare_parts=()
-    read -r -a compare_parts <<<"${COUNCIL_COMPARE:-}"
+    # read only consumes the first line, so flatten newlines first: otherwise a
+    # three-token value with a newline silently drops the third token while the
+    # PowerShell runner (which splits all whitespace) rejects it.
+    local compare_flat="${COUNCIL_COMPARE:-}"
+    compare_flat="${compare_flat//$'\n'/ }"
+    compare_flat="${compare_flat//$'\r'/ }"
+    read -r -a compare_parts <<<"$compare_flat"
     if [[ "${#compare_parts[@]}" -eq 2 ]]; then
       SUBJECT_COMPARE_A="${compare_parts[0]}"
       SUBJECT_COMPARE_B="${compare_parts[1]}"
@@ -453,6 +459,10 @@ validate_args() {
     plan | diff | text | compare) ;;
     *) die "--kind must be plan, diff, text, or compare (got '$SUBJECT_KIND')" ;;
     esac
+  fi
+
+  if [[ "$SUBJECT_KIND" == "compare" ]] && { [[ -z "$SUBJECT_COMPARE_A" ]] || [[ -z "$SUBJECT_COMPARE_B" ]]; }; then
+    die "--kind compare needs --compare A B"
   fi
 
   if [[ -n "$SUBJECT_COMPARE_A" ]]; then
@@ -640,6 +650,7 @@ SUBJECT_COMPARE_BASE_DESC=""
 SUBJECT_COMPARE_EMPTY_A=0
 SUBJECT_COMPARE_EMPTY_B=0
 COMPARE_IDENTICAL=0
+COMPARE_TREES_EQUAL=0
 COMPARE_BRANCH_A=""
 COMPARE_BRANCH_B=""
 COMPARE_WARN_BYTES=409600
@@ -774,7 +785,7 @@ resolve_subject() {
 }
 
 # Builds the two-sided compare subject: the shared base header plus the
-# base...A and base...B diffs. Both sides are judged on the same base so the
+# base-vs-A and base-vs-B diffs. Both sides are judged on the same base so the
 # council compares approaches, not patch noise between the branches.
 resolve_compare_subject() {
   local sha_a sha_b base stat_a stat_b diff_a diff_b
@@ -795,13 +806,25 @@ resolve_compare_subject() {
   COMPARE_BRANCH_A="$SUBJECT_COMPARE_A"
   COMPARE_BRANCH_B="$SUBJECT_COMPARE_B"
 
-  stat_a="$(git diff --stat "$base...$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
-  diff_a="$(git diff "$base...$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
-  stat_b="$(git diff --stat "$base...$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
-  diff_b="$(git diff "$base...$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
+  # A three-dot range would recompute the merge base and silently ignore an
+  # explicit --compare-base that is not an ancestor, so diff the supplied base
+  # directly for both sides.
+  stat_a="$(git diff --stat "$base..$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
+  diff_a="$(git diff "$base..$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
+  stat_b="$(git diff --stat "$base..$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
+  diff_b="$(git diff "$base..$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
   [[ -z "${diff_a//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_A=1 || SUBJECT_COMPARE_EMPTY_A=0
   [[ -z "${diff_b//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_B=1 || SUBJECT_COMPARE_EMPTY_B=0
+  # Both-empty is not the only tie: two branches can resolve to the same tree
+  # while both differing from the base. Comparing the trees directly catches
+  # that without spending paid calls stating the obvious.
+  COMPARE_TREES_EQUAL=0
+  if git diff --quiet "$sha_a" "$sha_b" -- >/dev/null 2>&1; then
+    COMPARE_TREES_EQUAL=1
+  fi
   if [[ "$SUBJECT_COMPARE_EMPTY_A" -eq 1 ]] && [[ "$SUBJECT_COMPARE_EMPTY_B" -eq 1 ]]; then
+    COMPARE_IDENTICAL=1
+  elif [[ "$COMPARE_TREES_EQUAL" -eq 1 ]]; then
     COMPARE_IDENTICAL=1
   else
     COMPARE_IDENTICAL=0
@@ -866,26 +889,47 @@ render_scalars() {
   # Values are passed as environment data, never as script text: a compare ref or
   # commit subject containing '|', '&', '\' or a newline must substitute
   # literally. A sed program with those bytes unescaped would be an injection.
+  # Single pass over the original line: inserted values are never rescanned, so
+  # a ref like 'refs/heads/{{BRANCH_B}}' keeps its literal braces instead of
+  # having them rewritten by the later replacement.
   SCALAR_MEMBER_N="$member_n" SCALAR_ROLE_NAME="$role_name" SCALAR_PAIR_NAME="$pair_name" \
     SCALAR_N_MEMBERS="$n_members" SCALAR_BRANCH_A="$COMPARE_BRANCH_A" \
     SCALAR_BRANCH_B="$COMPARE_BRANCH_B" SCALAR_BASE_DESC="$SUBJECT_COMPARE_BASE_DESC" \
     awk '
-    function rep(s, find, repl,   i, out) {
-      while ((i = index(s, find)) > 0) {
-        out = out substr(s, 1, i - 1) repl
-        s = substr(s, i + length(find))
+    BEGIN {
+      nfind = 7
+      find[1] = "{{MEMBER_N}}";  repl[1] = ENVIRON["SCALAR_MEMBER_N"]
+      find[2] = "{{ROLE_NAME}}"; repl[2] = ENVIRON["SCALAR_ROLE_NAME"]
+      find[3] = "{{PAIR_NAME}}"; repl[3] = ENVIRON["SCALAR_PAIR_NAME"]
+      find[4] = "{{N_MEMBERS}}"; repl[4] = ENVIRON["SCALAR_N_MEMBERS"]
+      find[5] = "{{BRANCH_A}}";  repl[5] = ENVIRON["SCALAR_BRANCH_A"]
+      find[6] = "{{BRANCH_B}}";  repl[6] = ENVIRON["SCALAR_BRANCH_B"]
+      find[7] = "{{BASE_DESC}}"; repl[7] = ENVIRON["SCALAR_BASE_DESC"]
+    }
+    function render(line,   out, i, n, k, flen, hit) {
+      out = ""
+      i = 1
+      n = length(line)
+      while (i <= n) {
+        hit = 0
+        for (k = 1; k <= nfind; k++) {
+          flen = length(find[k])
+          if (flen > 0 && substr(line, i, flen) == find[k]) {
+            out = out repl[k]
+            i += flen
+            hit = 1
+            break
+          }
+        }
+        if (!hit) {
+          out = out substr(line, i, 1)
+          i++
+        }
       }
-      return out s
+      return out
     }
     {
-      line = rep($0, "{{MEMBER_N}}", ENVIRON["SCALAR_MEMBER_N"])
-      line = rep(line, "{{ROLE_NAME}}", ENVIRON["SCALAR_ROLE_NAME"])
-      line = rep(line, "{{PAIR_NAME}}", ENVIRON["SCALAR_PAIR_NAME"])
-      line = rep(line, "{{N_MEMBERS}}", ENVIRON["SCALAR_N_MEMBERS"])
-      line = rep(line, "{{BRANCH_A}}", ENVIRON["SCALAR_BRANCH_A"])
-      line = rep(line, "{{BRANCH_B}}", ENVIRON["SCALAR_BRANCH_B"])
-      line = rep(line, "{{BASE_DESC}}", ENVIRON["SCALAR_BASE_DESC"])
-      print line
+      print render($0)
     }
   ' "$template" >"$out"
 
@@ -1644,15 +1688,22 @@ warn_if_prompt_large() {
   fi
 }
 
-# Both sides match the base, so there is nothing to judge. Write the tie
-# verdict directly instead of spending paid calls stating the obvious.
+# The branches are identical (both empty vs the base, or resolving to the same
+# tree), so there is nothing to judge. Write the tie verdict directly instead
+# of spending paid calls stating the obvious.
 write_identical_verdict() {
   local verdict="$OUT_DIR/verdict.md"
   {
     echo "VERDICT: tie"
-    echo "ONE LINE: Both branches match the base; there is nothing to choose between."
-    echo
-    echo "Both '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B' are empty against base $SUBJECT_COMPARE_BASE_DESC."
+    if [[ "$COMPARE_TREES_EQUAL" -eq 1 ]] && { [[ "$SUBJECT_COMPARE_EMPTY_A" -ne 1 ]] || [[ "$SUBJECT_COMPARE_EMPTY_B" -ne 1 ]]; }; then
+      echo "ONE LINE: Both branches resolve to the same tree; there is nothing to choose between."
+      echo
+      echo "Both '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B' resolve to the same tree, so there is nothing to choose between."
+    else
+      echo "ONE LINE: Both branches match the base; there is nothing to choose between."
+      echo
+      echo "Both '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B' are empty against base $SUBJECT_COMPARE_BASE_DESC."
+    fi
     echo "Members were seated and their prompts composed, but no rounds ran:"
     echo "there is no difference to judge, so no models were called."
   } >"$verdict"
@@ -1668,7 +1719,11 @@ write_identical_verdict() {
   } >"$OUT_DIR/manifest.tsv"
 
   write_index
-  log_success "Branches are identical vs the base; recorded a tie with no models called"
+  if [[ "$COMPARE_TREES_EQUAL" -eq 1 ]] && { [[ "$SUBJECT_COMPARE_EMPTY_A" -ne 1 ]] || [[ "$SUBJECT_COMPARE_EMPTY_B" -ne 1 ]]; }; then
+    log_success "Branches resolve to the same tree; recorded a tie with no models called"
+  else
+    log_success "Branches are identical vs the base; recorded a tie with no models called"
+  fi
   log_success "Read $OUT_DIR/council.md"
 }
 

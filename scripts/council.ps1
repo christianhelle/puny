@@ -262,6 +262,9 @@ function Test-Arguments {
   if ($CompareBase -and $script:CompareRefs.Count -ne 2) {
     Stop-WithError '-CompareBase needs -Compare A,B'
   }
+  if ($Kind -eq 'compare' -and $script:CompareRefs.Count -ne 2) {
+    Stop-WithError '-Kind compare needs -Compare A,B'
+  }
   if ($script:CompareRefs.Count -eq 2 -and $Kind -and $Kind -ne 'compare') {
     Stop-WithError "-Compare needs -Kind compare (got '$Kind')"
   }
@@ -610,7 +613,7 @@ function Resolve-Subject {
 }
 
 # Builds the two-sided compare subject: the shared base header plus the
-# base...A and base...B diffs. Both sides are judged on the same base so the
+# base-vs-A and base-vs-B diffs. Both sides are judged on the same base so the
 # council compares approaches, not patch noise between the branches.
 function Resolve-CompareSubject {
   & git rev-parse --git-dir 2>&1 | Out-Null
@@ -636,19 +639,28 @@ function Resolve-CompareSubject {
   $script:CompareBranchA = $refA
   $script:CompareBranchB = $refB
 
-  $statA = (& git diff --stat "$base...$shaA" 2>$null)
+  # A three-dot range would recompute the merge base and silently ignore an
+  # explicit -CompareBase that is not an ancestor, so diff the supplied base
+  # directly for both sides.
+  $statA = (& git diff --stat "$base..$shaA" 2>$null)
   if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch A ($refA)" }
-  $diffA = (& git diff "$base...$shaA" 2>$null)
+  $diffA = (& git diff "$base..$shaA" 2>$null)
   if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch A ($refA)" }
-  $statB = (& git diff --stat "$base...$shaB" 2>$null)
+  $statB = (& git diff --stat "$base..$shaB" 2>$null)
   if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch B ($refB)" }
-  $diffB = (& git diff "$base...$shaB" 2>$null)
+  $diffB = (& git diff "$base..$shaB" 2>$null)
   if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch B ($refB)" }
   $emptyA = ((-join $diffA).Trim().Length -eq 0)
   $emptyB = ((-join $diffB).Trim().Length -eq 0)
   $script:CompareEmptyA = $emptyA
   $script:CompareEmptyB = $emptyB
-  $script:CompareIdentical = ($emptyA -and $emptyB)
+  # Both-empty is not the only tie: two branches can resolve to the same tree
+  # while both differing from the base. Comparing the trees directly catches
+  # that without spending paid calls stating the obvious.
+  & git diff --quiet $shaA $shaB -- 2>$null
+  $treeSame = ($LASTEXITCODE -eq 0)
+  $script:CompareTreesEqual = $treeSame
+  $script:CompareIdentical = (($emptyA -and $emptyB) -or $treeSame)
 
   $lines = @("# Compare: $refA vs $refB",
     "Base: $($script:CompareBaseDesc)",
@@ -699,19 +711,21 @@ function Expand-Scalars {
   )
 
   $known = '^\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2|VERDICT_REPORT)\}\}$'
-  $extra = @{
+  $map = @{
+    '{{MEMBER_N}}'  = $MemberN
+    '{{ROLE_NAME}}' = $RoleName
+    '{{PAIR_NAME}}' = $PairName
+    '{{N_MEMBERS}}' = $MemberCount
     '{{BRANCH_A}}'  = $script:CompareBranchA
     '{{BRANCH_B}}'  = $script:CompareBranchB
     '{{BASE_DESC}}' = $script:CompareBaseDesc
   }
+  # Single pass over the original template: values are literal data, so a ref
+  # like 'refs/heads/{{BRANCH_B}}' must not have its braces rewritten by the
+  # later replacement. A chained .Replace() would rescan inserted text.
+  $pattern = '\{\{(?:MEMBER_N|ROLE_NAME|PAIR_NAME|N_MEMBERS|BRANCH_A|BRANCH_B|BASE_DESC)\}\}'
   $lines = foreach ($line in Get-FileLines $TemplatePath) {
-    $line.Replace('{{MEMBER_N}}', $MemberN).
-    Replace('{{ROLE_NAME}}', $RoleName).
-    Replace('{{PAIR_NAME}}', $PairName).
-    Replace('{{N_MEMBERS}}', $MemberCount).
-    Replace('{{BRANCH_A}}', $extra['{{BRANCH_A}}']).
-    Replace('{{BRANCH_B}}', $extra['{{BRANCH_B}}']).
-    Replace('{{BASE_DESC}}', $extra['{{BASE_DESC}}'])
+    [regex]::Replace($line, $pattern, { param($m) $map[$m.Value] })
   }
   Write-TextFile $OutPath (Join-Lines $lines)
 
@@ -916,15 +930,27 @@ function Test-PromptSize {
   }
 }
 
-# Both sides match the base, so there is nothing to judge. Write the tie
-# verdict directly instead of spending paid calls stating the obvious.
+# The branches are identical (both empty vs the base, or resolving to the same
+# tree), so there is nothing to judge. Write the tie verdict directly instead
+# of spending paid calls stating the obvious.
 function Write-IdenticalVerdict {
   $verdictPath = Join-Path $script:OutDir 'verdict.md'
-  $lines = @(
-    'VERDICT: tie',
-    'ONE LINE: Both branches match the base; there is nothing to choose between.',
-    '',
-    "Both '$($script:CompareBranchA)' and '$($script:CompareBranchB)' are empty against base $($script:CompareBaseDesc).",
+  $lines = @('VERDICT: tie')
+  if ($script:CompareTreesEqual -and (-not $script:CompareEmptyA -or -not $script:CompareEmptyB)) {
+    $lines += @(
+      'ONE LINE: Both branches resolve to the same tree; there is nothing to choose between.',
+      '',
+      "Both '$($script:CompareBranchA)' and '$($script:CompareBranchB)' resolve to the same tree, so there is nothing to choose between."
+    )
+  }
+  else {
+    $lines += @(
+      'ONE LINE: Both branches match the base; there is nothing to choose between.',
+      '',
+      "Both '$($script:CompareBranchA)' and '$($script:CompareBranchB)' are empty against base $($script:CompareBaseDesc)."
+    )
+  }
+  $lines += @(
     'Members were seated and their prompts composed, but no rounds ran:',
     'there is no difference to judge, so no models were called.',
     ''
@@ -940,7 +966,12 @@ function Write-IdenticalVerdict {
   Write-TextFile (Join-Path $script:OutDir 'manifest.tsv') (Join-Lines $manifest)
 
   Write-Index
-  Write-Success 'Branches are identical vs the base; recorded a tie with no models called'
+  if ($script:CompareTreesEqual -and (-not $script:CompareEmptyA -or -not $script:CompareEmptyB)) {
+    Write-Success 'Branches resolve to the same tree; recorded a tie with no models called'
+  }
+  else {
+    Write-Success 'Branches are identical vs the base; recorded a tie with no models called'
+  }
   Write-Success "Read $(Join-Path $script:OutDir 'council.md')"
 }
 
@@ -1462,6 +1493,7 @@ function Invoke-Main {
   $script:CompareEmptyA = $false
   $script:CompareEmptyB = $false
   $script:CompareIdentical = $false
+  $script:CompareTreesEqual = $false
   $script:ActiveProcesses = [System.Collections.ArrayList]::new()
 
   Import-SharedLists
