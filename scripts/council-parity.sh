@@ -54,6 +54,32 @@ check_dependencies() {
   done
 }
 
+# The mock provider dispatches on whole words in the last user message, so a
+# compare subject built from a real diff can never be smoke-safe. The parity
+# compare case therefore builds a scratch repo whose branches contain no
+# trigger words, and both runners judge that instead.
+make_compare_repo() {
+  local repo="$WORK_DIR/compare-repo"
+  mkdir -p "$repo"
+  (
+    cd "$repo" || exit 1
+    git init -q -b main .
+    git config user.email parity@test
+    git config user.name parity
+    printf 'base note\n' >note.txt
+    git add .
+    git commit -qm base
+    git checkout -qb side-a
+    printf 'side A adds a kettle rota\n' >>note.txt
+    git commit -qam side-a
+    git checkout -q main
+    git checkout -qb side-b
+    printf 'side B adds a spare kettle\n' >>note.txt
+    git commit -qam side-b
+  )
+  echo "$repo"
+}
+
 # The mock provider is deterministic, so identical prompts must produce identical
 # answers, and any difference is a real drift rather than model variation.
 run_both() {
@@ -78,35 +104,65 @@ run_both() {
   }
 }
 
+run_both_compare() {
+  local repo="$1"
+
+  log_info "Running council.sh --compare with $MEMBERS members against the mock provider"
+  (
+    cd "$repo" || exit 1
+    bash "$SCRIPT_DIR/council.sh" --smoke --members "$MEMBERS" --jobs 2 \
+      --min-answer-chars 20 --compare side-a side-b --out "$WORK_DIR/compare-bash" \
+      >"$WORK_DIR/compare-bash.log" 2>&1 || {
+      log_error "council.sh --compare failed; see $WORK_DIR/compare-bash.log"
+      cat "$WORK_DIR/compare-bash.log" >&2
+      exit 1
+    }
+  )
+
+  log_info "Running council.ps1 -Compare with $MEMBERS members against the mock provider"
+  (
+    cd "$repo" || exit 1
+    pwsh -NoProfile -File "$SCRIPT_DIR/council.ps1" -Smoke -Members "$MEMBERS" -Jobs 2 \
+      -MinAnswerChars 20 -Compare side-a,side-b -Out "$WORK_DIR/compare-pwsh" \
+      >"$WORK_DIR/compare-pwsh.log" 2>&1 || {
+      log_error "council.ps1 -Compare failed; see $WORK_DIR/compare-pwsh.log"
+      cat "$WORK_DIR/compare-pwsh.log" >&2
+      exit 1
+    }
+  )
+}
+
 compare_prompts() {
+  local left="$1" right="$2" label="$3"
   local round prompt name passed=0 failed=0 seen=" "
 
+  echo "--- $label ---"
   for round in round1 round2 round3 round4; do
     # Compare the union of both runners' prompts: a prompt composed by only one
     # side is drift even when every shared prompt matches.
-    for prompt in "$WORK_DIR/bash/$round"/*.prompt.md "$WORK_DIR/pwsh/$round"/*.prompt.md; do
+    for prompt in "$left/$round"/*.prompt.md "$right/$round"/*.prompt.md; do
       [[ -e "$prompt" ]] || continue
       name="$round/$(basename "$prompt")"
       case " $seen " in *" $name "*) continue ;; esac
       seen="$seen$name "
 
-      if [[ ! -f "$WORK_DIR/bash/$name" ]]; then
+      if [[ ! -f "$left/$name" ]]; then
         echo "  $name... ${ANSI_RED}FAILED${ANSI_RESET} (council.sh produced no such prompt)"
         failed=$((failed + 1))
         continue
       fi
-      if [[ ! -f "$WORK_DIR/pwsh/$name" ]]; then
+      if [[ ! -f "$right/$name" ]]; then
         echo "  $name... ${ANSI_RED}FAILED${ANSI_RESET} (council.ps1 produced no such prompt)"
         failed=$((failed + 1))
         continue
       fi
 
-      if diff -q "$WORK_DIR/bash/$name" "$WORK_DIR/pwsh/$name" >/dev/null 2>&1; then
+      if diff -q "$left/$name" "$right/$name" >/dev/null 2>&1; then
         echo "  $name... ${ANSI_GREEN}PASSED${ANSI_RESET}"
         passed=$((passed + 1))
       else
         echo "  $name... ${ANSI_RED}FAILED${ANSI_RESET}"
-        diff -u "$WORK_DIR/bash/$name" "$WORK_DIR/pwsh/$name" | head -20 | sed 's/^/    /' || true
+        diff -u "$left/$name" "$right/$name" | head -20 | sed 's/^/    /' || true
         failed=$((failed + 1))
       fi
     done
@@ -115,12 +171,12 @@ compare_prompts() {
   # A runner that composed nothing would otherwise pass by having no prompts to
   # disagree about.
   if [[ "$passed" -eq 0 ]] && [[ "$failed" -eq 0 ]]; then
-    log_error "No prompts were composed by either runner."
+    log_error "No prompts were composed by either runner ($label)."
     exit 1
   fi
 
   echo
-  echo "$passed passed, $failed failed (of $((passed + failed)))"
+  echo "$label: $passed passed, $failed failed (of $((passed + failed)))"
   [[ "$failed" -eq 0 ]]
 }
 
@@ -132,7 +188,10 @@ main() {
   trap cleanup EXIT
 
   run_both
-  compare_prompts
+  compare_prompts "$WORK_DIR/bash" "$WORK_DIR/pwsh" "subject-file"
+
+  run_both_compare "$(make_compare_repo)"
+  compare_prompts "$WORK_DIR/compare-bash" "$WORK_DIR/compare-pwsh" "compare"
 }
 
 main "$@"

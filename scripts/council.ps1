@@ -20,7 +20,9 @@ param(
   [string]$SubjectFile,
   [string]$Diff,
   [string]$Subject,
-  [ValidateSet('plan', 'diff', 'text')][string]$Kind,
+  [string[]]$Compare,
+  [string]$CompareBase = $env:COUNCIL_COMPARE_BASE,
+  [ValidateSet('plan', 'diff', 'text', 'compare')][string]$Kind,
   [int]$Members = 6,
   [string[]]$Models,
   [string]$Chair,
@@ -69,7 +71,9 @@ Subject (exactly one is required):
   -SubjectFile PATH     Critique the contents of a file
   -Diff BASE            Critique "git diff BASE...HEAD"
   -Subject TEXT         Critique the given text
-  -Kind KIND            plan | diff | text (default: inferred)
+  -Compare A,B          Judge branch A against branch B from their merge base
+  -CompareBase X        Compare from X instead of the merge base of A and B
+  -Kind KIND            plan | diff | text | compare (default: inferred)
 
 Council:
   -Members N            Number of council members (default: 6, maximum: 8)
@@ -99,7 +103,7 @@ Output:
   -Help                 Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR, COUNCIL_OUT,
-COUNCIL_JOBS, COUNCIL_TIMEOUT
+COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 '@
@@ -219,15 +223,50 @@ function Resolve-PunyBinary {
 }
 
 function Test-Arguments {
+  $script:CompareRefs = @()
+  # The environment fallback keeps headless runs working without flags, but it
+  # must look like two refs, not one blob, or the comparison has no sides.
+  if ((-not $Compare -or $Compare.Count -eq 0) -and $env:COUNCIL_COMPARE) {
+    $parts = @($env:COUNCIL_COMPARE -split '\s+' | Where-Object { $_ })
+    if ($parts.Count -eq 2) {
+      $script:CompareRefs = @($parts[0], $parts[1])
+    }
+    elseif ($env:COUNCIL_COMPARE) {
+      Stop-WithError "COUNCIL_COMPARE must hold exactly two refs, got '$env:COUNCIL_COMPARE'"
+    }
+  }
+  elseif ($Compare) {
+    $script:CompareRefs = @($Compare | ForEach-Object { $_ -split ',' } |
+      ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  }
+
+  if ($script:CompareRefs.Count -ne 2 -and ($Compare -or $env:COUNCIL_COMPARE)) {
+    Stop-WithError '-Compare needs exactly two branches: -Compare A,B'
+  }
+
   $chosen = @($SubjectFile, $Diff, $Subject | Where-Object { $_ }).Count
+  if ($script:CompareRefs.Count -eq 2) { $chosen++ }
+
+  if ($CompareBase -and $chosen -eq 0) {
+    Stop-WithError '-CompareBase needs -Compare A,B'
+  }
 
   if ($chosen -eq 0) {
-    Write-ErrorMessage 'No subject given. Pass one of -SubjectFile, -Diff, or -Subject.'
+    Write-ErrorMessage 'No subject given. Pass one of -SubjectFile, -Diff, -Subject, or -Compare.'
     Show-Usage
     exit 1
   }
   if ($chosen -gt 1) {
-    Stop-WithError '-SubjectFile, -Diff, and -Subject are mutually exclusive'
+    Stop-WithError '-SubjectFile, -Diff, -Subject, and -Compare are mutually exclusive'
+  }
+  if ($CompareBase -and $script:CompareRefs.Count -ne 2) {
+    Stop-WithError '-CompareBase needs -Compare A,B'
+  }
+  if ($Kind -eq 'compare' -and $script:CompareRefs.Count -ne 2) {
+    Stop-WithError '-Kind compare needs -Compare A,B'
+  }
+  if ($script:CompareRefs.Count -eq 2 -and $Kind -and $Kind -ne 'compare') {
+    Stop-WithError "-Compare needs -Kind compare (got '$Kind')"
   }
   if ($SubjectFile -and -not (Test-Path -LiteralPath $SubjectFile -PathType Leaf)) {
     Stop-WithError "Subject file not found: $SubjectFile"
@@ -458,6 +497,9 @@ function Initialize-OutputDirectory {
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     if ($SubjectFile) { $slug = ConvertTo-Slug ([System.IO.Path]::GetFileNameWithoutExtension($SubjectFile)) }
     elseif ($Diff) { $slug = ConvertTo-Slug "diff-$Diff" }
+    elseif ($script:CompareRefs -and $script:CompareRefs.Count -eq 2) {
+      $slug = ConvertTo-Slug "compare-$($script:CompareRefs[0])-vs-$($script:CompareRefs[1])"
+    }
     else { $slug = 'text' }
     if (-not $slug) { $slug = 'subject' }
     $script:OutDir = Join-Path '.council' "$stamp-$slug"
@@ -497,6 +539,26 @@ function Write-DirtyTreeWarning {
   Write-WarningMessage "output of 'git diff' through -SubjectFile to have them critiqued."
 }
 
+# Resolves a compare ref to a full SHA. A short or symbolic name would make the
+# subject header ambiguous when two branches point at nearby commits.
+function Resolve-CompareRef {
+  param([string]$Label, [string]$Ref)
+  $sha = (& git rev-parse --verify $Ref 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $sha) { Stop-WithError "Compare ref '$Ref' ($Label) is not a valid revision" }
+  $full = (& git rev-parse $sha 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $full) { Stop-WithError "Compare ref '$Ref' ($Label) is not a valid revision" }
+  return $full.Trim()
+}
+
+# One line of context for a compare header: short SHA plus the commit subject.
+function Describe-CompareRef {
+  param([string]$Sha)
+  $short = (& git rev-parse --short $Sha 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $short) { $short = $Sha }
+  $subject = (& git log -1 --format=%s $Sha 2>$null)
+  return ("$($short.ToString().Trim()) $($subject -join ' ')").Trim()
+}
+
 # Writes the exact bytes every member will see into <out>/subject.md.
 function Resolve-Subject {
   $script:SubjectPath = Join-Path $script:OutDir 'subject.md'
@@ -529,6 +591,10 @@ function Resolve-Subject {
     # change with a template the caller did not ask for.
     if (-not $kind) { $kind = 'diff' }
   }
+  elseif ($script:CompareRefs -and $script:CompareRefs.Count -eq 2) {
+    Resolve-CompareSubject
+    $kind = $script:SubjectKind
+  }
   else {
     Write-TextFile $script:SubjectPath ($Subject + "`n")
     $script:SubjectLabel = 'inline text'
@@ -538,10 +604,82 @@ function Resolve-Subject {
   $script:SubjectKind = $kind
   $bytes = Get-FileByteCount $script:SubjectPath
   if ($bytes -le 0) { Stop-WithError 'The subject is empty' }
-  if ($bytes -gt 204800) {
+  $warnLimit = 204800
+  if ($script:SubjectKind -eq 'compare') { $warnLimit = $script:CompareWarnBytes }
+  if ($bytes -gt $warnLimit) {
     Write-WarningMessage "Subject is $bytes bytes; large subjects can exceed a model's context window"
   }
   Write-Info "Subject: $($script:SubjectLabel) ($bytes bytes, kind: $kind)"
+}
+
+# Builds the two-sided compare subject: the shared base header plus the
+# base-vs-A and base-vs-B diffs. Both sides are judged on the same base so the
+# council compares approaches, not patch noise between the branches.
+function Resolve-CompareSubject {
+  & git rev-parse --git-dir 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) { Stop-WithError '-Compare needs to run inside a git repository' }
+  $refA = $script:CompareRefs[0]
+  $refB = $script:CompareRefs[1]
+  $shaA = Resolve-CompareRef 'branch A' $refA
+  $shaB = Resolve-CompareRef 'branch B' $refB
+  if ($CompareBase) {
+    $base = Resolve-CompareRef 'base' $CompareBase
+  }
+  else {
+    $base = (& git merge-base $shaA $shaB 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $base) {
+      Stop-WithError "No merge base between '$refA' and '$refB'; pass -CompareBase X"
+    }
+    $base = $base.Trim()
+  }
+
+  $script:CompareDescA = Describe-CompareRef $shaA
+  $script:CompareDescB = Describe-CompareRef $shaB
+  $script:CompareBaseDesc = Describe-CompareRef $base
+  $script:CompareBranchA = $refA
+  $script:CompareBranchB = $refB
+
+  # A three-dot range would recompute the merge base and silently ignore an
+  # explicit -CompareBase that is not an ancestor, so diff the supplied base
+  # directly for both sides.
+  $statA = (& git diff --stat "$base..$shaA" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch A ($refA)" }
+  $diffA = (& git diff "$base..$shaA" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch A ($refA)" }
+  $statB = (& git diff --stat "$base..$shaB" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch B ($refB)" }
+  $diffB = (& git diff "$base..$shaB" 2>$null)
+  if ($LASTEXITCODE -ne 0) { Stop-WithError "git diff failed for branch B ($refB)" }
+  $emptyA = ((-join $diffA).Trim().Length -eq 0)
+  $emptyB = ((-join $diffB).Trim().Length -eq 0)
+  $script:CompareEmptyA = $emptyA
+  $script:CompareEmptyB = $emptyB
+  # Both-empty is not the only tie: two branches can resolve to the same tree
+  # while both differing from the base. Comparing the trees directly catches
+  # that without spending paid calls stating the obvious.
+  & git diff --quiet $shaA $shaB -- 2>$null
+  $treeSame = ($LASTEXITCODE -eq 0)
+  $script:CompareTreesEqual = $treeSame
+  $script:CompareIdentical = (($emptyA -and $emptyB) -or $treeSame)
+
+  $lines = @("# Compare: $refA vs $refB",
+    "Base: $($script:CompareBaseDesc)",
+    "Branch A: $refA $($script:CompareDescA)",
+    "Branch B: $refB $($script:CompareDescB)",
+    '',
+    "## Branch A — summary ($refA vs base)",
+    '')
+  if ($statA) { $lines += $statA } else { $lines += '(no changes vs base)' }
+  $lines += @('', "## Branch A — full diff ($refA vs base)", '')
+  if ($diffA) { $lines += $diffA } else { $lines += '(no changes vs base)' }
+  $lines += @('', "## Branch B — summary ($refB vs base)", '')
+  if ($statB) { $lines += $statB } else { $lines += '(no changes vs base)' }
+  $lines += @('', "## Branch B — full diff ($refB vs base)", '')
+  if ($diffB) { $lines += $diffB } else { $lines += '(no changes vs base)' }
+  Write-TextFile $script:SubjectPath (Join-Lines $lines)
+  Write-DirtyTreeWarning
+  $script:SubjectLabel = "compare $refA vs $refB (base $base)"
+  $script:SubjectKind = 'compare'
 }
 
 # Replaces whole-line block markers in a single pass, so that text pulled in by
@@ -573,11 +711,21 @@ function Expand-Scalars {
   )
 
   $known = '^\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2|VERDICT_REPORT)\}\}$'
+  $map = @{
+    '{{MEMBER_N}}'  = $MemberN
+    '{{ROLE_NAME}}' = $RoleName
+    '{{PAIR_NAME}}' = $PairName
+    '{{N_MEMBERS}}' = $MemberCount
+    '{{BRANCH_A}}'  = $script:CompareBranchA
+    '{{BRANCH_B}}'  = $script:CompareBranchB
+    '{{BASE_DESC}}' = $script:CompareBaseDesc
+  }
+  # Single pass over the original template: values are literal data, so a ref
+  # like 'refs/heads/{{BRANCH_B}}' must not have its braces rewritten by the
+  # later replacement. A chained .Replace() would rescan inserted text.
+  $pattern = '\{\{(?:MEMBER_N|ROLE_NAME|PAIR_NAME|N_MEMBERS|BRANCH_A|BRANCH_B|BASE_DESC)\}\}'
   $lines = foreach ($line in Get-FileLines $TemplatePath) {
-    $line.Replace('{{MEMBER_N}}', $MemberN).
-    Replace('{{ROLE_NAME}}', $RoleName).
-    Replace('{{PAIR_NAME}}', $PairName).
-    Replace('{{N_MEMBERS}}', $MemberCount)
+    [regex]::Replace($line, $pattern, { param($m) $map[$m.Value] })
   }
   Write-TextFile $OutPath (Join-Lines $lines)
 
@@ -680,11 +828,21 @@ function New-Round2Prompt {
   $pairAlive = $seat.Pair -ge 0 -and ($Survivors -contains $seat.Pair)
 
   if ($pairAlive) {
-    $template = Join-Path $script:PromptDir 'round2.md'
+    if ($script:SubjectKind -eq 'compare') {
+      $template = Join-Path $script:PromptDir 'round2-compare.md'
+    }
+    else {
+      $template = Join-Path $script:PromptDir 'round2.md'
+    }
     $pairName = $script:Seats[$seat.Pair].Name
   }
   else {
-    $template = Join-Path $script:PromptDir 'round2-nopair.md'
+    if ($script:SubjectKind -eq 'compare') {
+      $template = Join-Path $script:PromptDir 'round2-compare-nopair.md'
+    }
+    else {
+      $template = Join-Path $script:PromptDir 'round2-nopair.md'
+    }
     if ($seat.Pair -ge 0) {
       Write-Info ('Seat {0:d2} lost its opposite; it will attack the strongest claims instead' -f $Index)
     }
@@ -735,6 +893,9 @@ function New-ChairPrompt {
   param([string]$OutPath, [int[]]$Survivors)
 
   $template = Join-Path $script:PromptDir 'round3-chair.md'
+  if ($script:SubjectKind -eq 'compare') {
+    $template = Join-Path $script:PromptDir 'round3-chair-compare.md'
+  }
   if (-not (Test-Path -LiteralPath $template)) { Stop-WithError "Chair template not found: $template" }
 
   $r1 = Join-Path $script:TempRoot 'all-round1.md'
@@ -761,10 +922,57 @@ function New-ChairPrompt {
 
 function Test-PromptSize {
   param([string]$Path)
+  $limit = 204800
+  if ($script:SubjectKind -eq 'compare') { $limit = $script:CompareWarnBytes }
   $bytes = Get-FileByteCount $Path
-  if ($bytes -gt 204800) {
+  if ($bytes -gt $limit) {
     Write-WarningMessage "$(Split-Path -Leaf $Path) is $bytes bytes and may exceed the model's context window"
   }
+}
+
+# The branches are identical (both empty vs the base, or resolving to the same
+# tree), so there is nothing to judge. Write the tie verdict directly instead
+# of spending paid calls stating the obvious.
+function Write-IdenticalVerdict {
+  $verdictPath = Join-Path $script:OutDir 'verdict.md'
+  $lines = @('VERDICT: tie')
+  if ($script:CompareTreesEqual -and (-not $script:CompareEmptyA -or -not $script:CompareEmptyB)) {
+    $lines += @(
+      'ONE LINE: Both branches resolve to the same tree; there is nothing to choose between.',
+      '',
+      "Both '$($script:CompareBranchA)' and '$($script:CompareBranchB)' resolve to the same tree, so there is nothing to choose between."
+    )
+  }
+  else {
+    $lines += @(
+      'ONE LINE: Both branches match the base; there is nothing to choose between.',
+      '',
+      "Both '$($script:CompareBranchA)' and '$($script:CompareBranchB)' are empty against base $($script:CompareBaseDesc)."
+    )
+  }
+  $lines += @(
+    'Members were seated and their prompts composed, but no rounds ran:',
+    'there is no difference to judge, so no models were called.',
+    ''
+  )
+  Write-TextFile $verdictPath (Join-Lines $lines)
+
+  $manifest = @('round`tseat`trole`tmodel`tstatus`texit_code`telapsed_ms`tanswer_bytes`tverdict'.Replace('`t', "`t"))
+  for ($seat = 0; $seat -lt $script:MemberTotal; $seat++) {
+    $entry = $script:Seats[$seat]
+    $manifest += ('round1`t{0:d2}`t{1}`t{2}`tPLANNED`t-`t-`t-`t-' -f $seat, $entry.Id, (Get-ModelLabel $seat)).Replace('`t', "`t")
+  }
+  $manifest += ('round3`tchair`tchair`t{0}`tSKIPPED`t-`t-`t-`ttie' -f (Get-ChairLabel)).Replace('`t', "`t")
+  Write-TextFile (Join-Path $script:OutDir 'manifest.tsv') (Join-Lines $manifest)
+
+  Write-Index
+  if ($script:CompareTreesEqual -and (-not $script:CompareEmptyA -or -not $script:CompareEmptyB)) {
+    Write-Success 'Branches resolve to the same tree; recorded a tie with no models called'
+  }
+  else {
+    Write-Success 'Branches are identical vs the base; recorded a tie with no models called'
+  }
+  Write-Success "Read $(Join-Path $script:OutDir 'council.md')"
 }
 
 # Finds the real config.json so each member's isolated config directory can be
@@ -1030,8 +1238,11 @@ function Get-Verdict {
   if (-not (Test-Path -LiteralPath $Path) -or (Get-FileByteCount $Path) -eq 0) { return '-' }
   foreach ($line in Get-FileLines $Path) {
     if ($line -match '^VERDICT:\s*(.*?)\s*$') {
-      $value = $Matches[1]
+      $value = $Matches[1].Trim()
       if (-not $value) { return '-' }
+      # Only machine-readable verdicts reach the manifest and member table; a
+      # free-form line is noise, not a verdict.
+      if ($value -notin @('A-wins', 'B-wins', 'tie', 'ship', 'ship-with-changes', 'do-not-ship')) { return '-' }
       if ($value.Length -gt 40) { $value = $value.Substring(0, 40) }
       return $value
     }
@@ -1273,6 +1484,16 @@ function Invoke-Main {
   $script:MemberFloor = $MinMembers
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
+  $script:CompareWarnBytes = 409600
+  $script:CompareBranchA = ''
+  $script:CompareBranchB = ''
+  $script:CompareDescA = ''
+  $script:CompareDescB = ''
+  $script:CompareBaseDesc = ''
+  $script:CompareEmptyA = $false
+  $script:CompareEmptyB = $false
+  $script:CompareIdentical = $false
+  $script:CompareTreesEqual = $false
   $script:ActiveProcesses = [System.Collections.ArrayList]::new()
 
   Import-SharedLists
@@ -1312,6 +1533,11 @@ function Invoke-Main {
       New-Round1Prompt $i (Join-Path $script:OutDir "round1\$($script:Seats[$i].Slug).prompt.md")
     }
     Write-Success "Composed $($script:MemberTotal) round-one prompts in $(Join-Path $script:OutDir 'round1')"
+
+    if ($script:CompareIdentical) {
+      Write-IdenticalVerdict
+      return 0
+    }
 
     if ($DryRun) {
       Write-Manifest

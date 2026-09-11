@@ -23,6 +23,9 @@ CHAIR_SPEC="${COUNCIL_CHAIR:-}"
 SUBJECT_FILE=""
 SUBJECT_DIFF=""
 SUBJECT_TEXT=""
+SUBJECT_COMPARE_A=""
+SUBJECT_COMPARE_B=""
+SUBJECT_COMPARE_BASE="${COUNCIL_COMPARE_BASE:-}"
 SUBJECT_KIND=""
 OUT_DIR="${COUNCIL_OUT:-}"
 ROLE_FILTER=""
@@ -84,7 +87,9 @@ Subject (exactly one is required):
   -f, --subject-file PATH   Critique the contents of a file
   -d, --diff BASE           Critique "git diff BASE...HEAD"
   -t, --subject TEXT        Critique the given text
-      --kind KIND           plan | diff | text (default: inferred)
+  --compare A B             Judge branch A against branch B from their merge base
+  --compare-base X          Compare from X instead of the merge base of A and B
+      --kind KIND           plan | diff | text | compare (default: inferred)
 
 Council:
   -n, --members N           Number of council members (default: 6, maximum: 8)
@@ -114,7 +119,7 @@ Output:
   -h, --help                Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR,
-COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, NO_COLOR
+COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE, NO_COLOR
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 USAGE
@@ -165,6 +170,19 @@ parse_args() {
     --kind)
       require_value "$1" "${2:-}"
       SUBJECT_KIND="$2"
+      shift 2
+      ;;
+    --compare)
+      if [[ -z "${2:-}" ]] || [[ "${2:-}" == -* ]] || [[ -z "${3:-}" ]] || [[ "${3:-}" == -* ]]; then
+        die "Option --compare requires two values: --compare A B"
+      fi
+      SUBJECT_COMPARE_A="$2"
+      SUBJECT_COMPARE_B="$3"
+      shift 3
+      ;;
+    --compare-base)
+      require_value "$1" "${2:-}"
+      SUBJECT_COMPARE_BASE="$2"
       shift 2
       ;;
     -n | --members)
@@ -384,6 +402,25 @@ validate_args() {
   require_whole_number "Job limit (COUNCIL_JOBS)" "$JOBS" 1
   require_whole_number "Timeout (COUNCIL_TIMEOUT)" "$TIMEOUT_SECS" 0
 
+  # The environment fallback keeps headless runs working without flags, but it
+  # must look like two refs, not one blob, or the comparison has no sides.
+  if [[ -z "$SUBJECT_COMPARE_A" ]] && [[ -n "${COUNCIL_COMPARE:-}" ]]; then
+    local -a compare_parts=()
+    # read only consumes the first line, so flatten newlines first: otherwise a
+    # three-token value with a newline silently drops the third token while the
+    # PowerShell runner (which splits all whitespace) rejects it.
+    local compare_flat="${COUNCIL_COMPARE:-}"
+    compare_flat="${compare_flat//$'\n'/ }"
+    compare_flat="${compare_flat//$'\r'/ }"
+    read -r -a compare_parts <<<"$compare_flat"
+    if [[ "${#compare_parts[@]}" -eq 2 ]]; then
+      SUBJECT_COMPARE_A="${compare_parts[0]}"
+      SUBJECT_COMPARE_B="${compare_parts[1]}"
+    elif [[ -n "${COUNCIL_COMPARE:-}" ]]; then
+      die "COUNCIL_COMPARE must hold exactly two refs, got '${COUNCIL_COMPARE:-}'"
+    fi
+  fi
+
   if [[ "$MEMBER_COUNT_EXPLICIT" -eq 1 ]] && [[ -n "$ROLE_FILTER" ]]; then
     die "--members and --roles are mutually exclusive; let one of them decide the council size"
   fi
@@ -391,15 +428,26 @@ validate_args() {
   [[ -n "$SUBJECT_FILE" ]] && chosen=$((chosen + 1))
   [[ -n "$SUBJECT_DIFF" ]] && chosen=$((chosen + 1))
   [[ -n "$SUBJECT_TEXT" ]] && chosen=$((chosen + 1))
+  if [[ -n "$SUBJECT_COMPARE_A" ]] || [[ -n "$SUBJECT_COMPARE_B" ]]; then
+    [[ -n "$SUBJECT_COMPARE_A" ]] && [[ -n "$SUBJECT_COMPARE_B" ]] ||
+      die "--compare requires two branches: --compare A B"
+    chosen=$((chosen + 1))
+  fi
 
   if [[ "$chosen" -eq 0 ]]; then
-    log_error "No subject given. Pass one of --subject-file, --diff, or --subject."
+    log_error "No subject given. Pass one of --subject-file, --diff, --subject, or --compare."
     show_usage >&2
     exit 1
   fi
 
   if [[ "$chosen" -gt 1 ]]; then
-    die "--subject-file, --diff, and --subject are mutually exclusive"
+    die "--subject-file, --diff, --subject, and --compare are mutually exclusive"
+  fi
+
+  if [[ -n "$SUBJECT_COMPARE_A" ]] && [[ -n "$SUBJECT_COMPARE_BASE" ]]; then
+    : # a base override is only meaningful with --compare, which is present
+  elif [[ -n "$SUBJECT_COMPARE_BASE" ]]; then
+    die "--compare-base needs --compare A B"
   fi
 
   if [[ -n "$SUBJECT_FILE" ]] && [[ ! -f "$SUBJECT_FILE" ]]; then
@@ -408,9 +456,20 @@ validate_args() {
 
   if [[ -n "$SUBJECT_KIND" ]]; then
     case "$SUBJECT_KIND" in
-    plan | diff | text) ;;
-    *) die "--kind must be plan, diff, or text (got '$SUBJECT_KIND')" ;;
+    plan | diff | text | compare) ;;
+    *) die "--kind must be plan, diff, text, or compare (got '$SUBJECT_KIND')" ;;
     esac
+  fi
+
+  if [[ "$SUBJECT_KIND" == "compare" ]] && { [[ -z "$SUBJECT_COMPARE_A" ]] || [[ -z "$SUBJECT_COMPARE_B" ]]; }; then
+    die "--kind compare needs --compare A B"
+  fi
+
+  if [[ -n "$SUBJECT_COMPARE_A" ]]; then
+    if [[ -n "$SUBJECT_KIND" ]] && [[ "$SUBJECT_KIND" != "compare" ]]; then
+      die "--compare needs --kind compare (got '$SUBJECT_KIND')"
+    fi
+    SUBJECT_KIND="compare"
   fi
 
   # Peer critiques are truncated on a line boundary, so a budget smaller than a
@@ -585,6 +644,16 @@ seat_members() {
 
 SUBJECT_PATH=""
 SUBJECT_LABEL=""
+SUBJECT_COMPARE_DESC_A=""
+SUBJECT_COMPARE_DESC_B=""
+SUBJECT_COMPARE_BASE_DESC=""
+SUBJECT_COMPARE_EMPTY_A=0
+SUBJECT_COMPARE_EMPTY_B=0
+COMPARE_IDENTICAL=0
+COMPARE_TREES_EQUAL=0
+COMPARE_BRANCH_A=""
+COMPARE_BRANCH_B=""
+COMPARE_WARN_BYTES=409600
 
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-40
@@ -603,6 +672,8 @@ init_out_dir() {
       slug="$(slugify "$(basename "$SUBJECT_FILE" .md)")"
     elif [[ -n "$SUBJECT_DIFF" ]]; then
       slug="$(slugify "diff-$SUBJECT_DIFF")"
+    elif [[ -n "$SUBJECT_COMPARE_A" ]]; then
+      slug="$(slugify "compare-$SUBJECT_COMPARE_A-vs-$SUBJECT_COMPARE_B")"
     else
       slug="text"
     fi
@@ -642,9 +713,25 @@ warn_if_working_tree_dirty() {
   log_warning "output of 'git diff' through --subject-file to have them critiqued."
 }
 
+# Resolves a compare ref to a full SHA. A short or symbolic name would make the
+# subject header ambiguous when two branches point at nearby commits.
+resolve_compare_ref() {
+  local label="$1" ref="$2" sha
+  sha="$(git rev-parse --verify "$ref" 2>/dev/null)" ||
+    die "Compare ref '$ref' ($label) is not a valid revision"
+  sha="$(git rev-parse "$sha" 2>/dev/null)" || die "Compare ref '$ref' ($label) is not a valid revision"
+  echo "$sha"
+}
+
+# One line of context for a compare header: short SHA plus the commit subject.
+describe_compare_ref() {
+  local sha="$1"
+  echo "$(git rev-parse --short "$sha" 2>/dev/null || echo "$sha") $(git log -1 --format=%s "$sha" 2>/dev/null || true)"
+}
+
 # Writes the exact bytes every member will see into <out>/subject.md.
 resolve_subject() {
-  local bytes
+  local bytes compare_warn_limit
 
   SUBJECT_PATH="$OUT_DIR/subject.md"
 
@@ -676,6 +763,8 @@ resolve_subject() {
     # An explicit --kind wins here too; silently overriding it would judge the
     # change with a template the caller did not ask for.
     [[ -n "$SUBJECT_KIND" ]] || SUBJECT_KIND="diff"
+  elif [[ -n "$SUBJECT_COMPARE_A" ]]; then
+    resolve_compare_subject
   else
     printf '%s\n' "$SUBJECT_TEXT" >"$SUBJECT_PATH"
     SUBJECT_LABEL="inline text"
@@ -684,10 +773,88 @@ resolve_subject() {
 
   bytes="$(wc -c <"$SUBJECT_PATH" | tr -d '[:space:]')"
   [[ "$bytes" -gt 0 ]] || die "The subject is empty"
-  if [[ "$bytes" -gt 204800 ]]; then
+  if [[ "$SUBJECT_KIND" == "compare" ]]; then
+    compare_warn_limit="$COMPARE_WARN_BYTES"
+  else
+    compare_warn_limit=204800
+  fi
+  if [[ "$bytes" -gt "$compare_warn_limit" ]]; then
     log_warning "Subject is ${bytes} bytes; large subjects can exceed a model's context window"
   fi
   log_info "Subject: $SUBJECT_LABEL (${bytes} bytes, kind: $SUBJECT_KIND)"
+}
+
+# Builds the two-sided compare subject: the shared base header plus the
+# base-vs-A and base-vs-B diffs. Both sides are judged on the same base so the
+# council compares approaches, not patch noise between the branches.
+resolve_compare_subject() {
+  local sha_a sha_b base stat_a stat_b diff_a diff_b
+
+  git rev-parse --git-dir >/dev/null 2>&1 || die "--compare needs to run inside a git repository"
+  sha_a="$(resolve_compare_ref "branch A" "$SUBJECT_COMPARE_A")"
+  sha_b="$(resolve_compare_ref "branch B" "$SUBJECT_COMPARE_B")"
+  if [[ -n "$SUBJECT_COMPARE_BASE" ]]; then
+    base="$(resolve_compare_ref "base" "$SUBJECT_COMPARE_BASE")"
+  else
+    base="$(git merge-base "$sha_a" "$sha_b" 2>/dev/null)" ||
+      die "No merge base between '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B'; pass --compare-base X"
+  fi
+
+  SUBJECT_COMPARE_DESC_A="$(describe_compare_ref "$sha_a")"
+  SUBJECT_COMPARE_DESC_B="$(describe_compare_ref "$sha_b")"
+  SUBJECT_COMPARE_BASE_DESC="$(describe_compare_ref "$base")"
+  COMPARE_BRANCH_A="$SUBJECT_COMPARE_A"
+  COMPARE_BRANCH_B="$SUBJECT_COMPARE_B"
+
+  # A three-dot range would recompute the merge base and silently ignore an
+  # explicit --compare-base that is not an ancestor, so diff the supplied base
+  # directly for both sides.
+  stat_a="$(git diff --stat "$base..$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
+  diff_a="$(git diff "$base..$sha_a")" || die "git diff failed for branch A ($SUBJECT_COMPARE_A)"
+  stat_b="$(git diff --stat "$base..$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
+  diff_b="$(git diff "$base..$sha_b")" || die "git diff failed for branch B ($SUBJECT_COMPARE_B)"
+  [[ -z "${diff_a//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_A=1 || SUBJECT_COMPARE_EMPTY_A=0
+  [[ -z "${diff_b//[[:space:]]/}" ]] && SUBJECT_COMPARE_EMPTY_B=1 || SUBJECT_COMPARE_EMPTY_B=0
+  # Both-empty is not the only tie: two branches can resolve to the same tree
+  # while both differing from the base. Comparing the trees directly catches
+  # that without spending paid calls stating the obvious.
+  COMPARE_TREES_EQUAL=0
+  if git diff --quiet "$sha_a" "$sha_b" -- >/dev/null 2>&1; then
+    COMPARE_TREES_EQUAL=1
+  fi
+  if [[ "$SUBJECT_COMPARE_EMPTY_A" -eq 1 ]] && [[ "$SUBJECT_COMPARE_EMPTY_B" -eq 1 ]]; then
+    COMPARE_IDENTICAL=1
+  elif [[ "$COMPARE_TREES_EQUAL" -eq 1 ]]; then
+    COMPARE_IDENTICAL=1
+  else
+    COMPARE_IDENTICAL=0
+  fi
+
+  {
+    echo "# Compare: $SUBJECT_COMPARE_A vs $SUBJECT_COMPARE_B"
+    echo "Base: $SUBJECT_COMPARE_BASE_DESC"
+    echo "Branch A: $SUBJECT_COMPARE_A $SUBJECT_COMPARE_DESC_A"
+    echo "Branch B: $SUBJECT_COMPARE_B $SUBJECT_COMPARE_DESC_B"
+    echo
+    echo "## Branch A — summary ($SUBJECT_COMPARE_A vs base)"
+    echo
+    if [[ -n "$stat_a" ]]; then echo "$stat_a"; else echo "(no changes vs base)"; fi
+    echo
+    echo "## Branch A — full diff ($SUBJECT_COMPARE_A vs base)"
+    echo
+    if [[ -n "$diff_a" ]]; then echo "$diff_a"; else echo "(no changes vs base)"; fi
+    echo
+    echo "## Branch B — summary ($SUBJECT_COMPARE_B vs base)"
+    echo
+    if [[ -n "$stat_b" ]]; then echo "$stat_b"; else echo "(no changes vs base)"; fi
+    echo
+    echo "## Branch B — full diff ($SUBJECT_COMPARE_B vs base)"
+    echo
+    if [[ -n "$diff_b" ]]; then echo "$diff_b"; else echo "(no changes vs base)"; fi
+  } >"$SUBJECT_PATH"
+  warn_if_working_tree_dirty
+  SUBJECT_LABEL="compare $SUBJECT_COMPARE_A vs $SUBJECT_COMPARE_B (base $base)"
+  [[ -n "$SUBJECT_KIND" ]] || SUBJECT_KIND="compare"
 }
 
 # Replaces whole-line block markers in a single pass, so that text pulled in by
@@ -719,12 +886,52 @@ render_scalars() {
   local template="$1" out="$2" member_n="$3" role_name="$4" pair_name="$5" n_members="$6"
   local leftover
 
-  sed \
-    -e "s|{{MEMBER_N}}|${member_n}|g" \
-    -e "s|{{ROLE_NAME}}|${role_name}|g" \
-    -e "s|{{PAIR_NAME}}|${pair_name}|g" \
-    -e "s|{{N_MEMBERS}}|${n_members}|g" \
-    "$template" >"$out"
+  # Values are passed as environment data, never as script text: a compare ref or
+  # commit subject containing '|', '&', '\' or a newline must substitute
+  # literally. A sed program with those bytes unescaped would be an injection.
+  # Single pass over the original line: inserted values are never rescanned, so
+  # a ref like 'refs/heads/{{BRANCH_B}}' keeps its literal braces instead of
+  # having them rewritten by the later replacement.
+  SCALAR_MEMBER_N="$member_n" SCALAR_ROLE_NAME="$role_name" SCALAR_PAIR_NAME="$pair_name" \
+    SCALAR_N_MEMBERS="$n_members" SCALAR_BRANCH_A="$COMPARE_BRANCH_A" \
+    SCALAR_BRANCH_B="$COMPARE_BRANCH_B" SCALAR_BASE_DESC="$SUBJECT_COMPARE_BASE_DESC" \
+    awk '
+    BEGIN {
+      nfind = 7
+      find[1] = "{{MEMBER_N}}";  repl[1] = ENVIRON["SCALAR_MEMBER_N"]
+      find[2] = "{{ROLE_NAME}}"; repl[2] = ENVIRON["SCALAR_ROLE_NAME"]
+      find[3] = "{{PAIR_NAME}}"; repl[3] = ENVIRON["SCALAR_PAIR_NAME"]
+      find[4] = "{{N_MEMBERS}}"; repl[4] = ENVIRON["SCALAR_N_MEMBERS"]
+      find[5] = "{{BRANCH_A}}";  repl[5] = ENVIRON["SCALAR_BRANCH_A"]
+      find[6] = "{{BRANCH_B}}";  repl[6] = ENVIRON["SCALAR_BRANCH_B"]
+      find[7] = "{{BASE_DESC}}"; repl[7] = ENVIRON["SCALAR_BASE_DESC"]
+    }
+    function render(line,   out, i, n, k, flen, hit) {
+      out = ""
+      i = 1
+      n = length(line)
+      while (i <= n) {
+        hit = 0
+        for (k = 1; k <= nfind; k++) {
+          flen = length(find[k])
+          if (flen > 0 && substr(line, i, flen) == find[k]) {
+            out = out repl[k]
+            i += flen
+            hit = 1
+            break
+          }
+        }
+        if (!hit) {
+          out = out substr(line, i, 1)
+          i++
+        }
+      }
+      return out
+    }
+    {
+      print render($0)
+    }
+  ' "$template" >"$out"
 
   leftover="$(grep -o '{{[A-Z_0-9]*}}' "$out" | sort -u |
     grep -vxE '\{\{(ROLE_BRIEF|SUBJECT|OWN_ROUND1|PEER_CRITIQUES|ALL_ROUND1|ALL_ROUND2|VERDICT_REPORT)\}\}' || true)"
@@ -1142,10 +1349,18 @@ compose_round2_prompt() {
   fi
 
   if [[ "$pair_alive" -eq 1 ]]; then
-    template="$PROMPT_DIR/round2.md"
+    if [[ "$SUBJECT_KIND" == "compare" ]]; then
+      template="$PROMPT_DIR/round2-compare.md"
+    else
+      template="$PROMPT_DIR/round2.md"
+    fi
     pair_name="${ROLE_NAME[$pair]}"
   else
-    template="$PROMPT_DIR/round2-nopair.md"
+    if [[ "$SUBJECT_KIND" == "compare" ]]; then
+      template="$PROMPT_DIR/round2-compare-nopair.md"
+    else
+      template="$PROMPT_DIR/round2-nopair.md"
+    fi
     [[ "$pair" -ge 0 ]] && log_info "Seat $(printf '%02d' "$index") lost its opposite; it will attack the strongest claims instead"
   fi
   [[ -f "$template" ]] || die "Round-two template not found: $template"
@@ -1170,13 +1385,17 @@ compose_round2_prompt() {
 }
 
 verdict_of() {
-  local file="$1"
+  local file="$1" verdict
   [[ -s "$file" ]] || {
     echo "-"
     return
   }
-  grep -m1 -E '^VERDICT:' "$file" | sed -e 's/^VERDICT:[[:space:]]*//' -e 's/[[:space:]]*$//' |
-    cut -c1-40 | grep . || echo "-"
+  verdict="$(grep -m1 -E '^VERDICT:' "$file" | sed -e 's/^VERDICT:[[:space:]]*//' -e 's/[[:space:]]*$//' |
+    cut -c1-40 | grep . || echo "-")"
+  case "$verdict" in
+  A-wins | B-wins | tie | ship | ship-with-changes | do-not-ship) echo "$verdict" ;;
+  *) echo "-" ;;
+  esac
 }
 
 # Concatenates a whole round for the chair, in seat order, labelling each block
@@ -1210,6 +1429,9 @@ compose_chair_prompt() {
   local template scratch r1 r2
 
   template="$PROMPT_DIR/round3-chair.md"
+  if [[ "$SUBJECT_KIND" == "compare" ]]; then
+    template="$PROMPT_DIR/round3-chair-compare.md"
+  fi
   [[ -f "$template" ]] || die "Chair template not found: $template"
 
   r1="$TEMP_ROOT/all-round1.md"
@@ -1458,11 +1680,51 @@ status_cell() {
 }
 
 warn_if_prompt_large() {
-  local file="$1" bytes
+  local file="$1" bytes limit=204800
+  [[ "$SUBJECT_KIND" == "compare" ]] && limit="$COMPARE_WARN_BYTES"
   bytes="$(wc -c <"$file" | tr -d '[:space:]')"
-  if [[ "$bytes" -gt 204800 ]]; then
+  if [[ "$bytes" -gt "$limit" ]]; then
     log_warning "$(basename "$file") is ${bytes} bytes and may exceed the model's context window"
   fi
+}
+
+# The branches are identical (both empty vs the base, or resolving to the same
+# tree), so there is nothing to judge. Write the tie verdict directly instead
+# of spending paid calls stating the obvious.
+write_identical_verdict() {
+  local verdict="$OUT_DIR/verdict.md"
+  {
+    echo "VERDICT: tie"
+    if [[ "$COMPARE_TREES_EQUAL" -eq 1 ]] && { [[ "$SUBJECT_COMPARE_EMPTY_A" -ne 1 ]] || [[ "$SUBJECT_COMPARE_EMPTY_B" -ne 1 ]]; }; then
+      echo "ONE LINE: Both branches resolve to the same tree; there is nothing to choose between."
+      echo
+      echo "Both '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B' resolve to the same tree, so there is nothing to choose between."
+    else
+      echo "ONE LINE: Both branches match the base; there is nothing to choose between."
+      echo
+      echo "Both '$SUBJECT_COMPARE_A' and '$SUBJECT_COMPARE_B' are empty against base $SUBJECT_COMPARE_BASE_DESC."
+    fi
+    echo "Members were seated and their prompts composed, but no rounds ran:"
+    echo "there is no difference to judge, so no models were called."
+  } >"$verdict"
+
+  local seat
+  {
+    printf 'round\tseat\trole\tmodel\tstatus\texit_code\telapsed_ms\tanswer_bytes\tverdict\n'
+    for ((seat = 0; seat < MEMBER_COUNT; seat++)); do
+      printf 'round1\t%02d\t%s\t%s\tPLANNED\t-\t-\t-\t-\n' \
+        "$seat" "${ROLE_ID[$seat]}" "$(model_label "$seat")"
+    done
+    printf 'round3\tchair\tchair\t%s\tSKIPPED\t-\t-\t-\ttie\n' "$(chair_label)"
+  } >"$OUT_DIR/manifest.tsv"
+
+  write_index
+  if [[ "$COMPARE_TREES_EQUAL" -eq 1 ]] && { [[ "$SUBJECT_COMPARE_EMPTY_A" -ne 1 ]] || [[ "$SUBJECT_COMPARE_EMPTY_B" -ne 1 ]]; }; then
+    log_success "Branches resolve to the same tree; recorded a tie with no models called"
+  else
+    log_success "Branches are identical vs the base; recorded a tie with no models called"
+  fi
+  log_success "Read $OUT_DIR/council.md"
 }
 
 main() {
@@ -1499,6 +1761,11 @@ main() {
     all_seats+=("$i")
   done
   log_success "Composed $MEMBER_COUNT round-one prompts in $OUT_DIR/round1"
+
+  if [[ "$COMPARE_IDENTICAL" -eq 1 ]]; then
+    write_identical_verdict
+    return 0
+  fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     write_manifest
