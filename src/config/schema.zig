@@ -175,6 +175,9 @@ pub const Provider = struct {
     }
 };
 
+/// Number of persisted provider slots: every provider except mock.
+pub const provider_count = @typeInfo(provider.ModelProvider).@"enum".fields.len - 1;
+
 pub fn providerSlot(kind: provider.ModelProvider) usize {
     return switch (kind) {
         .lmstudio => 0,
@@ -188,7 +191,7 @@ pub fn providerSlot(kind: provider.ModelProvider) usize {
 pub const Config = struct {
     provider: provider.ModelProvider = .lmstudio,
     prompts: PromptsConfig = .{},
-    providers: [4]Provider = [4]Provider{
+    providers: [provider_count]Provider = [provider_count]Provider{
         .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = null, .model = "" },
         .{ .name = .opencode_zen, .url = opencode_zen.default_base_url, .apiKey = null, .model = "" },
         .{ .name = .opencode_go, .url = opencode_go.default_base_url, .apiKey = null, .model = "" },
@@ -247,7 +250,7 @@ pub const Config = struct {
     }
 
     pub fn clone(self: Config, allocator: std.mem.Allocator) std.mem.Allocator.Error!Config {
-        var providers: [4]Provider = undefined;
+        var providers: [provider_count]Provider = undefined;
         for (&self.providers, &providers) |src, *dst| {
             dst.* = try src.clone(allocator);
         }

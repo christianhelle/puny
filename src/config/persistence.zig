@@ -131,8 +131,8 @@ pub fn save(
     var to_write = config;
 
     var needs_encryption = false;
-    var encrypt_index: [4]bool = .{ false, false, false, false };
-    var verbatim_index: [4]bool = .{ false, false, false, false };
+    var encrypt_index: [schema.provider_count]bool = @splat(false);
+    var verbatim_index: [schema.provider_count]bool = @splat(false);
     for (&to_write.providers, 0..) |*p, i| {
         const key = p.apiKey orelse {
             if (p.stored_blob) |blob| {
@@ -153,7 +153,7 @@ pub fn save(
         needs_encryption = true;
     }
 
-    var encrypted_blobs: [4]?[]const u8 = .{ null, null, null, null };
+    var encrypted_blobs: [schema.provider_count]?[]const u8 = @splat(null);
     defer {
         for (encrypted_blobs) |blob| {
             if (blob) |b| allocator.free(b);
@@ -198,7 +198,7 @@ pub fn save(
                 .{},
             ) catch {};
             stderr_writer.flush() catch {};
-            for (0..4) |i| {
+            for (0..schema.provider_count) |i| {
                 if (encrypt_index[i]) {
                     const p = &to_write.providers[i];
                     const already_on_disk = p.stored_plaintext != null and std.mem.eql(u8, p.stored_plaintext.?, p.apiKey.?);
