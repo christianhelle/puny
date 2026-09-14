@@ -23,6 +23,7 @@ description: |
   A minimal natively compiled single-binary coding agent with a ~1 MB footprint, for professionals on limited hardware. Currently supports the following model providers:
 
   - [LM Studio](https://lmstudio.ai/)
+  - [Unsloth](https://unsloth.ai/)
   - [OpenCode Zen](https://opencode.ai/zen)
   - [OpenCode Go](https://opencode.ai/go)
   - [GitHub Copilot](https://github.com/features/copilot)
@@ -31,7 +32,7 @@ description: |
 
   **Features**
 
-  - **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
+  - **Multiple providers**: local-first LM Studio or Unsloth, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
   - **Interactive model picker**: choose the model to load when Puny starts.
   - **Multi-turn chat**: keeps the conversation history across messages.
   - **Tool calling**: the LLM can use built-in tools to work with your project.
