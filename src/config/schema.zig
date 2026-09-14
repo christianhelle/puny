@@ -221,7 +221,10 @@ pub const Config = struct {
             if (value != .array) return error.UnexpectedToken;
             for (value.array.items) |item| {
                 const kind = persistedProviderKind(item) orelse continue;
-                result.providers[providerSlot(kind)] = try std.json.parseFromValueLeaky(Provider, allocator, item, options);
+                const slot = &result.providers[providerSlot(kind)];
+                const default_url = slot.url;
+                slot.* = try std.json.parseFromValueLeaky(Provider, allocator, item, options);
+                if (item.object.get("url") == null) slot.url = default_url;
             }
         }
         return result;
@@ -570,6 +573,17 @@ test "Config jsonParse keeps defaults for providers missing from the file" {
     try std.testing.expectEqual(.copilot, cfg.providerEntryConst(.copilot).name);
     try std.testing.expectEqualStrings(copilot.default_base_url, cfg.providerEntryConst(.copilot).url);
     try std.testing.expectEqualStrings(default_lm_studio_url, cfg.providerEntryConst(.lmstudio).url);
+}
+
+test "Config jsonParse gives an entry without a url its provider's default url" {
+    const parsed = try parseConfigForTest(
+        \\{"providers":[{"name":"opencode_go","model":"minimax-m3"}]}
+    );
+    defer parsed.deinit();
+
+    const entry = parsed.value.providerEntryConst(.opencode_go);
+    try std.testing.expectEqualStrings("minimax-m3", entry.model);
+    try std.testing.expectEqualStrings(opencode_go.default_base_url, entry.url);
 }
 
 test "Config jsonParse skips provider entries with unknown names" {
