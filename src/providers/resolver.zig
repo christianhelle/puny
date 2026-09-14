@@ -22,7 +22,7 @@ pub fn baseUrlFor(model_provider: ModelProvider, parsed: cli.Options, cfg: confi
     if (parsed.url) |url| return url;
     const entry = cfg.providerEntryConst(model_provider);
     if (entry.url.len > 0) return entry.url;
-    return config.default_lm_studio_url;
+    return defaultProviderUrl(model_provider);
 }
 
 pub fn resolveApiKey(
@@ -58,6 +58,7 @@ pub fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .opencode_zen) return opencode_zen.default_base_url;
     if (selectedProvider == .opencode_go) return opencode_go.default_base_url;
     if (selectedProvider == .copilot) return copilot.default_base_url;
+    if (selectedProvider == .unsloth) return config.default_unsloth_url;
     if (selectedProvider == .mock) return "-";
     return config.default_lm_studio_url;
 }
@@ -261,6 +262,23 @@ test "baseUrlFor returns provider defaults" {
     try std.testing.expectEqualStrings(opencode_zen.default_base_url, baseUrlFor(.opencode_zen, .{}, cfg));
     try std.testing.expectEqualStrings(opencode_go.default_base_url, baseUrlFor(.opencode_go, .{}, cfg));
     try std.testing.expectEqualStrings("-", baseUrlFor(.mock, .{}, cfg));
+}
+
+test "baseUrlFor resolves unsloth urls from CLI, config, then its own default" {
+    var cfg = config.Config{};
+    try std.testing.expectEqualStrings("http://127.0.0.1:8888", baseUrlFor(.unsloth, .{}, cfg));
+
+    cfg.providerEntry(.unsloth).url = "";
+    try std.testing.expectEqualStrings("http://127.0.0.1:8888", baseUrlFor(.unsloth, .{}, cfg));
+
+    cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
+    try std.testing.expectEqualStrings("http://gpu-box:8888", baseUrlFor(.unsloth, .{}, cfg));
+    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.unsloth, .{ .url = "http://cli.example" }, cfg));
+}
+
+test "unsloth url is configurable and defaults to the local server" {
+    try std.testing.expect(!providerHasFixedUrl(.unsloth));
+    try std.testing.expectEqualStrings("http://127.0.0.1:8888", defaultProviderUrl(.unsloth));
 }
 
 test "defaultProviderUrl returns provider-specific defaults" {
