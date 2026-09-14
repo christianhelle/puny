@@ -6,3 +6,4 @@ opencode_zen
 opencode
 opencode_go
 copilot
+unsloth
