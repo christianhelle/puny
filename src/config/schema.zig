@@ -199,6 +199,42 @@ pub const Config = struct {
         return .{};
     }
 
+    pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
+        const value = try std.json.innerParse(std.json.Value, allocator, source, options);
+        return jsonParseFromValue(allocator, value, options);
+    }
+
+    /// Places each persisted provider entry into its slot by name, so config
+    /// files written before a provider existed (or with entries in another
+    /// order) still load. Unknown provider names are skipped.
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
+        if (source != .object) return error.UnexpectedToken;
+
+        var result = Config.default();
+        if (source.object.get("provider")) |value| {
+            result.provider = try std.json.parseFromValueLeaky(provider.ModelProvider, allocator, value, options);
+        }
+        if (source.object.get("prompts")) |value| {
+            result.prompts = try std.json.parseFromValueLeaky(PromptsConfig, allocator, value, options);
+        }
+        if (source.object.get("providers")) |value| {
+            if (value != .array) return error.UnexpectedToken;
+            for (value.array.items) |item| {
+                const kind = persistedProviderKind(item) orelse continue;
+                result.providers[providerSlot(kind)] = try std.json.parseFromValueLeaky(Provider, allocator, item, options);
+            }
+        }
+        return result;
+    }
+
+    fn persistedProviderKind(item: std.json.Value) ?provider.ModelProvider {
+        if (item != .object) return null;
+        const name = item.object.get("name") orelse return null;
+        if (name != .string) return null;
+        const kind = std.meta.stringToEnum(provider.ModelProvider, name.string) orelse return null;
+        return if (kind == .mock) null else kind;
+    }
+
     pub fn providerEntry(self: *Config, kind: provider.ModelProvider) *Provider {
         return &self.providers[providerSlot(kind)];
     }
@@ -492,6 +528,58 @@ test "resolvePrompt returns the plain default when only a prefix is set" {
     const result = try cfg.resolvePrompt(allocator, "system", "default-prompt");
     defer allocator.free(result);
     try std.testing.expectEqualStrings("[pre] default-prompt", result);
+}
+
+fn parseConfigForTest(json: []const u8) !std.json.Parsed(Config) {
+    return std.json.parseFromSlice(Config, std.testing.allocator, json, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+}
+
+test "Config jsonParse places providers into slots by name regardless of order" {
+    const parsed = try parseConfigForTest(
+        \\{"provider":"copilot","providers":[
+        \\  {"name":"copilot","apiKey":null,"url":"https://copilot.example","model":"gpt-5"},
+        \\  {"name":"opencode_go","apiKey":"go-key","url":"https://go.example","model":"minimax-m3"},
+        \\  {"name":"opencode_zen","apiKey":null,"url":"https://zen.example","model":"deepseek"},
+        \\  {"name":"lmstudio","apiKey":null,"url":"http://lm.example","model":"qwen3"}
+        \\]}
+    );
+    defer parsed.deinit();
+
+    const cfg = parsed.value;
+    try std.testing.expectEqual(.copilot, cfg.provider);
+    try std.testing.expectEqualStrings("qwen3", cfg.providerEntryConst(.lmstudio).model);
+    try std.testing.expectEqualStrings("http://lm.example", cfg.providerEntryConst(.lmstudio).url);
+    try std.testing.expectEqualStrings("deepseek", cfg.providerEntryConst(.opencode_zen).model);
+    try std.testing.expectEqualStrings("go-key", cfg.providerEntryConst(.opencode_go).apiKey.?);
+    try std.testing.expectEqualStrings("gpt-5", cfg.providerEntryConst(.copilot).model);
+    try std.testing.expectEqual(.copilot, cfg.providerEntryConst(.copilot).name);
+}
+
+test "Config jsonParse keeps defaults for providers missing from the file" {
+    const parsed = try parseConfigForTest(
+        \\{"providers":[{"name":"opencode_zen","apiKey":"zen-key","url":"https://opencode.ai/zen","model":"deepseek"}]}
+    );
+    defer parsed.deinit();
+
+    const cfg = parsed.value;
+    try std.testing.expectEqual(.lmstudio, cfg.provider);
+    try std.testing.expectEqualStrings("zen-key", cfg.providerEntryConst(.opencode_zen).apiKey.?);
+    try std.testing.expectEqual(.copilot, cfg.providerEntryConst(.copilot).name);
+    try std.testing.expectEqualStrings(copilot.default_base_url, cfg.providerEntryConst(.copilot).url);
+    try std.testing.expectEqualStrings(default_lm_studio_url, cfg.providerEntryConst(.lmstudio).url);
+}
+
+test "Config jsonParse skips provider entries with unknown names" {
+    const parsed = try parseConfigForTest(
+        \\{"providers":[{"name":"from_the_future","model":"x"},{"name":"lmstudio","model":"qwen3"}],"prompts":{"system":{"prefix":"pre"}}}
+    );
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings("qwen3", parsed.value.providerEntryConst(.lmstudio).model);
+    try std.testing.expectEqualStrings("pre", parsed.value.prompts.system.prefix);
 }
 
 test "Provider jsonParseFromValue ignores internal stored fields" {
