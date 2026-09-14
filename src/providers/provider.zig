@@ -510,10 +510,7 @@ test "Provider.chatStreaming dispatches to the unsloth provider" {
 
     try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
     try std.testing.expectEqual(@as(usize, 2), rec.events.items.len);
-    switch (rec.events.items[0]) {
-        .content => |content| try std.testing.expectEqualStrings("Hi from Unsloth", content),
-        else => return error.ExpectedContentEvent,
-    }
+    try std.testing.expectEqualStrings("Hi from Unsloth", rec.events.items[0].content);
 }
 
 test "Provider.chatStreaming preserves unsloth HTTP error details" {
