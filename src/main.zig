@@ -736,7 +736,8 @@ fn formatDuration(buf: []u8, elapsed_ns: u64) []const u8 {
 
 fn requiresApiKey(selected_provider: ModelProvider) bool {
     return selected_provider == .opencode_zen or
-        selected_provider == .opencode_go;
+        selected_provider == .opencode_go or
+        selected_provider == .unsloth;
 }
 
 fn formatRestoreHeader(buf: []u8, id: []const u8, count: usize, elapsed_ns: u64) []const u8 {
@@ -851,10 +852,11 @@ test "buildPlanningToolDefinitions excludes load_skill when skills are disabled"
     try std.testing.expect(definitions.items.len > 0);
 }
 
-test "requiresApiKey only for opencode and opencode-go" {
+test "requiresApiKey only for opencode, opencode-go and unsloth" {
     try std.testing.expect(!requiresApiKey(.lmstudio));
     try std.testing.expect(requiresApiKey(.opencode_zen));
     try std.testing.expect(requiresApiKey(.opencode_go));
+    try std.testing.expect(requiresApiKey(.unsloth));
     try std.testing.expect(!requiresApiKey(.copilot));
     try std.testing.expect(!requiresApiKey(.mock));
 }
