@@ -123,8 +123,9 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     }
 
     ctx.cfg.provider = picked_provider;
-    const new_provider_url = resolver.defaultProviderUrl(picked_provider);
-    ctx.cfg.providerEntry(picked_provider).url = try ctx.arena.dupe(u8, new_provider_url);
+    // The startup --url targeted the previous provider, so only the picked
+    // provider's configured url (or its default) applies here.
+    const new_provider_url = resolver.baseUrlFor(picked_provider, .{}, ctx.cfg.*);
 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
 
@@ -526,6 +527,37 @@ test "switchProvider refuses a key-gated provider without an API key" {
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'Unsloth' requires an API key") != null);
     try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
     try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+    try std.testing.expectEqualStrings("http://gpu-box:8888", cfg.providerEntryConst(.unsloth).url);
+}
+
+test "switchProvider keeps the configured url of the provider it switches to" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
+    cfg.providerEntry(.unsloth).apiKey = "sk-unsloth-key";
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // Without a config dir the save fails, which stops the switch before it
+    // builds a client or opens the interactive model picker.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try std.testing.expectError(error.NoConfigDir, switchProvider(&ctx, .unsloth));
     try std.testing.expectEqualStrings("http://gpu-box:8888", cfg.providerEntryConst(.unsloth).url);
 }
 
