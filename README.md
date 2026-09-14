@@ -196,13 +196,17 @@ puny --provider unsloth
 
 Puny connects to `http://127.0.0.1:8888` by default, lists models from
 `/v1/models`, and streams through the OpenAI-compatible
-`/v1/chat/completions` endpoint. If Unsloth listens elsewhere (for example
-after `unsloth run -p 9000` or `-H 0.0.0.0` on another machine), pass
-`--url`:
+`/v1/chat/completions` endpoint. If Unsloth listens on another port (for
+example after `unsloth run -p 9000`), pass `--url`:
 
 ```bash
-puny --provider unsloth --url http://192.168.1.42:8888
+puny --provider unsloth --url http://127.0.0.1:9000
 ```
+
+Unsloth serves plain HTTP, so the API key travels unencrypted. To reach
+Unsloth on another machine, forward the port over SSH
+(`ssh -L 8888:127.0.0.1:8888 gpu-box`) or put it behind an HTTPS reverse
+proxy and pass that `https://` URL, rather than exposing it with `-H 0.0.0.0`.
 
 ### OpenCode Zen
 
