@@ -12,7 +12,7 @@ and stays out of your way.
 
 ## Features
 
-- **Multiple providers**: local-first LM Studio, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
+- **Multiple providers**: local-first LM Studio or Unsloth, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Session management**: each run, `/new`, or `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
@@ -58,9 +58,10 @@ to scroll past to get to the actual answer. If you want it, pass `--show-thinkin
 If you think you want it later, pass `--chat-log` which saves the entire conversation,
 noise included, to puny_chat.log
 
-The four supported providers are the ones I use personally:
+The five supported providers are the ones I use personally:
 
 - [LM Studio](https://lmstudio.ai/) — local inference on my own hardware
+- [Unsloth](https://unsloth.ai/) — local inference through Unsloth Studio
 - [OpenCode Zen](https://opencode.ai/zen) — wide selection of reliable optimized models
 - [OpenCode Go](https://opencode.ai/go) — cheaper hosted models when I need them
 - [GitHub Copilot](https://github.com/features/copilot) — comes with my sponsored GitHub subscription
@@ -165,9 +166,9 @@ zig build test-regression
 ## Quick start
 
 On first run, Puny launches a one-time setup wizard that asks you to pick a
-provider and API key (and a URL only for LM Studio; OpenCode Zen, OpenCode Go,
-and GitHub Copilot use fixed URLs). Your choices are saved to `config.json` and
-the wizard is skipped on later runs.
+provider and API key (and a URL only for LM Studio and Unsloth; OpenCode Zen,
+OpenCode Go, and GitHub Copilot use fixed URLs). Your choices are saved to
+`config.json` and the wizard is skipped on later runs.
 
 ### LM Studio
 
@@ -181,6 +182,26 @@ Or, if you are running from the source tree:
 
 ```bash
 zig build run
+```
+
+### Unsloth
+
+Start Unsloth Studio (for example with `unsloth run`) and load a model with
+tool-calling support. Unsloth requires an API key (`sk-unsloth-…`) on every
+request, so set it in `PUNY_API_KEY` (or use `--api-key-file`), then:
+
+```bash
+puny --provider unsloth
+```
+
+Puny connects to `http://127.0.0.1:8888` by default, lists models from
+`/v1/models`, and streams through the OpenAI-compatible
+`/v1/chat/completions` endpoint. If Unsloth listens elsewhere (for example
+after `unsloth run -p 9000` or `-H 0.0.0.0` on another machine), pass
+`--url`:
+
+```bash
+puny --provider unsloth --url http://192.168.1.42:8888
 ```
 
 ### OpenCode Zen
@@ -260,8 +281,8 @@ puny
 
 Puny uses the provider saved during setup and reuses its saved model when
 available. If no usable model is saved, Puny opens the provider's model picker
-before opening the chat prompt. When using LM Studio, start it and load a
-tool-capable model first.
+before opening the chat prompt. When using LM Studio or Unsloth, start it and
+load a tool-capable model first.
 
 ### Interactive chat
 
@@ -462,9 +483,9 @@ responses are limited to 10 MiB, and remote fetches time out after 30 seconds.
 ### Select a provider
 
 Use `--provider` to switch between LM Studio (`lmstudio`, the default),
-OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), and GitHub Copilot
-(`copilot`). The same identifiers apply to `PUNY_PROVIDER` and the `provider`
-field in `config.json`.
+OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), GitHub Copilot
+(`copilot`), and Unsloth (`unsloth`). The same identifiers apply to
+`PUNY_PROVIDER` and the `provider` field in `config.json`.
 
 ```bash
 puny --provider opencode_zen
@@ -501,7 +522,7 @@ Precedence is: `--api-key` > `--api-key-file` > `PUNY_API_KEY` > `config.json`.
 The `--api-key` flag is available for ephemeral use, but its value can appear
 in shell history and process listings; prefer the sources shown above.
 
-OpenCode Zen and OpenCode Go require an API key. Puny exits early with a hint if the key is missing.
+OpenCode Zen, OpenCode Go, and Unsloth require an API key. Puny exits early with a hint if the key is missing.
 
 GitHub Copilot does not need an API key up front — Puny discovers an existing GitHub
 OAuth token or runs a device-flow login on first use, then persists it. You can still
@@ -518,13 +539,13 @@ puny --reconfigure
 
 You will be prompted for:
 
-1. **Provider** — LM Studio (`lmstudio`), OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), or GitHub Copilot (`copilot`).
-2. **Provider URL** — only for LM Studio; press Enter to use the default. OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
+1. **Provider** — LM Studio (`lmstudio`), OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), GitHub Copilot (`copilot`), or Unsloth (`unsloth`).
+2. **Provider URL** — only for LM Studio and Unsloth; press Enter to use the default (`http://127.0.0.1:1234` and `http://127.0.0.1:8888` respectively). OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
 Once saved, Puny uses the stored provider and key on subsequent runs, so you only need to pass `--provider` or `--api-key` again if you want to override them for a single session. If an OpenCode Zen or OpenCode Go request fails with an authentication error, Puny prints an auth hint; use `--reconfigure` to update the key.
 
-`--url` and `PUNY_PROVIDER_URL` only affect LM Studio; OpenCode Zen always uses `https://opencode.ai/zen`, OpenCode Go always uses `https://opencode.ai/zen/go`, and GitHub Copilot always uses `https://api.githubcopilot.com`.
+`--url` and `PUNY_PROVIDER_URL` only affect LM Studio and Unsloth; OpenCode Zen always uses `https://opencode.ai/zen`, OpenCode Go always uses `https://opencode.ai/zen/go`, and GitHub Copilot always uses `https://api.githubcopilot.com`.
 
 The config file stores per-provider settings (URL, API key, and last-selected model) so you can switch between providers without re-entering credentials.
 
@@ -717,8 +738,8 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 | Flag                    | Description                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------- |
-| `--provider <name>`     | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, or `copilot` (CLI/env/config precedence) |
-| `-u`, `--url <url>`     | LM Studio endpoint URL (default: `http://127.0.0.1:1234`)                                 |
+| `--provider <name>`     | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, `copilot`, or `unsloth` (CLI/env/config precedence) |
+| `-u`, `--url <url>`     | LM Studio or Unsloth endpoint URL (defaults: `http://127.0.0.1:1234`, `http://127.0.0.1:8888`) |
 | `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
 | `--api-key-file <path>` | Read provider API token from file (session only)                                          |
 | `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
@@ -750,7 +771,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `PUNY_CHAT_LOG`              | Set to `1` or `true` to save full conversation to `puny_chat.log` |
 | `PUNY_REASONING_EFFORT`      | Reasoning effort level to request (below `--effort`)              |
 | `PUNY_PROVIDER`              | Default provider name (overrides config)            |
-| `PUNY_PROVIDER_URL`          | LM Studio endpoint URL (overrides config, unless `--url` is set) |
+| `PUNY_PROVIDER_URL`          | LM Studio or Unsloth endpoint URL (overrides config, unless `--url` is set) |
 | `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
 | `PUNY_MODEL`                 | Default model identifier (overrides config)         |
 | `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider        |
@@ -891,7 +912,7 @@ panics or segfaults.
 
 ## Development / testing
 
-### Mock mode (no LM Studio, OpenCode Zen, or GitHub Copilot required)
+### Mock mode (no LM Studio, Unsloth, OpenCode Zen, or GitHub Copilot required)
 
 Start without a running AI backend:
 
