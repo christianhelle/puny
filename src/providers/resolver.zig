@@ -47,6 +47,15 @@ pub fn resolveApiKey(
     return cfg.providerEntryConst(effective_provider).apiKey orelse "";
 }
 
+/// True when a real (non-mock) provider that needs an API key has none, so
+/// callers can stop with a hint instead of sending unauthenticated requests.
+pub fn missingRequiredApiKey(is_mock: bool, selected_provider: ModelProvider, api_key: []const u8) bool {
+    if (is_mock or api_key.len > 0) return false;
+    return selected_provider == .opencode_zen or
+        selected_provider == .opencode_go or
+        selected_provider == .unsloth;
+}
+
 pub fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
     return selectedProvider == .opencode_zen or
         selectedProvider == .opencode_go or
@@ -274,6 +283,16 @@ test "baseUrlFor resolves unsloth urls from CLI, config, then its own default" {
     cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
     try std.testing.expectEqualStrings("http://gpu-box:8888", baseUrlFor(.unsloth, .{}, cfg));
     try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.unsloth, .{ .url = "http://cli.example" }, cfg));
+}
+
+test "missingRequiredApiKey flags key-gated providers without a key" {
+    try std.testing.expect(missingRequiredApiKey(false, .unsloth, ""));
+    try std.testing.expect(missingRequiredApiKey(false, .opencode_zen, ""));
+    try std.testing.expect(missingRequiredApiKey(false, .opencode_go, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .unsloth, "sk-unsloth-key"));
+    try std.testing.expect(!missingRequiredApiKey(false, .lmstudio, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .copilot, ""));
+    try std.testing.expect(!missingRequiredApiKey(true, .unsloth, ""));
 }
 
 test "unsloth url is configurable and defaults to the local server" {

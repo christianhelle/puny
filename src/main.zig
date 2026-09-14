@@ -601,7 +601,7 @@ fn initializeProviderAndModel(
     provider_url.* = if (parsed.mock) "-" else resolver.baseUrlFor(selected_provider.*, parsed, cfg.*);
     const api_key = try resolver.resolveApiKey(arena, io, parsed, cfg.*, selected_provider.*, init.environ_map.get("PUNY_API_KEY"));
 
-    if (!parsed.mock and requiresApiKey(selected_provider.*) and api_key.len == 0) {
+    if (resolver.missingRequiredApiKey(parsed.mock, selected_provider.*, api_key)) {
         var stderr_buffer: [1024]u8 = undefined;
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
         const stderr_writer = &stderr_file_writer.interface;
@@ -734,12 +734,6 @@ fn formatDuration(buf: []u8, elapsed_ns: u64) []const u8 {
     return std.fmt.bufPrint(buf, "{d:.1} s", .{s}) catch "0 s";
 }
 
-fn requiresApiKey(selected_provider: ModelProvider) bool {
-    return selected_provider == .opencode_zen or
-        selected_provider == .opencode_go or
-        selected_provider == .unsloth;
-}
-
 fn formatRestoreHeader(buf: []u8, id: []const u8, count: usize, elapsed_ns: u64) []const u8 {
     var time_buf: [64]u8 = undefined;
     const time_str = formatDuration(&time_buf, elapsed_ns);
@@ -850,15 +844,6 @@ test "buildPlanningToolDefinitions excludes load_skill when skills are disabled"
         try std.testing.expect(!std.mem.eql(u8, name, "load_skill"));
     }
     try std.testing.expect(definitions.items.len > 0);
-}
-
-test "requiresApiKey only for opencode, opencode-go and unsloth" {
-    try std.testing.expect(!requiresApiKey(.lmstudio));
-    try std.testing.expect(requiresApiKey(.opencode_zen));
-    try std.testing.expect(requiresApiKey(.opencode_go));
-    try std.testing.expect(requiresApiKey(.unsloth));
-    try std.testing.expect(!requiresApiKey(.copilot));
-    try std.testing.expect(!requiresApiKey(.mock));
 }
 
 test "test runner suppresses warning logs" {
