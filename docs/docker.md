@@ -62,6 +62,20 @@ docker run --rm -it \
   christianhelle/puny:latest --url http://host.docker.internal:1234
 ```
 
+## Unsloth
+
+Unsloth Studio must also be reachable from inside the container, and it needs
+an API key. Set `PUNY_API_KEY` in the host shell and pass it through:
+
+```bash
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  --env PUNY_API_KEY \
+  christianhelle/puny:latest --provider unsloth --url http://host.docker.internal:8888
+```
+
 ## OpenCode Zen
 
 Set `PUNY_API_KEY` in the host shell, then pass it through without placing the
