@@ -105,10 +105,20 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
         break :blk picked;
     };
 
+    try switchProvider(ctx, picked_provider);
+}
+
+fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     const current_provider = ctx.model_provider.*;
     if (picked_provider == current_provider) {
         try ctx.stdout_writer.print("\nAlready using provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
         try ctx.stdout_writer.flush();
+        return;
+    }
+
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
+    if (resolver.missingRequiredApiKey(ctx.parsed.mock, picked_provider, new_api_key)) {
+        try printMissingApiKey(ctx.stdout_writer, picked_provider);
         return;
     }
 
@@ -118,7 +128,6 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
 
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
     ctx.prov.deinit();
     ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
     if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
@@ -159,6 +168,14 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
 
     try ctx.stdout_writer.print("Switched to provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
     try ctx.stdout_writer.flush();
+}
+
+fn printMissingApiKey(stdout_writer: *std.Io.Writer, selected_provider: ModelProvider) !void {
+    try stdout_writer.print(
+        "\nProvider '{s}' requires an API key. Set one with /config or PUNY_API_KEY.\n",
+        .{provider.getProviderDisplayName(selected_provider)},
+    );
+    try stdout_writer.flush();
 }
 
 pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
@@ -478,6 +495,38 @@ test "handleSwitchProviderCommand rejects unknown provider ids" {
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Unknown provider 'does-not-exist'") != null);
     try std.testing.expectEqual(ModelProvider.mock, model_provider);
+}
+
+test "switchProvider refuses a key-gated provider without an API key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // No PUNY_API_KEY and no stored key. Without HOME the config cannot be
+    // saved either, so reaching config.save would fail this test.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try switchProvider(&ctx, .unsloth);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'Unsloth' requires an API key") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
+    try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+    try std.testing.expectEqualStrings("http://gpu-box:8888", cfg.providerEntryConst(.unsloth).url);
 }
 
 test "handleSwitchEffortCommand warns on stderr when the config cannot be saved" {
