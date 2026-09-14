@@ -194,7 +194,8 @@ request, so set it in `PUNY_API_KEY` (or use `--api-key-file`), then:
 puny --provider unsloth
 ```
 
-Puny connects to `http://127.0.0.1:8888` by default, lists models from
+Puny connects to `http://127.0.0.1:8888` by default
+(`http://host.docker.internal:8888` in the Docker image), lists models from
 `/v1/models`, and streams through the OpenAI-compatible
 `/v1/chat/completions` endpoint. If Unsloth listens on another port (for
 example after `unsloth run -p 9000`), pass `--url`:
@@ -544,7 +545,7 @@ puny --reconfigure
 You will be prompted for:
 
 1. **Provider** — LM Studio (`lmstudio`), OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), GitHub Copilot (`copilot`), or Unsloth (`unsloth`).
-2. **Provider URL** — only for LM Studio and Unsloth; press Enter to use the default (`http://127.0.0.1:1234` and `http://127.0.0.1:8888` respectively). OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
+2. **Provider URL** — only for LM Studio and Unsloth; press Enter to use the default (`http://127.0.0.1:1234` and `http://127.0.0.1:8888` respectively, or `http://host.docker.internal:1234` and `http://host.docker.internal:8888` in the Docker image). OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
 Once saved, Puny uses the stored provider and key on subsequent runs, so you only need to pass `--provider` or `--api-key` again if you want to override them for a single session. If an OpenCode Zen or OpenCode Go request fails with an authentication error, Puny prints an auth hint; use `--reconfigure` to update the key.
@@ -743,7 +744,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | Flag                    | Description                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------- |
 | `--provider <name>`     | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, `copilot`, or `unsloth` (CLI/env/config precedence) |
-| `-u`, `--url <url>`     | LM Studio or Unsloth endpoint URL (defaults: `http://127.0.0.1:1234`, `http://127.0.0.1:8888`) |
+| `-u`, `--url <url>`     | LM Studio or Unsloth endpoint URL (defaults: `http://127.0.0.1:1234`, `http://127.0.0.1:8888`; Docker image uses `host.docker.internal`) |
 | `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
 | `--api-key-file <path>` | Read provider API token from file (session only)                                          |
 | `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
