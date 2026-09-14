@@ -116,6 +116,11 @@ fn createClient(
             c.withBaseUrl(url);
             return .{ .copilot = c };
         },
+        .unsloth => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .unsloth = c };
+        },
         .mock => {
             return .{ .mock = mock.MockClient.init(arena, io) };
         },
@@ -346,6 +351,14 @@ test "createProvider builds each provider type" {
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).copilot);
         try std.testing.expectEqualStrings("http://copilot", prov.copilot.inner.base_url);
         try std.testing.expectEqualStrings("key-4", prov.copilot.github_token);
+    }
+
+    {
+        var prov = createProvider(false, .unsloth, "http://unsloth", "sk-unsloth-5", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).unsloth);
+        try std.testing.expectEqualStrings("http://unsloth", prov.unsloth.base_url);
+        try std.testing.expectEqualStrings("sk-unsloth-5", prov.unsloth.api_key);
     }
 }
 

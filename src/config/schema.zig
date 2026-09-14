@@ -19,6 +19,9 @@ pub fn isValidUtf8(s: []const u8) bool {
 pub const default_lm_studio_url =
     if (build_options.docker) "http://host.docker.internal:1234" else "http://127.0.0.1:1234";
 
+pub const default_unsloth_url =
+    if (build_options.docker) "http://host.docker.internal:8888" else "http://127.0.0.1:8888";
+
 pub const PromptOverride = struct {
     prefix: []const u8 = "",
     suffix: []const u8 = "",
@@ -184,6 +187,7 @@ pub fn providerSlot(kind: provider.ModelProvider) usize {
         .opencode_zen => 1,
         .opencode_go => 2,
         .copilot => 3,
+        .unsloth => 4,
         .mock => unreachable,
     };
 }
@@ -196,6 +200,7 @@ pub const Config = struct {
         .{ .name = .opencode_zen, .url = opencode_zen.default_base_url, .apiKey = null, .model = "" },
         .{ .name = .opencode_go, .url = opencode_go.default_base_url, .apiKey = null, .model = "" },
         .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = null, .model = "" },
+        .{ .name = .unsloth, .url = default_unsloth_url, .apiKey = null, .model = "" },
     },
 
     pub fn default() Config {
@@ -587,6 +592,23 @@ test "Config jsonParse gives an entry without a url its provider's default url" 
     const entry = parsed.value.providerEntryConst(.opencode_go);
     try std.testing.expectEqualStrings("minimax-m3", entry.model);
     try std.testing.expectEqualStrings(opencode_go.default_base_url, entry.url);
+}
+
+test "Config jsonParse loads a config written before unsloth existed" {
+    const parsed = try parseConfigForTest(
+        \\{"provider":"opencode_go","providers":[
+        \\  {"name":"lmstudio","apiKey":null,"url":"http://127.0.0.1:1234","model":""},
+        \\  {"name":"opencode_zen","apiKey":null,"url":"https://opencode.ai/zen","model":""},
+        \\  {"name":"opencode_go","apiKey":"go-key","url":"https://opencode.ai/zen/go","model":"minimax-m3"},
+        \\  {"name":"copilot","apiKey":null,"url":"https://api.githubcopilot.com","model":""}
+        \\]}
+    );
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(.opencode_go, parsed.value.provider);
+    try std.testing.expectEqualStrings("go-key", parsed.value.providerEntryConst(.opencode_go).apiKey.?);
+    try std.testing.expectEqual(.unsloth, parsed.value.providerEntryConst(.unsloth).name);
+    try std.testing.expect(parsed.value.providerEntryConst(.unsloth).apiKey == null);
 }
 
 test "Config jsonParse skips provider entries with unknown names" {
