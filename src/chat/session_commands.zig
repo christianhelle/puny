@@ -192,9 +192,18 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (!result.changed) return;
 
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
+    try applyReconfiguredProvider(ctx, old_provider_name);
+}
+
+/// Applies a saved /config change to the running session.
+fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
     const new_provider_name = ctx.cfg.provider;
     const new_provider_url = if (ctx.parsed.mock) "-" else resolver.baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
     const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
+    if (resolver.missingRequiredApiKey(ctx.parsed.mock, new_provider_name, new_api_key)) {
+        try printMissingApiKey(ctx.stdout_writer, new_provider_name);
+        return;
+    }
 
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         ctx.prov.deinit();
@@ -559,6 +568,35 @@ test "switchProvider keeps the configured url of the provider it switches to" {
 
     try std.testing.expectError(error.NoConfigDir, switchProvider(&ctx, .unsloth));
     try std.testing.expectEqualStrings("http://gpu-box:8888", cfg.providerEntryConst(.unsloth).url);
+}
+
+test "applyReconfiguredProvider does not switch to a key-gated provider without a key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    // /config just picked Unsloth but the API key prompt was skipped.
+    cfg.provider = .unsloth;
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try applyReconfiguredProvider(&ctx, .lmstudio);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'Unsloth' requires an API key") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
 }
 
 test "handleSwitchEffortCommand warns on stderr when the config cannot be saved" {
