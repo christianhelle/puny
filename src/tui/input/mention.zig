@@ -19,12 +19,14 @@ pub fn isTrigger(line: []const u8) bool {
 }
 
 /// Opens the searchable file picker and, when the user selects a path,
-/// inserts the resulting "@path" mention into the editor buffer.
+/// inserts the resulting "@path" mention into the editor buffer. An editor
+/// with mentions disabled gets a literal '@' instead.
 pub fn insertMention(
     allocator: std.mem.Allocator,
     io: std.Io,
     editor: *line_editor.LineEditor,
 ) !void {
+    if (!editor.mentions_enabled) return editor.append('@');
     const path = (try file_picker.pickFile(allocator, io)) orelse {
         // The picker erased its own overlay; restore the prompt line. The
         // success path redraws via appendSlice, so only cancellation needs it.
@@ -65,4 +67,18 @@ test "isTrigger false after non-whitespace" {
     try std.testing.expect(!isTrigger("hello"));
     try std.testing.expect(!isTrigger("a@b"));
     try std.testing.expect(!isTrigger("user@example.com"));
+}
+
+test "insertMention appends a literal @ when mentions are disabled" {
+    var line_alloc = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, null);
+    editor.mentions_enabled = false;
+
+    try insertMention(std.testing.allocator, std.testing.io, &editor);
+
+    try std.testing.expectEqualStrings("@", line_alloc.written());
+    try std.testing.expectEqualStrings("@", out.written());
 }
