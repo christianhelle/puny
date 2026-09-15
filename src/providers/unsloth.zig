@@ -26,6 +26,8 @@ pub const Client = struct {
     }
 
     pub fn setConfig(self: *Client, config: client.ClientConfig) void {
+        // A (possibly different) server has not loaded anything for this client yet.
+        if (config.base_url != null) self.forgetLoadedModel();
         self.inner.setConfig(config);
     }
 
@@ -217,6 +219,26 @@ test "chatStreaming loads from the server root when the base url ends in /v1" {
 
     try std.testing.expectEqualStrings("/api/inference/load", ctx.path(0));
     try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(1));
+}
+
+test "setConfig with a base url loads the model again on the next chat" {
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+
+    var events: EventCounter = .{};
+    try chatStreaming(&c, chatRequest("model-a"), events.callback());
+    c.setConfig(.{ .base_url = c.inner.base_url });
+    try chatStreaming(&c, chatRequest("model-a"), events.callback());
+
+    try std.testing.expectEqual(@as(usize, 4), ctx.request_count);
+    try std.testing.expectEqualStrings("/api/inference/load", ctx.path(2));
 }
 
 // Test helpers
