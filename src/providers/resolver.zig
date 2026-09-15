@@ -57,6 +57,11 @@ pub fn apiKeyEnv(environ_map: *const std.process.Environ.Map, selected_provider:
     return null;
 }
 
+/// Names of the variables `apiKeyEnv` reads, for missing-key hints.
+pub fn apiKeyEnvNames(selected_provider: ModelProvider) []const u8 {
+    return if (selected_provider == .ollama_cloud) "PUNY_API_KEY/OLLAMA_API_KEY" else "PUNY_API_KEY";
+}
+
 /// True when a real (non-mock) provider that needs an API key has none, so
 /// callers can stop with a hint instead of sending unauthenticated requests.
 pub fn missingRequiredApiKey(is_mock: bool, selected_provider: ModelProvider, api_key: []const u8) bool {
@@ -228,6 +233,11 @@ test "apiKeyEnv falls back to OLLAMA_API_KEY only for ollama_cloud" {
 
     try env.put("PUNY_API_KEY", "puny-key");
     try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .ollama_cloud).?);
+}
+
+test "apiKeyEnvNames lists the variables apiKeyEnv reads" {
+    try std.testing.expectEqualStrings("PUNY_API_KEY", apiKeyEnvNames(.opencode_go));
+    try std.testing.expectEqualStrings("PUNY_API_KEY/OLLAMA_API_KEY", apiKeyEnvNames(.ollama_cloud));
 }
 
 test "resolveApiKey uses CLI key over env and config" {

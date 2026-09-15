@@ -206,8 +206,8 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
 
 fn printMissingApiKey(stdout_writer: *std.Io.Writer, selected_provider: ModelProvider) !void {
     try stdout_writer.print(
-        "\nProvider '{s}' requires an API key. Set one with /config or PUNY_API_KEY.\n",
-        .{provider.getProviderDisplayName(selected_provider)},
+        "\nProvider '{s}' requires an API key. Set one with /config or {s}.\n",
+        .{ provider.getProviderDisplayName(selected_provider), resolver.apiKeyEnvNames(selected_provider) },
     );
     try stdout_writer.flush();
 }
@@ -585,6 +585,33 @@ test "switchProvider refuses a key-gated provider without an API key" {
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
     try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
     try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+}
+
+test "switchProvider hints at OLLAMA_API_KEY when Ollama Cloud has no key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try switchProvider(&ctx, .ollama_cloud);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'Ollama Cloud' requires an API key. Set one with /config or PUNY_API_KEY/OLLAMA_API_KEY.") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
 }
 
 test "switchProvider accepts OLLAMA_API_KEY for Ollama Cloud" {
