@@ -40,15 +40,47 @@ pub fn readLine(
     }
 }
 
-/// Reads a single line from stdin in canonical mode without printing a prompt.
-/// Returns the trimmed line, or null on EOF/empty input.
+/// Reads a single line from stdin without printing a prompt, echoing input
+/// itself in raw mode. Some terminals (Warp's ConPTY on Windows) never deliver
+/// a line to a canonical-mode console read, so canonical input is only the
+/// fallback when raw mode is unavailable (e.g., piped stdin).
+/// Returns the line, or null on EOF, cancel, or interrupt.
 pub fn readLineSimple(
+    allocator: std.mem.Allocator,
     io: std.Io,
+    stdout_writer: *std.Io.Writer,
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: []u8,
 ) !?[]const u8 {
     line_alloc.clearRetainingCapacity();
 
+    cancel.setRawMode(true) catch {
+        return try readLineSimpleCanonical(io, line_alloc, stdin_buffer);
+    };
+    defer cancel.setRawMode(false) catch {};
+
+    var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, null, null);
+    editor.mentions_enabled = false;
+    const result = if (builtin.os.tag == .windows)
+        try windows_impl.readLineWindows(allocator, io, &editor)
+    else
+        try posix.readLinePosix(allocator, io, &editor);
+
+    return switch (result) {
+        .submitted => |text| {
+            try stdout_writer.writeAll("\r\n");
+            try stdout_writer.flush();
+            return text;
+        },
+        .cancelled, .interrupted, .eof => null,
+    };
+}
+
+fn readLineSimpleCanonical(
+    io: std.Io,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdin_buffer: []u8,
+) !?[]const u8 {
     var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, stdin_buffer);
     const stdin_reader = &stdin_file_reader.interface;
 

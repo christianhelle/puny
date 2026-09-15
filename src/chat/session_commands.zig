@@ -330,7 +330,7 @@ pub fn promptReconfigure(
         );
         try stdout_writer.flush();
 
-        const new_url = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+        const new_url = input.readLineSimple(arena, io, stdout_writer, &line_alloc, &stdin_buffer) catch |err| {
             if (sigint.isTriggered()) return .{ .cancelled = true };
             return err;
         } orelse {
@@ -355,7 +355,7 @@ pub fn promptReconfigure(
     try stdout_writer.print("Enter new API key (press Enter to keep, '-' to clear): ", .{});
     try stdout_writer.flush();
 
-    const new_key = input.readLineSimple(io, &line_alloc, &stdin_buffer) catch |err| {
+    const new_key = input.readLineSimple(arena, io, stdout_writer, &line_alloc, &stdin_buffer) catch |err| {
         if (sigint.isTriggered()) return .{ .cancelled = true };
         return err;
     } orelse {
