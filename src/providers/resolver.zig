@@ -7,6 +7,7 @@ const mock = @import("mock.zig");
 const opencode_zen = @import("opencode_zen.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
+const unsloth = @import("unsloth.zig");
 
 const ModelProvider = provider.ModelProvider;
 
@@ -126,7 +127,7 @@ fn createClient(
             return .{ .copilot = c };
         },
         .unsloth => {
-            var c = http_client.Client.init(arena, io, api_key);
+            var c = unsloth.Client.init(arena, io, api_key);
             c.withBaseUrl(url);
             return .{ .unsloth = c };
         },
@@ -393,8 +394,8 @@ test "createProvider builds each provider type" {
         var prov = createProvider(false, .unsloth, "http://unsloth", "sk-unsloth-5", allocator, std.testing.io, "");
         defer prov.deinit();
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).unsloth);
-        try std.testing.expectEqualStrings("http://unsloth", prov.unsloth.base_url);
-        try std.testing.expectEqualStrings("sk-unsloth-5", prov.unsloth.api_key);
+        try std.testing.expectEqualStrings("http://unsloth", prov.unsloth.inner.base_url);
+        try std.testing.expectEqualStrings("sk-unsloth-5", prov.unsloth.inner.api_key);
     }
 }
 

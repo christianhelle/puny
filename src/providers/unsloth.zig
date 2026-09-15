@@ -25,6 +25,10 @@ pub const Client = struct {
         self.inner.withBaseUrl(base_url);
     }
 
+    pub fn setConfig(self: *Client, config: client.ClientConfig) void {
+        self.inner.setConfig(config);
+    }
+
     fn forgetLoadedModel(self: *Client) void {
         if (self.loaded_model) |model| self.inner.allocator.free(model);
         self.loaded_model = null;
