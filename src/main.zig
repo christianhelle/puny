@@ -605,7 +605,7 @@ fn initializeProviderAndModel(
 ) !void {
     selected_provider.* = try resolver.effectiveProvider(parsed, cfg.*);
     provider_url.* = if (parsed.mock) "-" else resolver.baseUrlFor(selected_provider.*, parsed, cfg.*);
-    const api_key = try resolver.resolveApiKey(arena, io, parsed, cfg.*, selected_provider.*, init.environ_map.get("PUNY_API_KEY"));
+    const api_key = try resolver.resolveApiKey(arena, io, parsed, cfg.*, selected_provider.*, resolver.apiKeyEnv(init.environ_map, selected_provider.*));
 
     if (resolver.missingRequiredApiKey(parsed.mock, selected_provider.*, api_key)) {
         var stderr_buffer: [1024]u8 = undefined;

@@ -145,7 +145,7 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
         return;
     }
 
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, resolver.apiKeyEnv(ctx.init.environ_map, picked_provider));
     if (resolver.missingRequiredApiKey(ctx.parsed.mock, picked_provider, new_api_key)) {
         try printMissingApiKey(ctx.stdout_writer, picked_provider);
         return;
@@ -233,7 +233,7 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
 fn commitReconfigure(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
     const candidate = ctx.cfg.provider;
     if (candidate != old_provider_name) {
-        const candidate_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, candidate, ctx.init.environ_map.get("PUNY_API_KEY"));
+        const candidate_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, candidate, resolver.apiKeyEnv(ctx.init.environ_map, candidate));
         if (resolver.missingRequiredApiKey(ctx.parsed.mock, candidate, candidate_key)) {
             try printMissingApiKey(ctx.stdout_writer, candidate);
             ctx.cfg.provider = old_provider_name;
@@ -248,7 +248,7 @@ fn commitReconfigure(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !v
 fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
     const new_provider_name = ctx.cfg.provider;
     const new_provider_url = if (ctx.parsed.mock) "-" else resolver.baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, resolver.apiKeyEnv(ctx.init.environ_map, new_provider_name));
     if (resolver.missingRequiredApiKey(ctx.parsed.mock, new_provider_name, new_api_key)) {
         try printMissingApiKey(ctx.stdout_writer, new_provider_name);
         return;
@@ -585,6 +585,36 @@ test "switchProvider refuses a key-gated provider without an API key" {
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
     try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
     try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+}
+
+test "switchProvider accepts OLLAMA_API_KEY for Ollama Cloud" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // The key passes the gate; without a config dir the save then fails,
+    // which stops the switch before it builds a client.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("OLLAMA_API_KEY", "ollama-key");
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try std.testing.expectError(error.NoConfigDir, switchProvider(&ctx, .ollama_cloud));
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "requires an API key") == null);
 }
 
 test "switchProvider keeps the configured url of the provider it switches to" {
