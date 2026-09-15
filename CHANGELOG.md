@@ -2,10 +2,9 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
-- Recover the conversation after a failed turn ([#202](https://github.com/christianhelle/puny/pull/202)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Embed the application icon in Windows executables ([#206](https://github.com/christianhelle/puny/pull/206)) ([@christianhelle](https://github.com/christianhelle/))
+- Recover the conversation after a failed turn ([#202](https://github.com/christianhelle/puny/pull/202)) ([@christianhelle](https://github.com/christianhelle/))
 - Run council members in parallel by default ([#204](https://github.com/christianhelle/puny/pull/204)) ([@christianhelle](https://github.com/christianhelle/))
 - Add branch-compare mode to council ([#203](https://github.com/christianhelle/puny/pull/203)) ([@christianhelle](https://github.com/christianhelle/))
 - Add an AI council: adversarial multi-model review scripts ([#201](https://github.com/christianhelle/puny/pull/201)) ([@christianhelle](https://github.com/christianhelle/))
