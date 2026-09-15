@@ -2,6 +2,9 @@
 
 ## [Unreleased Changes]
 
+### Merged Pull Requests
+- Fix reconfigure prompts freezing in Warp ([#207](https://github.com/christianhelle/puny/pull/207)) ([@christianhelle](https://github.com/christianhelle/))
+
 ### Features
 - Add Unsloth Studio as a model provider ([#205](https://github.com/christianhelle/puny/pull/205)) ([@christianhelle](https://github.com/christianhelle/))
 - Embed the application icon in Windows executables ([#206](https://github.com/christianhelle/puny/pull/206)) ([@christianhelle](https://github.com/christianhelle/))
