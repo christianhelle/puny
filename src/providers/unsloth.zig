@@ -9,23 +9,40 @@ const openai = @import("openai.zig");
 
 pub const Client = struct {
     inner: client.Client,
+    /// Model this client last loaded, so chats with the same model skip the load.
+    loaded_model: ?[]u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8) Client {
         return .{ .inner = client.Client.init(allocator, io, api_key) };
     }
 
     pub fn deinit(self: *Client) void {
+        self.forgetLoadedModel();
         self.inner.deinit();
     }
 
     pub fn withBaseUrl(self: *Client, base_url: []const u8) void {
         self.inner.withBaseUrl(base_url);
     }
+
+    fn forgetLoadedModel(self: *Client) void {
+        if (self.loaded_model) |model| self.inner.allocator.free(model);
+        self.loaded_model = null;
+    }
 };
 
 pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
-    try loadModel(self, request.model);
+    try ensureModelLoaded(self, request.model);
     return openai.chatStreaming(&self.inner, request, callback);
+}
+
+fn ensureModelLoaded(self: *Client, model: []const u8) !void {
+    if (self.loaded_model) |loaded| {
+        if (std.mem.eql(u8, loaded, model)) return;
+    }
+    self.forgetLoadedModel();
+    try loadModel(self, model);
+    self.loaded_model = try self.inner.allocator.dupe(u8, model);
 }
 
 fn loadModel(self: *Client, model: []const u8) !void {
@@ -57,6 +74,29 @@ test "chatStreaming loads the requested model before streaming" {
     try std.testing.expectEqualStrings("{\"model_path\":\"unsloth/Qwen3-8B-GGUF\"}", ctx.body(0));
     try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(1));
     try std.testing.expect(events.count > 0);
+}
+
+test "chatStreaming loads a model once and again only when the model changes" {
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+        .{ .body = stop_stream },
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+
+    var events: EventCounter = .{};
+    try chatStreaming(&c, chatRequest("model-a"), events.callback());
+    try chatStreaming(&c, chatRequest("model-a"), events.callback());
+    try chatStreaming(&c, chatRequest("model-b"), events.callback());
+
+    try std.testing.expectEqual(@as(usize, 5), ctx.request_count);
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(2));
+    try std.testing.expectEqualStrings("/api/inference/load", ctx.path(3));
+    try std.testing.expectEqualStrings("{\"model_path\":\"model-b\"}", ctx.body(3));
 }
 
 // Test helpers
