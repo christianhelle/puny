@@ -40,15 +40,64 @@ pub fn readLine(
     }
 }
 
-/// Reads a single line from stdin in canonical mode without printing a prompt.
-/// Returns the trimmed line, or null on EOF/empty input.
+/// Reads a single line from stdin without printing a prompt, echoing input
+/// itself in raw mode. Some terminals (Warp's ConPTY on Windows) never deliver
+/// a line to a canonical-mode console read, so canonical input is only the
+/// fallback when raw mode is unavailable (e.g., piped stdin).
+/// Returns the line, or null on EOF, cancel, or interrupt.
 pub fn readLineSimple(
+    allocator: std.mem.Allocator,
     io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdin_buffer: []u8,
+) !?[]const u8 {
+    return readPlainLine(Console, allocator, io, stdout_writer, line_alloc, stdin_buffer);
+}
+
+/// Terminal access behind `readPlainLine`; tests substitute a fake.
+const Console = struct {
+    const setRawMode = cancel.setRawMode;
+    const readCanonical = readLineSimpleCanonical;
+
+    fn readRaw(allocator: std.mem.Allocator, io: std.Io, editor: *line_editor.LineEditor) !ReadLineResult {
+        return if (builtin.os.tag == .windows) windows_impl.readLineWindows(allocator, io, editor) else posix.readLinePosix(allocator, io, editor);
+    }
+};
+
+fn readPlainLine(
+    comptime C: type,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: []u8,
 ) !?[]const u8 {
     line_alloc.clearRetainingCapacity();
 
+    C.setRawMode(true) catch {
+        return try C.readCanonical(io, line_alloc, stdin_buffer);
+    };
+    defer C.setRawMode(false) catch {};
+
+    var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, null, null);
+    editor.mentions_enabled = false;
+
+    return switch (try C.readRaw(allocator, io, &editor)) {
+        .submitted => |text| {
+            try stdout_writer.writeAll("\r\n");
+            try stdout_writer.flush();
+            return text;
+        },
+        .cancelled, .interrupted, .eof => null,
+    };
+}
+
+fn readLineSimpleCanonical(
+    io: std.Io,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdin_buffer: []u8,
+) !?[]const u8 {
     var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, stdin_buffer);
     const stdin_reader = &stdin_file_reader.interface;
 
@@ -66,4 +115,93 @@ pub fn readLineSimple(
     else
         raw_message;
     return result;
+}
+
+/// Scripted stand-in for the terminal used by the `readPlainLine` tests.
+const FakeConsole = struct {
+    var raw_available = true;
+    var raw_enabled = false;
+    var raw_result: ReadLineResult = .eof;
+    var typed: []const u8 = "";
+    var saw_mentions_enabled = true;
+
+    fn reset(result: ReadLineResult) void {
+        raw_available = true;
+        raw_enabled = false;
+        raw_result = result;
+        typed = "";
+        saw_mentions_enabled = true;
+    }
+
+    fn setRawMode(enable: bool) !void {
+        if (!raw_available) return error.Unexpected;
+        raw_enabled = enable;
+    }
+
+    fn readCanonical(_: std.Io, line_alloc: *std.Io.Writer.Allocating, _: []u8) !?[]const u8 {
+        try line_alloc.writer.writeAll("canonical");
+        return line_alloc.written();
+    }
+
+    fn readRaw(_: std.mem.Allocator, _: std.Io, editor: *line_editor.LineEditor) !ReadLineResult {
+        try std.testing.expect(raw_enabled);
+        saw_mentions_enabled = editor.mentions_enabled;
+        try editor.line_alloc.writer.writeAll(typed);
+        return switch (raw_result) {
+            .submitted => .{ .submitted = editor.line_alloc.written() },
+            else => raw_result,
+        };
+    }
+};
+
+test "readPlainLine returns the raw line, ends it with a newline, and restores the terminal" {
+    FakeConsole.reset(.{ .submitted = "" });
+    FakeConsole.typed = "sk-test@key";
+    var line_alloc = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer line_alloc.deinit();
+    try line_alloc.writer.writeAll("stale");
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var stdin_buffer: [16]u8 = undefined;
+
+    const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer);
+
+    try std.testing.expectEqualStrings("sk-test@key", line.?);
+    try std.testing.expectEqualStrings("\r\n", out.written());
+    try std.testing.expect(!FakeConsole.saw_mentions_enabled);
+    try std.testing.expect(!FakeConsole.raw_enabled);
+}
+
+test "readPlainLine returns null when the raw read is cancelled, interrupted, or ends" {
+    const outcomes = [_]ReadLineResult{ .cancelled, .interrupted, .eof };
+    for (outcomes) |outcome| {
+        FakeConsole.reset(outcome);
+        var line_alloc = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer line_alloc.deinit();
+        var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer out.deinit();
+        var stdin_buffer: [16]u8 = undefined;
+
+        const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer);
+
+        try std.testing.expect(line == null);
+        try std.testing.expectEqualStrings("", out.written());
+        try std.testing.expect(!FakeConsole.raw_enabled);
+    }
+}
+
+test "readPlainLine falls back to canonical input when raw mode is unavailable" {
+    FakeConsole.reset(.eof);
+    FakeConsole.raw_available = false;
+    var line_alloc = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer line_alloc.deinit();
+    try line_alloc.writer.writeAll("stale");
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var stdin_buffer: [16]u8 = undefined;
+
+    const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer);
+
+    try std.testing.expectEqualStrings("canonical", line.?);
+    try std.testing.expectEqualStrings("", out.written());
 }

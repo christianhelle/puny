@@ -209,6 +209,8 @@ fn run(init: std.process.Init) !u8 {
 
     if (parsed.reconfigure) {
         try runStartupReconfigure(arena, init.io, init, cfg, stdout_writer, !cfg_result.file_existed);
+        // Ctrl+C at a setup prompt quits, as it does at the chat prompt.
+        if (sigint.isTriggered()) return 0;
     }
 
     var random_source: std.Random.IoSource = .{ .io = init.io };
