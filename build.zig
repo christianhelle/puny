@@ -227,6 +227,8 @@ fn addPunyExecutable(
 
     if (target.result.os.tag == .windows) {
         exe.root_module.linkSystemLibrary("psapi", .{});
+        // Only Windows executables can carry an icon; Mach-O and ELF binaries have no such resource.
+        exe.root_module.addWin32ResourceFile(.{ .file = b.path("src/resources/puny.rc") });
     }
 
     return exe;
