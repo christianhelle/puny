@@ -55,6 +55,47 @@ fn loadModel(self: *Client, model: []const u8) !void {
     var raw = try client.requestRaw(&self.inner, .POST, url, payload);
     defer raw.deinit();
     if (raw.status.class() != .success) return error.ResponseError;
+    try checkLoadBody(self, url, raw.body);
+}
+
+/// A slow load commits 200 early and pads the body until it finishes, so a late
+/// failure arrives as `_deferred_error` in the JSON, and a body cut off mid-pad
+/// means the load never reported completion.
+fn checkLoadBody(self: *Client, url: []const u8, body: []const u8) !void {
+    const allocator = self.inner.allocator;
+    const trimmed = std.mem.trim(u8, body, &std.ascii.whitespace);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, trimmed, .{}) catch
+        return error.UnslothModelLoadIncomplete;
+    defer parsed.deinit();
+    if (parsed.value != .object or parsed.value.object.count() == 0) return error.UnslothModelLoadIncomplete;
+
+    const deferred = parsed.value.object.get("_deferred_error") orelse return;
+    const status_code: u10 = blk: {
+        if (deferred == .object) {
+            if (deferred.object.get("status_code")) |code| {
+                if (code == .integer and code.integer >= 400 and code.integer <= 599) break :blk @intCast(code.integer);
+            }
+        }
+        break :blk 500;
+    };
+    const detail: []const u8 = blk: {
+        if (deferred == .object) {
+            if (deferred.object.get("detail")) |value| {
+                if (value == .string and value.string.len > 0) break :blk value.string;
+            }
+        }
+        break :blk "Model load failed";
+    };
+
+    // Report it like any failed response so the chat error shows the reason.
+    if (self.inner.http_observer) |obs| {
+        if (obs.onResponse) |on_response| {
+            const failure_body = try std.json.Stringify.valueAlloc(allocator, .{ .@"error" = .{ .message = detail } }, .{});
+            defer allocator.free(failure_body);
+            on_response(obs.ctx, .POST, url, @enumFromInt(status_code), &.{}, failure_body, 0);
+        }
+    }
+    return error.ResponseError;
 }
 
 test "chatStreaming loads the requested model before streaming" {
@@ -97,6 +138,61 @@ test "chatStreaming loads a model once and again only when the model changes" {
     try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(2));
     try std.testing.expectEqualStrings("/api/inference/load", ctx.path(3));
     try std.testing.expectEqualStrings("{\"model_path\":\"model-b\"}", ctx.body(3));
+}
+
+test "chatStreaming stops and retries the load after a failed load" {
+    const ctx = try SequenceServer.start(&.{
+        .{ .status = .not_found, .body = "{\"detail\":\"Model not found\"}" },
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+
+    var events: EventCounter = .{};
+    try std.testing.expectError(error.ResponseError, chatStreaming(&c, chatRequest("missing"), events.callback()));
+    try std.testing.expectEqual(@as(usize, 1), ctx.request_count);
+
+    try chatStreaming(&c, chatRequest("missing"), events.callback());
+    try std.testing.expectEqualStrings("/api/inference/load", ctx.path(1));
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(2));
+}
+
+test "chatStreaming reports a load failure that arrives inside a 200 response" {
+    // Slow loads commit 200 early and pad the body, so a late failure is
+    // carried in the JSON instead of the status line.
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "   \n{\"_deferred_error\":{\"status_code\":507,\"detail\":\"Not enough GPU memory\"}}" },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+    var capture = client.HttpFailureCapture.init(&c.inner);
+    defer capture.deinit();
+    c.inner.http_observer = capture.observer();
+
+    var events: EventCounter = .{};
+    try std.testing.expectError(error.ResponseError, chatStreaming(&c, chatRequest("too-big"), events.callback()));
+    try capture.commit(&c.inner);
+
+    const failure = c.inner.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(@as(u10, 507), @intFromEnum(failure.status));
+    try std.testing.expect(std.mem.indexOf(u8, failure.body, "Not enough GPU memory") != null);
+    try std.testing.expectEqual(@as(usize, 1), ctx.request_count);
+}
+
+test "chatStreaming rejects a load response that ends before completion" {
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "    " },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+
+    var events: EventCounter = .{};
+    try std.testing.expectError(error.UnslothModelLoadIncomplete, chatStreaming(&c, chatRequest("model-a"), events.callback()));
+    try std.testing.expectEqual(@as(usize, 1), ctx.request_count);
 }
 
 // Test helpers
