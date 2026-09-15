@@ -23,6 +23,7 @@ test "providerSlot keeps registry aligned with provider enum" {
     try std.testing.expectEqual(@as(usize, 3), providerSlot(.copilot));
     try std.testing.expectEqual(@as(usize, 4), providerSlot(.unsloth));
     try std.testing.expectEqual(@as(usize, 5), providerSlot(.ollama));
+    try std.testing.expectEqual(@as(usize, 6), providerSlot(.ollama_cloud));
 }
 
 test "default config points unsloth at the local Unsloth Studio server" {
@@ -33,6 +34,11 @@ test "default config points unsloth at the local Unsloth Studio server" {
 test "default config points ollama at the local Ollama server" {
     const cfg = Config.default();
     try std.testing.expectEqualStrings("http://127.0.0.1:11434", cfg.providerEntryConst(.ollama).url);
+}
+
+test "default config points ollama_cloud at ollama.com" {
+    const cfg = Config.default();
+    try std.testing.expectEqualStrings("https://ollama.com", cfg.providerEntryConst(.ollama_cloud).url);
 }
 
 test "provider JSON parsing ignores internal retention fields" {
@@ -144,7 +150,7 @@ test "configPath errors without a config dir" {
 
 test "default config names each provider slot consistently" {
     const cfg = Config.default();
-    inline for (.{ .lmstudio, .opencode_zen, .opencode_go, .copilot, .unsloth, .ollama }) |kind| {
+    inline for (.{ .lmstudio, .opencode_zen, .opencode_go, .copilot, .unsloth, .ollama, .ollama_cloud }) |kind| {
         try std.testing.expectEqual(kind, cfg.providerEntryConst(kind).name);
         try std.testing.expect(cfg.providerEntryConst(kind).url.len > 0);
         try std.testing.expect(cfg.providerEntryConst(kind).apiKey == null);

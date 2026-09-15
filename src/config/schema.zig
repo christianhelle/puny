@@ -4,6 +4,7 @@ const provider = @import("../providers/provider.zig");
 const opencode_zen = @import("../providers/opencode_zen.zig");
 const opencode_go = @import("../providers/opencode_go.zig");
 const copilot = @import("../providers/copilot.zig");
+const ollama_cloud = @import("../providers/ollama_cloud.zig");
 
 pub fn isValidUtf8(s: []const u8) bool {
     var i: usize = 0;
@@ -192,6 +193,7 @@ pub fn providerSlot(kind: provider.ModelProvider) usize {
         .copilot => 3,
         .unsloth => 4,
         .ollama => 5,
+        .ollama_cloud => 6,
         .mock => unreachable,
     };
 }
@@ -209,6 +211,7 @@ pub const Config = struct {
         .{ .name = .copilot, .url = copilot.default_base_url, .apiKey = null, .model = "" },
         .{ .name = .unsloth, .url = default_unsloth_url, .apiKey = null, .model = "" },
         .{ .name = .ollama, .url = default_ollama_url, .apiKey = null, .model = "" },
+        .{ .name = .ollama_cloud, .url = ollama_cloud.default_base_url, .apiKey = null, .model = "" },
     },
 
     pub fn default() Config {

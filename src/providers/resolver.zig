@@ -137,6 +137,11 @@ fn createClient(
             c.withBaseUrl(url);
             return .{ .ollama = c };
         },
+        .ollama_cloud => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .ollama_cloud = c };
+        },
         .mock => {
             return .{ .mock = mock.MockClient.init(arena, io) };
         },
@@ -427,6 +432,14 @@ test "createProvider builds each provider type" {
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).ollama);
         try std.testing.expectEqualStrings("http://ollama", prov.ollama.base_url);
         try std.testing.expectEqualStrings("", prov.ollama.api_key);
+    }
+
+    {
+        var prov = createProvider(false, .ollama_cloud, "http://ollama-cloud", "ollama-key-7", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).ollama_cloud);
+        try std.testing.expectEqualStrings("http://ollama-cloud", prov.ollama_cloud.base_url);
+        try std.testing.expectEqualStrings("ollama-key-7", prov.ollama_cloud.api_key);
     }
 }
 
