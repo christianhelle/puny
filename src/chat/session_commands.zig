@@ -191,6 +191,22 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (result.cancelled) return;
     if (!result.changed) return;
 
+    try commitReconfigure(ctx, old_provider_name);
+}
+
+/// Saves a /config change, but keeps the previous provider selected when the
+/// newly picked one needs an API key that is not set, so the saved config does
+/// not fail at the next startup.
+fn commitReconfigure(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
+    const candidate = ctx.cfg.provider;
+    if (candidate != old_provider_name) {
+        const candidate_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, candidate, ctx.init.environ_map.get("PUNY_API_KEY"));
+        if (resolver.missingRequiredApiKey(ctx.parsed.mock, candidate, candidate_key)) {
+            try printMissingApiKey(ctx.stdout_writer, candidate);
+            ctx.cfg.provider = old_provider_name;
+        }
+    }
+
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
     try applyReconfiguredProvider(ctx, old_provider_name);
 }
@@ -595,6 +611,37 @@ test "applyReconfiguredProvider does not switch to a key-gated provider without 
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
     try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
+}
+
+test "commitReconfigure keeps the previous provider when the picked one lacks a required key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    // /config just picked OpenCode Go but the API key prompt was skipped.
+    cfg.provider = .opencode_go;
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // Without a config dir the save fails, so the test observes what would
+    // have been persisted without writing anything.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try std.testing.expectError(error.NoConfigDir, commitReconfigure(&ctx, .lmstudio));
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
 }
 
 test "handleSwitchEffortCommand warns on stderr when the config cannot be saved" {
