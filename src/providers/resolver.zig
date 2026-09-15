@@ -8,6 +8,7 @@ const opencode_zen = @import("opencode_zen.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const unsloth = @import("unsloth.zig");
+const ollama_cloud = @import("ollama_cloud.zig");
 
 const ModelProvider = provider.ModelProvider;
 
@@ -60,6 +61,7 @@ pub fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
     return selectedProvider == .opencode_zen or
         selectedProvider == .opencode_go or
         selectedProvider == .copilot or
+        selectedProvider == .ollama_cloud or
         selectedProvider == .mock;
 }
 
@@ -69,6 +71,7 @@ pub fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .copilot) return copilot.default_base_url;
     if (selectedProvider == .unsloth) return config.default_unsloth_url;
     if (selectedProvider == .ollama) return config.default_ollama_url;
+    if (selectedProvider == .ollama_cloud) return ollama_cloud.default_base_url;
     if (selectedProvider == .mock) return "-";
     return config.default_lm_studio_url;
 }
@@ -311,6 +314,16 @@ test "baseUrlFor resolves ollama urls from CLI, config, then its own default" {
 test "ollama url is configurable and defaults to the local server" {
     try std.testing.expect(!providerHasFixedUrl(.ollama));
     try std.testing.expectEqualStrings("http://127.0.0.1:11434", defaultProviderUrl(.ollama));
+}
+
+test "ollama_cloud url is fixed at ollama.com" {
+    try std.testing.expect(providerHasFixedUrl(.ollama_cloud));
+    try std.testing.expectEqualStrings(ollama_cloud.default_base_url, defaultProviderUrl(.ollama_cloud));
+
+    var cfg = config.Config{};
+    cfg.providerEntry(.ollama_cloud).url = "http://stale.example";
+    const parsed = cli.Options{ .url = "http://cli.example" };
+    try std.testing.expectEqualStrings("https://ollama.com", baseUrlFor(.ollama_cloud, parsed, cfg));
 }
 
 test "missingRequiredApiKey flags key-gated providers without a key" {
