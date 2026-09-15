@@ -543,8 +543,8 @@ test "switchProvider keeps the configured url of the provider it switches to" {
     var reasoning_effort: ?openai.ReasoningEffort = null;
     var model_provider: ModelProvider = .lmstudio;
     var cfg = config.Config.default();
+    // Unsloth needs no API key, so the switch proceeds without one.
     cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
-    cfg.providerEntry(.unsloth).apiKey = "sk-unsloth-key";
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);

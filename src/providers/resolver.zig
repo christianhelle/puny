@@ -52,8 +52,7 @@ pub fn resolveApiKey(
 pub fn missingRequiredApiKey(is_mock: bool, selected_provider: ModelProvider, api_key: []const u8) bool {
     if (is_mock or api_key.len > 0) return false;
     return selected_provider == .opencode_zen or
-        selected_provider == .opencode_go or
-        selected_provider == .unsloth;
+        selected_provider == .opencode_go;
 }
 
 pub fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
@@ -286,13 +285,13 @@ test "baseUrlFor resolves unsloth urls from CLI, config, then its own default" {
 }
 
 test "missingRequiredApiKey flags key-gated providers without a key" {
-    try std.testing.expect(missingRequiredApiKey(false, .unsloth, ""));
     try std.testing.expect(missingRequiredApiKey(false, .opencode_zen, ""));
     try std.testing.expect(missingRequiredApiKey(false, .opencode_go, ""));
-    try std.testing.expect(!missingRequiredApiKey(false, .unsloth, "sk-unsloth-key"));
+    try std.testing.expect(!missingRequiredApiKey(false, .opencode_go, "sk-go-key"));
     try std.testing.expect(!missingRequiredApiKey(false, .lmstudio, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .unsloth, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .copilot, ""));
-    try std.testing.expect(!missingRequiredApiKey(true, .unsloth, ""));
+    try std.testing.expect(!missingRequiredApiKey(true, .opencode_go, ""));
 }
 
 test "unsloth url is configurable and defaults to the local server" {
