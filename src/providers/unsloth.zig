@@ -1,0 +1,163 @@
+const std = @import("std");
+const client = @import("client.zig");
+const openai = @import("openai.zig");
+
+// Unsloth Studio serves one loaded model and, unless "Switch model by request"
+// is enabled in its settings, answers chat requests for anything else with
+// "No model loaded". So load the requested model through its inference API
+// before streaming, the same way Unsloth's own CLI does.
+
+pub const Client = struct {
+    inner: client.Client,
+
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8) Client {
+        return .{ .inner = client.Client.init(allocator, io, api_key) };
+    }
+
+    pub fn deinit(self: *Client) void {
+        self.inner.deinit();
+    }
+
+    pub fn withBaseUrl(self: *Client, base_url: []const u8) void {
+        self.inner.withBaseUrl(base_url);
+    }
+};
+
+pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    try loadModel(self, request.model);
+    return openai.chatStreaming(&self.inner, request, callback);
+}
+
+fn loadModel(self: *Client, model: []const u8) !void {
+    const allocator = self.inner.allocator;
+    const url = try std.fmt.allocPrint(allocator, "{s}/api/inference/load", .{std.mem.trimEnd(u8, self.inner.base_url, "/")});
+    defer allocator.free(url);
+    const payload = try std.json.Stringify.valueAlloc(allocator, .{ .model_path = model }, .{});
+    defer allocator.free(payload);
+
+    var raw = try client.requestRaw(&self.inner, .POST, url, payload);
+    defer raw.deinit();
+    if (raw.status.class() != .success) return error.ResponseError;
+}
+
+test "chatStreaming loads the requested model before streaming" {
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "{\"status\":\"loaded\",\"model\":\"unsloth/Qwen3-8B-GGUF\"}" },
+        .{ .body = stop_stream },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+
+    var events: EventCounter = .{};
+    try chatStreaming(&c, chatRequest("unsloth/Qwen3-8B-GGUF"), events.callback());
+
+    try std.testing.expectEqual(@as(usize, 2), ctx.request_count);
+    try std.testing.expectEqualStrings("/api/inference/load", ctx.path(0));
+    try std.testing.expectEqualStrings("{\"model_path\":\"unsloth/Qwen3-8B-GGUF\"}", ctx.body(0));
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(1));
+    try std.testing.expect(events.count > 0);
+}
+
+// Test helpers
+
+const stop_stream =
+    "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n" ++
+    "data: [DONE]\n\n";
+
+fn chatRequest(model: []const u8) openai.ChatRequest {
+    return .{ .model = model, .messages = &.{.{ .user = "hi" }}, .tools = &.{} };
+}
+
+fn testClient(ctx: *SequenceServer) !Client {
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    const url = try std.fmt.bufPrint(&ctx.url_buf, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    c.withBaseUrl(url);
+    return c;
+}
+
+const EventCounter = struct {
+    count: usize = 0,
+
+    fn callback(self: *EventCounter) openai.StreamCallback {
+        return .{ .context = self, .vtable = &.{ .event = event, .reset = null } };
+    }
+
+    fn event(context: *anyopaque, _: openai.StreamEvent) anyerror!void {
+        const self: *EventCounter = @ptrCast(@alignCast(context));
+        self.count += 1;
+    }
+};
+
+/// Answers requests in order with canned responses, recording each request's
+/// path and body. Handles several requests on one kept-alive connection.
+const SequenceServer = struct {
+    const Response = struct {
+        status: std.http.Status = .ok,
+        body: []const u8,
+    };
+    const max_requests = 8;
+
+    io: std.Io,
+    server: std.Io.net.Server,
+    responses: []const Response,
+    thread: std.Thread = undefined,
+    request_count: usize = 0,
+    paths: [max_requests]std.ArrayList(u8) = @splat(.empty),
+    bodies: [max_requests]std.ArrayList(u8) = @splat(.empty),
+    url_buf: [64]u8 = undefined,
+
+    fn start(responses: []const Response) !*SequenceServer {
+        const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+        const server = try std.Io.net.IpAddress.listen(&address, std.testing.io, .{});
+        const ctx = try std.testing.allocator.create(SequenceServer);
+        errdefer std.testing.allocator.destroy(ctx);
+        ctx.* = .{ .io = std.testing.io, .server = server, .responses = responses };
+        errdefer ctx.server.deinit(std.testing.io);
+        ctx.thread = try std.Thread.spawn(.{}, serve, .{ctx});
+        return ctx;
+    }
+
+    fn stop(ctx: *SequenceServer) void {
+        ctx.server.deinit(std.testing.io);
+        ctx.thread.join();
+        for (&ctx.paths, &ctx.bodies) |*p, *b| {
+            p.deinit(std.testing.allocator);
+            b.deinit(std.testing.allocator);
+        }
+        std.testing.allocator.destroy(ctx);
+    }
+
+    fn path(ctx: *SequenceServer, index: usize) []const u8 {
+        return ctx.paths[index].items;
+    }
+
+    fn body(ctx: *SequenceServer, index: usize) []const u8 {
+        return ctx.bodies[index].items;
+    }
+
+    fn serve(ctx: *SequenceServer) void {
+        while (ctx.request_count < ctx.responses.len) {
+            var stream = ctx.server.accept(ctx.io) catch return;
+            defer stream.close(ctx.io);
+            var in_buf: [4096]u8 = undefined;
+            var out_buf: [4096]u8 = undefined;
+            var reader = stream.reader(ctx.io, &in_buf);
+            var writer = stream.writer(ctx.io, &out_buf);
+            var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+            while (ctx.request_count < ctx.responses.len) {
+                var request = http_server.receiveHead() catch break;
+                const index = ctx.request_count;
+                ctx.paths[index].appendSlice(std.testing.allocator, request.head.target) catch return;
+                var body_buf: [4096]u8 = undefined;
+                const body_reader = request.readerExpectNone(&body_buf);
+                const request_body = body_reader.allocRemaining(std.testing.allocator, .limited(1 << 16)) catch return;
+                defer std.testing.allocator.free(request_body);
+                ctx.bodies[index].appendSlice(std.testing.allocator, request_body) catch return;
+                ctx.request_count += 1;
+                const response = ctx.responses[index];
+                request.respond(response.body, .{ .status = response.status }) catch return;
+            }
+        }
+    }
+};

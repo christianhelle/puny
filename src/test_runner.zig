@@ -146,6 +146,9 @@ test "include providers.message tests" {
 test "include providers.opencode_go tests" {
     _ = @import("providers/opencode_go.zig");
 }
+test "include providers.unsloth tests" {
+    _ = @import("providers/unsloth.zig");
+}
 test "include providers.opencode_zen tests" {
     _ = @import("providers/opencode_zen.zig");
 }
