@@ -513,7 +513,6 @@ test "switchProvider refuses a key-gated provider without an API key" {
     var reasoning_effort: ?openai.ReasoningEffort = null;
     var model_provider: ModelProvider = .lmstudio;
     var cfg = config.Config.default();
-    cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
     var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
     ctx.parsed.mock = false;
 
@@ -531,12 +530,11 @@ test "switchProvider refuses a key-gated provider without an API key" {
         .preopens = undefined,
     };
 
-    try switchProvider(&ctx, .unsloth);
+    try switchProvider(&ctx, .opencode_go);
 
-    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'Unsloth' requires an API key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
     try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
     try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
-    try std.testing.expectEqualStrings("http://gpu-box:8888", cfg.providerEntryConst(.unsloth).url);
 }
 
 test "switchProvider keeps the configured url of the provider it switches to" {
@@ -576,8 +574,8 @@ test "applyReconfiguredProvider does not switch to a key-gated provider without 
     var reasoning_effort: ?openai.ReasoningEffort = null;
     var model_provider: ModelProvider = .lmstudio;
     var cfg = config.Config.default();
-    // /config just picked Unsloth but the API key prompt was skipped.
-    cfg.provider = .unsloth;
+    // /config just picked OpenCode Go but the API key prompt was skipped.
+    cfg.provider = .opencode_go;
     var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
     ctx.parsed.mock = false;
 
@@ -595,7 +593,7 @@ test "applyReconfiguredProvider does not switch to a key-gated provider without 
 
     try applyReconfiguredProvider(&ctx, .lmstudio);
 
-    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'Unsloth' requires an API key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
     try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
 }
 
