@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add Unsloth Studio as a model provider ([#205](https://github.com/christianhelle/puny/pull/205)) ([@christianhelle](https://github.com/christianhelle/))
 - Embed the application icon in Windows executables ([#206](https://github.com/christianhelle/puny/pull/206)) ([@christianhelle](https://github.com/christianhelle/))
 - Recover the conversation after a failed turn ([#202](https://github.com/christianhelle/puny/pull/202)) ([@christianhelle](https://github.com/christianhelle/))
 - Run council members in parallel by default ([#204](https://github.com/christianhelle/puny/pull/204)) ([@christianhelle](https://github.com/christianhelle/))
