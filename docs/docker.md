@@ -77,6 +77,37 @@ docker run --rm -it \
 If your Unsloth server requires an API key, add `--env PUNY_API_KEY` to pass it
 through from the host shell.
 
+## Ollama
+
+The image defaults the Ollama URL to `http://host.docker.internal:11434`, so an
+Ollama server on the Docker host needs no `--url` on Docker Desktop:
+
+```bash
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  christianhelle/puny:latest --provider ollama
+```
+
+Ollama listens only on `127.0.0.1` by default. If the container cannot reach
+it (for example on a Linux host), start Ollama with `OLLAMA_HOST=0.0.0.0` and
+pass the host's address with `--url`.
+
+## Ollama Cloud
+
+Set `OLLAMA_API_KEY` (or `PUNY_API_KEY`) in the host shell, then pass it
+through:
+
+```bash
+docker run --rm -it \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  --env OLLAMA_API_KEY \
+  christianhelle/puny:latest --provider ollama_cloud
+```
+
 ## OpenCode Zen
 
 Set `PUNY_API_KEY` in the host shell, then pass it through without placing the
