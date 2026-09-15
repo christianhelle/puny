@@ -131,6 +131,11 @@ fn createClient(
             c.withBaseUrl(url);
             return .{ .unsloth = c };
         },
+        .ollama => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .ollama = c };
+        },
         .mock => {
             return .{ .mock = mock.MockClient.init(arena, io) };
         },
@@ -396,6 +401,14 @@ test "createProvider builds each provider type" {
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).unsloth);
         try std.testing.expectEqualStrings("http://unsloth", prov.unsloth.inner.base_url);
         try std.testing.expectEqualStrings("sk-unsloth-5", prov.unsloth.inner.api_key);
+    }
+
+    {
+        var prov = createProvider(false, .ollama, "http://ollama", "", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).ollama);
+        try std.testing.expectEqualStrings("http://ollama", prov.ollama.base_url);
+        try std.testing.expectEqualStrings("", prov.ollama.api_key);
     }
 }
 
