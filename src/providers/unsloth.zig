@@ -38,8 +38,30 @@ pub const Client = struct {
 };
 
 pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    const was_loaded = if (self.loaded_model) |loaded| std.mem.eql(u8, loaded, request.model) else false;
     try ensureModelLoaded(self, request.model);
-    return openai.chatStreaming(&self.inner, request, callback);
+    if (!was_loaded) return openai.chatStreaming(&self.inner, request, callback);
+
+    // Unsloth may have unloaded the model since (idle timeout, or the UI), so
+    // watch for its "No model loaded" reply and load it again once.
+    var capture = client.HttpFailureCapture.init(&self.inner);
+    defer capture.deinit();
+    const original_observer = self.inner.http_observer;
+    self.inner.http_observer = capture.observer();
+    defer self.inner.http_observer = original_observer;
+
+    openai.chatStreaming(&self.inner, request, callback) catch |err| {
+        if (err != error.ResponseError or !isNoModelLoaded(capture.failure)) return err;
+        self.inner.http_observer = original_observer;
+        self.forgetLoadedModel();
+        try ensureModelLoaded(self, request.model);
+        return openai.chatStreaming(&self.inner, request, callback);
+    };
+}
+
+fn isNoModelLoaded(failure: ?client.HttpFailure) bool {
+    const f = failure orelse return false;
+    return f.status == .bad_request and std.mem.indexOf(u8, f.body, "No model loaded") != null;
 }
 
 fn ensureModelLoaded(self: *Client, model: []const u8) !void {
@@ -239,6 +261,44 @@ test "setConfig with a base url loads the model again on the next chat" {
 
     try std.testing.expectEqual(@as(usize, 4), ctx.request_count);
     try std.testing.expectEqualStrings("/api/inference/load", ctx.path(2));
+}
+
+test "chatStreaming reloads and retries once when Unsloth unloaded the model" {
+    const no_model = "{\"error\":{\"message\":\"No model loaded. Call POST /inference/load first\"}}";
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+        // Unsloth unloaded the model (idle timeout or the UI) between turns.
+        .{ .status = .bad_request, .body = no_model },
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+
+    var events: EventCounter = .{};
+    try chatStreaming(&c, chatRequest("model-a"), events.callback());
+    try chatStreaming(&c, chatRequest("model-a"), events.callback());
+
+    try std.testing.expectEqual(@as(usize, 5), ctx.request_count);
+    try std.testing.expectEqualStrings("/api/inference/load", ctx.path(3));
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(4));
+}
+
+test "chatStreaming does not retry a no-model error right after loading" {
+    const no_model = "{\"error\":{\"message\":\"No model loaded. Call POST /inference/load first\"}}";
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .status = .bad_request, .body = no_model },
+    });
+    defer ctx.stop();
+    var c = try testClient(ctx);
+    defer c.deinit();
+
+    var events: EventCounter = .{};
+    try std.testing.expectError(error.ResponseError, chatStreaming(&c, chatRequest("model-a"), events.callback()));
+    try std.testing.expectEqual(@as(usize, 2), ctx.request_count);
 }
 
 // Test helpers
