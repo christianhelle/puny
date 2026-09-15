@@ -7,6 +7,7 @@ const mock = @import("mock.zig");
 const opencode_zen = @import("opencode_zen.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
+const unsloth = @import("unsloth.zig");
 
 const ModelProvider = provider.ModelProvider;
 
@@ -22,7 +23,7 @@ pub fn baseUrlFor(model_provider: ModelProvider, parsed: cli.Options, cfg: confi
     if (parsed.url) |url| return url;
     const entry = cfg.providerEntryConst(model_provider);
     if (entry.url.len > 0) return entry.url;
-    return config.default_lm_studio_url;
+    return defaultProviderUrl(model_provider);
 }
 
 pub fn resolveApiKey(
@@ -47,6 +48,14 @@ pub fn resolveApiKey(
     return cfg.providerEntryConst(effective_provider).apiKey orelse "";
 }
 
+/// True when a real (non-mock) provider that needs an API key has none, so
+/// callers can stop with a hint instead of sending unauthenticated requests.
+pub fn missingRequiredApiKey(is_mock: bool, selected_provider: ModelProvider, api_key: []const u8) bool {
+    if (is_mock or api_key.len > 0) return false;
+    return selected_provider == .opencode_zen or
+        selected_provider == .opencode_go;
+}
+
 pub fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
     return selectedProvider == .opencode_zen or
         selectedProvider == .opencode_go or
@@ -58,6 +67,7 @@ pub fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .opencode_zen) return opencode_zen.default_base_url;
     if (selectedProvider == .opencode_go) return opencode_go.default_base_url;
     if (selectedProvider == .copilot) return copilot.default_base_url;
+    if (selectedProvider == .unsloth) return config.default_unsloth_url;
     if (selectedProvider == .mock) return "-";
     return config.default_lm_studio_url;
 }
@@ -115,6 +125,11 @@ fn createClient(
             var c = copilot.Client.init(arena, io, api_key);
             c.withBaseUrl(url);
             return .{ .copilot = c };
+        },
+        .unsloth => {
+            var c = unsloth.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .unsloth = c };
         },
         .mock => {
             return .{ .mock = mock.MockClient.init(arena, io) };
@@ -258,6 +273,33 @@ test "baseUrlFor returns provider defaults" {
     try std.testing.expectEqualStrings("-", baseUrlFor(.mock, .{}, cfg));
 }
 
+test "baseUrlFor resolves unsloth urls from CLI, config, then its own default" {
+    var cfg = config.Config{};
+    try std.testing.expectEqualStrings("http://127.0.0.1:8888", baseUrlFor(.unsloth, .{}, cfg));
+
+    cfg.providerEntry(.unsloth).url = "";
+    try std.testing.expectEqualStrings("http://127.0.0.1:8888", baseUrlFor(.unsloth, .{}, cfg));
+
+    cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
+    try std.testing.expectEqualStrings("http://gpu-box:8888", baseUrlFor(.unsloth, .{}, cfg));
+    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.unsloth, .{ .url = "http://cli.example" }, cfg));
+}
+
+test "missingRequiredApiKey flags key-gated providers without a key" {
+    try std.testing.expect(missingRequiredApiKey(false, .opencode_zen, ""));
+    try std.testing.expect(missingRequiredApiKey(false, .opencode_go, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .opencode_go, "sk-go-key"));
+    try std.testing.expect(!missingRequiredApiKey(false, .lmstudio, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .unsloth, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .copilot, ""));
+    try std.testing.expect(!missingRequiredApiKey(true, .opencode_go, ""));
+}
+
+test "unsloth url is configurable and defaults to the local server" {
+    try std.testing.expect(!providerHasFixedUrl(.unsloth));
+    try std.testing.expectEqualStrings("http://127.0.0.1:8888", defaultProviderUrl(.unsloth));
+}
+
 test "defaultProviderUrl returns provider-specific defaults" {
     try std.testing.expectEqualStrings(config.default_lm_studio_url, defaultProviderUrl(.lmstudio));
     try std.testing.expectEqualStrings(opencode_zen.default_base_url, defaultProviderUrl(.opencode_zen));
@@ -346,6 +388,14 @@ test "createProvider builds each provider type" {
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).copilot);
         try std.testing.expectEqualStrings("http://copilot", prov.copilot.inner.base_url);
         try std.testing.expectEqualStrings("key-4", prov.copilot.github_token);
+    }
+
+    {
+        var prov = createProvider(false, .unsloth, "http://unsloth", "sk-unsloth-5", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).unsloth);
+        try std.testing.expectEqualStrings("http://unsloth", prov.unsloth.inner.base_url);
+        try std.testing.expectEqualStrings("sk-unsloth-5", prov.unsloth.inner.api_key);
     }
 }
 

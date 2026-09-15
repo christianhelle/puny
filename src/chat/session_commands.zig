@@ -105,6 +105,10 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
         break :blk picked;
     };
 
+    try switchProvider(ctx, picked_provider);
+}
+
+fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     const current_provider = ctx.model_provider.*;
     if (picked_provider == current_provider) {
         try ctx.stdout_writer.print("\nAlready using provider {s}.\n", .{provider.getProviderDisplayName(picked_provider)});
@@ -112,13 +116,23 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
         return;
     }
 
-    ctx.cfg.provider = picked_provider;
-    const new_provider_url = resolver.defaultProviderUrl(picked_provider);
-    ctx.cfg.providerEntry(picked_provider).url = try ctx.arena.dupe(u8, new_provider_url);
-
-    try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
-
     const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
+    if (resolver.missingRequiredApiKey(ctx.parsed.mock, picked_provider, new_api_key)) {
+        try printMissingApiKey(ctx.stdout_writer, picked_provider);
+        return;
+    }
+
+    ctx.cfg.provider = picked_provider;
+    // The startup --url targeted the previous provider, so only the picked
+    // provider's configured url (or its default) applies here.
+    const new_provider_url = resolver.baseUrlFor(picked_provider, .{}, ctx.cfg.*);
+
+    config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map) catch |err| {
+        // The live provider stays as it was, so the configured one must too.
+        ctx.cfg.provider = current_provider;
+        return err;
+    };
+
     ctx.prov.deinit();
     ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
     if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
@@ -161,6 +175,14 @@ pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const 
     try ctx.stdout_writer.flush();
 }
 
+fn printMissingApiKey(stdout_writer: *std.Io.Writer, selected_provider: ModelProvider) !void {
+    try stdout_writer.print(
+        "\nProvider '{s}' requires an API key. Set one with /config or PUNY_API_KEY.\n",
+        .{provider.getProviderDisplayName(selected_provider)},
+    );
+    try stdout_writer.flush();
+}
+
 pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (ctx.parsed.oneshot) {
         try ctx.stdout_writer.print("\n/config not available in oneshot mode.\n", .{});
@@ -173,10 +195,35 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
     if (result.cancelled) return;
     if (!result.changed) return;
 
+    try commitReconfigure(ctx, old_provider_name);
+}
+
+/// Saves a /config change, but keeps the previous provider selected when the
+/// newly picked one needs an API key that is not set, so the saved config does
+/// not fail at the next startup.
+fn commitReconfigure(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
+    const candidate = ctx.cfg.provider;
+    if (candidate != old_provider_name) {
+        const candidate_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, candidate, ctx.init.environ_map.get("PUNY_API_KEY"));
+        if (resolver.missingRequiredApiKey(ctx.parsed.mock, candidate, candidate_key)) {
+            try printMissingApiKey(ctx.stdout_writer, candidate);
+            ctx.cfg.provider = old_provider_name;
+        }
+    }
+
     try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
+    try applyReconfiguredProvider(ctx, old_provider_name);
+}
+
+/// Applies a saved /config change to the running session.
+fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
     const new_provider_name = ctx.cfg.provider;
     const new_provider_url = if (ctx.parsed.mock) "-" else resolver.baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
     const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
+    if (resolver.missingRequiredApiKey(ctx.parsed.mock, new_provider_name, new_api_key)) {
+        try printMissingApiKey(ctx.stdout_writer, new_provider_name);
+        return;
+    }
 
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         ctx.prov.deinit();
@@ -478,6 +525,130 @@ test "handleSwitchProviderCommand rejects unknown provider ids" {
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Unknown provider 'does-not-exist'") != null);
     try std.testing.expectEqual(ModelProvider.mock, model_provider);
+}
+
+test "switchProvider refuses a key-gated provider without an API key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // No PUNY_API_KEY and no stored key. Without HOME the config cannot be
+    // saved either, so reaching config.save would fail this test.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try switchProvider(&ctx, .opencode_go);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
+    try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+}
+
+test "switchProvider keeps the configured url of the provider it switches to" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    // Unsloth needs no API key, so the switch proceeds without one.
+    cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // Without a config dir the save fails, which stops the switch before it
+    // builds a client or opens the interactive model picker.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try std.testing.expectError(error.NoConfigDir, switchProvider(&ctx, .unsloth));
+    try std.testing.expectEqualStrings("http://gpu-box:8888", cfg.providerEntryConst(.unsloth).url);
+    // The live provider did not change, so neither may the configured one.
+    try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
+}
+
+test "applyReconfiguredProvider does not switch to a key-gated provider without a key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    // /config just picked OpenCode Go but the API key prompt was skipped.
+    cfg.provider = .opencode_go;
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try applyReconfiguredProvider(&ctx, .lmstudio);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
+}
+
+test "commitReconfigure keeps the previous provider when the picked one lacks a required key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    // /config just picked OpenCode Go but the API key prompt was skipped.
+    cfg.provider = .opencode_go;
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // Without a config dir the save fails, so the test observes what would
+    // have been persisted without writing anything.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try std.testing.expectError(error.NoConfigDir, commitReconfigure(&ctx, .lmstudio));
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
 }
 
 test "handleSwitchEffortCommand warns on stderr when the config cannot be saved" {

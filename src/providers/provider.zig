@@ -7,6 +7,7 @@ const anthropic = @import("anthropic.zig");
 const google = @import("google.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
+const unsloth = @import("unsloth.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const responses = @import("responses.zig");
@@ -17,6 +18,7 @@ pub const ModelProvider = enum {
     opencode_zen,
     opencode_go,
     copilot,
+    unsloth,
     mock,
 };
 
@@ -35,6 +37,7 @@ pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
         .opencode_zen => "OpenCode Zen",
         .opencode_go => "OpenCode Go",
         .copilot => "GitHub Copilot",
+        .unsloth => "Unsloth",
         .mock => "Mock",
     };
 }
@@ -44,6 +47,7 @@ pub const Provider = union(enum) {
     opencode: client.Client,
     opencode_go: client.Client,
     copilot: copilot.Client,
+    unsloth: unsloth.Client,
     mock: mock.MockClient,
 
     pub fn deinit(self: *Provider) void {
@@ -60,6 +64,10 @@ pub const Provider = union(enum) {
             },
             .opencode, .opencode_go => |*c| blk: {
                 var owned = try openai_shim.listModels(c);
+                break :blk try openai_shim.toSharedModels(&owned);
+            },
+            .unsloth => |*c| blk: {
+                var owned = try openai_shim.listModels(&c.inner);
                 break :blk try openai_shim.toSharedModels(&owned);
             },
             .copilot => |*c| blk: {
@@ -91,6 +99,7 @@ pub const Provider = union(enum) {
             else
                 chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
             .copilot => |*c| chatStreamingCopilotCaptured(c, request, callback),
+            .unsloth => |*c| chatStreamingUnslothCaptured(c, request, callback),
             .mock => |*c| c.chatStreaming(request, callback),
         };
     }
@@ -101,6 +110,7 @@ pub const Provider = union(enum) {
             .opencode => |*c| c.lastHttpFailure(),
             .opencode_go => |*c| c.lastHttpFailure(),
             .copilot => |*c| c.inner.lastHttpFailure(),
+            .unsloth => |*c| c.inner.lastHttpFailure(),
             .mock => null,
         };
     }
@@ -117,6 +127,7 @@ pub const Provider = union(enum) {
         switch (self.*) {
             .lmstudio, .opencode, .opencode_go => |*c| c.setConfig(config),
             .copilot => |*c| c.setConfig(config),
+            .unsloth => |*c| c.setConfig(config),
             .mock => |*c| c.setConfig(config),
         }
     }
@@ -159,6 +170,22 @@ fn chatStreamingCopilotCaptured(c: *copilot.Client, request: openai.ChatRequest,
     try capture.commit(&c.inner);
 }
 
+fn chatStreamingUnslothCaptured(c: *unsloth.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    c.inner.clearLastHttpFailure();
+    var capture = client.HttpFailureCapture.init(&c.inner);
+    defer capture.deinit();
+
+    const original_observer = c.inner.http_observer;
+    c.inner.http_observer = capture.observer();
+    defer c.inner.http_observer = original_observer;
+
+    unsloth.chatStreaming(c, request, callback) catch |err| {
+        try capture.commit(&c.inner);
+        return err;
+    };
+    try capture.commit(&c.inner);
+}
+
 /// Streams through the hand-written OpenAI-compatible transport. This
 /// intentionally routes LM Studio, OpenCode Zen/Go via the OpenAI-compatible
 /// `/v1/chat/completions` endpoint.
@@ -175,6 +202,7 @@ test "getProviderDisplayName maps known providers" {
     try std.testing.expectEqualStrings("OpenCode Zen", getProviderDisplayName(.opencode_zen));
     try std.testing.expectEqualStrings("OpenCode Go", getProviderDisplayName(.opencode_go));
     try std.testing.expectEqualStrings("GitHub Copilot", getProviderDisplayName(.copilot));
+    try std.testing.expectEqualStrings("Unsloth", getProviderDisplayName(.unsloth));
     try std.testing.expectEqualStrings("Mock", getProviderDisplayName(.mock));
 }
 
@@ -185,6 +213,7 @@ test "parseModelProvider accepts canonical names and legacy aliases" {
     try std.testing.expectEqual(.opencode_go, parseModelProvider("opencode_go").?);
     try std.testing.expectEqual(.opencode_go, parseModelProvider("opencode-go").?);
     try std.testing.expectEqual(.copilot, parseModelProvider("copilot").?);
+    try std.testing.expectEqual(.unsloth, parseModelProvider("unsloth").?);
     try std.testing.expect(parseModelProvider("mock") == null);
     try std.testing.expect(parseModelProvider("unknown") == null);
 }
@@ -455,6 +484,80 @@ test "Provider.listModels dispatches to the opencode-go provider" {
     var owned = try prov.listModels();
     defer owned.deinit();
     try expectModelIds(&owned, &.{"minimax-m3"});
+}
+
+test "Provider.listModels dispatches to the unsloth provider" {
+    const body =
+        \\{"object":"list","data":[{"id":"unsloth/Qwen3-8B-GGUF","object":"model","created":0,"owned_by":"unsloth"}]}
+    ;
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .unsloth = unsloth.Client.init(std.testing.allocator, std.testing.io, "sk-unsloth-test") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var owned = try prov.listModels();
+    defer owned.deinit();
+    try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
+    try expectModelIds(&owned, &.{"unsloth/Qwen3-8B-GGUF"});
+}
+
+test "Provider.chatStreaming loads the unsloth model and reports a late load failure" {
+    const body = "  \n{\"_deferred_error\":{\"status_code\":507,\"detail\":\"Not enough GPU memory\"}}";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .unsloth = unsloth.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "unsloth/Qwen3-8B-GGUF",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, rec.callback()));
+
+    try std.testing.expectEqualStrings("/api/inference/load", ctx.getRequestPath());
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(@as(u10, 507), @intFromEnum(failure.status));
+    try std.testing.expect(std.mem.indexOf(u8, failure.body, "Not enough GPU memory") != null);
+}
+
+test "Provider.chatStreaming preserves unsloth HTTP error details" {
+    const body = "{\"error\":{\"message\":\"Invalid API key\"}}";
+    const ctx = try startProviderTestServer(.unauthorized, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .unsloth = unsloth.Client.init(std.testing.allocator, std.testing.io, "sk-unsloth-wrong") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "unsloth/Qwen3-8B-GGUF",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, rec.callback()));
+
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(std.http.Status.unauthorized, failure.status);
+    try std.testing.expectEqualStrings(body, failure.body);
 }
 
 test "Provider.listModels dispatches to the copilot provider" {

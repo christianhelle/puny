@@ -3,6 +3,7 @@ const schema = @import("schema.zig");
 const persistence = @import("persistence.zig");
 
 pub const default_lm_studio_url = schema.default_lm_studio_url;
+pub const default_unsloth_url = schema.default_unsloth_url;
 pub const isValidUtf8 = schema.isValidUtf8;
 pub const PromptOverride = schema.PromptOverride;
 pub const PromptsConfig = schema.PromptsConfig;
@@ -19,6 +20,12 @@ test "providerSlot keeps registry aligned with provider enum" {
     try std.testing.expectEqual(@as(usize, 1), providerSlot(.opencode_zen));
     try std.testing.expectEqual(@as(usize, 2), providerSlot(.opencode_go));
     try std.testing.expectEqual(@as(usize, 3), providerSlot(.copilot));
+    try std.testing.expectEqual(@as(usize, 4), providerSlot(.unsloth));
+}
+
+test "default config points unsloth at the local Unsloth Studio server" {
+    const cfg = Config.default();
+    try std.testing.expectEqualStrings("http://127.0.0.1:8888", cfg.providerEntryConst(.unsloth).url);
 }
 
 test "provider JSON parsing ignores internal retention fields" {
@@ -130,7 +137,7 @@ test "configPath errors without a config dir" {
 
 test "default config names each provider slot consistently" {
     const cfg = Config.default();
-    inline for (.{ .lmstudio, .opencode_zen, .opencode_go, .copilot }) |kind| {
+    inline for (.{ .lmstudio, .opencode_zen, .opencode_go, .copilot, .unsloth }) |kind| {
         try std.testing.expectEqual(kind, cfg.providerEntryConst(kind).name);
         try std.testing.expect(cfg.providerEntryConst(kind).url.len > 0);
         try std.testing.expect(cfg.providerEntryConst(kind).apiKey == null);
