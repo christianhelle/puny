@@ -260,9 +260,8 @@
   {
     "name": "Invalid provider lists the Ollama providers",
     "args": ["--provider", "not_a_provider"],
-    "expect": [],
+    "expect": ["Expected one of: lmstudio, opencode_zen, opencode_go, copilot, unsloth, ollama, ollama_cloud.", "copilot, unsloth, ollama, or ollama_cloud"],
     "not_expect": [],
-    "expect_stderr": ["Expected one of: lmstudio, opencode_zen, opencode_go, copilot, unsloth, ollama, ollama_cloud.", "copilot, unsloth, ollama, or ollama_cloud"],
     "exit_code": 1
   },
   {
