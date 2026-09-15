@@ -186,7 +186,7 @@ zig build run
 
 ### Unsloth
 
-Start Unsloth Studio (for example with `unsloth run`) and load a model with
+Start Unsloth Studio (for example with `unsloth run`) and download a model with
 tool-calling support, then:
 
 ```bash
@@ -196,7 +196,11 @@ puny --provider unsloth
 Puny connects to `http://127.0.0.1:8888` by default
 (`http://host.docker.internal:8888` in the Docker image), lists models from
 `/v1/models`, and streams through the OpenAI-compatible
-`/v1/chat/completions` endpoint. If Unsloth listens on another port (for
+`/v1/chat/completions` endpoint. Unsloth serves one loaded model at a time, so
+before the first chat with a model Puny loads it through
+`POST /api/inference/load`, replacing whichever model Unsloth had loaded. The
+first reply can take a while as the model loads, and Puny loads it again if
+Unsloth has since unloaded it. If Unsloth listens on another port (for
 example after `unsloth run -p 9000`), pass `--url`:
 
 ```bash
