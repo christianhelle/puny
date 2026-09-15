@@ -127,7 +127,11 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     // provider's configured url (or its default) applies here.
     const new_provider_url = resolver.baseUrlFor(picked_provider, .{}, ctx.cfg.*);
 
-    try config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map);
+    config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map) catch |err| {
+        // The live provider stays as it was, so the configured one must too.
+        ctx.cfg.provider = current_provider;
+        return err;
+    };
 
     ctx.prov.deinit();
     ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
@@ -582,6 +586,9 @@ test "switchProvider keeps the configured url of the provider it switches to" {
 
     try std.testing.expectError(error.NoConfigDir, switchProvider(&ctx, .unsloth));
     try std.testing.expectEqualStrings("http://gpu-box:8888", cfg.providerEntryConst(.unsloth).url);
+    // The live provider did not change, so neither may the configured one.
+    try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
 }
 
 test "applyReconfiguredProvider does not switch to a key-gated provider without a key" {
