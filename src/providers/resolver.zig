@@ -68,6 +68,7 @@ pub fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .opencode_go) return opencode_go.default_base_url;
     if (selectedProvider == .copilot) return copilot.default_base_url;
     if (selectedProvider == .unsloth) return config.default_unsloth_url;
+    if (selectedProvider == .ollama) return config.default_ollama_url;
     if (selectedProvider == .mock) return "-";
     return config.default_lm_studio_url;
 }
@@ -288,6 +289,23 @@ test "baseUrlFor resolves unsloth urls from CLI, config, then its own default" {
     cfg.providerEntry(.unsloth).url = "http://gpu-box:8888";
     try std.testing.expectEqualStrings("http://gpu-box:8888", baseUrlFor(.unsloth, .{}, cfg));
     try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.unsloth, .{ .url = "http://cli.example" }, cfg));
+}
+
+test "baseUrlFor resolves ollama urls from CLI, config, then its own default" {
+    var cfg = config.Config{};
+    try std.testing.expectEqualStrings("http://127.0.0.1:11434", baseUrlFor(.ollama, .{}, cfg));
+
+    cfg.providerEntry(.ollama).url = "";
+    try std.testing.expectEqualStrings("http://127.0.0.1:11434", baseUrlFor(.ollama, .{}, cfg));
+
+    cfg.providerEntry(.ollama).url = "http://gpu-box:11434";
+    try std.testing.expectEqualStrings("http://gpu-box:11434", baseUrlFor(.ollama, .{}, cfg));
+    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.ollama, .{ .url = "http://cli.example" }, cfg));
+}
+
+test "ollama url is configurable and defaults to the local server" {
+    try std.testing.expect(!providerHasFixedUrl(.ollama));
+    try std.testing.expectEqualStrings("http://127.0.0.1:11434", defaultProviderUrl(.ollama));
 }
 
 test "missingRequiredApiKey flags key-gated providers without a key" {
