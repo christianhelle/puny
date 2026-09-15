@@ -47,7 +47,10 @@ fn ensureModelLoaded(self: *Client, model: []const u8) !void {
 
 fn loadModel(self: *Client, model: []const u8) !void {
     const allocator = self.inner.allocator;
-    const url = try std.fmt.allocPrint(allocator, "{s}/api/inference/load", .{std.mem.trimEnd(u8, self.inner.base_url, "/")});
+    // The inference API lives at the server root, beside the OpenAI-compatible /v1.
+    var root = std.mem.trimEnd(u8, self.inner.base_url, "/");
+    if (std.mem.endsWith(u8, root, "/v1")) root = root[0 .. root.len - "/v1".len];
+    const url = try std.fmt.allocPrint(allocator, "{s}/api/inference/load", .{root});
     defer allocator.free(url);
     const payload = try std.json.Stringify.valueAlloc(allocator, .{ .model_path = model }, .{});
     defer allocator.free(payload);
@@ -193,6 +196,23 @@ test "chatStreaming rejects a load response that ends before completion" {
     var events: EventCounter = .{};
     try std.testing.expectError(error.UnslothModelLoadIncomplete, chatStreaming(&c, chatRequest("model-a"), events.callback()));
     try std.testing.expectEqual(@as(usize, 1), ctx.request_count);
+}
+
+test "chatStreaming loads from the server root when the base url ends in /v1" {
+    const ctx = try SequenceServer.start(&.{
+        .{ .body = "{\"status\":\"loaded\"}" },
+        .{ .body = stop_stream },
+    });
+    defer ctx.stop();
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+    c.withBaseUrl(try std.fmt.bufPrint(&ctx.url_buf, "http://127.0.0.1:{d}/v1/", .{ctx.server.socket.address.getPort()}));
+
+    var events: EventCounter = .{};
+    try chatStreaming(&c, chatRequest("model-a"), events.callback());
+
+    try std.testing.expectEqualStrings("/api/inference/load", ctx.path(0));
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.path(1));
 }
 
 // Test helpers
