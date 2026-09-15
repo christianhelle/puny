@@ -7,3 +7,5 @@ opencode
 opencode_go
 copilot
 unsloth
+ollama
+ollama_cloud
