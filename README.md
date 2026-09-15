@@ -187,8 +187,7 @@ zig build run
 ### Unsloth
 
 Start Unsloth Studio (for example with `unsloth run`) and load a model with
-tool-calling support. Unsloth requires an API key (`sk-unsloth-…`) on every
-request, so set it in `PUNY_API_KEY` (or use `--api-key-file`), then:
+tool-calling support, then:
 
 ```bash
 puny --provider unsloth
@@ -204,7 +203,11 @@ example after `unsloth run -p 9000`), pass `--url`:
 puny --provider unsloth --url http://127.0.0.1:9000
 ```
 
-Unsloth serves plain HTTP, so the API key travels unencrypted. To reach
+No API key is needed. If your Unsloth server is set up to require one
+(`sk-unsloth-…`), set it in `PUNY_API_KEY` or use `--api-key-file`; Puny sends
+it as a `Bearer` token.
+
+Unsloth serves plain HTTP, so any API key travels unencrypted. To reach
 Unsloth on another machine, forward the port over SSH
 (`ssh -L 8888:127.0.0.1:8888 gpu-box`) or put it behind an HTTPS reverse
 proxy and pass that `https://` URL, rather than exposing it with `-H 0.0.0.0`.
@@ -527,7 +530,7 @@ Precedence is: `--api-key` > `--api-key-file` > `PUNY_API_KEY` > `config.json`.
 The `--api-key` flag is available for ephemeral use, but its value can appear
 in shell history and process listings; prefer the sources shown above.
 
-OpenCode Zen, OpenCode Go, and Unsloth require an API key. Puny exits early with a hint if the key is missing.
+OpenCode Zen and OpenCode Go require an API key. Puny exits early with a hint if the key is missing.
 
 GitHub Copilot does not need an API key up front — Puny discovers an existing GitHub
 OAuth token or runs a device-flow login on first use, then persists it. You can still
