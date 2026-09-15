@@ -612,8 +612,8 @@ fn initializeProviderAndModel(
         var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
         const stderr_writer = &stderr_file_writer.interface;
         stderr_writer.print(
-            "Provider '{s}' requires an API key. Set one with --api-key, PUNY_API_KEY, or --reconfigure.\n",
-            .{provider.getProviderDisplayName(selected_provider.*)},
+            "Provider '{s}' requires an API key. Set one with --api-key, {s}, or --reconfigure.\n",
+            .{ provider.getProviderDisplayName(selected_provider.*), resolver.apiKeyEnvNames(selected_provider.*) },
         ) catch {};
         stderr_writer.flush() catch {};
         return error.MissingApiKey;
