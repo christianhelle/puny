@@ -77,7 +77,7 @@ pub fn readLineWindows(
                     } else {
                         pending_high = null;
                         if (ch < 0x80) {
-                            if (ch == '@' and mention.isTrigger(editor.line_alloc.written())) {
+                            if (ch == '@' and editor.mentions_enabled and mention.isTrigger(editor.line_alloc.written())) {
                                 try mention.insertMention(allocator, io, editor);
                             } else {
                                 try editor.append(@intCast(ch));

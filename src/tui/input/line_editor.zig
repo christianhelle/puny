@@ -19,6 +19,9 @@ pub const LineEditor = struct {
     /// when the text ends exactly at the right edge, where a forced wrap
     /// leaves the cursor on a fresh continuation row.
     cursor_rows: usize,
+    /// When false, `@` is inserted literally instead of opening the file
+    /// picker, for plain prompts such as a URL or an API key.
+    mentions_enabled: bool = true,
 
     pub fn init(
         line_alloc: *std.Io.Writer.Allocating,
