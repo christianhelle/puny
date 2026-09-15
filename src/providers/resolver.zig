@@ -54,7 +54,8 @@ pub fn resolveApiKey(
 pub fn missingRequiredApiKey(is_mock: bool, selected_provider: ModelProvider, api_key: []const u8) bool {
     if (is_mock or api_key.len > 0) return false;
     return selected_provider == .opencode_zen or
-        selected_provider == .opencode_go;
+        selected_provider == .opencode_go or
+        selected_provider == .ollama_cloud;
 }
 
 pub fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
@@ -330,6 +331,9 @@ test "missingRequiredApiKey flags key-gated providers without a key" {
     try std.testing.expect(missingRequiredApiKey(false, .opencode_zen, ""));
     try std.testing.expect(missingRequiredApiKey(false, .opencode_go, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .opencode_go, "sk-go-key"));
+    try std.testing.expect(missingRequiredApiKey(false, .ollama_cloud, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .ollama_cloud, "ollama-key"));
+    try std.testing.expect(!missingRequiredApiKey(false, .ollama, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .lmstudio, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .unsloth, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .copilot, ""));
