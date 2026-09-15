@@ -49,6 +49,14 @@ pub fn resolveApiKey(
     return cfg.providerEntryConst(effective_provider).apiKey orelse "";
 }
 
+/// API key from the environment: PUNY_API_KEY, else the variable Ollama's own
+/// tooling uses for its cloud API.
+pub fn apiKeyEnv(environ_map: *const std.process.Environ.Map, selected_provider: ModelProvider) ?[]const u8 {
+    if (environ_map.get("PUNY_API_KEY")) |key| return key;
+    if (selected_provider == .ollama_cloud) return environ_map.get("OLLAMA_API_KEY");
+    return null;
+}
+
 /// True when a real (non-mock) provider that needs an API key has none, so
 /// callers can stop with a hint instead of sending unauthenticated requests.
 pub fn missingRequiredApiKey(is_mock: bool, selected_provider: ModelProvider, api_key: []const u8) bool {
@@ -197,6 +205,29 @@ test "createProvider returns mock for mock flag or provider name" {
     var by_name = createProvider(false, .mock, "-", "", allocator, std.testing.io, "");
     defer by_name.deinit();
     try std.testing.expectEqual(std.meta.activeTag(by_name), std.meta.Tag(provider.Provider).mock);
+}
+
+test "apiKeyEnv reads PUNY_API_KEY for every provider" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try std.testing.expect(apiKeyEnv(&env, .lmstudio) == null);
+
+    try env.put("PUNY_API_KEY", "puny-key");
+    try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .lmstudio).?);
+    try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .ollama_cloud).?);
+}
+
+test "apiKeyEnv falls back to OLLAMA_API_KEY only for ollama_cloud" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("OLLAMA_API_KEY", "ollama-key");
+
+    try std.testing.expectEqualStrings("ollama-key", apiKeyEnv(&env, .ollama_cloud).?);
+    try std.testing.expect(apiKeyEnv(&env, .ollama) == null);
+    try std.testing.expect(apiKeyEnv(&env, .opencode_go) == null);
+
+    try env.put("PUNY_API_KEY", "puny-key");
+    try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .ollama_cloud).?);
 }
 
 test "resolveApiKey uses CLI key over env and config" {
