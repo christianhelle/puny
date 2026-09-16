@@ -805,9 +805,13 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
     try ctx.stdout_writer.print("\n{s}Compacting conversation...{s}\n", .{ ansi.dim, ansi.reset });
     try ctx.stdout_writer.flush();
 
-    const alloc = ctx.messages_arena.allocator();
-    const request = try compact.buildSummaryRequest(alloc, ctx.messages.items[split.start..split.end]);
-    const outcome = try compact.summarize(ctx.prov, alloc, ctx.io, ctx.random, ctx.stdout_writer, ctx.session_stats, ctx.model_key.*, request);
+    // The transcript copy and the summarizer's stream buffers are released
+    // however the summary ends; only the summary itself joins the conversation.
+    var scratch_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch_state.deinit();
+    const scratch = scratch_state.allocator();
+    const request = try compact.buildSummaryRequest(scratch, ctx.messages.items[split.start..split.end]);
+    const outcome = try compact.summarize(ctx.prov, scratch, ctx.io, ctx.random, ctx.stdout_writer, ctx.session_stats, ctx.model_key.*, request);
     switch (outcome) {
         .cancelled => {
             try ctx.stdout_writer.print("{s}Compaction cancelled.{s}\n", .{ ansi.dim, ansi.reset });
@@ -820,7 +824,7 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
             return .failed;
         },
         .ok => |summary| {
-            try compact.apply(alloc, ctx.messages, split, summary);
+            try compact.apply(ctx.messages_arena.allocator(), ctx.messages, split, summary);
             ctx.context_budget.resetUsage();
             const after = ctx.context_budget.estimate(ctx.messages.items);
             try ctx.stdout_writer.print("{s}Compacted conversation: ~{d} -> ~{d} tokens.{s}\n", .{ ansi.dim, before, after, ansi.reset });
