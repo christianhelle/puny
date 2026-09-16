@@ -2,6 +2,14 @@ const std = @import("std");
 const openai = @import("../providers/openai.zig");
 const usage = @import("usage.zig");
 
+/// Share of the limit a request may reach before it is compacted.
+pub const threshold_percent = 80;
+
+pub fn shouldCompact(tokens: i64, limit: usize) bool {
+    if (tokens <= 0) return false;
+    return @as(u128, @intCast(tokens)) * 100 >= @as(u128, limit) * threshold_percent;
+}
+
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
@@ -90,4 +98,10 @@ test "resetUsage forgets the reported prompt size" {
     budget.resetUsage();
     const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
     try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages));
+}
+
+test "shouldCompact triggers at 80 percent of the limit" {
+    try std.testing.expect(!shouldCompact(799, 1000));
+    try std.testing.expect(shouldCompact(800, 1000));
+    try std.testing.expect(shouldCompact(1500, 1000));
 }
