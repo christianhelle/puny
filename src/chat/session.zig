@@ -178,8 +178,14 @@ pub const ChatSession = struct {
                     }
                     continue;
                 },
-                // Handled once the session tracks a context budget.
-                .set_context => continue,
+                .set_context => |argument| {
+                    try session_commands.handleContextCommand(ctx, argument);
+                    if (ctx.parsed.oneshot) {
+                        finalizeSession(ctx);
+                        return;
+                    }
+                    continue;
+                },
                 .print_stats => {
                     try ctx.session_stats.print(ctx.io, ctx.stdout_writer);
                     continue;
