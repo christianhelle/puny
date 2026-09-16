@@ -195,6 +195,9 @@ pub fn providerSlot(kind: provider.ModelProvider) usize {
 pub const Config = struct {
     provider: provider.ModelProvider = .lmstudio,
     prompts: PromptsConfig = .{},
+    /// Context window budget, in tokens, for every conversation. When unset,
+    /// the model's reported context length is used when the provider has one.
+    max_context_tokens: ?u64 = null,
     providers: [provider_count]Provider = [provider_count]Provider{
         .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = null, .model = "" },
         .{ .name = .opencode_zen, .url = opencode_zen.default_base_url, .apiKey = null, .model = "" },
@@ -224,6 +227,9 @@ pub const Config = struct {
         }
         if (source.object.get("prompts")) |value| {
             result.prompts = try std.json.parseFromValueLeaky(PromptsConfig, allocator, value, options);
+        }
+        if (source.object.get("max_context_tokens")) |value| {
+            result.max_context_tokens = try std.json.parseFromValueLeaky(?u64, allocator, value, options);
         }
         if (source.object.get("providers")) |value| {
             if (value != .array) return error.UnexpectedToken;
@@ -262,6 +268,7 @@ pub const Config = struct {
         return .{
             .provider = self.provider,
             .prompts = try self.prompts.clone(allocator),
+            .max_context_tokens = self.max_context_tokens,
             .providers = providers,
         };
     }
@@ -634,4 +641,31 @@ test "Provider jsonParseFromValue ignores internal stored fields" {
     try std.testing.expectEqual(.lmstudio, parsed.value.name);
     try std.testing.expect(parsed.value.stored_blob == null);
     try std.testing.expect(parsed.value.stored_plaintext == null);
+}
+
+test "Config jsonParse reads max_context_tokens" {
+    const parsed = try parseConfigForTest(
+        \\{"max_context_tokens":64000}
+    );
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(@as(?u64, 64000), parsed.value.max_context_tokens);
+}
+
+test "Config jsonParse leaves max_context_tokens unset for older configs" {
+    const parsed = try parseConfigForTest(
+        \\{"provider":"lmstudio"}
+    );
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(@as(?u64, null), parsed.value.max_context_tokens);
+}
+
+test "Config clone copies max_context_tokens" {
+    var src = Config.default();
+    src.max_context_tokens = 32000;
+
+    var cloned = try src.clone(std.testing.allocator);
+    defer cloned.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(?u64, 32000), cloned.max_context_tokens);
 }
