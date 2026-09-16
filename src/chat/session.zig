@@ -840,12 +840,14 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
 /// without this dance leaves a dangling client. Shared by `/reset` and by the
 /// orchestrate loop, which starts every phase from a clean conversation.
 fn recycleMessagesArena(ctx: *ChatLoopContext) !void {
+    // Resolved first, so a key that cannot be read fails before anything is torn down.
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+
     ctx.prov.deinit();
     ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
     _ = ctx.messages_arena.reset(.free_all);
     ctx.messages.* = .empty;
 
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
     ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
     if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 }
