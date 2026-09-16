@@ -16,6 +16,8 @@ pub const Action = union(enum) {
     full_reset,
     run_chat_turn,
     print_stats,
+    compact,
+    set_context: ?[]const u8,
     reconfigure,
     switch_model: ?[]const u8,
     switch_provider: ?[]const u8,
@@ -57,6 +59,10 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         },
 
         .stats => return .print_stats,
+
+        .compact => return .compact,
+
+        .context => |limit| return .{ .set_context = limit },
 
         .config => return .reconfigure,
 
@@ -923,4 +929,28 @@ test "dispatch orchestrate without text yields an empty spec" {
     });
 
     try std.testing.expectEqualDeep(Action{ .begin_orchestrate = "" }, action);
+}
+
+test "dispatch compact and context return their actions" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+    const ctx: Context = .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+    };
+
+    try std.testing.expectEqual(Action.compact, try dispatch(.compact, ctx));
+    try std.testing.expectEqualDeep(Action{ .set_context = "off" }, try dispatch(.{ .context = "off" }, ctx));
+    try std.testing.expectEqualDeep(Action{ .set_context = null }, try dispatch(.{ .context = null }, ctx));
 }

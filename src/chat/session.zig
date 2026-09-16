@@ -25,6 +25,7 @@ const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
 const branch_review = @import("../review/review.zig");
 const orchestrate = @import("orchestrate.zig");
+const compact = @import("compact.zig");
 const help = @import("../tui/help.zig");
 
 pub const ReconfigurePrompt = session_commands.ReconfigurePrompt;
@@ -152,10 +153,38 @@ pub const ChatSession = struct {
 
                     ctx.history.clear();
                     loaded_skills.clearRetainingCapacity();
+                    ctx.context_budget.resetConversation();
 
                     try ctx.stdout_writer.print(" OK\n", .{});
                     try ctx.stdout_writer.print("New session: {s}\n", .{ctx.session.id});
                     try ctx.stdout_writer.flush();
+                    continue;
+                },
+                .compact => {
+                    switch (try compactConversation(ctx, .forced)) {
+                        .nothing_to_compact => {
+                            try ctx.stdout_writer.print("\n{s}Nothing to compact.{s}\n", .{ ansi.dim, ansi.reset });
+                            try ctx.stdout_writer.flush();
+                        },
+                        .compacted => {
+                            try persistence.saveMessages(ctx);
+                            try persistence.saveSessionMeta(ctx);
+                            upsertCurrentSession(ctx);
+                        },
+                        .cancelled, .failed => {},
+                    }
+                    if (ctx.parsed.oneshot) {
+                        finalizeSession(ctx);
+                        return;
+                    }
+                    continue;
+                },
+                .set_context => |argument| {
+                    try session_commands.handleContextCommand(ctx, argument);
+                    if (ctx.parsed.oneshot) {
+                        finalizeSession(ctx);
+                        return;
+                    }
                     continue;
                 },
                 .print_stats => {
@@ -248,6 +277,7 @@ pub const ChatSession = struct {
                         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                         ctx.history.clear();
+                        ctx.context_budget.resetConversation();
                         try ctx.stdout_writer.print("Session restored — {d} messages:\n", .{ctx.messages.items.len});
                         try display.printConversation(ctx.stdout_writer, ctx.messages.items);
                         try ctx.stdout_writer.flush();
@@ -624,7 +654,17 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_estimated = false;
     var turn_in: i64 = 0;
     var turn_out: i64 = 0;
+    var compaction_failed = false;
     while (!turn_complete) {
+        if (!compaction_failed) {
+            if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
+                if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items), limit)) {
+                    const outcome = try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) });
+                    compaction_failed = outcome == .failed or outcome == .cancelled;
+                }
+            }
+        }
+
         const active_tool_definitions = switch (ctx.mode.*) {
             .build => ctx.full_tool_definitions.items,
             .planning => ctx.planning_tool_definitions.items,
@@ -635,6 +675,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         try thinking_indicator.show(ctx.stdout_writer);
 
         const chat_log_writer = if (ctx.chat_log) |log| log.writer else null;
+        const request_message_count = ctx.messages.items.len;
         const result = chat.runTurnWithMode(
             ctx.prov,
             ctx.messages_arena.allocator(),
@@ -675,6 +716,8 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
             try ctx.stdout_writer.flush();
             break;
         }
+
+        ctx.context_budget.recordTurn(result.usage, result.usage_estimated, request_message_count);
 
         if (result.usage) |u| {
             turn_in += u.input_tokens;
@@ -751,20 +794,92 @@ fn printReviewWriteError(io: std.Io, err: anyerror) void {
     writer.interface.flush() catch {};
 }
 
+const CompactOutcome = enum { compacted, nothing_to_compact, cancelled, failed };
+
+/// Summarizes older messages into one system message. A cancelled or failed
+/// summary leaves the conversation untouched.
+fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactOutcome {
+    const split = compact.planSplit(ctx.messages.items, mode) orelse return .nothing_to_compact;
+    const before = ctx.context_budget.estimate(ctx.messages.items);
+
+    try ctx.stdout_writer.print("\n{s}Compacting conversation...{s}\n", .{ ansi.dim, ansi.reset });
+    try ctx.stdout_writer.flush();
+
+    // The transcript copy and the summarizer's stream buffers are released
+    // however the summary ends; only the summary itself joins the conversation.
+    var scratch_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch_state.deinit();
+    const scratch = scratch_state.allocator();
+    const request = try compact.buildSummaryRequest(scratch, ctx.messages.items[split.start..split.end]);
+    const outcome = try compact.summarize(ctx.prov, scratch, ctx.io, ctx.random, ctx.stdout_writer, ctx.session_stats, ctx.model_key.*, request);
+    switch (outcome) {
+        .cancelled => {
+            try ctx.stdout_writer.print("{s}Compaction cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+            try ctx.stdout_writer.flush();
+            return .cancelled;
+        },
+        .failed => {
+            try ctx.stdout_writer.print("{s}Compaction failed; keeping the full conversation.{s}\n", .{ ansi.dim, ansi.reset });
+            try ctx.stdout_writer.flush();
+            return .failed;
+        },
+        .ok => |summary| {
+            try compact.apply(ctx.messages_arena.allocator(), ctx.messages, split, summary);
+            try reclaimCompactedHistory(ctx);
+            ctx.context_budget.resetUsage();
+            const after = ctx.context_budget.estimate(ctx.messages.items);
+            try ctx.stdout_writer.print("{s}Compacted conversation: ~{d} -> ~{d} tokens.{s}\n", .{ ansi.dim, before, after, ansi.reset });
+            try ctx.stdout_writer.flush();
+            return .compacted;
+        },
+    }
+}
+
+/// Frees the history a compaction replaced, which otherwise stays allocated in
+/// `messages_arena` for the rest of the session. The kept messages are copied
+/// into a fresh arena, and only once every fallible step has succeeded is the
+/// old arena released and the provider rebuilt on the new one, so a failure
+/// leaves the conversation as it was. Skipped while a review is active,
+/// because its scope lives in the same arena.
+fn reclaimCompactedHistory(ctx: *ChatLoopContext) !void {
+    if (branch_review.isActive()) return;
+    const api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+
+    var fresh = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    errdefer fresh.deinit();
+    const fresh_alloc = fresh.allocator();
+    var kept: std.ArrayList(openai.Message) = .empty;
+    try kept.appendSlice(fresh_alloc, try compact.cloneMessages(fresh_alloc, ctx.messages.items));
+
+    // Nothing below can fail.
+    ctx.prov.deinit();
+    ctx.messages_arena.deinit();
+    ctx.messages_arena.* = fresh;
+    ctx.messages.* = kept;
+    rebuildProvider(ctx, api_key);
+}
+
+/// Creates the provider on `messages_arena`, which must not still hold one.
+fn rebuildProvider(ctx: *ChatLoopContext, api_key: []const u8) void {
+    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
+    if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
+}
+
 /// Tears down and rebuilds the provider around a `messages_arena` reset.
 ///
 /// The provider is allocated from `messages_arena`, so resetting the arena
 /// without this dance leaves a dangling client. Shared by `/reset` and by the
 /// orchestrate loop, which starts every phase from a clean conversation.
 fn recycleMessagesArena(ctx: *ChatLoopContext) !void {
+    // Resolved first, so a key that cannot be read fails before anything is torn down.
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
+
     ctx.prov.deinit();
     ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
     _ = ctx.messages_arena.reset(.free_all);
     ctx.messages.* = .empty;
 
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
-    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
-    if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
+    rebuildProvider(ctx, new_api_key);
 }
 
 /// Re-installs the standing system context after an arena reset: the system
@@ -797,6 +912,7 @@ fn installBaseContext(ctx: *ChatLoopContext) !void {
 fn resetContextForPhase(ctx: *ChatLoopContext) anyerror!void {
     persistence.saveMessages(ctx) catch {};
     try recycleMessagesArena(ctx);
+    ctx.context_budget.resetUsage();
     try installBaseContext(ctx);
 }
 
@@ -868,6 +984,22 @@ test "include chat tests" {
 
 test "include chat usage tests" {
     _ = @import("usage.zig");
+}
+
+test "sessionHasContent keeps a fully compacted conversation" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var messages: std.ArrayList(openai.Message) = .empty;
+    try messages.appendSlice(arena, &.{
+        .{ .system = "You are a helpful assistant." },
+        .{ .user = "Hello!" },
+        .{ .assistant = .{ .content = "Hi there!" } },
+    });
+
+    try compact.apply(arena, &messages, compact.planSplit(messages.items, .forced).?, "greetings were exchanged");
+
+    try std.testing.expect(sessionHasContent(messages.items));
 }
 
 test "sessionHasContent returns false for empty message list" {

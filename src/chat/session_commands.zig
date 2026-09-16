@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
 const context = @import("context.zig");
+const compact = @import("compact.zig");
 const debug_log = @import("debug_log.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const input = @import("../tui/input.zig");
@@ -16,6 +17,34 @@ const welcome = @import("../tui/welcome.zig");
 
 const ModelProvider = provider.ModelProvider;
 const ChatLoopContext = context.ChatLoopContext;
+
+/// `/context [tokens|off]`: shows how full the context is, or changes the
+/// limit for the current conversation.
+pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void {
+    const budget = ctx.context_budget;
+    const w = ctx.stdout_writer;
+    switch (compact.parseContextArgument(argument)) {
+        .show => {
+            const used = budget.estimate(ctx.messages.items);
+            if (budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
+                const percent = @divFloor(@as(u128, @intCast(@max(used, 0))) * 100, limit);
+                try w.print("\nContext: ~{d} of {d} tokens ({d}%); compacts at {d}%.\n", .{ used, limit, percent, compact.threshold_percent });
+            } else {
+                try w.print("\nContext: ~{d} tokens. No limit is set, so auto compaction is off.\n", .{used});
+            }
+        },
+        .set => |tokens| {
+            budget.setExplicit(tokens);
+            try w.print("\nContext limit set to {d} tokens for this conversation.\n", .{tokens});
+        },
+        .off => {
+            budget.disable();
+            try w.print("\nAuto compaction is off for this conversation.\n", .{});
+        },
+        .invalid => try w.print("\nUsage: /context [tokens|off]\n", .{}),
+    }
+    try w.flush();
+}
 
 pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8) !void {
     const effort = if (effort_arg) |text| blk: {
@@ -411,6 +440,7 @@ fn testChatLoopContext(
         .debug_log = null,
         .chat_log = null,
         .skill_registry = undefined,
+        .context_budget = undefined,
     };
 }
 

@@ -420,5 +420,48 @@
     "expect": ["Unknown reasoning effort 'enthusiastic'"],
     "not_expect": ["mock response"],
     "exit_code": 1
+  },
+  {
+    "name": "Compact command with nothing to summarize",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/compact", "--oneshot"],
+    "expect": ["Nothing to compact."],
+    "not_expect": ["Compacting conversation"]
+  },
+  {
+    "name": "Context command shows usage against the model's reported window",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/context", "--oneshot"],
+    "expect": ["of 128000 tokens", "compacts at 80%"],
+    "not_expect": ["mock response"]
+  },
+  {
+    "name": "Context command sets the limit for the conversation",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/context 64000", "--oneshot"],
+    "expect": ["Context limit set to 64000 tokens for this conversation."],
+    "not_expect": ["mock response"]
+  },
+  {
+    "name": "Context command turns auto compaction off",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/context off", "--oneshot"],
+    "expect": ["Auto compaction is off for this conversation."],
+    "not_expect": ["mock response"]
+  },
+  {
+    "name": "Context command rejects an invalid limit",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/context lots", "--oneshot"],
+    "expect": ["Usage: /context [tokens|off]"],
+    "not_expect": ["mock response"]
+  },
+  {
+    "name": "Max context flag sets the limit /context reports",
+    "args": ["--mock", "--model", "mock-model", "--max-context", "32000", "--prompt", "/context", "--oneshot"],
+    "expect": ["of 32000 tokens"],
+    "not_expect": ["128000"]
+  },
+  {
+    "name": "A zero max context is rejected",
+    "args": ["--mock", "--model", "mock-model", "--max-context", "0", "--prompt", "hello world", "--oneshot"],
+    "expect": ["--max-context must be greater than zero"],
+    "not_expect": ["mock response"],
+    "exit_code": 1
   }
 ]

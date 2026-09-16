@@ -18,6 +18,7 @@ const prompts = @import("prompts/prompts.zig");
 const provider = @import("providers/provider.zig");
 const resolver = @import("providers/resolver.zig");
 const session = @import("chat/session.zig");
+const compact = @import("chat/compact.zig");
 const display = @import("chat/display.zig");
 const sigint = @import("core/sigint.zig");
 const instructions = @import("agents/instructions.zig");
@@ -397,6 +398,8 @@ fn run(init: std.process.Init) !u8 {
     defer session_stats.deinit();
     sigint.register() catch {};
 
+    var context_budget = compact.ContextBudget.init(parsed.max_context, cfg.max_context_tokens);
+
     const ctx = session.ChatLoopContext{
         .arena = arena,
         .messages_arena = &messages_arena_state,
@@ -424,6 +427,7 @@ fn run(init: std.process.Init) !u8 {
         .debug_log = if (debug_log) |*log| log else null,
         .chat_log = if (chat_log) |*log| log else null,
         .skill_registry = &skill_registry,
+        .context_budget = &context_budget,
     };
 
     var chat_session = session.ChatSession.init(ctx);

@@ -20,6 +20,7 @@ pub const Options = struct {
     review: bool = false,
     orchestrate: bool = false,
     max_iterations: usize = default_max_iterations,
+    max_context: ?usize = null,
     mock: bool = false,
     reconfigure: bool = false,
     debug: bool = false,
@@ -82,6 +83,9 @@ pub fn validate(opts: Options) !void {
     if (opts.max_iterations == 0) {
         return error.InvalidMaxIterations;
     }
+    if (opts.max_context == 0) {
+        return error.InvalidMaxContext;
+    }
 }
 
 pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: []const [:0]const u8) Options {
@@ -131,6 +135,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.max_iterations = std.fmt.parseInt(usize, args[i], 10) catch
                 fatal(io, "Invalid value for --max-iterations: {s}\n\n", .{args[i]});
+        } else if (std.mem.eql(u8, arg, "--max-context")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.max_context = std.fmt.parseInt(usize, args[i], 10) catch
+                fatal(io, "Invalid value for --max-context: {s}\n\n", .{args[i]});
         } else if (std.mem.eql(u8, arg, "--prompt") or std.mem.eql(u8, arg, "-p")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -193,6 +202,7 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         error.OrchestrateConflictsSession => fatal(io, "--orchestrate cannot be combined with session or prune options\n\n", .{}),
         error.OrchestrateConflictsOperation => fatal(io, "--orchestrate cannot be combined with upgrade options\n\n", .{}),
         error.InvalidMaxIterations => fatal(io, "--max-iterations must be greater than zero\n\n", .{}),
+        error.InvalidMaxContext => fatal(io, "--max-context must be greater than zero\n\n", .{}),
     };
 
     if (opts.provider) |name| {
@@ -263,6 +273,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --review                 Review the current branch against the latest origin/main and exit
         \\      --orchestrate            Implement, review, and fix the current branch until merge worthy
         \\      --max-iterations <n>     Maximum review iterations for --orchestrate; a fix runs between reviews (default 5)
+        \\      --max-context <tokens>   Context window budget; the conversation is compacted near it (CLI > config > model)
         \\  -M, --mock                   Use mock provider (no network calls, for testing)
         \\      --reconfigure            Re-run first-run setup and update config
         \\      --show-thinking          Show reasoning/thinking output from the model
@@ -698,4 +709,16 @@ test "parseArgs prefers the effort flag over the environment" {
     const args = &[_][:0]const u8{ "puny", "--effort", "xhigh" };
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), opts.effort);
+}
+
+test "parseArgs sets max_context from flag" {
+    const argv = [_][:0]const u8{ "puny", "--max-context", "64000" };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expectEqual(@as(?usize, 64000), opts.max_context);
+}
+
+test "validate rejects a zero max context" {
+    try std.testing.expectError(error.InvalidMaxContext, validate(.{ .max_context = 0 }));
 }
