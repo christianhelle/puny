@@ -837,17 +837,32 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
 
 /// Frees the history a compaction replaced, which otherwise stays allocated in
 /// `messages_arena` for the rest of the session. The kept messages are copied
-/// out, the arena is recycled, and the copies move back in. Skipped while a
-/// review is active, because its scope lives in the same arena.
+/// into a fresh arena, and only once every fallible step has succeeded is the
+/// old arena released and the provider rebuilt on the new one, so a failure
+/// leaves the conversation as it was. Skipped while a review is active,
+/// because its scope lives in the same arena.
 fn reclaimCompactedHistory(ctx: *ChatLoopContext) !void {
     if (branch_review.isActive()) return;
-    var kept_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer kept_state.deinit();
-    const kept = try compact.cloneMessages(kept_state.allocator(), ctx.messages.items);
+    const api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, ctx.init.environ_map.get("PUNY_API_KEY"));
 
-    try recycleMessagesArena(ctx);
-    const alloc = ctx.messages_arena.allocator();
-    try ctx.messages.appendSlice(alloc, try compact.cloneMessages(alloc, kept));
+    var fresh = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    errdefer fresh.deinit();
+    const fresh_alloc = fresh.allocator();
+    var kept: std.ArrayList(openai.Message) = .empty;
+    try kept.appendSlice(fresh_alloc, try compact.cloneMessages(fresh_alloc, ctx.messages.items));
+
+    // Nothing below can fail.
+    ctx.prov.deinit();
+    ctx.messages_arena.deinit();
+    ctx.messages_arena.* = fresh;
+    ctx.messages.* = kept;
+    rebuildProvider(ctx, api_key);
+}
+
+/// Creates the provider on `messages_arena`, which must not still hold one.
+fn rebuildProvider(ctx: *ChatLoopContext, api_key: []const u8) void {
+    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
+    if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 }
 
 /// Tears down and rebuilds the provider around a `messages_arena` reset.
@@ -864,8 +879,7 @@ fn recycleMessagesArena(ctx: *ChatLoopContext) !void {
     _ = ctx.messages_arena.reset(.free_all);
     ctx.messages.* = .empty;
 
-    ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
-    if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
+    rebuildProvider(ctx, new_api_key);
 }
 
 /// Re-installs the standing system context after an arena reset: the system
