@@ -4,6 +4,8 @@ pub const Command = union(enum) {
     quit,
     reset,
     stats,
+    compact,
+    context: ?[]const u8,
     config,
     plan: ?[]const u8,
     build: ?[]const u8,
@@ -68,6 +70,22 @@ pub fn parse(user_message: []const u8) Command {
 
     if (eqlIgnoreCase(user_message, "/config") or eqlIgnoreCase(user_message, ":config"))
         return .config;
+
+    if (eqlIgnoreCase(user_message, "/compact") or eqlIgnoreCase(user_message, ":compact"))
+        return .compact;
+
+    if (eqlIgnoreCase(user_message, "/context") or std.mem.startsWith(u8, user_message, "/context ")) {
+        if (user_message.len > "/context ".len) {
+            return .{ .context = user_message["/context ".len..] };
+        }
+        return .{ .context = null };
+    }
+    if (eqlIgnoreCase(user_message, ":context") or std.mem.startsWith(u8, user_message, ":context ")) {
+        if (user_message.len > ":context ".len) {
+            return .{ .context = user_message[":context ".len..] };
+        }
+        return .{ .context = null };
+    }
 
     if (eqlIgnoreCase(user_message, "/plan") or std.mem.startsWith(u8, user_message, "/plan ")) {
         if (user_message.len > "/plan ".len) {
@@ -253,4 +271,12 @@ test "every registered command token parses as a command" {
         try std.testing.expect(cmd != .prompt);
         try std.testing.expect(cmd != .skill);
     }
+}
+
+test "parse recognizes the compact and context commands before the skill fallback" {
+    try std.testing.expectEqual(Command.compact, parse("/compact"));
+    try std.testing.expectEqual(Command.compact, parse(":compact"));
+    try std.testing.expectEqualDeep(Command{ .context = null }, parse("/context"));
+    try std.testing.expectEqualDeep(Command{ .context = "64000" }, parse("/context 64000"));
+    try std.testing.expectEqualDeep(Command{ .context = "off" }, parse(":context off"));
 }

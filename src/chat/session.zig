@@ -158,6 +158,8 @@ pub const ChatSession = struct {
                     try ctx.stdout_writer.flush();
                     continue;
                 },
+                // Handled once the session tracks a context budget.
+                .compact, .set_context => continue,
                 .print_stats => {
                     try ctx.session_stats.print(ctx.io, ctx.stdout_writer);
                     continue;
