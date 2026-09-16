@@ -103,4 +103,19 @@ pub const orchestrate =
     \\a check ran unless you observed its result.
 ;
 
+/// Instructs the model to condense earlier conversation so it can replace
+/// those messages when the context window runs short.
+pub const compact =
+    \\You are compacting a coding assistant's conversation so it fits in a
+    \\smaller context window. The transcript of the earlier conversation follows.
+    \\Write a concise summary that lets the assistant continue the work without
+    \\the original messages. Keep:
+    \\- the user's goals, requests, and constraints, including exact wording that matters;
+    \\- decisions made and the reasons for them;
+    \\- files, functions, commands, and errors that were involved, with exact names and paths;
+    \\- what has been completed and what is still pending.
+    \\Leave out pleasantries and tool output that no longer matters. Reply with the
+    \\summary only.
+;
+
 pub const prompt_text = ">";

@@ -1,6 +1,7 @@
 const std = @import("std");
 const openai = @import("../providers/openai.zig");
 const usage = @import("usage.zig");
+const prompts = @import("../prompts/prompts.zig");
 
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
@@ -54,6 +55,45 @@ fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
         return last == .assistant and (last.assistant.tool_calls == null or last.assistant.tool_calls.?.len == 0);
     }
     return messages[index] == .user;
+}
+
+/// Longest tool result copied into the summarizer's transcript.
+const max_tool_result_chars = 2000;
+
+/// Builds the request that asks the model to summarize `messages`. The
+/// transcript travels as plain text so no tool call has to be paired with a
+/// result, and the final instruction stands alone as the last user message.
+pub fn buildSummaryRequest(allocator: std.mem.Allocator, messages: []const openai.Message) ![]openai.Message {
+    var transcript: std.Io.Writer.Allocating = .init(allocator);
+    defer transcript.deinit();
+    const w = &transcript.writer;
+    for (messages) |message| {
+        switch (message) {
+            .system => {},
+            .user => |text| try w.print("User:\n{s}\n\n", .{text}),
+            .assistant => |a| {
+                if (a.content) |text| try w.print("Assistant:\n{s}\n\n", .{text});
+                if (a.tool_calls) |calls| {
+                    for (calls) |call| try w.print("Tool call: {s}({s})\n\n", .{ call.function.name, call.function.arguments });
+                }
+            },
+            .tool => |t| {
+                if (t.content.len > max_tool_result_chars) {
+                    var cut: usize = max_tool_result_chars;
+                    while (cut > 0 and t.content[cut] & 0xC0 == 0x80) cut -= 1;
+                    try w.print("Tool result:\n{s}\n[truncated]\n\n", .{t.content[0..cut]});
+                } else {
+                    try w.print("Tool result:\n{s}\n\n", .{t.content});
+                }
+            },
+        }
+    }
+
+    const request = try allocator.alloc(openai.Message, 3);
+    request[0] = .{ .system = prompts.compact };
+    request[1] = .{ .user = try transcript.toOwnedSlice() };
+    request[2] = .{ .user = "Write the summary now." };
+    return request;
 }
 
 /// Tracks how large the conversation may grow before it is compacted.
@@ -200,4 +240,53 @@ test "planSplit auto cannot summarize the only pending request" {
         .{ .user = long_text },
     };
     try std.testing.expectEqual(@as(?Split, null), planSplit(&messages, .{ .auto = 10 }));
+}
+
+test "buildSummaryRequest renders the transcript for the summarizer" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const messages = [_]openai.Message{
+        .{ .user = "hello" },
+        .{ .assistant = .{ .content = "let me look", .tool_calls = &.{
+            .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{\"path\":\"a.zig\"}" } },
+        } } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "const a = 1;" } },
+        .{ .assistant = .{ .content = "done" } },
+    };
+
+    const request = try buildSummaryRequest(arena_state.allocator(), &messages);
+
+    try std.testing.expectEqual(@as(usize, 3), request.len);
+    try std.testing.expectEqualStrings(prompts.compact, request[0].system);
+    try std.testing.expectEqualStrings(
+        "User:\nhello\n\nAssistant:\nlet me look\n\nTool call: read_file({\"path\":\"a.zig\"})\n\nTool result:\nconst a = 1;\n\nAssistant:\ndone\n\n",
+        request[1].user,
+    );
+    try std.testing.expectEqualStrings("Write the summary now.", request[2].user);
+}
+
+test "buildSummaryRequest truncates long tool results" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const messages = [_]openai.Message{
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "y" ** 3000 } },
+    };
+
+    const request = try buildSummaryRequest(arena_state.allocator(), &messages);
+
+    const expected = "Tool result:\n" ++ "y" ** 2000 ++ "\n[truncated]\n\n";
+    try std.testing.expectEqualStrings(expected, request[1].user);
+}
+
+test "buildSummaryRequest truncates tool results on a character boundary" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const messages = [_]openai.Message{
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "y" ** 1999 ++ "é" ++ "z" ** 100 } },
+    };
+
+    const request = try buildSummaryRequest(arena_state.allocator(), &messages);
+
+    const expected = "Tool result:\n" ++ "y" ** 1999 ++ "\n[truncated]\n\n";
+    try std.testing.expectEqualStrings(expected, request[1].user);
 }
