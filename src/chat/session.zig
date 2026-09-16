@@ -659,8 +659,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         if (!compaction_failed) {
             if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
                 if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items), limit)) {
-                    const keep_budget = limit * (100 - compact.threshold_percent) / 100;
-                    const outcome = try compactConversation(ctx, .{ .auto = keep_budget });
+                    const outcome = try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) });
                     compaction_failed = outcome == .failed or outcome == .cancelled;
                 }
             }

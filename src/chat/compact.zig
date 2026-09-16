@@ -11,6 +11,11 @@ const client = @import("../providers/client.zig");
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
 
+/// Tokens of recent conversation an automatic compaction keeps verbatim.
+pub fn keepBudget(limit: usize) usize {
+    return @intCast(@as(u128, limit) * (100 - threshold_percent) / 100);
+}
+
 pub fn shouldCompact(tokens: i64, limit: usize) bool {
     if (tokens <= 0) return false;
     return @as(u128, @intCast(tokens)) * 100 >= @as(u128, limit) * threshold_percent;
@@ -661,4 +666,9 @@ test "resetConversation restores the startup budget and forgets usage" {
 test "init ignores a zero budget" {
     const budget = ContextBudget.init(null, 0);
     try std.testing.expectEqual(@as(?usize, null), budget.limit());
+}
+
+test "keepBudget is the share of the limit left under the threshold" {
+    try std.testing.expectEqual(@as(usize, 200), keepBudget(1000));
+    try std.testing.expectEqual(std.math.maxInt(usize) / 5, keepBudget(std.math.maxInt(usize)));
 }
