@@ -96,6 +96,25 @@ pub fn buildSummaryRequest(allocator: std.mem.Allocator, messages: []const opena
     return request;
 }
 
+/// Replaces `messages[split.start..split.end]` with the system messages from
+/// that range, kept so skills and mode prompts stay in force, followed by the
+/// summary.
+pub fn apply(
+    allocator: std.mem.Allocator,
+    messages: *std.ArrayList(openai.Message),
+    split: Split,
+    summary: []const u8,
+) !void {
+    var replacement: std.ArrayList(openai.Message) = .empty;
+    defer replacement.deinit(allocator);
+    for (messages.items[split.start..split.end]) |message| {
+        if (message == .system) try replacement.append(allocator, message);
+    }
+    const text = try std.fmt.allocPrint(allocator, "Summary of the earlier conversation:\n{s}", .{summary});
+    try replacement.append(allocator, .{ .system = text });
+    try messages.replaceRange(allocator, split.start, split.end - split.start, replacement.items);
+}
+
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
@@ -289,4 +308,28 @@ test "buildSummaryRequest truncates tool results on a character boundary" {
 
     const expected = "Tool result:\n" ++ "y" ** 1999 ++ "\n[truncated]\n\n";
     try std.testing.expectEqualStrings(expected, request[1].user);
+}
+
+test "apply replaces the range with its system messages and the summary" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var messages: std.ArrayList(openai.Message) = .empty;
+    try messages.appendSlice(arena, &.{
+        .{ .system = "base prompt" },
+        .{ .user = "first question" },
+        .{ .system = "skill content" },
+        .{ .assistant = .{ .content = "first answer" } },
+        .{ .user = "second question" },
+    });
+
+    try apply(arena, &messages, .{ .start = 1, .end = 4 }, "they asked a question");
+
+    const expected = [_]openai.Message{
+        .{ .system = "base prompt" },
+        .{ .system = "skill content" },
+        .{ .system = "Summary of the earlier conversation:\nthey asked a question" },
+        .{ .user = "second question" },
+    };
+    try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), messages.items);
 }
