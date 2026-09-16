@@ -637,6 +637,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         try thinking_indicator.show(ctx.stdout_writer);
 
         const chat_log_writer = if (ctx.chat_log) |log| log.writer else null;
+        const request_message_count = ctx.messages.items.len;
         const result = chat.runTurnWithMode(
             ctx.prov,
             ctx.messages_arena.allocator(),
@@ -677,6 +678,8 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
             try ctx.stdout_writer.flush();
             break;
         }
+
+        ctx.context_budget.recordTurn(result.usage, result.usage_estimated, request_message_count);
 
         if (result.usage) |u| {
             turn_in += u.input_tokens;

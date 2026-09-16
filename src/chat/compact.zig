@@ -188,6 +188,14 @@ pub const ContextBudget = struct {
         self.last_prompt_message_count = message_count;
     }
 
+    /// Records a finished request's usage, skipping usage that was only
+    /// estimated because the provider reported none.
+    pub fn recordTurn(self: *ContextBudget, turn_usage: ?openai.TurnUsage, estimated: bool, message_count: usize) void {
+        if (estimated) return;
+        const reported = turn_usage orelse return;
+        self.recordPrompt(reported.input_tokens, message_count);
+    }
+
     pub fn resetUsage(self: *ContextBudget) void {
         self.last_prompt_tokens = null;
         self.last_prompt_message_count = 0;
@@ -428,4 +436,19 @@ test "init falls back to the config file budget" {
 test "init leaves the budget to the model when neither is set" {
     const budget = ContextBudget.init(null, null);
     try std.testing.expectEqual(@as(?usize, null), budget.limit());
+}
+
+test "recordTurn keeps provider-reported usage" {
+    var budget = ContextBudget{};
+    budget.recordTurn(.{ .input_tokens = 500, .output_tokens = 20 }, false, 1);
+    const messages = [_]openai.Message{ .{ .user = "abcdefgh" }, .{ .user = "abcdefgh" } };
+    try std.testing.expectEqual(@as(i64, 502), budget.estimate(&messages));
+}
+
+test "recordTurn ignores estimated usage" {
+    var budget = ContextBudget{};
+    budget.recordTurn(.{ .input_tokens = 500, .output_tokens = 20 }, true, 1);
+    budget.recordTurn(null, false, 1);
+    const messages = [_]openai.Message{ .{ .user = "abcdefgh" }, .{ .user = "abcdefgh" } };
+    try std.testing.expectEqual(@as(i64, 4), budget.estimate(&messages));
 }
