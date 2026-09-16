@@ -32,6 +32,8 @@ pub const command_tokens = [_][]const u8{
     "/reset",
     "/new",
     "/stats",
+    "/compact",
+    "/context",
     "/config",
     "/plan",
     "/build",
