@@ -91,6 +91,9 @@ test "include chat.retry tests" {
 test "include chat.usage tests" {
     _ = @import("chat/usage.zig");
 }
+test "include chat.compact tests" {
+    _ = @import("chat/compact.zig");
+}
 test "include cli.args tests" {
     _ = @import("cli/args.zig");
 }
