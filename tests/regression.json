@@ -456,5 +456,12 @@
     "args": ["--mock", "--model", "mock-model", "--max-context", "32000", "--prompt", "/context", "--oneshot"],
     "expect": ["of 32000 tokens"],
     "not_expect": ["128000"]
+  },
+  {
+    "name": "A zero max context is rejected",
+    "args": ["--mock", "--model", "mock-model", "--max-context", "0", "--prompt", "hello world", "--oneshot"],
+    "expect": ["--max-context must be greater than zero"],
+    "not_expect": ["mock response"],
+    "exit_code": 1
   }
 ]
