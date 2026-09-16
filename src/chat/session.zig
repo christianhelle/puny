@@ -649,7 +649,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var compaction_failed = false;
     while (!turn_complete) {
         if (!compaction_failed) {
-            if (resolveContextLimit(ctx)) |limit| {
+            if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
                 if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items), limit)) {
                     const keep_budget = limit * (100 - compact.threshold_percent) / 100;
                     const outcome = try compactConversation(ctx, .{ .auto = keep_budget });
@@ -785,22 +785,6 @@ fn printReviewWriteError(io: std.Io, err: anyerror) void {
     var writer: std.Io.File.Writer = .init(.stderr(), io, &buffer);
     writer.interface.print("Review report could not be written: {s}\n", .{@errorName(err)}) catch {};
     writer.interface.flush() catch {};
-}
-
-/// The context limit for the active model. Without an explicit budget, the
-/// provider's model list is consulted once per model; a failed lookup leaves
-/// auto compaction off for that model.
-fn resolveContextLimit(ctx: *ChatLoopContext) ?usize {
-    const budget = ctx.context_budget;
-    if (budget.needsModelLookup(ctx.model_key.*)) {
-        const length: ?usize = blk: {
-            var models = ctx.prov.listModels() catch break :blk null;
-            defer models.deinit();
-            break :blk compact.contextLengthFor(models.value().models, ctx.model_key.*);
-        };
-        budget.setModelReported(ctx.model_key.*, length);
-    }
-    return budget.limit();
 }
 
 const CompactOutcome = enum { compacted, nothing_to_compact, cancelled, failed };

@@ -214,6 +214,21 @@ pub const ContextBudget = struct {
         return self.model_reported_key_hash != std.hash.Wyhash.hash(0, model_key);
     }
 
+    /// The context limit for `model_key`. Without an explicit budget, the
+    /// provider's model list is consulted once per model; a failed lookup
+    /// leaves auto compaction off for that model.
+    pub fn resolveLimit(self: *ContextBudget, prov: *provider.Provider, model_key: []const u8) ?usize {
+        if (self.needsModelLookup(model_key)) {
+            const length: ?usize = blk: {
+                var models = prov.listModels() catch break :blk null;
+                defer models.deinit();
+                break :blk contextLengthFor(models.value().models, model_key);
+            };
+            self.setModelReported(model_key, length);
+        }
+        return self.limit();
+    }
+
     pub fn setModelReported(self: *ContextBudget, model_key: []const u8, context_length: ?usize) void {
         self.model_reported = context_length;
         self.model_reported_key_hash = std.hash.Wyhash.hash(0, model_key);
@@ -558,4 +573,14 @@ test "a second compaction folds the earlier summary into the new one" {
         .{ .system = "Summary of the earlier conversation:\ncombined summary" },
     };
     try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), messages.items);
+}
+
+test "resolveLimit looks up the model's window from the provider" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var budget = ContextBudget{};
+    try std.testing.expectEqual(@as(?usize, 128000), budget.resolveLimit(&prov, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, null), budget.resolveLimit(&prov, "not-a-mock-model"));
 }
