@@ -825,6 +825,7 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
         },
         .ok => |summary| {
             try compact.apply(ctx.messages_arena.allocator(), ctx.messages, split, summary);
+            try reclaimCompactedHistory(ctx);
             ctx.context_budget.resetUsage();
             const after = ctx.context_budget.estimate(ctx.messages.items);
             try ctx.stdout_writer.print("{s}Compacted conversation: ~{d} -> ~{d} tokens.{s}\n", .{ ansi.dim, before, after, ansi.reset });
@@ -832,6 +833,21 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
             return .compacted;
         },
     }
+}
+
+/// Frees the history a compaction replaced, which otherwise stays allocated in
+/// `messages_arena` for the rest of the session. The kept messages are copied
+/// out, the arena is recycled, and the copies move back in. Skipped while a
+/// review is active, because its scope lives in the same arena.
+fn reclaimCompactedHistory(ctx: *ChatLoopContext) !void {
+    if (branch_review.isActive()) return;
+    var kept_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer kept_state.deinit();
+    const kept = try compact.cloneMessages(kept_state.allocator(), ctx.messages.items);
+
+    try recycleMessagesArena(ctx);
+    const alloc = ctx.messages_arena.allocator();
+    try ctx.messages.appendSlice(alloc, try compact.cloneMessages(alloc, kept));
 }
 
 /// Tears down and rebuilds the provider around a `messages_arena` reset.
