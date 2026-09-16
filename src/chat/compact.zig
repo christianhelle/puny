@@ -171,6 +171,12 @@ pub const ContextBudget = struct {
     last_prompt_tokens: ?i64 = null,
     last_prompt_message_count: usize = 0,
 
+    /// Budget from `--max-context` or, failing that, `max_context_tokens`.
+    pub fn init(cli_limit: ?usize, config_limit: ?u64) ContextBudget {
+        const configured: ?usize = if (config_limit) |value| std.math.cast(usize, value) else null;
+        return .{ .explicit = cli_limit orelse configured };
+    }
+
     /// The effective token limit, or null when auto compaction is off.
     pub fn limit(self: *const ContextBudget) ?usize {
         return self.explicit orelse self.model_reported;
@@ -407,4 +413,19 @@ test "summarize fails on an empty reply" {
     const outcome = try runSummarizeForTest(arena_state.allocator(), &request);
 
     try std.testing.expect(outcome == .failed);
+}
+
+test "init prefers the command-line budget over the config file" {
+    const budget = ContextBudget.init(16000, 64000);
+    try std.testing.expectEqual(@as(?usize, 16000), budget.limit());
+}
+
+test "init falls back to the config file budget" {
+    const budget = ContextBudget.init(null, 64000);
+    try std.testing.expectEqual(@as(?usize, 64000), budget.limit());
+}
+
+test "init leaves the budget to the model when neither is set" {
+    const budget = ContextBudget.init(null, null);
+    try std.testing.expectEqual(@as(?usize, null), budget.limit());
 }

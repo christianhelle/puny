@@ -9,6 +9,7 @@ const core_session = @import("../core/session.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
 const review = @import("../review/review.zig");
 const stats = @import("stats.zig");
+const compact = @import("compact.zig");
 const skills = @import("../skills/skills.zig");
 
 const ModelProvider = provider.ModelProvider;
@@ -50,4 +51,5 @@ pub const ChatLoopContext = struct {
     debug_log: ?*DebugLog,
     chat_log: ?*ChatLog,
     skill_registry: *skills.Registry,
+    context_budget: *compact.ContextBudget,
 };
