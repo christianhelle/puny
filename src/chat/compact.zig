@@ -204,6 +204,8 @@ pub fn parseContextArgument(text: ?[]const u8) ContextArgument {
 pub const ContextBudget = struct {
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
     explicit: ?usize = null,
+    /// The explicit budget the session started with, restored for a new conversation.
+    startup_explicit: ?usize = null,
     /// Set by `/context off`: no limit, whatever the model reports.
     disabled: bool = false,
     /// Context window the provider reports for the active model, if any.
@@ -219,7 +221,16 @@ pub const ContextBudget = struct {
     /// Budget from `--max-context` or, failing that, `max_context_tokens`.
     pub fn init(cli_limit: ?usize, config_limit: ?u64) ContextBudget {
         const configured: ?usize = if (config_limit) |value| std.math.cast(usize, value) else null;
-        return .{ .explicit = cli_limit orelse configured };
+        const explicit = cli_limit orelse configured;
+        return .{ .explicit = explicit, .startup_explicit = explicit };
+    }
+
+    /// Drops `/context` changes and recorded usage when the conversation is
+    /// replaced by `/new` or `/resume`.
+    pub fn resetConversation(self: *ContextBudget) void {
+        self.explicit = self.startup_explicit;
+        self.disabled = false;
+        self.resetUsage();
     }
 
     /// The effective token limit, or null when auto compaction is off.
@@ -632,4 +643,16 @@ test "disable turns auto compaction off even when the model reports a window" {
 
     budget.setExplicit(4000);
     try std.testing.expectEqual(@as(?usize, 4000), budget.limit());
+}
+
+test "resetConversation restores the startup budget and forgets usage" {
+    var budget = ContextBudget.init(16000, null);
+    budget.disable();
+    budget.recordPrompt(9000, 1);
+
+    budget.resetConversation();
+
+    try std.testing.expectEqual(@as(?usize, 16000), budget.limit());
+    const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
+    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages));
 }

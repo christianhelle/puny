@@ -153,6 +153,7 @@ pub const ChatSession = struct {
 
                     ctx.history.clear();
                     loaded_skills.clearRetainingCapacity();
+                    ctx.context_budget.resetConversation();
 
                     try ctx.stdout_writer.print(" OK\n", .{});
                     try ctx.stdout_writer.print("New session: {s}\n", .{ctx.session.id});
@@ -276,6 +277,7 @@ pub const ChatSession = struct {
                         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
                         ctx.history.clear();
+                        ctx.context_budget.resetConversation();
                         try ctx.stdout_writer.print("Session restored — {d} messages:\n", .{ctx.messages.items.len});
                         try display.printConversation(ctx.stdout_writer, ctx.messages.items);
                         try ctx.stdout_writer.flush();
@@ -875,6 +877,7 @@ fn installBaseContext(ctx: *ChatLoopContext) !void {
 fn resetContextForPhase(ctx: *ChatLoopContext) anyerror!void {
     persistence.saveMessages(ctx) catch {};
     try recycleMessagesArena(ctx);
+    ctx.context_budget.resetUsage();
     try installBaseContext(ctx);
 }
 
