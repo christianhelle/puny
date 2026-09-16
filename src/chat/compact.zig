@@ -2,6 +2,10 @@ const std = @import("std");
 const openai = @import("../providers/openai.zig");
 const usage = @import("usage.zig");
 const prompts = @import("../prompts/prompts.zig");
+const provider = @import("../providers/provider.zig");
+const stats = @import("stats.zig");
+const accumulator = @import("accumulator.zig");
+const chat_retry = @import("retry.zig");
 
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
@@ -113,6 +117,47 @@ pub fn apply(
     const text = try std.fmt.allocPrint(allocator, "Summary of the earlier conversation:\n{s}", .{summary});
     try replacement.append(allocator, .{ .system = text });
     try messages.replaceRange(allocator, split.start, split.end - split.start, replacement.items);
+}
+
+pub const SummaryOutcome = union(enum) {
+    ok: []const u8,
+    cancelled,
+    failed,
+};
+
+/// Sends a summarization request built by `buildSummaryRequest`, without
+/// tools and without streaming the reply to the terminal. The tokens it uses
+/// are still counted in the session statistics.
+pub fn summarize(
+    prov: *provider.Provider,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    random: std.Random,
+    stdout_writer: *std.Io.Writer,
+    session_stats: *stats.SessionStats,
+    model_key: []const u8,
+    request: []const openai.Message,
+) !SummaryOutcome {
+    session_stats.beginTurn(model_key, usage.estimateUsage(request, 0).input_tokens);
+    var acc = accumulator.OpenAiAccumulator.init(allocator, io, null, session_stats);
+    defer acc.deinit();
+
+    const outcome = try chat_retry.runChatWithRetry(prov, allocator, .{
+        .model = model_key,
+        .messages = request,
+        .tools = &.{},
+        .stream = true,
+    }, acc.streamCallback(), io, random, stdout_writer);
+    session_stats.finalizeTurn(acc.usage, false);
+
+    return switch (outcome) {
+        .cancelled => .cancelled,
+        .failed => .failed,
+        .success => if (std.mem.trim(u8, acc.content.items, &std.ascii.whitespace).len == 0)
+            .failed
+        else
+            .{ .ok = try allocator.dupe(u8, acc.content.items) },
+    };
 }
 
 /// Tracks how large the conversation may grow before it is compacted.
@@ -332,4 +377,34 @@ test "apply replaces the range with its system messages and the summary" {
         .{ .user = "second question" },
     };
     try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), messages.items);
+}
+
+fn runSummarizeForTest(arena: std.mem.Allocator, request: []const openai.Message) !SummaryOutcome {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    var output = std.Io.Writer.Allocating.init(arena);
+    var session_stats = stats.SessionStats.init(arena, std.testing.io);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    return summarize(&prov, arena, std.testing.io, random_source.interface(), &output.writer, &session_stats, "mock-model", request);
+}
+
+test "summarize returns the model's reply without streaming it" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const request = [_]openai.Message{ .{ .system = prompts.compact }, .{ .user = "Write the summary now, fast." } };
+
+    const outcome = try runSummarizeForTest(arena_state.allocator(), &request);
+
+    try std.testing.expect(std.mem.indexOf(u8, outcome.ok, "You said: Write the summary now, fast.") != null);
+}
+
+test "summarize fails on an empty reply" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const request = [_]openai.Message{.{ .user = "empty" }};
+
+    const outcome = try runSummarizeForTest(arena_state.allocator(), &request);
+
+    try std.testing.expect(outcome == .failed);
 }
