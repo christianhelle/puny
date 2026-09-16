@@ -59,6 +59,8 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
         switch (mode) {
             .forced => return .{ .start = first_summary, .end = end },
             .auto => |keep_budget| {
+                // The newest exchange is always kept, however large.
+                if (end == messages.len) continue;
                 const tail = usage.estimateUsage(messages[end..], 0).input_tokens;
                 if (chosen == null) chosen = end;
                 if (tail <= keep_budget) chosen = end else break;
@@ -684,4 +686,24 @@ test "init ignores a zero budget" {
 test "keepBudget is the share of the limit left under the threshold" {
     try std.testing.expectEqual(@as(usize, 200), keepBudget(1000));
     try std.testing.expectEqual(std.math.maxInt(usize) / 5, keepBudget(std.math.maxInt(usize)));
+}
+
+test "planSplit auto keeps an oversized newest exchange of a finished conversation" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = "earlier question" },
+        .{ .assistant = .{ .content = "earlier answer" } },
+        .{ .user = long_text },
+        .{ .assistant = .{ .content = long_text } },
+    };
+    try std.testing.expectEqual(Split{ .start = 1, .end = 3 }, planSplit(&messages, .{ .auto = 10 }).?);
+}
+
+test "planSplit auto has nothing to summarize when only the newest exchange exists" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = long_text },
+        .{ .assistant = .{ .content = long_text } },
+    };
+    try std.testing.expectEqual(@as(?Split, null), planSplit(&messages, .{ .auto = 10 }));
 }
