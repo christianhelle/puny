@@ -78,6 +78,41 @@ fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
     return messages[index] == .user;
 }
 
+/// Deep-copies `messages` so they survive a reset of the allocator they came from.
+pub fn cloneMessages(allocator: std.mem.Allocator, messages: []const openai.Message) ![]openai.Message {
+    const copies = try allocator.alloc(openai.Message, messages.len);
+    for (messages, copies) |message, *copy| {
+        copy.* = switch (message) {
+            .system => |text| .{ .system = try allocator.dupe(u8, text) },
+            .user => |text| .{ .user = try allocator.dupe(u8, text) },
+            .tool => |t| .{ .tool = .{
+                .tool_call_id = try allocator.dupe(u8, t.tool_call_id),
+                .content = try allocator.dupe(u8, t.content),
+            } },
+            .assistant => |a| .{ .assistant = .{
+                .content = if (a.content) |text| try allocator.dupe(u8, text) else null,
+                .tool_calls = if (a.tool_calls) |calls| try cloneToolCalls(allocator, calls) else null,
+            } },
+        };
+    }
+    return copies;
+}
+
+fn cloneToolCalls(allocator: std.mem.Allocator, calls: []const openai.ToolCall) ![]openai.ToolCall {
+    const copies = try allocator.alloc(openai.ToolCall, calls.len);
+    for (calls, copies) |call, *copy| {
+        copy.* = .{
+            .id = try allocator.dupe(u8, call.id),
+            .type = try allocator.dupe(u8, call.type),
+            .function = .{
+                .name = try allocator.dupe(u8, call.function.name),
+                .arguments = try allocator.dupe(u8, call.function.arguments),
+            },
+        };
+    }
+    return copies;
+}
+
 /// Longest tool result copied into the summarizer's transcript.
 const max_tool_result_chars = 2000;
 
@@ -707,4 +742,35 @@ test "planSplit auto has nothing to summarize when only the newest exchange exis
         .{ .assistant = .{ .content = long_text } },
     };
     try std.testing.expectEqual(@as(?Split, null), planSplit(&messages, .{ .auto = 10 }));
+}
+
+test "cloneMessages deep-copies every message into the new allocator" {
+    var source_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const source = source_state.allocator();
+    const original = [_]openai.Message{
+        .{ .system = try source.dupe(u8, "system prompt") },
+        .{ .user = try source.dupe(u8, "read it") },
+        .{ .assistant = .{ .content = try source.dupe(u8, "looking"), .tool_calls = try source.dupe(openai.ToolCall, &.{
+            .{ .id = try source.dupe(u8, "call_1"), .function = .{ .name = try source.dupe(u8, "read_file"), .arguments = try source.dupe(u8, "{}") } },
+        }) } },
+        .{ .tool = .{ .tool_call_id = try source.dupe(u8, "call_1"), .content = try source.dupe(u8, "contents") } },
+        .{ .assistant = .{} },
+    };
+
+    var target_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer target_state.deinit();
+    const cloned = try cloneMessages(target_state.allocator(), &original);
+
+    const expected = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = "read it" },
+        .{ .assistant = .{ .content = "looking", .tool_calls = &.{
+            .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+        } } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "contents" } },
+        .{ .assistant = .{} },
+    };
+    // Freeing the source proves nothing in the copy still points into it.
+    source_state.deinit();
+    try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), cloned);
 }
