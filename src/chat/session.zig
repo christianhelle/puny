@@ -25,6 +25,7 @@ const sigint = @import("../core/sigint.zig");
 const skills = @import("../skills/skills.zig");
 const branch_review = @import("../review/review.zig");
 const orchestrate = @import("orchestrate.zig");
+const compact = @import("compact.zig");
 const help = @import("../tui/help.zig");
 
 pub const ReconfigurePrompt = session_commands.ReconfigurePrompt;
@@ -626,7 +627,18 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_estimated = false;
     var turn_in: i64 = 0;
     var turn_out: i64 = 0;
+    var compaction_failed = false;
     while (!turn_complete) {
+        if (!compaction_failed) {
+            if (resolveContextLimit(ctx)) |limit| {
+                if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items), limit)) {
+                    const keep_budget = limit * (100 - compact.threshold_percent) / 100;
+                    const outcome = try compactConversation(ctx, .{ .auto = keep_budget });
+                    compaction_failed = outcome == .failed or outcome == .cancelled;
+                }
+            }
+        }
+
         const active_tool_definitions = switch (ctx.mode.*) {
             .build => ctx.full_tool_definitions.items,
             .planning => ctx.planning_tool_definitions.items,
@@ -754,6 +766,58 @@ fn printReviewWriteError(io: std.Io, err: anyerror) void {
     var writer: std.Io.File.Writer = .init(.stderr(), io, &buffer);
     writer.interface.print("Review report could not be written: {s}\n", .{@errorName(err)}) catch {};
     writer.interface.flush() catch {};
+}
+
+/// The context limit for the active model. Without an explicit budget, the
+/// provider's model list is consulted once per model; a failed lookup leaves
+/// auto compaction off for that model.
+fn resolveContextLimit(ctx: *ChatLoopContext) ?usize {
+    const budget = ctx.context_budget;
+    if (budget.needsModelLookup(ctx.model_key.*)) {
+        const length: ?usize = blk: {
+            var models = ctx.prov.listModels() catch break :blk null;
+            defer models.deinit();
+            break :blk compact.contextLengthFor(models.value().models, ctx.model_key.*);
+        };
+        budget.setModelReported(ctx.model_key.*, length);
+    }
+    return budget.limit();
+}
+
+const CompactOutcome = enum { compacted, nothing_to_compact, cancelled, failed };
+
+/// Summarizes older messages into one system message. A cancelled or failed
+/// summary leaves the conversation untouched.
+fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactOutcome {
+    const split = compact.planSplit(ctx.messages.items, mode) orelse return .nothing_to_compact;
+    const before = ctx.context_budget.estimate(ctx.messages.items);
+
+    try ctx.stdout_writer.print("\n{s}Compacting conversation...{s}\n", .{ ansi.dim, ansi.reset });
+    try ctx.stdout_writer.flush();
+
+    const alloc = ctx.messages_arena.allocator();
+    const request = try compact.buildSummaryRequest(alloc, ctx.messages.items[split.start..split.end]);
+    const outcome = try compact.summarize(ctx.prov, alloc, ctx.io, ctx.random, ctx.stdout_writer, ctx.session_stats, ctx.model_key.*, request);
+    switch (outcome) {
+        .cancelled => {
+            try ctx.stdout_writer.print("{s}Compaction cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+            try ctx.stdout_writer.flush();
+            return .cancelled;
+        },
+        .failed => {
+            try ctx.stdout_writer.print("{s}Compaction failed; keeping the full conversation.{s}\n", .{ ansi.dim, ansi.reset });
+            try ctx.stdout_writer.flush();
+            return .failed;
+        },
+        .ok => |summary| {
+            try compact.apply(alloc, ctx.messages, split, summary);
+            ctx.context_budget.resetUsage();
+            const after = ctx.context_budget.estimate(ctx.messages.items);
+            try ctx.stdout_writer.print("{s}Compacted conversation: ~{d} -> ~{d} tokens.{s}\n", .{ ansi.dim, before, after, ansi.reset });
+            try ctx.stdout_writer.flush();
+            return .compacted;
+        },
+    }
 }
 
 /// Tears down and rebuilds the provider around a `messages_arena` reset.
