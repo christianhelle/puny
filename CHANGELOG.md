@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.4.0](https://github.com/christianhelle/puny/releases/tag/v0.4.0) (2026-09-16)
 
 ### Features
 - Add auto context compaction, /compact, and a max context length ([#208](https://github.com/christianhelle/puny/pull/208)) ([@christianhelle](https://github.com/christianhelle/))
