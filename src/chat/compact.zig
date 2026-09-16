@@ -10,6 +10,52 @@ pub fn shouldCompact(tokens: i64, limit: usize) bool {
     return @as(u128, @intCast(tokens)) * 100 >= @as(u128, limit) * threshold_percent;
 }
 
+/// The half-open range of messages that a compaction replaces with a summary.
+pub const Split = struct {
+    start: usize,
+    end: usize,
+};
+
+pub const SplitMode = union(enum) {
+    /// Summarize as much as possible (`/compact`).
+    forced,
+    /// Keep the most recent exchanges that fit this many tokens.
+    auto: usize,
+};
+
+/// Chooses which messages to summarize. The range starts after the leading
+/// system context and ends where a new exchange begins: at a user message, or
+/// at the end of a conversation whose last message is a finished reply. Ending
+/// anywhere else could separate an assistant tool call from its results.
+pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
+    var start: usize = 0;
+    while (start < messages.len and messages[start] == .system) start += 1;
+
+    var chosen: ?usize = null;
+    var end = messages.len;
+    while (end > start) : (end -= 1) {
+        if (!isExchangeBoundary(messages, end)) continue;
+        switch (mode) {
+            .forced => return .{ .start = start, .end = end },
+            .auto => |keep_budget| {
+                const tail = usage.estimateUsage(messages[end..], 0).input_tokens;
+                if (chosen == null) chosen = end;
+                if (tail <= keep_budget) chosen = end else break;
+            },
+        }
+    }
+    const split_end = chosen orelse return null;
+    return .{ .start = start, .end = split_end };
+}
+
+fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
+    if (index == messages.len) {
+        const last = messages[index - 1];
+        return last == .assistant and (last.assistant.tool_calls == null or last.assistant.tool_calls.?.len == 0);
+    }
+    return messages[index] == .user;
+}
+
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
@@ -104,4 +150,54 @@ test "shouldCompact triggers at 80 percent of the limit" {
     try std.testing.expect(!shouldCompact(799, 1000));
     try std.testing.expect(shouldCompact(800, 1000));
     try std.testing.expect(shouldCompact(1500, 1000));
+}
+
+const long_text = "x" ** 400; // 100 estimated tokens
+
+test "planSplit forced summarizes every exchange between turns" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = "hello" },
+        .{ .assistant = .{ .content = "hi" } },
+    };
+    try std.testing.expectEqual(Split{ .start = 1, .end = 3 }, planSplit(&messages, .forced).?);
+}
+
+test "planSplit has nothing to summarize without a conversation" {
+    const messages = [_]openai.Message{.{ .system = "system prompt" }};
+    try std.testing.expectEqual(@as(?Split, null), planSplit(&messages, .forced));
+}
+
+test "planSplit auto keeps the recent exchanges that fit the keep budget" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = long_text },
+        .{ .assistant = .{ .content = long_text } },
+        .{ .user = "short question" },
+        .{ .assistant = .{ .content = "short answer" } },
+        .{ .user = "next question" },
+    };
+    try std.testing.expectEqual(Split{ .start = 1, .end = 3 }, planSplit(&messages, .{ .auto = 50 }).?);
+}
+
+test "planSplit auto never separates a tool call from its result" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = long_text },
+        .{ .assistant = .{ .content = long_text } },
+        .{ .user = "read it" },
+        .{ .assistant = .{ .tool_calls = &.{
+            .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+        } } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = long_text } },
+    };
+    try std.testing.expectEqual(Split{ .start = 1, .end = 3 }, planSplit(&messages, .{ .auto = 10 }).?);
+}
+
+test "planSplit auto cannot summarize the only pending request" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = long_text },
+    };
+    try std.testing.expectEqual(@as(?Split, null), planSplit(&messages, .{ .auto = 10 }));
 }
