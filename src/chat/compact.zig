@@ -44,9 +44,10 @@ pub const SplitMode = union(enum) {
 };
 
 /// Chooses which messages to summarize. The range starts after the leading
-/// system context, so an earlier summary is folded into the next one, and ends where a new exchange begins: at a user message, or
-/// at the end of a conversation whose last message is a finished reply. Ending
-/// anywhere else could separate an assistant tool call from its results.
+/// system context, so an earlier summary is folded into the next one. It ends
+/// where a new exchange begins: at a user message, or at the end of a
+/// conversation whose last message is a finished reply. Ending anywhere else
+/// could separate an assistant tool call from its results.
 pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
     var start: usize = 0;
     while (start < messages.len and messages[start] == .system) start += 1;
