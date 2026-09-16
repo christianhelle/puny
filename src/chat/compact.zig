@@ -203,14 +203,17 @@ pub const ContextBudget = struct {
 
     /// Approximate tokens the next request will carry. Starts from the last
     /// provider-reported prompt size when it still describes a prefix of the
-    /// conversation, and estimates only the messages added since.
+    /// conversation, and estimates only the messages added since. Never less
+    /// than the character estimate, in case a provider under-reports.
     pub fn estimate(self: *const ContextBudget, messages: []const openai.Message) i64 {
+        const by_characters = usage.estimateUsage(messages, 0).input_tokens;
         if (self.last_prompt_tokens) |reported| {
             if (self.last_prompt_message_count <= messages.len) {
-                return reported + usage.estimateUsage(messages[self.last_prompt_message_count..], 0).input_tokens;
+                const newer = usage.estimateUsage(messages[self.last_prompt_message_count..], 0).input_tokens;
+                return @max(reported + newer, by_characters);
             }
         }
-        return usage.estimateUsage(messages, 0).input_tokens;
+        return by_characters;
     }
 };
 
@@ -451,4 +454,11 @@ test "recordTurn ignores estimated usage" {
     budget.recordTurn(null, false, 1);
     const messages = [_]openai.Message{ .{ .user = "abcdefgh" }, .{ .user = "abcdefgh" } };
     try std.testing.expectEqual(@as(i64, 4), budget.estimate(&messages));
+}
+
+test "estimate never drops below the character estimate when usage is under-reported" {
+    var budget = ContextBudget{};
+    budget.recordPrompt(1, 1);
+    const messages = [_]openai.Message{ .{ .user = long_text }, .{ .user = "abcdefgh" } };
+    try std.testing.expectEqual(@as(i64, 102), budget.estimate(&messages));
 }
