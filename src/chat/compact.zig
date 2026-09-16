@@ -73,8 +73,12 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
 
 fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
     if (index == messages.len) {
-        const last = messages[index - 1];
-        return last == .assistant and (last.assistant.tool_calls == null or last.assistant.tool_calls.?.len == 0);
+        // Skills and mode prompts can follow a reply; look past them to it.
+        var last = index;
+        while (last > 0 and messages[last - 1] == .system) last -= 1;
+        if (last == 0) return false;
+        const reply = messages[last - 1];
+        return reply == .assistant and (reply.assistant.tool_calls == null or reply.assistant.tool_calls.?.len == 0);
     }
     return messages[index] == .user;
 }
@@ -774,4 +778,29 @@ test "cloneMessages deep-copies every message into the new allocator" {
     // Freeing the source proves nothing in the copy still points into it.
     source_state.deinit();
     try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), cloned);
+}
+
+test "planSplit forced looks past trailing system messages to a finished reply" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = "hello" },
+        .{ .assistant = .{ .content = "hi" } },
+        .{ .system = "planning prompt" },
+    };
+    try std.testing.expectEqual(Split{ .start = 1, .end = 4 }, planSplit(&messages, .forced).?);
+}
+
+test "planSplit forced keeps a pending tool call even behind a system message" {
+    const messages = [_]openai.Message{
+        .{ .system = "system prompt" },
+        .{ .user = "hello" },
+        .{ .assistant = .{ .content = "hi" } },
+        .{ .user = "read it" },
+        .{ .assistant = .{ .tool_calls = &.{
+            .{ .id = "call_1", .function = .{ .name = "read_file", .arguments = "{}" } },
+        } } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = "contents" } },
+        .{ .system = "skill content" },
+    };
+    try std.testing.expectEqual(Split{ .start = 1, .end = 3 }, planSplit(&messages, .forced).?);
 }
