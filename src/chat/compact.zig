@@ -183,10 +183,29 @@ pub fn contextLengthFor(models: []const client.Model, model_key: []const u8) ?us
     return null;
 }
 
+pub const ContextArgument = union(enum) {
+    show,
+    set: usize,
+    off,
+    invalid,
+};
+
+/// Parses the argument of `/context [tokens|off]`.
+pub fn parseContextArgument(text: ?[]const u8) ContextArgument {
+    const trimmed = std.mem.trim(u8, text orelse "", &std.ascii.whitespace);
+    if (trimmed.len == 0) return .show;
+    if (std.ascii.eqlIgnoreCase(trimmed, "off")) return .off;
+    const tokens = std.fmt.parseInt(usize, trimmed, 10) catch return .invalid;
+    if (tokens == 0) return .invalid;
+    return .{ .set = tokens };
+}
+
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
     explicit: ?usize = null,
+    /// Set by `/context off`: no limit, whatever the model reports.
+    disabled: bool = false,
     /// Context window the provider reports for the active model, if any.
     model_reported: ?usize = null,
     /// Hash of the model key `model_reported` was looked up for, so a model
@@ -205,13 +224,24 @@ pub const ContextBudget = struct {
 
     /// The effective token limit, or null when auto compaction is off.
     pub fn limit(self: *const ContextBudget) ?usize {
+        if (self.disabled) return null;
         return self.explicit orelse self.model_reported;
     }
 
     /// True when the limit depends on a model window not yet looked up.
     pub fn needsModelLookup(self: *const ContextBudget, model_key: []const u8) bool {
-        if (self.explicit != null) return false;
+        if (self.explicit != null or self.disabled) return false;
         return self.model_reported_key_hash != std.hash.Wyhash.hash(0, model_key);
+    }
+
+    pub fn setExplicit(self: *ContextBudget, tokens: usize) void {
+        self.explicit = tokens;
+        self.disabled = false;
+    }
+
+    pub fn disable(self: *ContextBudget) void {
+        self.explicit = null;
+        self.disabled = true;
     }
 
     /// The context limit for `model_key`. Without an explicit budget, the
@@ -583,4 +613,23 @@ test "resolveLimit looks up the model's window from the provider" {
     var budget = ContextBudget{};
     try std.testing.expectEqual(@as(?usize, 128000), budget.resolveLimit(&prov, "mock-model"));
     try std.testing.expectEqual(@as(?usize, null), budget.resolveLimit(&prov, "not-a-mock-model"));
+}
+
+test "parseContextArgument reads a limit, off, or nothing" {
+    try std.testing.expectEqual(ContextArgument.show, parseContextArgument(null));
+    try std.testing.expectEqual(ContextArgument.show, parseContextArgument("  "));
+    try std.testing.expectEqual(ContextArgument{ .set = 64000 }, parseContextArgument(" 64000 "));
+    try std.testing.expectEqual(ContextArgument.off, parseContextArgument("OFF"));
+    try std.testing.expectEqual(ContextArgument.invalid, parseContextArgument("0"));
+    try std.testing.expectEqual(ContextArgument.invalid, parseContextArgument("lots"));
+}
+
+test "disable turns auto compaction off even when the model reports a window" {
+    var budget = ContextBudget{ .model_reported = 128000 };
+    budget.disable();
+    try std.testing.expectEqual(@as(?usize, null), budget.limit());
+    try std.testing.expect(!budget.needsModelLookup("model-a"));
+
+    budget.setExplicit(4000);
+    try std.testing.expectEqual(@as(?usize, 4000), budget.limit());
 }
