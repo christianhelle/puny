@@ -229,7 +229,10 @@ pub const Config = struct {
             result.prompts = try std.json.parseFromValueLeaky(PromptsConfig, allocator, value, options);
         }
         if (source.object.get("max_context_tokens")) |value| {
-            result.max_context_tokens = try std.json.parseFromValueLeaky(?u64, allocator, value, options);
+            // Zero is no usable budget; treat it as unset rather than failing the
+            // whole config load over one field.
+            const tokens = try std.json.parseFromValueLeaky(?u64, allocator, value, options);
+            result.max_context_tokens = if (tokens == 0) null else tokens;
         }
         if (source.object.get("providers")) |value| {
             if (value != .array) return error.UnexpectedToken;
@@ -668,4 +671,13 @@ test "Config clone copies max_context_tokens" {
     var cloned = try src.clone(std.testing.allocator);
     defer cloned.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(?u64, 32000), cloned.max_context_tokens);
+}
+
+test "Config jsonParse treats a zero max_context_tokens as unset" {
+    const parsed = try parseConfigForTest(
+        \\{"max_context_tokens":0}
+    );
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(@as(?u64, null), parsed.value.max_context_tokens);
 }

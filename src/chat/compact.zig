@@ -221,7 +221,8 @@ pub const ContextBudget = struct {
     /// Budget from `--max-context` or, failing that, `max_context_tokens`.
     pub fn init(cli_limit: ?usize, config_limit: ?u64) ContextBudget {
         const configured: ?usize = if (config_limit) |value| std.math.cast(usize, value) else null;
-        const explicit = cli_limit orelse configured;
+        const chosen = cli_limit orelse configured;
+        const explicit = if (chosen == 0) null else chosen;
         return .{ .explicit = explicit, .startup_explicit = explicit };
     }
 
@@ -655,4 +656,9 @@ test "resetConversation restores the startup budget and forgets usage" {
     try std.testing.expectEqual(@as(?usize, 16000), budget.limit());
     const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
     try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages));
+}
+
+test "init ignores a zero budget" {
+    const budget = ContextBudget.init(null, 0);
+    try std.testing.expectEqual(@as(?usize, null), budget.limit());
 }
