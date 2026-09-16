@@ -16,6 +16,13 @@ pub fn shouldCompact(tokens: i64, limit: usize) bool {
     return @as(u128, @intCast(tokens)) * 100 >= @as(u128, limit) * threshold_percent;
 }
 
+/// Opens the system message that holds a compaction summary.
+const summary_prefix = "Summary of the earlier conversation:\n";
+
+fn isSummary(message: openai.Message) bool {
+    return message == .system and std.mem.startsWith(u8, message.system, summary_prefix);
+}
+
 /// The half-open range of messages that a compaction replaces with a summary.
 pub const Split = struct {
     start: usize,
@@ -36,13 +43,16 @@ pub const SplitMode = union(enum) {
 pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
     var start: usize = 0;
     while (start < messages.len and messages[start] == .system) start += 1;
+    // An earlier summary is folded into the next one instead of piling up.
+    var first_summary = start;
+    while (first_summary > 0 and isSummary(messages[first_summary - 1])) first_summary -= 1;
 
     var chosen: ?usize = null;
     var end = messages.len;
     while (end > start) : (end -= 1) {
         if (!isExchangeBoundary(messages, end)) continue;
         switch (mode) {
-            .forced => return .{ .start = start, .end = end },
+            .forced => return .{ .start = first_summary, .end = end },
             .auto => |keep_budget| {
                 const tail = usage.estimateUsage(messages[end..], 0).input_tokens;
                 if (chosen == null) chosen = end;
@@ -51,7 +61,7 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
         }
     }
     const split_end = chosen orelse return null;
-    return .{ .start = start, .end = split_end };
+    return .{ .start = first_summary, .end = split_end };
 }
 
 fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
@@ -74,7 +84,9 @@ pub fn buildSummaryRequest(allocator: std.mem.Allocator, messages: []const opena
     const w = &transcript.writer;
     for (messages) |message| {
         switch (message) {
-            .system => {},
+            .system => |text| if (isSummary(message)) {
+                try w.print("Earlier summary:\n{s}\n\n", .{text[summary_prefix.len..]});
+            },
             .user => |text| try w.print("User:\n{s}\n\n", .{text}),
             .assistant => |a| {
                 if (a.content) |text| try w.print("Assistant:\n{s}\n\n", .{text});
@@ -113,9 +125,9 @@ pub fn apply(
     var replacement: std.ArrayList(openai.Message) = .empty;
     defer replacement.deinit(allocator);
     for (messages.items[split.start..split.end]) |message| {
-        if (message == .system) try replacement.append(allocator, message);
+        if (message == .system and !isSummary(message)) try replacement.append(allocator, message);
     }
-    const text = try std.fmt.allocPrint(allocator, "Summary of the earlier conversation:\n{s}", .{summary});
+    const text = try std.mem.concat(allocator, u8, &.{ summary_prefix, summary });
     try replacement.append(allocator, .{ .system = text });
     try messages.replaceRange(allocator, split.start, split.end - split.start, replacement.items);
 }
@@ -513,4 +525,37 @@ test "needsModelLookup asks once per model and never with an explicit budget" {
 
     const explicit = ContextBudget{ .explicit = 1000 };
     try std.testing.expect(!explicit.needsModelLookup("model-a"));
+}
+
+test "a second compaction folds the earlier summary into the new one" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var messages: std.ArrayList(openai.Message) = .empty;
+    try messages.appendSlice(arena, &.{
+        .{ .system = "base prompt" },
+        .{ .user = "first question" },
+        .{ .assistant = .{ .content = "first answer" } },
+    });
+    try apply(arena, &messages, planSplit(messages.items, .forced).?, "earlier summary");
+    try messages.appendSlice(arena, &.{
+        .{ .user = "second question" },
+        .{ .assistant = .{ .content = "second answer" } },
+    });
+
+    const split = planSplit(messages.items, .forced).?;
+    try std.testing.expectEqual(Split{ .start = 1, .end = 4 }, split);
+
+    const request = try buildSummaryRequest(arena, messages.items[split.start..split.end]);
+    try std.testing.expectEqualStrings(
+        "Earlier summary:\nearlier summary\n\nUser:\nsecond question\n\nAssistant:\nsecond answer\n\n",
+        request[1].user,
+    );
+
+    try apply(arena, &messages, split, "combined summary");
+    const expected = [_]openai.Message{
+        .{ .system = "base prompt" },
+        .{ .system = "Summary of the earlier conversation:\ncombined summary" },
+    };
+    try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), messages.items);
 }
