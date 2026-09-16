@@ -950,6 +950,22 @@ test "include chat usage tests" {
     _ = @import("usage.zig");
 }
 
+test "sessionHasContent keeps a fully compacted conversation" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var messages: std.ArrayList(openai.Message) = .empty;
+    try messages.appendSlice(arena, &.{
+        .{ .system = "You are a helpful assistant." },
+        .{ .user = "Hello!" },
+        .{ .assistant = .{ .content = "Hi there!" } },
+    });
+
+    try compact.apply(arena, &messages, compact.planSplit(messages.items, .forced).?, "greetings were exchanged");
+
+    try std.testing.expect(sessionHasContent(messages.items));
+}
+
 test "sessionHasContent returns false for empty message list" {
     const messages = [_]openai.Message{};
     try std.testing.expect(!sessionHasContent(&messages));

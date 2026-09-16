@@ -21,11 +21,13 @@ pub fn shouldCompact(tokens: i64, limit: usize) bool {
     return @as(u128, @intCast(tokens)) * 100 >= @as(u128, limit) * threshold_percent;
 }
 
-/// Opens the system message that holds a compaction summary.
+/// Opens the message that holds a compaction summary. The summary is
+/// model-written and may echo tool output, so it travels as a user message
+/// rather than with the authority of a system instruction.
 const summary_prefix = "Summary of the earlier conversation:\n";
 
 fn isSummary(message: openai.Message) bool {
-    return message == .system and std.mem.startsWith(u8, message.system, summary_prefix);
+    return message == .user and std.mem.startsWith(u8, message.user, summary_prefix);
 }
 
 /// The half-open range of messages that a compaction replaces with a summary.
@@ -42,22 +44,19 @@ pub const SplitMode = union(enum) {
 };
 
 /// Chooses which messages to summarize. The range starts after the leading
-/// system context and ends where a new exchange begins: at a user message, or
+/// system context, so an earlier summary is folded into the next one, and ends where a new exchange begins: at a user message, or
 /// at the end of a conversation whose last message is a finished reply. Ending
 /// anywhere else could separate an assistant tool call from its results.
 pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
     var start: usize = 0;
     while (start < messages.len and messages[start] == .system) start += 1;
-    // An earlier summary is folded into the next one instead of piling up.
-    var first_summary = start;
-    while (first_summary > 0 and isSummary(messages[first_summary - 1])) first_summary -= 1;
 
     var chosen: ?usize = null;
     var end = messages.len;
     while (end > start) : (end -= 1) {
         if (!isExchangeBoundary(messages, end)) continue;
         switch (mode) {
-            .forced => return .{ .start = first_summary, .end = end },
+            .forced => return .{ .start = start, .end = end },
             .auto => |keep_budget| {
                 // The newest exchange is always kept, however large.
                 if (end == messages.len) continue;
@@ -68,7 +67,7 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
         }
     }
     const split_end = chosen orelse return null;
-    return .{ .start = first_summary, .end = split_end };
+    return .{ .start = start, .end = split_end };
 }
 
 fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
@@ -91,10 +90,12 @@ pub fn buildSummaryRequest(allocator: std.mem.Allocator, messages: []const opena
     const w = &transcript.writer;
     for (messages) |message| {
         switch (message) {
-            .system => |text| if (isSummary(message)) {
+            .system => {},
+            .user => |text| if (isSummary(message)) {
                 try w.print("Earlier summary:\n{s}\n\n", .{text[summary_prefix.len..]});
+            } else {
+                try w.print("User:\n{s}\n\n", .{text});
             },
-            .user => |text| try w.print("User:\n{s}\n\n", .{text}),
             .assistant => |a| {
                 if (a.content) |text| try w.print("Assistant:\n{s}\n\n", .{text});
                 if (a.tool_calls) |calls| {
@@ -132,10 +133,10 @@ pub fn apply(
     var replacement: std.ArrayList(openai.Message) = .empty;
     defer replacement.deinit(allocator);
     for (messages.items[split.start..split.end]) |message| {
-        if (message == .system and !isSummary(message)) try replacement.append(allocator, message);
+        if (message == .system) try replacement.append(allocator, message);
     }
     const text = try std.mem.concat(allocator, u8, &.{ summary_prefix, summary });
-    try replacement.append(allocator, .{ .system = text });
+    try replacement.append(allocator, .{ .user = text });
     try messages.replaceRange(allocator, split.start, split.end - split.start, replacement.items);
 }
 
@@ -480,7 +481,7 @@ test "buildSummaryRequest truncates tool results on a character boundary" {
     try std.testing.expectEqualStrings(expected, request[1].user);
 }
 
-test "apply replaces the range with its system messages and the summary" {
+test "apply replaces the range with its system messages and a user-role summary" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -498,7 +499,7 @@ test "apply replaces the range with its system messages and the summary" {
     const expected = [_]openai.Message{
         .{ .system = "base prompt" },
         .{ .system = "skill content" },
-        .{ .system = "Summary of the earlier conversation:\nthey asked a question" },
+        .{ .user = "Summary of the earlier conversation:\nthey asked a question" },
         .{ .user = "second question" },
     };
     try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), messages.items);
@@ -632,7 +633,7 @@ test "a second compaction folds the earlier summary into the new one" {
     try apply(arena, &messages, split, "combined summary");
     const expected = [_]openai.Message{
         .{ .system = "base prompt" },
-        .{ .system = "Summary of the earlier conversation:\ncombined summary" },
+        .{ .user = "Summary of the earlier conversation:\ncombined summary" },
     };
     try std.testing.expectEqualDeep(@as([]const openai.Message, &expected), messages.items);
 }
