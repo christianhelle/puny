@@ -572,6 +572,29 @@ Use `--reconfigure` at startup or `/config` during a session to update this
 file. Provider keys written by Puny are encrypted, so copying an `apiKey` value
 without its encryption key does not produce a usable configuration.
 
+### Context compaction
+
+Puny tracks how large each request is getting. Once a request reaches 80% of the
+context limit, Puny asks the current model to summarize the older part of the
+conversation and replaces those messages with the summary. The most recent
+exchanges, the system prompt, and loaded skills are kept as they are. Run
+`/compact` to do this at any time.
+
+The context limit comes from the first of these that is set:
+
+1. `/context <tokens>` for the current conversation
+2. `--max-context <tokens>`
+3. `max_context_tokens` in `config.json`
+4. The context window the provider reports for the selected model (LM Studio and GitHub Copilot report one)
+
+When none is set, auto compaction is off, but `/compact` still works.
+
+```json
+{
+  "max_context_tokens": 64000
+}
+```
+
 ### API key protection
 
 Puny does not write API keys to `config.json` as clear text. When Puny saves a
@@ -764,6 +787,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--review`               | Review the current branch against the latest `origin/main`, write `review-results.md`, and exit       |
 | `--orchestrate`          | Implement, review, and fix the current branch until merge worthy, then exit (requires `--prompt` or `--prompt-file`) |
 | `--max-iterations <n>`   | Maximum review iterations for `--orchestrate`; a fix runs between reviews, not after the last one (default `5`) |
+| `--max-context <tokens>` | Context window budget; the conversation is compacted near it (overrides `max_context_tokens` in config, which overrides the model's reported window) |
 | `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
 | `--reconfigure`         | Re-run first-run setup and update config                                                  |
 | `--show-thinking`       | Show reasoning/thinking output from the model                                             |
@@ -798,6 +822,8 @@ While in a chat session:
 - `/quit` or `/exit` — exit Puny
 - `/new` or `/reset` — clear the conversation, start a new session, and unload all skills
 - `/stats` — show session statistics and memory usage
+- `/compact` — summarize the conversation so far into one message to free context
+- `/context [tokens|off]` — show how full the context is, set the context limit for this conversation, or turn auto compaction off
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`
 - `/build [task]` — switch to build mode (optionally with a task description)
