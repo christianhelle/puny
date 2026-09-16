@@ -205,6 +205,8 @@ pub fn parseContextArgument(text: ?[]const u8) ContextArgument {
     return .{ .set = tokens };
 }
 
+const ProviderKind = std.meta.Tag(provider.Provider);
+
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
@@ -215,8 +217,8 @@ pub const ContextBudget = struct {
     disabled: bool = false,
     /// Context window the provider reports for the active model, if any.
     model_reported: ?usize = null,
-    /// Hash of the model key `model_reported` was looked up for, so a model
-    /// switch triggers a new lookup.
+    /// Hash of the provider and model key `model_reported` was looked up for,
+    /// so switching either one triggers a new lookup.
     model_reported_key_hash: ?u64 = null,
     /// Input tokens the provider reported for the most recent request, and
     /// how many messages that request carried.
@@ -246,9 +248,9 @@ pub const ContextBudget = struct {
     }
 
     /// True when the limit depends on a model window not yet looked up.
-    pub fn needsModelLookup(self: *const ContextBudget, model_key: []const u8) bool {
+    pub fn needsModelLookup(self: *const ContextBudget, provider_kind: ProviderKind, model_key: []const u8) bool {
         if (self.explicit != null or self.disabled) return false;
-        return self.model_reported_key_hash != std.hash.Wyhash.hash(0, model_key);
+        return self.model_reported_key_hash != modelKeyHash(provider_kind, model_key);
     }
 
     pub fn setExplicit(self: *ContextBudget, tokens: usize) void {
@@ -265,20 +267,25 @@ pub const ContextBudget = struct {
     /// provider's model list is consulted once per model; a failed lookup
     /// leaves auto compaction off for that model.
     pub fn resolveLimit(self: *ContextBudget, prov: *provider.Provider, model_key: []const u8) ?usize {
-        if (self.needsModelLookup(model_key)) {
+        const provider_kind = std.meta.activeTag(prov.*);
+        if (self.needsModelLookup(provider_kind, model_key)) {
             const length: ?usize = blk: {
                 var models = prov.listModels() catch break :blk null;
                 defer models.deinit();
                 break :blk contextLengthFor(models.value().models, model_key);
             };
-            self.setModelReported(model_key, length);
+            self.setModelReported(provider_kind, model_key, length);
         }
         return self.limit();
     }
 
-    pub fn setModelReported(self: *ContextBudget, model_key: []const u8, context_length: ?usize) void {
+    pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, context_length: ?usize) void {
         self.model_reported = context_length;
-        self.model_reported_key_hash = std.hash.Wyhash.hash(0, model_key);
+        self.model_reported_key_hash = modelKeyHash(provider_kind, model_key);
+    }
+
+    fn modelKeyHash(provider_kind: ProviderKind, model_key: []const u8) u64 {
+        return std.hash.Wyhash.hash(@intFromEnum(provider_kind), model_key);
     }
 
     /// Records the provider-reported size of a request of `message_count` messages.
@@ -580,13 +587,19 @@ test "contextLengthFor ignores unknown models and unreported windows" {
 
 test "needsModelLookup asks once per model and never with an explicit budget" {
     var budget = ContextBudget{};
-    try std.testing.expect(budget.needsModelLookup("model-a"));
-    budget.setModelReported("model-a", null);
-    try std.testing.expect(!budget.needsModelLookup("model-a"));
-    try std.testing.expect(budget.needsModelLookup("model-b"));
+    try std.testing.expect(budget.needsModelLookup(.lmstudio, "model-a"));
+    budget.setModelReported(.lmstudio, "model-a", null);
+    try std.testing.expect(!budget.needsModelLookup(.lmstudio, "model-a"));
+    try std.testing.expect(budget.needsModelLookup(.lmstudio, "model-b"));
 
     const explicit = ContextBudget{ .explicit = 1000 };
-    try std.testing.expect(!explicit.needsModelLookup("model-a"));
+    try std.testing.expect(!explicit.needsModelLookup(.lmstudio, "model-a"));
+}
+
+test "needsModelLookup asks again after switching provider with the same model id" {
+    var budget = ContextBudget{};
+    budget.setModelReported(.lmstudio, "shared-model", 32768);
+    try std.testing.expect(budget.needsModelLookup(.copilot, "shared-model"));
 }
 
 test "a second compaction folds the earlier summary into the new one" {
@@ -645,7 +658,7 @@ test "disable turns auto compaction off even when the model reports a window" {
     var budget = ContextBudget{ .model_reported = 128000 };
     budget.disable();
     try std.testing.expectEqual(@as(?usize, null), budget.limit());
-    try std.testing.expect(!budget.needsModelLookup("model-a"));
+    try std.testing.expect(!budget.needsModelLookup(.lmstudio, "model-a"));
 
     budget.setExplicit(4000);
     try std.testing.expectEqual(@as(?usize, 4000), budget.limit());
