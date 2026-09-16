@@ -420,5 +420,11 @@
     "expect": ["Unknown reasoning effort 'enthusiastic'"],
     "not_expect": ["mock response"],
     "exit_code": 1
+  },
+  {
+    "name": "Compact command with nothing to summarize",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/compact", "--oneshot"],
+    "expect": ["Nothing to compact."],
+    "not_expect": ["Compacting conversation"]
   }
 ]
