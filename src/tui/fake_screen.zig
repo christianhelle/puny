@@ -45,6 +45,12 @@ pub const FakeScreen = struct {
                                 const row = &self.rows.items[self.cur_row];
                                 try row.resize(allocator, self.cur_col);
                             },
+                            'M' => {
+                                if (self.cur_row < self.rows.items.len) {
+                                    var row = self.rows.orderedRemove(self.cur_row);
+                                    row.deinit(allocator);
+                                }
+                            },
                             'm' => {},
                             else => {},
                         }
@@ -117,4 +123,18 @@ test "FakeScreen handles dangling escapes, cursor moves, and erases" {
     defer arena.free(text);
     try std.testing.expect(std.mem.indexOf(u8, text, "a") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "bc") != null);
+}
+
+test "FakeScreen deletes the cursor row and shifts later rows up" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var screen = FakeScreen{};
+    defer screen.deinit(arena);
+
+    try screen.feed(arena, "one\ntwo\nthree\x1b[1A\x1b[M");
+
+    const text = try screen.toText(arena);
+    try std.testing.expectEqualStrings("one\nthree", text);
 }
