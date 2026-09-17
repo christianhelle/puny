@@ -136,7 +136,7 @@ pub const ChatSession = struct {
                     try persistence.saveSessionMeta(ctx);
                     upsertCurrentSession(ctx);
 
-                    try ctx.stdout_writer.print(" Performing full memory reset...", .{});
+                    try ctx.stdout_writer.print("\nPerforming full memory reset...", .{});
                     try ctx.stdout_writer.flush();
 
                     try recycleMessagesArena(ctx);
