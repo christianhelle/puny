@@ -58,11 +58,19 @@ pub const ThinkingIndicator = struct {
         }
 
         if (status == .done and has_streamed_content) {
-            try writer.print(terminal.cursor_up, .{cursor_offset});
-            try writer.writeAll(terminal.move_to_line_start);
-            try writer.writeAll(terminal.clear_to_end_of_line);
-            try writer.print(terminal.cursor_down, .{cursor_offset});
-            try writer.writeAll(terminal.move_to_line_start);
+            // Delete the indicator row rather than blanking it, so the output
+            // below moves up into its place instead of leaving an empty line.
+            // A zero offset has no row to rewind to, and CSI 0 A would move up
+            // one row anyway.
+            if (cursor_offset > 0) {
+                try writer.print(terminal.cursor_up, .{cursor_offset});
+                try writer.writeAll(terminal.move_to_line_start);
+                try writer.writeAll(terminal.delete_line);
+                if (cursor_offset > 1) {
+                    try writer.print(terminal.cursor_down, .{cursor_offset - 1});
+                }
+                try writer.writeAll(terminal.move_to_line_start);
+            }
             if (output_ends_with_newline) {
                 try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, message, ansi.reset });
             } else {
@@ -102,7 +110,7 @@ test "finish prints done message with provider ttft" {
     try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for 1.50s\x1b[0m\n", output.written());
 }
 
-test "finish with streamed content rewrites the indicator line" {
+test "finish with streamed content deletes the indicator row" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -112,12 +120,12 @@ test "finish with streamed content rewrites the indicator line" {
     var indicator = ThinkingIndicator.init(std.testing.io);
     try indicator.finish(std.testing.io, &output.writer, 2, true, true, .done, 0.5);
     try std.testing.expectEqualStrings(
-        "\x1b[2A\x1b[G\x1b[K\x1b[2B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        "\x1b[2A\x1b[G\x1b[M\x1b[1B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
         output.written(),
     );
 }
 
-test "finish with streamed content and no trailing newline adds a blank line" {
+test "finish deletes the indicator row when output streamed right below it" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -127,7 +135,7 @@ test "finish with streamed content and no trailing newline adds a blank line" {
     var indicator = ThinkingIndicator.init(std.testing.io);
     try indicator.finish(std.testing.io, &output.writer, 1, false, true, .done, 2.0);
     try std.testing.expectEqualStrings(
-        "\x1b[1A\x1b[G\x1b[K\x1b[1B\x1b[G\n\n\x1b[2mThought for 2.00s\x1b[0m\n",
+        "\x1b[1A\x1b[G\x1b[M\x1b[G\n\n\x1b[2mThought for 2.00s\x1b[0m\n",
         output.written(),
     );
 }
@@ -175,7 +183,7 @@ test "finish reports sub-10ms thinking as a rounded message" {
     try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for <0.01s\x1b[0m\n", output.written());
 }
 
-test "finish rewrites the indicator line when called out of line" {
+test "finish deletes the indicator row when called out of line" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -185,7 +193,43 @@ test "finish rewrites the indicator line when called out of line" {
     var indicator = ThinkingIndicator.init(std.testing.io);
     try @call(.never_inline, ThinkingIndicator.finish, .{ &indicator, std.testing.io, &output.writer, 2, true, true, .done, 0.5 });
     try std.testing.expectEqualStrings(
-        "\x1b[2A\x1b[G\x1b[K\x1b[2B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        "\x1b[2A\x1b[G\x1b[M\x1b[1B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
         output.written(),
+    );
+}
+
+test "finish with streamed content but no row offset does not rewind" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.finish(std.testing.io, &output.writer, 0, true, true, .done, 0.5);
+    try std.testing.expectEqualStrings(
+        "\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        output.written(),
+    );
+}
+
+test "finished indicator leaves a single blank line above the thought message" {
+    const FakeScreen = @import("fake_screen.zig").FakeScreen;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    try output.writer.writeAll("> prompt\r\n\nThinking...\n🔧 one\n🔧 two");
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    try indicator.finish(std.testing.io, &output.writer, 2, false, true, .done, 0.5);
+
+    var screen = FakeScreen{};
+    defer screen.deinit(arena);
+    try screen.feed(arena, output.written());
+    try std.testing.expectEqualStrings(
+        "> prompt\n\n🔧 one\n🔧 two\n\nThought for 0.50s",
+        try screen.toText(arena),
     );
 }
