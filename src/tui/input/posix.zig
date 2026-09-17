@@ -14,15 +14,24 @@ pub fn readLinePosix(
     io: std.Io,
     editor: *line_editor.LineEditor,
 ) !common.ReadLineResult {
-    const posix = std.posix;
+    var stdin: StdinSource = .{};
+    return readLineFrom(allocator, io, editor, &stdin, cancel.eraseIsCtrlH());
+}
+
+/// Edits the prompt from the bytes of `source`, which provides `read()`
+/// (blocks; null at end of input) and `readWithTimeout(ms)` (null when
+/// nothing arrives in time).
+fn readLineFrom(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    editor: *line_editor.LineEditor,
+    source: anytype,
+    erase_is_ctrl_h: bool,
+) !common.ReadLineResult {
     var first_esc_ts: ?std.Io.Timestamp = null;
-    var buf: [1]u8 = undefined;
 
     while (true) {
-        const n = posix.read(0, &buf) catch return error.ReadFailed;
-        if (n == 0) return .eof;
-
-        const byte = buf[0];
+        const byte = try source.read() orelse return .eof;
         if (byte != terminal.control.esc) first_esc_ts = null;
         switch (byte) {
             '\r', '\n' => {
@@ -31,7 +40,7 @@ pub fn readLinePosix(
             },
             terminal.control.del => try editor.backspace(),
             // Ctrl+Backspace, unless the terminal's Backspace itself sends ^H.
-            terminal.control.bs => if (cancel.eraseIsCtrlH()) try editor.backspace() else try editor.deleteWordBackward(),
+            terminal.control.bs => if (erase_is_ctrl_h) try editor.backspace() else try editor.deleteWordBackward(),
             terminal.control.etx => {
                 try editor.moveEnd();
                 sigint.trigger();
@@ -49,21 +58,21 @@ pub fn readLinePosix(
             terminal.control.esc => {
                 // Try to interpret an escape sequence (arrow keys, etc.).
                 // If nothing follows within a short window, treat as Esc.
-                if (try readByteWithTimeout(terminal.escape_sequence_timeout_ms)) |next| {
+                if (try source.readWithTimeout(terminal.escape_sequence_timeout_ms)) |next| {
                     first_esc_ts = null;
                     switch (next) {
                         // A second Esc inside the probe window is the second
                         // tap, unless a CSI follows (rxvt's Alt+arrow).
                         terminal.control.esc => {
-                            const after = try readByteWithTimeout(terminal.escape_sequence_timeout_ms) orelse {
+                            const after = try source.readWithTimeout(terminal.escape_sequence_timeout_ms) orelse {
                                 try editor.moveEnd();
                                 return .cancelled;
                             };
-                            if (after == terminal.csi_leader) try editor.handleKey(keys.withAlt(try readCsi()));
+                            if (after == terminal.csi_leader) try editor.handleKey(keys.withAlt(try readCsi(source)));
                         },
-                        terminal.csi_leader => try editor.handleKey(try readCsi()),
+                        terminal.csi_leader => try editor.handleKey(try readCsi(source)),
                         terminal.ss3_leader => {
-                            const final = try readByteWithTimeout(terminal.escape_sequence_timeout_ms) orelse continue;
+                            const final = try source.readWithTimeout(terminal.escape_sequence_timeout_ms) orelse continue;
                             try editor.handleKey(keys.decodeSs3(final));
                         },
                         else => {
@@ -102,10 +111,10 @@ pub fn readLinePosix(
 
 /// Reads the rest of a CSI sequence after `ESC [` and decodes it. Parameter
 /// bytes beyond the buffer are consumed but dropped.
-fn readCsi() !keys.Key {
+fn readCsi(source: anytype) !keys.Key {
     var params: [16]u8 = undefined;
     var len: usize = 0;
-    while (try readByteWithTimeout(terminal.escape_sequence_timeout_ms)) |byte| {
+    while (try source.readWithTimeout(terminal.escape_sequence_timeout_ms)) |byte| {
         // Parameter and intermediate bytes run from 0x20 to 0x3F; anything
         // else ends the sequence.
         if (byte < 0x20 or byte > 0x3F) return keys.decodeCsi(params[0..len], byte);
@@ -117,16 +126,26 @@ fn readCsi() !keys.Key {
     return .unknown;
 }
 
-fn readByteWithTimeout(timeout_ms: i32) !?u8 {
-    const posix = std.posix;
-    var pfd = [1]posix.pollfd{
-        .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
-    };
-    const rc = posix.poll(&pfd, timeout_ms) catch return error.ReadFailed;
-    if (rc == 0) return null;
-    if (pfd[0].revents & posix.POLL.IN == 0) return null;
-    var buf: [1]u8 = undefined;
-    const n = posix.read(0, &buf) catch return error.ReadFailed;
-    if (n == 0) return null;
-    return buf[0];
-}
+/// Reads terminal input from stdin (fd 0).
+const StdinSource = struct {
+    fn read(_: *StdinSource) !?u8 {
+        var buf: [1]u8 = undefined;
+        const n = std.posix.read(0, &buf) catch return error.ReadFailed;
+        if (n == 0) return null;
+        return buf[0];
+    }
+
+    fn readWithTimeout(_: *StdinSource, timeout_ms: i32) !?u8 {
+        const posix = std.posix;
+        var pfd = [1]posix.pollfd{
+            .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
+        };
+        const rc = posix.poll(&pfd, timeout_ms) catch return error.ReadFailed;
+        if (rc == 0) return null;
+        if (pfd[0].revents & posix.POLL.IN == 0) return null;
+        var buf: [1]u8 = undefined;
+        const n = posix.read(0, &buf) catch return error.ReadFailed;
+        if (n == 0) return null;
+        return buf[0];
+    }
+};
