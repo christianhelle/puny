@@ -27,6 +27,9 @@ pub fn insertMention(
     editor: *line_editor.LineEditor,
 ) !void {
     if (!editor.mentions_enabled) return editor.append('@');
+    // The picker draws below the terminal cursor, so start it under the
+    // last wrapped row instead of over the text after a mid-line cursor.
+    try editor.parkAtInputEnd();
     const path = (try file_picker.pickFile(allocator, io)) orelse {
         // The picker erased its own overlay; restore the prompt line. The
         // success path redraws via appendSlice, so only cancellation needs it.
