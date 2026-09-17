@@ -96,6 +96,15 @@ pub const LineEditor = struct {
         return n;
     }
 
+    /// Offset just past the code point starting at `pos`, skipping any
+    /// continuation bytes so the cursor never splits a UTF-8 sequence.
+    fn nextCodePointEnd(text: []const u8, pos: usize) usize {
+        if (pos >= text.len) return text.len;
+        var end = pos + 1;
+        while (end < text.len and text[end] & 0xC0 == 0x80) end += 1;
+        return end;
+    }
+
     /// Display width of the code point removed by backspace, used by the
     /// legacy echo path. Invalid UTF-8 renders as a single replacement column.
     fn deletedCodePointWidth(deleted: []const u8) usize {
@@ -121,7 +130,25 @@ pub const LineEditor = struct {
     /// Moves the cursor one code point to the left.
     pub fn moveLeft(self: *LineEditor) !void {
         if (self.cursor == 0) return;
-        self.cursor -= backspaceLen(self.line_alloc.written()[0..self.cursor]);
+        try self.moveTo(self.cursor - backspaceLen(self.line_alloc.written()[0..self.cursor]));
+    }
+
+    /// Moves the cursor one code point to the right.
+    pub fn moveRight(self: *LineEditor) !void {
+        try self.moveTo(nextCodePointEnd(self.line_alloc.written(), self.cursor));
+    }
+
+    pub fn moveHome(self: *LineEditor) !void {
+        try self.moveTo(0);
+    }
+
+    pub fn moveEnd(self: *LineEditor) !void {
+        try self.moveTo(self.line_alloc.written().len);
+    }
+
+    fn moveTo(self: *LineEditor, pos: usize) !void {
+        if (pos == self.cursor) return;
+        self.cursor = pos;
         try self.redraw();
     }
 
@@ -841,4 +868,43 @@ test "editor appendSlice inserts a multi-byte code point mid-line" {
     try editor.appendSlice("é");
 
     try std.testing.expectEqualStrings("a中éb", line_alloc.written());
+}
+
+test "editor moveRight steps over a code point and stops at the end" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("a中b");
+    try editor.moveLeft();
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.moveRight();
+    try std.testing.expectEqualStrings("\r\x1b[J> a中b\x1b[6G", out.written());
+
+    try editor.moveRight();
+    out.clearRetainingCapacity();
+    try editor.moveRight();
+    try std.testing.expectEqualStrings("", out.written());
+}
+
+test "editor moveHome and moveEnd jump across wrapped rows" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijkl");
+    out.clearRetainingCapacity();
+    try editor.moveHome();
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghijkl\x1b[1A\x1b[3G", out.written());
+
+    out.clearRetainingCapacity();
+    try editor.moveEnd();
+    try std.testing.expectEqualStrings("\r\x1b[J> abcdefghijkl", out.written());
 }
