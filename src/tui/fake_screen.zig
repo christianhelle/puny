@@ -6,6 +6,8 @@ pub const FakeScreen = struct {
     rows: std.ArrayList(std.ArrayList(u8)) = .empty,
     cur_row: usize = 0,
     cur_col: usize = 0,
+    /// Columns before printed text wraps to the next row; null never wraps.
+    width: ?usize = null,
 
     pub fn deinit(self: *FakeScreen, allocator: std.mem.Allocator) void {
         for (self.rows.items) |*r| r.deinit(allocator);
@@ -63,7 +65,18 @@ pub const FakeScreen = struct {
             } else if (c == '\n') {
                 self.cur_row += 1;
                 self.cur_col = 0;
+            } else if (c & 0xC0 == 0x80) {
+                // UTF-8 continuation bytes belong to the column already taken.
+                if (self.cur_row < self.rows.items.len) {
+                    try self.rows.items[self.cur_row].append(allocator, c);
+                }
             } else {
+                if (self.width) |w| {
+                    if (self.cur_col >= w) {
+                        self.cur_row += 1;
+                        self.cur_col = 0;
+                    }
+                }
                 while (self.rows.items.len <= self.cur_row) {
                     try self.rows.append(allocator, .empty);
                 }
@@ -137,4 +150,18 @@ test "FakeScreen deletes the cursor row and shifts later rows up" {
 
     const text = try screen.toText(arena);
     try std.testing.expectEqualStrings("one\nthree", text);
+}
+
+test "FakeScreen wraps printed text at its width" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var screen = FakeScreen{ .width = 3 };
+    defer screen.deinit(arena);
+
+    try screen.feed(arena, "abcdef\nxyz\r\n→ab");
+
+    const text = try screen.toText(arena);
+    try std.testing.expectEqualStrings("abc\ndef\nxyz\n→ab", text);
 }
