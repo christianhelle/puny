@@ -238,9 +238,14 @@ Ollama runs elsewhere, pass `--url`:
 puny --provider ollama --url http://gpu-box:11434
 ```
 
-No API key is needed. After `ollama signin`, the local server also offers
-Ollama's cloud models (for example `gpt-oss:120b-cloud`) and relays them to
-ollama.com for you.
+No API key is needed. If you point Puny at a remote Ollama behind an
+authenticating proxy and set a key, note that an `http://` URL sends that key
+as a `Bearer` token in cleartext: use an `https://` URL, or forward the port
+over SSH (`ssh -L 11434:127.0.0.1:11434 gpu-box`) and keep the URL on
+`127.0.0.1`.
+
+After `ollama signin`, the local server also offers Ollama's cloud models (for
+example `gpt-oss:120b-cloud`) and relays them to ollama.com for you.
 
 ### Ollama Cloud
 
@@ -253,8 +258,9 @@ puny --provider ollama_cloud
 ```
 
 Puny connects to `https://ollama.com`, sends the key as a `Bearer` token, and
-shows the cloud models in the picker. `PUNY_API_KEY` takes precedence over
-`OLLAMA_API_KEY` when both are set.
+shows the cloud models in the picker. The key is resolved in this order:
+`--api-key`, then `--api-key-file`, then `PUNY_API_KEY`, then `OLLAMA_API_KEY`,
+then the key saved in `config.json`.
 
 ### OpenCode Zen
 
@@ -870,7 +876,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `PUNY_PROVIDER`              | Default provider name (overrides config)            |
 | `PUNY_PROVIDER_URL`          | LM Studio, Unsloth, or Ollama endpoint URL (overrides config, unless `--url` is set) |
 | `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
-| `OLLAMA_API_KEY`             | Ollama Cloud API token, used when `PUNY_API_KEY` is unset |
+| `OLLAMA_API_KEY`             | Ollama Cloud API token, below `--api-key`, `--api-key-file` and `PUNY_API_KEY`, above `config.json` |
 | `PUNY_MODEL`                 | Default model identifier (overrides config)         |
 | `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider        |
 | `PUNY_NO_SKILLS`             | Set to `1` or `true` to disable skill loading       |
