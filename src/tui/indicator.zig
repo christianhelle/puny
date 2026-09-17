@@ -20,7 +20,9 @@ pub const ThinkingIndicator = struct {
 
     pub fn show(self: *const @This(), writer: *std.Io.Writer) !void {
         _ = self;
-        try writer.print("\n\n{s}Thinking...{s}", .{ ansi.dim, ansi.reset });
+        // Output before the indicator ends its own line, so one newline leaves
+        // a single blank line above it.
+        try writer.print("\n{s}Thinking...{s}", .{ ansi.dim, ansi.reset });
         try writer.flush();
     }
 
@@ -95,7 +97,7 @@ test "show writes a thinking hint" {
 
     var indicator = ThinkingIndicator.init(std.testing.io);
     try indicator.show(&output.writer);
-    try std.testing.expectEqualStrings("\n\n\x1b[2mThinking...\x1b[0m", output.written());
+    try std.testing.expectEqualStrings("\n\x1b[2mThinking...\x1b[0m", output.written());
 }
 
 test "finish prints done message with provider ttft" {

@@ -22,8 +22,7 @@ pub fn readLine(
     line_alloc.clearRetainingCapacity();
     if (history) |h| h.resetNavigation();
 
-    try stdout_writer.print("\n\n{s} ", .{prompts.prompt_text});
-    try stdout_writer.flush();
+    try printPrompt(stdout_writer);
 
     cancel.setRawMode(true) catch {
         // Terminal does not support raw mode (e.g., piped stdin). Fall back
@@ -38,6 +37,13 @@ pub fn readLine(
     else
         try posix.readLinePosix(allocator, io, &editor);
     return endPromptRow(stdout_writer, result);
+}
+
+/// Output before the prompt ends its own line, so one newline leaves a single
+/// blank line above the prompt.
+fn printPrompt(stdout_writer: *std.Io.Writer) !void {
+    try stdout_writer.print("\n{s} ", .{prompts.prompt_text});
+    try stdout_writer.flush();
 }
 
 /// Raw input leaves the cursor at the end of the prompt row. Ending that row,
@@ -229,4 +235,13 @@ test "endPromptRow ends the prompt row unless the input was cancelled" {
         try std.testing.expectEqual(std.meta.activeTag(outcome), std.meta.activeTag(result));
         try std.testing.expectEqualStrings(written, out.written());
     }
+}
+
+test "printPrompt leaves a single blank line above the prompt" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try printPrompt(&out.writer);
+
+    try std.testing.expectEqualStrings("\n" ++ prompts.prompt_text ++ " ", out.written());
 }
