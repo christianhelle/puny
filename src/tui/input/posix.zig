@@ -82,7 +82,7 @@ pub fn readLinePosix(
             },
             else => if (terminal.isIgnoredControlByte(byte)) {
                 // Unbound control keys do nothing.
-            } else if (byte == '@' and mention.isTrigger(editor.line_alloc.written())) {
+            } else if (byte == '@' and mention.isTrigger(editor.line_alloc.written()[0..editor.cursor])) {
                 try mention.insertMention(allocator, io, editor);
             } else {
                 try editor.append(byte);
