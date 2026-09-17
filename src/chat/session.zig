@@ -305,7 +305,7 @@ pub const ChatSession = struct {
                 },
                 .list_skills => {
                     if (ctx.parsed.no_skills) {
-                        try ctx.stdout_writer.print("\n\nSkills are disabled.\n", .{});
+                        try ctx.stdout_writer.print("\nSkills are disabled.\n", .{});
                         try ctx.stdout_writer.flush();
                         if (ctx.parsed.oneshot) {
                             finalizeSession(ctx);
@@ -316,18 +316,7 @@ pub const ChatSession = struct {
                     if (!ctx.skill_registry.fully_scanned) {
                         try ctx.skill_registry.fullScan(ctx.io);
                     }
-                    try ctx.stdout_writer.print("\n\nAvailable skills:\n\n", .{});
-                    if (ctx.skill_registry.count() == 0) {
-                        try ctx.stdout_writer.print("  (none found)\n", .{});
-                    } else {
-                        for (ctx.skill_registry.records.items) |r| {
-                            if (r.description) |desc| {
-                                try ctx.stdout_writer.print("{s}{s}{s}\n{s}\n\n", .{ ansi.bright, r.name, ansi.reset, desc });
-                            } else {
-                                try ctx.stdout_writer.print("{s}{s}{s}\n", .{ ansi.bright, r.name, ansi.reset });
-                            }
-                        }
-                    }
+                    try printSkillList(ctx.stdout_writer, ctx.skill_registry.records.items);
                     if (ctx.parsed.oneshot) {
                         finalizeSession(ctx);
                         return;
@@ -602,6 +591,23 @@ fn maybeLoadTriggeredSkills(
         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
         try printNotice(ctx.stdout_writer, "Skill: {s}", .{r.name});
         loaded_skills.put(ctx.arena, r.name, {}) catch {};
+    }
+}
+
+/// Lists skills for `/skills`. A described skill gets a blank line above it,
+/// so no two blank lines meet whatever prints next.
+fn printSkillList(writer: *std.Io.Writer, records: []const skills.SkillRecord) !void {
+    try writer.print("\nAvailable skills:\n", .{});
+    if (records.len == 0) {
+        try writer.print("  (none found)\n", .{});
+        return;
+    }
+    for (records) |r| {
+        if (r.description) |desc| {
+            try writer.print("\n{s}{s}{s}\n{s}\n", .{ ansi.bright, r.name, ansi.reset, desc });
+        } else {
+            try writer.print("{s}{s}{s}\n", .{ ansi.bright, r.name, ansi.reset });
+        }
     }
 }
 
@@ -1394,4 +1400,33 @@ test "printNotice writes a dim line with a single blank line above it" {
     try printNotice(&output.writer, "Skill: {s}", .{"tdd"});
 
     try std.testing.expectEqualStrings("\n\x1b[2mSkill: tdd\x1b[0m\n", output.written());
+}
+
+test "printSkillList separates described skills by single blank lines" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    const records = [_]skills.SkillRecord{
+        .{ .name = "tdd", .description = "Test first", .dir_path = "", .triggers = null, .disable_model_invocation = false },
+        .{ .name = "plain", .description = null, .dir_path = "", .triggers = null, .disable_model_invocation = false },
+        .{ .name = "review", .description = "Review code", .dir_path = "", .triggers = null, .disable_model_invocation = false },
+    };
+    try printSkillList(&output.writer, &records);
+
+    try std.testing.expectEqualStrings(
+        "\nAvailable skills:\n" ++
+            "\n" ++ ansi.bright ++ "tdd" ++ ansi.reset ++ "\nTest first\n" ++
+            ansi.bright ++ "plain" ++ ansi.reset ++ "\n" ++
+            "\n" ++ ansi.bright ++ "review" ++ ansi.reset ++ "\nReview code\n",
+        output.written(),
+    );
+}
+
+test "printSkillList reports when no skills are found" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printSkillList(&output.writer, &.{});
+
+    try std.testing.expectEqualStrings("\nAvailable skills:\n  (none found)\n", output.written());
 }
