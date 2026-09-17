@@ -51,12 +51,16 @@ pub const LineEditor = struct {
         try self.appendSlice(&single);
     }
 
-    /// Appends a run of bytes (typically one complete UTF-8 code point) and
-    /// redraws once, so multi-byte input never flashes a redraw containing
-    /// an incomplete sequence.
+    /// Inserts a run of bytes (typically one complete UTF-8 code point) at
+    /// the cursor and redraws once, so multi-byte input never flashes a
+    /// redraw containing an incomplete sequence.
     pub fn appendSlice(self: *LineEditor, bytes: []const u8) !void {
+        const old_len = self.line_alloc.written().len;
         try self.line_alloc.writer.writeAll(bytes);
-        self.cursor = self.line_alloc.written().len;
+        const text = self.line_alloc.written();
+        std.mem.copyBackwards(u8, text[self.cursor + bytes.len ..], text[self.cursor..old_len]);
+        @memcpy(text[self.cursor..][0..bytes.len], bytes);
+        self.cursor += bytes.len;
         if (self.width == null) {
             try self.stdout_writer.writeAll(bytes);
             try self.stdout_writer.flush();
@@ -804,4 +808,37 @@ test "editor moveLeft from text ending at the edge leaves the forced-wrap row" {
     try editor.moveLeft();
 
     try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefgh \x1b[1A\x1b[10G", out.written());
+}
+
+test "editor append inserts at the cursor and keeps it after the new char" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ac");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.append('b');
+
+    try std.testing.expectEqualStrings("abc", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> abc\x1b[5G", out.written());
+}
+
+test "editor appendSlice inserts a multi-byte code point mid-line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ab");
+    try editor.moveLeft();
+    try editor.appendSlice("中");
+    try editor.appendSlice("é");
+
+    try std.testing.expectEqualStrings("a中éb", line_alloc.written());
 }
