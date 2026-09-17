@@ -61,6 +61,10 @@ pub const cursor_up = "\x1b[{d}A";
 /// Use with `print(cursor_down, .{n})`.
 pub const cursor_down = "\x1b[{d}B";
 
+/// Move the cursor to the one-based column `n` on the current line (CSI G).
+/// Use with `print(cursor_to_column, .{n})`.
+pub const cursor_to_column = "\x1b[{d}G";
+
 /// Clear from the cursor to the end of the current line (CSI K).
 pub const clear_to_end_of_line = "\x1b[K";
 
