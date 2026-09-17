@@ -148,6 +148,16 @@ pub const LineEditor = struct {
         try self.moveTo(self.line_alloc.written().len);
     }
 
+    /// Moves the cursor to the start of the word before it.
+    pub fn moveWordLeft(self: *LineEditor) !void {
+        try self.moveTo(prevWordStart(self.line_alloc.written(), self.cursor));
+    }
+
+    /// Moves the cursor to the end of the word after it.
+    pub fn moveWordRight(self: *LineEditor) !void {
+        try self.moveTo(nextWordEnd(self.line_alloc.written(), self.cursor));
+    }
+
     fn moveTo(self: *LineEditor, pos: usize) !void {
         if (pos == self.cursor) return;
         self.cursor = pos;
@@ -220,6 +230,28 @@ pub const RowsInfo = struct {
     /// Zero-based column just past the last code point on the final row.
     col: usize,
 };
+
+/// Word characters for word-wise motion and deletion: ASCII letters, digits,
+/// and `_`, plus every non-ASCII byte so a word never splits a UTF-8 sequence.
+fn isWordByte(byte: u8) bool {
+    return std.ascii.isAlphanumeric(byte) or byte == '_' or byte >= 0x80;
+}
+
+/// Start of the word before `pos`, skipping any separators first.
+fn prevWordStart(text: []const u8, pos: usize) usize {
+    var i = pos;
+    while (i > 0 and !isWordByte(text[i - 1])) i -= 1;
+    while (i > 0 and isWordByte(text[i - 1])) i -= 1;
+    return i;
+}
+
+/// End of the word after `pos`, skipping any separators first.
+fn nextWordEnd(text: []const u8, pos: usize) usize {
+    var i = pos;
+    while (i < text.len and !isWordByte(text[i])) i += 1;
+    while (i < text.len and isWordByte(text[i])) i += 1;
+    return i;
+}
 
 /// Display width and byte length of the code point starting at `text[i]`.
 /// Invalid or truncated UTF-8 renders as a single replacement column.
@@ -979,4 +1011,41 @@ test "editor deleteForward is a no-op at the end of the buffer" {
 
     try std.testing.expectEqualStrings("ab", line_alloc.written());
     try std.testing.expectEqualStrings("", out.written());
+}
+
+/// Types `text`, runs `ops` on the editor, then inserts a `|` marker so the
+/// resulting buffer shows where the cursor landed.
+fn expectCursorAfter(text: []const u8, ops: []const *const fn (*LineEditor) anyerror!void, expected: []const u8) !void {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 80);
+    try editor.appendSlice(text);
+    for (ops) |op| try op(&editor);
+    try editor.append('|');
+    try std.testing.expectEqualStrings(expected, line_alloc.written());
+}
+
+test "editor moveWordLeft stops at the start of each word" {
+    const L = LineEditor.moveWordLeft;
+    try expectCursorAfter("read src/main.zig", &.{L}, "read src/main.|zig");
+    try expectCursorAfter("read src/main.zig", &.{ L, L }, "read src/|main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ L, L, L, L }, "|read src/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ L, L, L, L, L }, "|read src/main.zig");
+    try expectCursorAfter("hello   ", &.{L}, "|hello   ");
+    try expectCursorAfter("héllo wörld", &.{L}, "héllo |wörld");
+    try expectCursorAfter("snake_case", &.{L}, "|snake_case");
+}
+
+test "editor moveWordRight stops at the end of each word" {
+    const H = LineEditor.moveHome;
+    const R = LineEditor.moveWordRight;
+    try expectCursorAfter("read src/main.zig", &.{ H, R }, "read| src/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ H, R, R }, "read src|/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ H, R, R, R, R, R }, "read src/main.zig|");
+    try expectCursorAfter("   hello", &.{ H, R }, "   hello|");
+    try expectCursorAfter("héllo wörld", &.{ H, R }, "héllo| wörld");
 }
