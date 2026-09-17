@@ -335,7 +335,7 @@ fn run(init: std.process.Init) !u8 {
         restore_incomplete = restore_result.incomplete;
         if (restore_result.restored) {
             var header_buf: [256]u8 = undefined;
-            try stdout_writer.print("\n\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
+            try stdout_writer.print("\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
             try display.printConversation(stdout_writer, messages.items);
             try stdout_writer.flush();
         }
@@ -499,7 +499,7 @@ fn printStartupTime(
     const now = std.Io.Clock.Timestamp.now(io, .awake);
     const elapsed_ns: u64 = @intCast(startup_time.raw.durationTo(now.raw).nanoseconds);
     var startup_buf: [64]u8 = undefined;
-    try stdout_writer.print("{s}Startup time: {s}{s}", .{
+    try stdout_writer.print("{s}Startup time: {s}{s}\n", .{
         ansi.dim, formatDuration(&startup_buf, elapsed_ns), ansi.reset,
     });
     try stdout_writer.flush();
@@ -920,4 +920,14 @@ test "resolveReasoningEffort ignores an unrecognised configured level" {
         @as(?openai.ReasoningEffort, null),
         resolveReasoningEffort(null, null, "enthusiastic"),
     );
+}
+
+test "printStartupTime ends its line" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try printStartupTime(std.testing.io, &out.writer, std.Io.Clock.Timestamp.now(std.testing.io, .awake));
+
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), ansi.dim ++ "Startup time: "));
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), ansi.reset ++ "\n"));
 }

@@ -86,6 +86,9 @@ pub const clear_line = "\x1b[2K";
 /// Erase from cursor to end of display (CSI J).
 pub const erase_display = "\x1b[J";
 
+/// Delete the cursor's line, moving the lines below it up one row (CSI M).
+pub const delete_line = "\x1b[M";
+
 /// Returns true for C0 control characters that the prompt input loop ignores.
 pub fn isIgnoredControlByte(byte: u8) bool {
     return switch (byte) {

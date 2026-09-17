@@ -162,7 +162,7 @@ pub const SessionStats = struct {
         else
             try std.fmt.allocPrint(self.allocator, "─── Session Stats ───", .{});
         defer self.allocator.free(session_label);
-        try writer.print("\n\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
+        try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
         var session_turns_buf: [32]u8 = undefined;
         try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, self.totalTurns())});
         for (self.models.items) |entry| {
@@ -452,4 +452,15 @@ test "SessionStats totalTokens includes reasoning tokens" {
 
     // 12 in + 5 plain out (8 - 3) + 3 reasoning = 20.
     try std.testing.expectEqual(@as(i64, 20), stats.totalTokens());
+}
+
+test "SessionStats.print starts one blank line below the output before it" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    try std.testing.expect(std.mem.startsWith(u8, output.written(), "\n" ++ ansi.dim ++ "─── Session Stats ───"));
 }

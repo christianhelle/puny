@@ -704,3 +704,56 @@ test "effectiveEffort leaves the level unset when nothing asks for reasoning" {
         effectiveEffort(null, false, false),
     );
 }
+
+test "agent loop output never leaves consecutive blank lines" {
+    const mock = @import("../providers/mock.zig");
+    const token_stats = @import("../tui/token_stats.zig");
+    const terminal = @import("../tui/terminal.zig");
+    const FakeScreen = @import("../tui/fake_screen.zig").FakeScreen;
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+
+    // Mirrors the interactive chat loop: submitting a prompt ends the prompt
+    // row, each agent iteration shows the indicator before running its turn,
+    // and a footer closes the turn.
+    for ([_][]const u8{ "read the file", "say fast" }) |prompt| {
+        try output.writer.print("\n> {s}\r\n", .{prompt});
+        try messages.append(arena, .{ .user = prompt });
+        var turn_complete = false;
+        while (!turn_complete) {
+            var thinking_indicator = indicator.ThinkingIndicator.init(std.testing.io);
+            try thinking_indicator.show(&output.writer);
+            const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, &thinking_indicator, null);
+            turn_complete = result.turn_complete;
+        }
+        try token_stats.printTokenFooter(&output.writer, 1, 1, false, 2);
+    }
+    try output.writer.writeAll("\n> ");
+
+    var screen = FakeScreen{ .width = terminal.terminalWidth() orelse 80 };
+    defer screen.deinit(arena);
+    try screen.feed(arena, output.written());
+    const text = try screen.toText(arena);
+
+    errdefer std.debug.print("screen:\n{s}\n", .{text});
+    try std.testing.expect(std.mem.indexOf(u8, text, "Thinking...") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "\n\n\n") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "> read the file\n\n") != null);
+    try std.testing.expect(std.mem.endsWith(u8, text, ")\n\n> "));
+}

@@ -22,22 +22,48 @@ pub fn readLine(
     line_alloc.clearRetainingCapacity();
     if (history) |h| h.resetNavigation();
 
-    try stdout_writer.print("\n\n{s} ", .{prompts.prompt_text});
-    try stdout_writer.flush();
+    try printPrompt(stdout_writer);
 
     cancel.setRawMode(true) catch {
         // Terminal does not support raw mode (e.g., piped stdin). Fall back
         // to canonical single-line input; Esc cancellation is unavailable.
-        return try common.readLineCanonical(io, stdout_writer, line_alloc, stdin_buffer);
+        const result = try common.readLineCanonical(io, stdout_writer, line_alloc, stdin_buffer);
+        const stdin_is_tty = std.Io.File.stdin().isTty(io) catch false;
+        return endCanonicalPromptRow(stdout_writer, result, stdin_is_tty);
     };
     defer cancel.setRawMode(false) catch {};
 
     var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, history, terminal.terminalWidth());
-    if (builtin.os.tag == .windows) {
-        return try windows_impl.readLineWindows(allocator, io, &editor);
-    } else {
-        return try posix.readLinePosix(allocator, io, &editor);
+    const result = if (builtin.os.tag == .windows)
+        try windows_impl.readLineWindows(allocator, io, &editor)
+    else
+        try posix.readLinePosix(allocator, io, &editor);
+    return endPromptRow(stdout_writer, result);
+}
+
+/// Output before the prompt ends its own line, so one newline leaves a single
+/// blank line above the prompt.
+fn printPrompt(stdout_writer: *std.Io.Writer) !void {
+    try stdout_writer.print("\n{s} ", .{prompts.prompt_text});
+    try stdout_writer.flush();
+}
+
+/// Raw input leaves the cursor at the end of the prompt row. Ending that row,
+/// as the terminal's own echo does for canonical input, lets whatever prints
+/// next start on a fresh line. A cancelled prompt is re-shown by the caller.
+fn endPromptRow(stdout_writer: *std.Io.Writer, result: ReadLineResult) !ReadLineResult {
+    if (result != .cancelled) {
+        try stdout_writer.writeAll("\r\n");
+        try stdout_writer.flush();
     }
+    return result;
+}
+
+/// A terminal in canonical mode echoes the Enter that submits a line, but
+/// nothing echoes piped input or EOF, so end the prompt row only then.
+fn endCanonicalPromptRow(stdout_writer: *std.Io.Writer, result: ReadLineResult, stdin_is_tty: bool) !ReadLineResult {
+    if (stdin_is_tty and result == .submitted) return result;
+    return endPromptRow(stdout_writer, result);
 }
 
 /// Reads a single line from stdin without printing a prompt, echoing input
@@ -204,4 +230,46 @@ test "readPlainLine falls back to canonical input when raw mode is unavailable" 
 
     try std.testing.expectEqualStrings("canonical", line.?);
     try std.testing.expectEqualStrings("", out.written());
+}
+
+test "endPromptRow ends the prompt row unless the input was cancelled" {
+    const outcomes = [_]ReadLineResult{ .{ .submitted = "hi" }, .interrupted, .eof, .cancelled };
+    const expected = [_][]const u8{ "\r\n", "\r\n", "\r\n", "" };
+    for (outcomes, expected) |outcome, written| {
+        var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer out.deinit();
+
+        const result = try endPromptRow(&out.writer, outcome);
+
+        try std.testing.expectEqual(std.meta.activeTag(outcome), std.meta.activeTag(result));
+        try std.testing.expectEqualStrings(written, out.written());
+    }
+}
+
+test "printPrompt leaves a single blank line above the prompt" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try printPrompt(&out.writer);
+
+    try std.testing.expectEqualStrings("\n" ++ prompts.prompt_text ++ " ", out.written());
+}
+
+test "endCanonicalPromptRow ends the row only when the terminal did not echo it" {
+    const Case = struct { result: ReadLineResult, stdin_is_tty: bool, written: []const u8 };
+    const cases = [_]Case{
+        .{ .result = .{ .submitted = "hi" }, .stdin_is_tty = true, .written = "" },
+        .{ .result = .{ .submitted = "hi" }, .stdin_is_tty = false, .written = "\r\n" },
+        .{ .result = .eof, .stdin_is_tty = true, .written = "\r\n" },
+        .{ .result = .eof, .stdin_is_tty = false, .written = "\r\n" },
+    };
+    for (cases) |case| {
+        var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer out.deinit();
+
+        const result = try endCanonicalPromptRow(&out.writer, case.result, case.stdin_is_tty);
+
+        try std.testing.expectEqual(std.meta.activeTag(case.result), std.meta.activeTag(result));
+        try std.testing.expectEqualStrings(case.written, out.written());
+    }
 }

@@ -136,7 +136,7 @@ pub const ChatSession = struct {
                     try persistence.saveSessionMeta(ctx);
                     upsertCurrentSession(ctx);
 
-                    try ctx.stdout_writer.print(" Performing full memory reset...", .{});
+                    try ctx.stdout_writer.print("\nPerforming full memory reset...", .{});
                     try ctx.stdout_writer.flush();
 
                     try recycleMessagesArena(ctx);
@@ -305,11 +305,9 @@ pub const ChatSession = struct {
                 },
                 .list_skills => {
                     if (ctx.parsed.no_skills) {
-                        try ctx.stdout_writer.print("\n\nSkills are disabled.\n", .{});
+                        try ctx.stdout_writer.print("\nSkills are disabled.\n", .{});
                         try ctx.stdout_writer.flush();
                         if (ctx.parsed.oneshot) {
-                            try ctx.stdout_writer.print("\n", .{});
-                            try ctx.stdout_writer.flush();
                             finalizeSession(ctx);
                             return;
                         }
@@ -318,21 +316,8 @@ pub const ChatSession = struct {
                     if (!ctx.skill_registry.fully_scanned) {
                         try ctx.skill_registry.fullScan(ctx.io);
                     }
-                    try ctx.stdout_writer.print("\n\nAvailable skills:\n\n", .{});
-                    if (ctx.skill_registry.count() == 0) {
-                        try ctx.stdout_writer.print("  (none found)\n", .{});
-                    } else {
-                        for (ctx.skill_registry.records.items) |r| {
-                            if (r.description) |desc| {
-                                try ctx.stdout_writer.print("{s}{s}{s}\n{s}\n\n", .{ ansi.bright, r.name, ansi.reset, desc });
-                            } else {
-                                try ctx.stdout_writer.print("{s}{s}{s}\n", .{ ansi.bright, r.name, ansi.reset });
-                            }
-                        }
-                    }
+                    try printSkillList(ctx.stdout_writer, ctx.skill_registry.records.items);
                     if (ctx.parsed.oneshot) {
-                        try ctx.stdout_writer.print("\n", .{});
-                        try ctx.stdout_writer.flush();
                         finalizeSession(ctx);
                         return;
                     }
@@ -364,8 +349,7 @@ pub const ChatSession = struct {
                     // text was supplied (e.g. `/empty-skill hello`), so no empty
                     // system message is appended and no chat turn is run.
                     if (std.mem.trim(u8, content, " \t\r\n").len == 0) {
-                        try ctx.stdout_writer.print("\n\n{s}Skill '{s}' has no content.{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                        try ctx.stdout_writer.flush();
+                        try printNotice(ctx.stdout_writer, "Skill '{s}' has no content.", .{skill_name});
                         continue;
                     }
 
@@ -373,8 +357,7 @@ pub const ChatSession = struct {
                     if (has_text) {
                         // Skill loaded as system context, trailing text as the user request.
                         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-                        try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                        try ctx.stdout_writer.flush();
+                        try printNotice(ctx.stdout_writer, "Skill: {s}", .{skill_name});
                         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = user_text.? });
                         try ctx.stdout_writer.print(" {s}\n", .{user_text.?});
                         try ctx.stdout_writer.flush();
@@ -385,8 +368,7 @@ pub const ChatSession = struct {
 
                     // Bare skill command: send the skill content itself as the prompt.
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = content });
-                    try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                    try ctx.stdout_writer.flush();
+                    try printNotice(ctx.stdout_writer, "Skill: {s}", .{skill_name});
                     const turn_result = try runChatTurn(ctx);
                     if (turn_result == .exit) return;
                     continue;
@@ -607,10 +589,33 @@ fn maybeLoadTriggeredSkills(
         if (!skills.recordMatchesTrigger(r, text)) continue;
         const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-        try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
-        try ctx.stdout_writer.flush();
+        try printNotice(ctx.stdout_writer, "Skill: {s}", .{r.name});
         loaded_skills.put(ctx.arena, r.name, {}) catch {};
     }
+}
+
+/// Lists skills for `/skills`. A described skill gets a blank line above it,
+/// so no two blank lines meet whatever prints next.
+fn printSkillList(writer: *std.Io.Writer, records: []const skills.SkillRecord) !void {
+    try writer.print("\nAvailable skills:\n", .{});
+    if (records.len == 0) {
+        try writer.print("  (none found)\n", .{});
+    }
+    for (records) |r| {
+        if (r.description) |desc| {
+            try writer.print("\n{s}{s}{s}\n{s}\n", .{ ansi.bright, r.name, ansi.reset, desc });
+        } else {
+            try writer.print("{s}{s}{s}\n", .{ ansi.bright, r.name, ansi.reset });
+        }
+    }
+    try writer.flush();
+}
+
+/// Prints a dim status line, such as a loaded skill, one blank line below the
+/// output before it.
+fn printNotice(writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
+    try writer.print("\n" ++ ansi.dim ++ fmt ++ ansi.reset ++ "\n", args);
+    try writer.flush();
 }
 
 fn readUserInput(
@@ -727,8 +732,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
 
         if (skills.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = pending.content });
-            try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, pending.name, ansi.reset });
-            try ctx.stdout_writer.flush();
+            try printNotice(ctx.stdout_writer, "Skill: {s}", .{pending.name});
         }
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
@@ -761,7 +765,6 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     // this turn just produced. Saving first would serialize the whole
     // conversation and rewrite the whole index twice over, back to back.
     if (honor_oneshot and ctx.parsed.oneshot) {
-        try ctx.stdout_writer.print("\n", .{});
         finalizeSession(ctx);
         return .{ .cancelled = turn_cancelled, .had_error = turn_had_error, .exited = true };
     }
@@ -1388,4 +1391,52 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
     }) catch |err| {
         std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
     };
+}
+
+test "printNotice writes a dim line with a single blank line above it" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printNotice(&output.writer, "Skill: {s}", .{"tdd"});
+
+    try std.testing.expectEqualStrings("\n\x1b[2mSkill: tdd\x1b[0m\n", output.written());
+}
+
+test "printSkillList separates described skills by single blank lines" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    const records = [_]skills.SkillRecord{
+        .{ .name = "tdd", .description = "Test first", .dir_path = "", .triggers = null, .disable_model_invocation = false },
+        .{ .name = "plain", .description = null, .dir_path = "", .triggers = null, .disable_model_invocation = false },
+        .{ .name = "review", .description = "Review code", .dir_path = "", .triggers = null, .disable_model_invocation = false },
+    };
+    try printSkillList(&output.writer, &records);
+
+    try std.testing.expectEqualStrings(
+        "\nAvailable skills:\n" ++
+            "\n" ++ ansi.bright ++ "tdd" ++ ansi.reset ++ "\nTest first\n" ++
+            ansi.bright ++ "plain" ++ ansi.reset ++ "\n" ++
+            "\n" ++ ansi.bright ++ "review" ++ ansi.reset ++ "\nReview code\n",
+        output.written(),
+    );
+}
+
+test "printSkillList reports when no skills are found" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printSkillList(&output.writer, &.{});
+
+    try std.testing.expectEqualStrings("\nAvailable skills:\n  (none found)\n", output.written());
+}
+
+test "printSkillList flushes so a one-shot listing is not left buffered" {
+    var buffer: [256]u8 = undefined;
+    var discarding = std.Io.Writer.Discarding.init(&buffer);
+
+    try printSkillList(&discarding.writer, &.{});
+
+    try std.testing.expectEqual(@as(usize, 0), discarding.writer.end);
+    try std.testing.expect(discarding.fullCount() > 0);
 }

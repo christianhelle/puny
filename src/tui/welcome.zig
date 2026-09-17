@@ -35,7 +35,10 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     }
 
     if (!info.oneshot and !info.prefilled) {
+        // End the model line before the list and leave a blank line after it.
+        try writer.print("\n", .{});
         try help.showHelp(writer);
+        try writer.print("\n", .{});
     } else {
         try writer.print("\n\n", .{});
     }
@@ -271,4 +274,20 @@ test "print renders a full banner out of line for coverage" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "Welcome to Puny"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "sess-1"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, " - \x1b[1mlow\x1b[22m"));
+}
+
+test "print keeps one blank line around the command list" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try print(&out.writer, .{
+        .provider_name = "Mock",
+        .provider_url = "-",
+        .model_key = "test-model",
+        .session_id = "abc-123",
+    });
+
+    const text = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, "test-model\n\n" ++ ansi.yellow ++ "Available commands:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "prompt.\n\n" ++ ansi.dim ++ "Session:") != null);
 }
