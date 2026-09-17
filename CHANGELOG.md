@@ -5,6 +5,9 @@
 ### Merged Pull Requests
 - Readline-style prompt editing ([#209](https://github.com/christianhelle/puny/pull/209)) ([@christianhelle](https://github.com/christianhelle/))
 
+### Features
+- Never print more than one blank line between chat output blocks ([#210](https://github.com/christianhelle/puny/pull/210)) ([@christianhelle](https://github.com/christianhelle/))
+
 
 ## [v0.4.0](https://github.com/christianhelle/puny/releases/tag/v0.4.0) (2026-09-16)
 
