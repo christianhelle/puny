@@ -149,3 +149,142 @@ const StdinSource = struct {
         return buf[0];
     }
 };
+
+/// Scripted terminal input for `readLineFrom`. A null event is a pause long
+/// enough for a timed read to give up; a blocking read waits through it.
+const TestSource = struct {
+    events: []const ?u8,
+    pos: usize = 0,
+
+    fn read(self: *TestSource) !?u8 {
+        while (self.pos < self.events.len) {
+            defer self.pos += 1;
+            if (self.events[self.pos]) |byte| return byte;
+        }
+        return null;
+    }
+
+    fn readWithTimeout(self: *TestSource, timeout_ms: i32) !?u8 {
+        _ = timeout_ms;
+        if (self.pos >= self.events.len) return null;
+        defer self.pos += 1;
+        return self.events[self.pos];
+    }
+};
+
+const pause = [_]?u8{null};
+
+fn input(comptime bytes: []const u8) [bytes.len]?u8 {
+    var events: [bytes.len]?u8 = undefined;
+    for (bytes, 0..) |byte, i| events[i] = byte;
+    return events;
+}
+
+fn expectReadLine(
+    events: []const ?u8,
+    erase_is_ctrl_h: bool,
+    expected: std.meta.Tag(common.ReadLineResult),
+    expected_text: []const u8,
+) !void {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    var source: TestSource = .{ .events = events };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &source, erase_is_ctrl_h);
+
+    try std.testing.expectEqual(expected, std.meta.activeTag(result));
+    try std.testing.expectEqualStrings(expected_text, line_alloc.written());
+}
+
+test "readLineFrom submits typed text on Enter" {
+    try expectReadLine(&input("hello\r"), false, .submitted, "hello");
+    try expectReadLine(&input("hi\n"), false, .submitted, "hi");
+}
+
+test "readLineFrom returns eof when input ends" {
+    try expectReadLine(&input("hi"), false, .eof, "hi");
+}
+
+test "readLineFrom deletes a character on Backspace" {
+    try expectReadLine(&input("ab\x7f\r"), false, .submitted, "a");
+}
+
+test "readLineFrom deletes a word on Ctrl+Backspace unless erase is Ctrl+H" {
+    try expectReadLine(&input("one two\x08\r"), false, .submitted, "one ");
+    try expectReadLine(&input("one two\x08\r"), true, .submitted, "one tw");
+}
+
+test "readLineFrom interrupts on Ctrl+C" {
+    defer sigint.clear();
+    try expectReadLine(&input("ab\x03"), false, .interrupted, "ab");
+    try std.testing.expect(sigint.isTriggered());
+}
+
+test "readLineFrom cancels on Ctrl+D only when the prompt is empty" {
+    try expectReadLine(&input("\x04"), false, .cancelled, "");
+    try expectReadLine(&input("ab\x01\x04\r"), false, .submitted, "b");
+}
+
+test "readLineFrom moves the cursor with Ctrl+A, Ctrl+B, Ctrl+E, and Ctrl+F" {
+    try expectReadLine(&input("bc\x01a\x05d\x02X\x06Y\r"), false, .submitted, "abcXdY");
+}
+
+test "readLineFrom kills text with Ctrl+W, Ctrl+K, and Ctrl+U" {
+    try expectReadLine(&input("one two three\x17\r"), false, .submitted, "one two ");
+    try expectReadLine(&input("abcd\x02\x02\x0b\r"), false, .submitted, "ab");
+    try expectReadLine(&input("abcd\x02\x02\x15\r"), false, .submitted, "cd");
+}
+
+test "readLineFrom ignores unbound control bytes and inserts a literal @ without mentions" {
+    try expectReadLine(&input("@a\x07\r"), false, .submitted, "@a");
+}
+
+test "readLineFrom applies CSI arrow keys" {
+    try expectReadLine(&input("ac\x1b[Db\r"), false, .submitted, "abc");
+    try expectReadLine(&input("one two\x1b[1;5DX\r"), false, .submitted, "one Xtwo");
+    try expectReadLine(&input("a\x1b[Ab\r"), false, .submitted, "ab");
+}
+
+test "readLineFrom drops parameter bytes beyond the CSI buffer" {
+    try expectReadLine(&input("ab\x1b[1;11111111111111111111DX\r"), false, .submitted, "aXb");
+}
+
+test "readLineFrom ignores a CSI sequence cut off by a pause" {
+    try expectReadLine(&(input("a\x1b[") ++ pause ++ input("b\r")), false, .submitted, "ab");
+}
+
+test "readLineFrom applies SS3 keys and ignores a truncated SS3 sequence" {
+    try expectReadLine(&input("bc\x1bOHa\r"), false, .submitted, "abc");
+    try expectReadLine(&(input("a\x1bO") ++ pause ++ input("b\r")), false, .submitted, "ab");
+}
+
+test "readLineFrom applies readline Alt shortcuts" {
+    try expectReadLine(&input("one two\x1bbX\r"), false, .submitted, "one Xtwo");
+}
+
+test "readLineFrom inserts the byte after Esc when it is not a shortcut" {
+    try expectReadLine(&input("a\x1bx\r"), false, .submitted, "ax");
+    try expectReadLine(&input("a\x1b\x07\r"), false, .submitted, "a");
+}
+
+test "readLineFrom cancels on two separate Esc taps" {
+    try expectReadLine(&(input("ab\x1b") ++ pause ++ input("\x1b") ++ pause), false, .cancelled, "ab");
+}
+
+test "readLineFrom forgets a first Esc tap when another key follows" {
+    try expectReadLine(&(input("\x1b") ++ pause ++ input("a\x1b") ++ pause ++ input("\r")), false, .submitted, "a");
+}
+
+test "readLineFrom cancels on a double Esc inside the sequence probe" {
+    try expectReadLine(&(input("ab\x1b\x1b") ++ pause), false, .cancelled, "ab");
+}
+
+test "readLineFrom treats Esc Esc CSI as the Alt-modified key" {
+    try expectReadLine(&input("one two\x1b\x1b[DX\r"), false, .submitted, "one Xtwo");
+    try expectReadLine(&input("a\x1b\x1bz\r"), false, .submitted, "a");
+}

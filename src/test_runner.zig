@@ -222,6 +222,7 @@ test "include tui.input.common tests" {
     _ = @import("tui/input/keys.zig");
     _ = @import("tui/input/line_editor.zig");
     _ = @import("tui/input/mention.zig");
+    _ = @import("tui/input/posix.zig");
 }
 test "include tui.list_picker tests" {
     _ = @import("tui/list_picker.zig");
