@@ -44,8 +44,13 @@ pub const FakeScreen = struct {
                             'G' => self.cur_col = 0,
                             'J' => try self.eraseToEnd(allocator),
                             'K' => {
+                                while (self.rows.items.len <= self.cur_row) {
+                                    try self.rows.append(allocator, .empty);
+                                }
                                 const row = &self.rows.items[self.cur_row];
-                                try row.resize(allocator, self.cur_col);
+                                // CSI 2 K clears the whole line; otherwise erase from the cursor.
+                                const keep = if (has_num and num == 2) 0 else self.cur_col;
+                                if (row.items.len > keep) row.shrinkRetainingCapacity(keep);
                             },
                             'M' => {
                                 if (self.cur_row < self.rows.items.len) {
@@ -94,7 +99,7 @@ pub const FakeScreen = struct {
             try self.rows.append(allocator, .empty);
         }
         const row = &self.rows.items[self.cur_row];
-        try row.resize(allocator, self.cur_col);
+        if (row.items.len > self.cur_col) row.shrinkRetainingCapacity(self.cur_col);
         for (self.rows.items[self.cur_row + 1 ..]) |*r| r.deinit(allocator);
         try self.rows.resize(allocator, self.cur_row + 1);
     }
@@ -134,8 +139,8 @@ test "FakeScreen handles dangling escapes, cursor moves, and erases" {
 
     const text = try screen.toText(arena);
     defer arena.free(text);
-    try std.testing.expect(std.mem.indexOf(u8, text, "a") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "bc") != null);
+    // CSI 2 K wiped the "bcY" row; the padded "X" stays on the first row.
+    try std.testing.expectEqualStrings("a X", text);
 }
 
 test "FakeScreen deletes the cursor row and shifts later rows up" {
@@ -164,4 +169,21 @@ test "FakeScreen wraps printed text at its width" {
 
     const text = try screen.toText(arena);
     try std.testing.expectEqualStrings("abc\ndef\nxyz\n→ab", text);
+}
+
+test "FakeScreen clears to the end of the line or the whole line" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var screen = FakeScreen{};
+    defer screen.deinit(arena);
+
+    // Erase from the cursor, then the whole line, then on a row not drawn yet.
+    try screen.feed(arena, "abcdef\nxy\x1b[1A\x1b[K");
+    try screen.feed(arena, "\x1b[1B\x1b[2K");
+    try screen.feed(arena, "\n\n\x1b[Kz");
+
+    const text = try screen.toText(arena);
+    try std.testing.expectEqualStrings("ab\n\n\nz", text);
 }
