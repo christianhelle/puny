@@ -85,6 +85,15 @@ pub const LineEditor = struct {
         try self.deleteRange(prevWordStart(self.line_alloc.written(), self.cursor), self.cursor);
     }
 
+    /// Deletes back to the previous whitespace, like Ctrl+W in a Unix shell.
+    pub fn deleteWhitespaceWordBackward(self: *LineEditor) !void {
+        const text = self.line_alloc.written();
+        var start = self.cursor;
+        while (start > 0 and std.ascii.isWhitespace(text[start - 1])) start -= 1;
+        while (start > 0 and !std.ascii.isWhitespace(text[start - 1])) start -= 1;
+        try self.deleteRange(start, self.cursor);
+    }
+
     /// Deletes up to the end of the word after the cursor.
     pub fn deleteWordForward(self: *LineEditor) !void {
         try self.deleteRange(self.cursor, nextWordEnd(self.line_alloc.written(), self.cursor));
@@ -1077,4 +1086,11 @@ test "editor deleteWordForward removes the word after the cursor" {
     try expectCursorAfter("read src/main.zig", &.{ H, F, F }, "|/main.zig");
     try expectCursorAfter("héllo wörld", &.{ H, F, F }, "|");
     try expectCursorAfter("abc", &.{F}, "abc|");
+}
+
+test "editor deleteWhitespaceWordBackward removes back to the previous whitespace" {
+    const W = LineEditor.deleteWhitespaceWordBackward;
+    try expectCursorAfter("read src/main.zig", &.{W}, "read |");
+    try expectCursorAfter("read src/main.zig  ", &.{W}, "read |");
+    try expectCursorAfter("read src/main.zig", &.{ W, W }, "|");
 }
