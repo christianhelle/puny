@@ -81,13 +81,13 @@ pub fn readLineWindows(
                     0x17 => try editor.deleteWhitespaceWordBackward(),
                     else => {},
                 };
-                if (alt and !ctrl and ch < 0x80) {
-                    const key = keys.decodeAlt(@intCast(ch));
+                if (alt and !ctrl) if (keys.altByteFromVirtualKey(vk, ch)) |byte| {
+                    const key = keys.decodeAlt(byte);
                     if (key != .unknown) {
                         try editor.handleKey(key);
                         continue;
                     }
-                }
+                };
                 if (ch >= 32 and ch != 127) {
                     if (std.unicode.utf16IsHighSurrogate(ch)) {
                         pending_high = ch;
