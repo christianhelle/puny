@@ -5,7 +5,7 @@ const command_column_width = 20;
 const command_padding = [_]u8{' '} ** command_column_width;
 
 pub fn showHelp(writer: *std.Io.Writer) !void {
-    try writer.print("\n\n{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
+    try writer.print("\n{s}Available commands:{s}\n", .{ ansi.yellow, ansi.reset });
     try printCommand(writer, "/quit, /exit", "Exit Puny");
     try printCommand(writer, "/new, /reset", "New session");
     try printCommand(writer, "/stats", "Show session statistics");
@@ -27,7 +27,6 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/help", "Show this help message");
     try printCommand(writer, "@path", "Attach a file to the prompt");
     try writer.print("\n{s}Tip:{s} Type @ to search and attach files to your prompt.\n", .{ ansi.yellow, ansi.reset });
-    try writer.print("\n", .{});
     try writer.flush();
 }
 
@@ -111,4 +110,15 @@ test "showHelp renders the full command table when called out of line" {
     try std.testing.expect(std.mem.indexOf(u8, text, "/plan [task]") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "@path") != null);
     try std.testing.expect(std.mem.endsWith(u8, text, "\n"));
+}
+
+test "showHelp starts one blank line below the prompt and ends its own line" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try showHelp(&output.writer);
+
+    const text = output.written();
+    try std.testing.expect(std.mem.startsWith(u8, text, "\n" ++ ansi.yellow ++ "Available commands:"));
+    try std.testing.expect(std.mem.endsWith(u8, text, "prompt.\n"));
 }
