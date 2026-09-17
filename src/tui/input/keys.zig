@@ -69,6 +69,17 @@ pub fn decodeAlt(byte: u8) Key {
     };
 }
 
+/// Word-wise variant of a key sent with an extra `ESC` prefix, which is how
+/// rxvt reports Alt with arrows and Delete (`ESC ESC [ D`).
+pub fn withAlt(key: Key) Key {
+    return switch (key) {
+        .left => .word_left,
+        .right => .word_right,
+        .delete => .delete_word_forward,
+        else => key,
+    };
+}
+
 /// Byte to pass to `decodeAlt` for a Windows Alt key-down record. Consoles
 /// may report Alt+letter with a zero character, so a letter virtual-key code
 /// (`A`..`Z`) stands in as its lowercase byte. Returns null when the record
@@ -150,4 +161,17 @@ test "altByteFromVirtualKey derives a lowercase letter when the character is zer
 test "altByteFromVirtualKey rejects non-letter keys without a character" {
     try std.testing.expectEqual(@as(?u8, null), altByteFromVirtualKey(0x70, 0));
     try std.testing.expectEqual(@as(?u8, null), altByteFromVirtualKey(0x41, 0x00E9));
+}
+
+test "withAlt turns arrows and Delete into their word-wise variants" {
+    try std.testing.expectEqual(Key.word_left, withAlt(.left));
+    try std.testing.expectEqual(Key.word_right, withAlt(.right));
+    try std.testing.expectEqual(Key.delete_word_forward, withAlt(.delete));
+}
+
+test "withAlt leaves other keys unchanged" {
+    try std.testing.expectEqual(Key.up, withAlt(.up));
+    try std.testing.expectEqual(Key.home, withAlt(.home));
+    try std.testing.expectEqual(Key.word_left, withAlt(.word_left));
+    try std.testing.expectEqual(Key.unknown, withAlt(.unknown));
 }
