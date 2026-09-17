@@ -104,6 +104,14 @@ fn setRawModePosix(enable: bool) !void {
     }
 }
 
+/// True when the terminal's erase character, saved when raw mode was last
+/// enabled, is ^H. Backspace then sends 0x08 itself, so 0x08 cannot mean
+/// Ctrl+Backspace.
+pub fn eraseIsCtrlH() bool {
+    if (is_windows) return false;
+    return saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] == 0x08;
+}
+
 fn setRawModeWindows(enable: bool) !void {
     const hStdin = getStdinHandle();
     if (enable) {

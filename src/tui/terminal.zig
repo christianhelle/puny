@@ -44,6 +44,10 @@ pub const control = struct {
 /// Byte that begins a CSI escape sequence after ESC.
 pub const csi_leader: u8 = '[';
 
+/// Byte that begins an SS3 escape sequence after ESC (application-mode
+/// cursor keys).
+pub const ss3_leader: u8 = 'O';
+
 /// Default timeout when waiting for the rest of an escape sequence.
 pub const escape_sequence_timeout_ms = 50;
 
