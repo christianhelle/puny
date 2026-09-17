@@ -4,6 +4,7 @@ const prompt_history = @import("../../prompts/history.zig");
 const terminal = @import("../terminal.zig");
 const prompts = @import("../../prompts/prompts.zig");
 const ansi = @import("../ansi.zig");
+const keys = @import("./keys.zig");
 
 /// Line editor state for the raw-mode prompt. Mutations to the buffer redraw
 /// the entire input area (all wrapped rows) instead of echoing bytes, so
@@ -159,6 +160,24 @@ pub const LineEditor = struct {
         const h = self.history orelse return;
         const replacement = h.next() orelse h.currentDraft() orelse return;
         try self.replace(replacement);
+    }
+
+    /// Applies a decoded editing key.
+    pub fn handleKey(self: *LineEditor, key: keys.Key) !void {
+        switch (key) {
+            .up => try self.historyPrevious(),
+            .down => try self.historyNext(),
+            .left => try self.moveLeft(),
+            .right => try self.moveRight(),
+            .word_left => try self.moveWordLeft(),
+            .word_right => try self.moveWordRight(),
+            .home => try self.moveHome(),
+            .end => try self.moveEnd(),
+            .delete => try self.deleteForward(),
+            .delete_word_forward => try self.deleteWordForward(),
+            .delete_word_backward => try self.deleteWordBackward(),
+            .unknown => {},
+        }
     }
 
     /// Moves the cursor one code point to the left.
@@ -1202,4 +1221,30 @@ test "editor without width rewrites the tail when deleting mid-line" {
     try editor.killToEnd();
     try std.testing.expectEqualStrings("", line_alloc.written());
     try std.testing.expectEqualStrings("\x1b[K", out.written());
+}
+
+test "editor handleKey dispatches decoded editing keys" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 80);
+    try editor.appendSlice("one two three");
+    try editor.handleKey(.word_left);
+    try editor.handleKey(.left);
+    try editor.handleKey(.right);
+    try editor.handleKey(.delete_word_backward);
+    try std.testing.expectEqualStrings("one three", line_alloc.written());
+
+    try editor.handleKey(.home);
+    try editor.handleKey(.delete_word_forward);
+    try editor.handleKey(.delete);
+    try std.testing.expectEqualStrings("three", line_alloc.written());
+
+    try editor.handleKey(.end);
+    try editor.handleKey(.unknown);
+    try editor.append('!');
+    try std.testing.expectEqualStrings("three!", line_alloc.written());
 }
