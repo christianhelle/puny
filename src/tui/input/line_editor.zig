@@ -260,6 +260,20 @@ pub const LineEditor = struct {
         try self.redraw();
     }
 
+    /// Moves the terminal cursor down to the last row the input occupies
+    /// without moving the edit cursor, so an overlay drawn below the cursor
+    /// (like the file picker) clears the whole wrapped prompt.
+    pub fn parkAtInputEnd(self: *LineEditor) !void {
+        const width = self.width orelse return;
+        const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
+        const info = rowsNeeded(start_col, width, self.line_alloc.written());
+        const end_rows = info.rows + @intFromBool(info.ends_at_edge);
+        if (end_rows <= self.cursor_rows) return;
+        try self.stdout_writer.print(terminal.cursor_down, .{end_rows - self.cursor_rows});
+        try self.stdout_writer.flush();
+        self.cursor_rows = end_rows;
+    }
+
     /// Clears every row the input currently occupies and reprints the prompt
     /// and buffer, then moves the terminal cursor back to the edit cursor
     /// when it is not at the end of the text.
@@ -970,6 +984,75 @@ test "editor moveLeft from text ending at the edge leaves the forced-wrap row" {
     try editor.moveLeft();
 
     try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefgh \x1b[1A\x1b[10G", out.written());
+}
+
+test "editor parkAtInputEnd moves the terminal cursor to the last input row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijk");
+    try editor.moveHome();
+    out.clearRetainingCapacity();
+    try editor.parkAtInputEnd();
+
+    try std.testing.expectEqualStrings("\x1b[1B", out.written());
+    try std.testing.expectEqual(@as(usize, 2), editor.cursor_rows);
+    try std.testing.expectEqual(@as(usize, 0), editor.cursor);
+}
+
+test "editor parkAtInputEnd counts the forced-wrap row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefgh");
+    try editor.moveHome();
+    out.clearRetainingCapacity();
+    try editor.parkAtInputEnd();
+
+    try std.testing.expectEqualStrings("\x1b[1B", out.written());
+    try std.testing.expectEqual(@as(usize, 2), editor.cursor_rows);
+}
+
+test "editor parkAtInputEnd is a no-op on the last row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijk");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.parkAtInputEnd();
+
+    try std.testing.expectEqualStrings("", out.written());
+    try std.testing.expectEqual(@as(usize, 2), editor.cursor_rows);
+}
+
+test "editor redraw after parkAtInputEnd starts from the last input row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijk");
+    try editor.moveHome();
+    try editor.parkAtInputEnd();
+    out.clearRetainingCapacity();
+    try editor.redraw();
+
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghijk\x1b[1A\x1b[3G", out.written());
 }
 
 test "editor append inserts at the cursor and keeps it after the new char" {
