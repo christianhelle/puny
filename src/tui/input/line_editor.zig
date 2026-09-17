@@ -69,17 +69,28 @@ pub const LineEditor = struct {
         try self.redraw();
     }
 
+    /// Deletes the code point before the cursor.
     pub fn backspace(self: *LineEditor) !void {
-        const written = self.line_alloc.written();
-        if (written.len == 0) return;
-        const n = backspaceLen(written);
-        const deleted = written[written.len - n ..];
-        self.line_alloc.shrinkRetainingCapacity(written.len - n);
-        self.cursor = self.line_alloc.written().len;
+        if (self.cursor == 0) return;
+        try self.deleteRange(self.cursor - backspaceLen(self.line_alloc.written()[0..self.cursor]), self.cursor);
+    }
+
+    /// Deletes the code point under the cursor.
+    pub fn deleteForward(self: *LineEditor) !void {
+        try self.deleteRange(self.cursor, nextCodePointEnd(self.line_alloc.written(), self.cursor));
+    }
+
+    /// Removes `text[start..end]`, leaves the cursor at `start`, and redraws.
+    fn deleteRange(self: *LineEditor, start: usize, end: usize) !void {
+        if (start == end) return;
+        const text = self.line_alloc.written();
+        const deleted_width = textWidth(text[start..end]);
+        std.mem.copyForwards(u8, text[start..], text[end..]);
+        self.line_alloc.shrinkRetainingCapacity(text.len - (end - start));
+        self.cursor = start;
         if (self.width == null) {
-            // Erase every column the deleted code point occupied.
-            const echo_width = deletedCodePointWidth(deleted);
-            for (0..echo_width) |_| try self.stdout_writer.writeAll(terminal.backspace_echo);
+            // Erase every column the deleted code points occupied.
+            for (0..deleted_width) |_| try self.stdout_writer.writeAll(terminal.backspace_echo);
             try self.stdout_writer.flush();
             return;
         }
@@ -103,15 +114,6 @@ pub const LineEditor = struct {
         var end = pos + 1;
         while (end < text.len and text[end] & 0xC0 == 0x80) end += 1;
         return end;
-    }
-
-    /// Display width of the code point removed by backspace, used by the
-    /// legacy echo path. Invalid UTF-8 renders as a single replacement column.
-    fn deletedCodePointWidth(deleted: []const u8) usize {
-        const seq_len = std.unicode.utf8ByteSequenceLength(deleted[0]) catch return 1;
-        if (seq_len > deleted.len) return 1;
-        const cp = std.unicode.utf8Decode(deleted[0..seq_len]) catch return 1;
-        return markdown.codePointWidth(cp);
     }
 
     pub fn historyPrevious(self: *LineEditor) !void {
@@ -219,6 +221,29 @@ pub const RowsInfo = struct {
     col: usize,
 };
 
+/// Display width and byte length of the code point starting at `text[i]`.
+/// Invalid or truncated UTF-8 renders as a single replacement column.
+fn codePointAt(text: []const u8, i: usize) struct { len: usize, width: usize } {
+    const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+    const width = if (seq_len > 1 and i + seq_len <= text.len)
+        markdown.codePointWidth(std.unicode.utf8Decode(text[i..][0..seq_len]) catch 1)
+    else
+        1;
+    return .{ .len = seq_len, .width = width };
+}
+
+/// Total display width of `text` on a single row.
+fn textWidth(text: []const u8) usize {
+    var width: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const cp = codePointAt(text, i);
+        width += cp.width;
+        i += cp.len;
+    }
+    return width;
+}
+
 /// Computes how many terminal rows `text` occupies when it starts at
 /// `start_col` (the column after the prompt) on a terminal `width` columns
 /// wide. Wide code points that do not fit on the current row wrap to the
@@ -228,18 +253,14 @@ pub fn rowsNeeded(start_col: usize, width: usize, text: []const u8) RowsInfo {
     var rows: usize = 1;
     var i: usize = 0;
     while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const cp_width = if (seq_len > 1 and i + seq_len <= text.len)
-            markdown.codePointWidth(std.unicode.utf8Decode(text[i..][0..seq_len]) catch 1)
-        else
-            1;
-        if (col + cp_width > width) {
+        const cp = codePointAt(text, i);
+        if (col + cp.width > width) {
             rows += 1;
-            col = cp_width;
+            col = cp.width;
         } else {
-            col += cp_width;
+            col += cp.width;
         }
-        i += seq_len;
+        i += cp.len;
     }
     return .{ .rows = rows, .ends_at_edge = col == width, .col = col };
 }
@@ -907,4 +928,55 @@ test "editor moveHome and moveEnd jump across wrapped rows" {
     out.clearRetainingCapacity();
     try editor.moveEnd();
     try std.testing.expectEqualStrings("\r\x1b[J> abcdefghijkl", out.written());
+}
+
+test "editor backspace deletes the code point before a mid-line cursor" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("a中c");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("ac", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> ac\x1b[4G", out.written());
+}
+
+test "editor deleteForward deletes the code point under the cursor" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("a中c");
+    try editor.moveHome();
+    try editor.moveRight();
+    out.clearRetainingCapacity();
+    try editor.deleteForward();
+
+    try std.testing.expectEqualStrings("ac", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> ac\x1b[4G", out.written());
+}
+
+test "editor deleteForward is a no-op at the end of the buffer" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ab");
+    out.clearRetainingCapacity();
+    try editor.deleteForward();
+
+    try std.testing.expectEqualStrings("ab", line_alloc.written());
+    try std.testing.expectEqualStrings("", out.written());
 }
