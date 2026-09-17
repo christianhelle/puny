@@ -90,9 +90,23 @@ docker run --rm -it \
   christianhelle/puny:latest --provider ollama
 ```
 
-Ollama listens only on `127.0.0.1` by default. If the container cannot reach
-it (for example on a Linux host), start Ollama with `OLLAMA_HOST=0.0.0.0` and
-pass the host's address with `--url`.
+Ollama listens only on `127.0.0.1` by default, and its local API needs no API
+key, so leave that loopback bind alone. If the container cannot reach it (for
+example on a Linux host, where `host.docker.internal` does not resolve), share
+the host's network namespace instead of widening the bind:
+
+```bash
+docker run --rm -it \
+  --network host \
+  --mount "type=bind,source=${PWD},target=/workspace" \
+  --mount "type=volume,source=puny-home,target=/app" \
+  --workdir /workspace \
+  christianhelle/puny:latest --provider ollama --url http://127.0.0.1:11434
+```
+
+Binding Ollama to all interfaces with `OLLAMA_HOST=0.0.0.0` instead exposes an
+unauthenticated API to every machine that can reach the host, so restrict port
+`11434` with firewall rules if you do that.
 
 ## Ollama Cloud
 
