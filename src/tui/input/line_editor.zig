@@ -99,6 +99,16 @@ pub const LineEditor = struct {
         try self.deleteRange(self.cursor, nextWordEnd(self.line_alloc.written(), self.cursor));
     }
 
+    /// Deletes everything before the cursor.
+    pub fn killToStart(self: *LineEditor) !void {
+        try self.deleteRange(0, self.cursor);
+    }
+
+    /// Deletes everything from the cursor to the end of the line.
+    pub fn killToEnd(self: *LineEditor) !void {
+        try self.deleteRange(self.cursor, self.line_alloc.written().len);
+    }
+
     /// Removes `text[start..end]`, leaves the cursor at `start`, and redraws.
     fn deleteRange(self: *LineEditor, start: usize, end: usize) !void {
         if (start == end) return;
@@ -1093,4 +1103,11 @@ test "editor deleteWhitespaceWordBackward removes back to the previous whitespac
     try expectCursorAfter("read src/main.zig", &.{W}, "read |");
     try expectCursorAfter("read src/main.zig  ", &.{W}, "read |");
     try expectCursorAfter("read src/main.zig", &.{ W, W }, "|");
+}
+
+test "editor killToStart and killToEnd remove text on either side of the cursor" {
+    const L = LineEditor.moveWordLeft;
+    try expectCursorAfter("hello big world", &.{ L, LineEditor.killToStart }, "|world");
+    try expectCursorAfter("hello big world", &.{ L, LineEditor.killToEnd }, "hello big |");
+    try expectCursorAfter("hello", &.{LineEditor.killToEnd}, "hello|");
 }
