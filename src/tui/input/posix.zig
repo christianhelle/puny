@@ -64,11 +64,11 @@ fn readLineFrom(
                         // A second Esc inside the probe window is the second
                         // tap, unless a CSI follows (rxvt's Alt+arrow).
                         terminal.control.esc => {
-                            const after = try source.readWithTimeout(terminal.escape_sequence_timeout_ms) orelse {
+                            if (try source.readWithTimeout(terminal.escape_sequence_timeout_ms) != terminal.csi_leader) {
                                 try editor.moveEnd();
                                 return .cancelled;
-                            };
-                            if (after == terminal.csi_leader) try editor.handleKey(keys.withAlt(try readCsi(source)));
+                            }
+                            try editor.handleKey(keys.withAlt(try readCsi(source)));
                         },
                         terminal.csi_leader => try editor.handleKey(try readCsi(source)),
                         terminal.ss3_leader => {
@@ -286,5 +286,8 @@ test "readLineFrom cancels on a double Esc inside the sequence probe" {
 
 test "readLineFrom treats Esc Esc CSI as the Alt-modified key" {
     try expectReadLine(&input("one two\x1b\x1b[DX\r"), false, .submitted, "one Xtwo");
-    try expectReadLine(&input("a\x1b\x1bz\r"), false, .submitted, "a");
+}
+
+test "readLineFrom cancels on a double Esc followed by a non-CSI byte" {
+    try expectReadLine(&input("a\x1b\x1bz\r"), false, .cancelled, "a");
 }
