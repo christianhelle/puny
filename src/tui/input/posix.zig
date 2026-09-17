@@ -52,6 +52,15 @@ pub fn readLinePosix(
                 if (try readByteWithTimeout(terminal.escape_sequence_timeout_ms)) |next| {
                     first_esc_ts = null;
                     switch (next) {
+                        // A second Esc inside the probe window is the second
+                        // tap, unless a CSI follows (rxvt's Alt+arrow).
+                        terminal.control.esc => {
+                            const after = try readByteWithTimeout(terminal.escape_sequence_timeout_ms) orelse {
+                                try editor.moveEnd();
+                                return .cancelled;
+                            };
+                            if (after == terminal.csi_leader) try editor.handleKey(keys.withAlt(try readCsi()));
+                        },
                         terminal.csi_leader => try editor.handleKey(try readCsi()),
                         terminal.ss3_leader => {
                             const final = try readByteWithTimeout(terminal.escape_sequence_timeout_ms) orelse continue;
