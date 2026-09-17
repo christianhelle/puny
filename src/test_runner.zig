@@ -219,6 +219,7 @@ test "include tui.indicator tests" {
 }
 test "include tui.input.common tests" {
     _ = @import("tui/input/common.zig");
+    _ = @import("tui/input/keys.zig");
     _ = @import("tui/input/line_editor.zig");
     _ = @import("tui/input/mention.zig");
 }
