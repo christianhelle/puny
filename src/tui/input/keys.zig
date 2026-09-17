@@ -69,6 +69,19 @@ pub fn decodeAlt(byte: u8) Key {
     };
 }
 
+/// Byte to pass to `decodeAlt` for a Windows Alt key-down record. Consoles
+/// may report Alt+letter with a zero character, so a letter virtual-key code
+/// (`A`..`Z`) stands in as its lowercase byte. Returns null when the record
+/// carries no ASCII byte.
+pub fn altByteFromVirtualKey(vk: u16, ch: u16) ?u8 {
+    if (ch == 0) {
+        if (vk >= 'A' and vk <= 'Z') return std.ascii.toLower(@intCast(vk));
+        return null;
+    }
+    if (ch < 0x80) return @intCast(ch);
+    return null;
+}
+
 test "decodeCsi maps plain arrow, home, end, and delete keys" {
     try std.testing.expectEqual(Key.up, decodeCsi("", 'A'));
     try std.testing.expectEqual(Key.down, decodeCsi("", 'B'));
@@ -120,4 +133,21 @@ test "decodeAlt maps readline Alt shortcuts" {
     try std.testing.expectEqual(Key.delete_word_backward, decodeAlt(0x7f));
     try std.testing.expectEqual(Key.delete_word_backward, decodeAlt(0x08));
     try std.testing.expectEqual(Key.unknown, decodeAlt('x'));
+}
+
+test "altByteFromVirtualKey keeps the reported character" {
+    try std.testing.expectEqual(@as(?u8, 'b'), altByteFromVirtualKey(0x42, 'b'));
+    try std.testing.expectEqual(@as(?u8, 'B'), altByteFromVirtualKey(0x42, 'B'));
+}
+
+test "altByteFromVirtualKey derives a lowercase letter when the character is zero" {
+    try std.testing.expectEqual(@as(?u8, 'b'), altByteFromVirtualKey(0x42, 0));
+    try std.testing.expectEqual(@as(?u8, 'f'), altByteFromVirtualKey(0x46, 0));
+    try std.testing.expectEqual(@as(?u8, 'd'), altByteFromVirtualKey(0x44, 0));
+    try std.testing.expectEqual(Key.word_left, decodeAlt(altByteFromVirtualKey(0x42, 0).?));
+}
+
+test "altByteFromVirtualKey rejects non-letter keys without a character" {
+    try std.testing.expectEqual(@as(?u8, null), altByteFromVirtualKey(0x70, 0));
+    try std.testing.expectEqual(@as(?u8, null), altByteFromVirtualKey(0x41, 0x00E9));
 }
