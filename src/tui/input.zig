@@ -33,11 +33,22 @@ pub fn readLine(
     defer cancel.setRawMode(false) catch {};
 
     var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, history, terminal.terminalWidth());
-    if (builtin.os.tag == .windows) {
-        return try windows_impl.readLineWindows(allocator, io, &editor);
-    } else {
-        return try posix.readLinePosix(allocator, io, &editor);
+    const result = if (builtin.os.tag == .windows)
+        try windows_impl.readLineWindows(allocator, io, &editor)
+    else
+        try posix.readLinePosix(allocator, io, &editor);
+    return endPromptRow(stdout_writer, result);
+}
+
+/// Raw input leaves the cursor at the end of the prompt row. Ending that row,
+/// as the terminal's own echo does for canonical input, lets whatever prints
+/// next start on a fresh line. A cancelled prompt is re-shown by the caller.
+fn endPromptRow(stdout_writer: *std.Io.Writer, result: ReadLineResult) !ReadLineResult {
+    if (result != .cancelled) {
+        try stdout_writer.writeAll("\r\n");
+        try stdout_writer.flush();
     }
+    return result;
 }
 
 /// Reads a single line from stdin without printing a prompt, echoing input
@@ -204,4 +215,18 @@ test "readPlainLine falls back to canonical input when raw mode is unavailable" 
 
     try std.testing.expectEqualStrings("canonical", line.?);
     try std.testing.expectEqualStrings("", out.written());
+}
+
+test "endPromptRow ends the prompt row unless the input was cancelled" {
+    const outcomes = [_]ReadLineResult{ .{ .submitted = "hi" }, .interrupted, .eof, .cancelled };
+    const expected = [_][]const u8{ "\r\n", "\r\n", "\r\n", "" };
+    for (outcomes, expected) |outcome, written| {
+        var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer out.deinit();
+
+        const result = try endPromptRow(&out.writer, outcome);
+
+        try std.testing.expectEqual(std.meta.activeTag(outcome), std.meta.activeTag(result));
+        try std.testing.expectEqualStrings(written, out.written());
+    }
 }
