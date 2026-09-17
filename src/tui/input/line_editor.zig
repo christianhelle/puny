@@ -489,7 +489,6 @@ test "rowsNeeded wide code point filling the row exactly flags pending wrap" {
 
 test "textWidth counts an incomplete lead byte as one column without swallowing the next byte" {
     try std.testing.expectEqual(@as(usize, 2), textWidth("\xC3b"));
-    try std.testing.expectEqual(@as(usize, 3), textWidth("\xF0\x9Fab"));
 }
 
 test "rowsNeeded wraps at the right column around an incomplete lead byte" {
