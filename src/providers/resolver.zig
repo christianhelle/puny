@@ -111,7 +111,20 @@ pub fn createProvider(
 ) provider.Provider {
     var created = createClient(is_mock, prov, url, api_key, arena, io);
     applySessionId(&created, session_id);
+    applyApiKeyEnvNames(&created, prov);
     return created;
+}
+
+/// Tells the client which key variables its provider reads, so an auth failure
+/// hints at the ones that actually apply.
+fn applyApiKeyEnvNames(prov_client: *provider.Provider, selected_provider: ModelProvider) void {
+    const names = apiKeyEnvNames(selected_provider);
+    switch (prov_client.*) {
+        .lmstudio, .opencode, .opencode_go, .ollama, .ollama_cloud => |*c| c.api_key_env_names = names,
+        .copilot => |*c| c.inner.api_key_env_names = names,
+        .unsloth => |*c| c.inner.api_key_env_names = names,
+        .mock => {},
+    }
 }
 
 fn createClient(
@@ -498,6 +511,36 @@ test "createProvider builds each provider type" {
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).ollama_cloud);
         try std.testing.expectEqualStrings("http://ollama-cloud", prov.ollama_cloud.base_url);
         try std.testing.expectEqualStrings("ollama-key-7", prov.ollama_cloud.api_key);
+    }
+}
+
+test "createProvider tells each client which key variables its provider uses" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        var prov = createProvider(false, .ollama_cloud, "https://ollama.com", "key", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY/OLLAMA_API_KEY", prov.ollama_cloud.api_key_env_names);
+    }
+
+    {
+        var prov = createProvider(false, .ollama, "http://ollama", "", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY", prov.ollama.api_key_env_names);
+    }
+
+    {
+        var prov = createProvider(false, .unsloth, "http://unsloth", "", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY", prov.unsloth.inner.api_key_env_names);
+    }
+
+    {
+        var prov = createProvider(false, .copilot, "http://copilot", "gho_x", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY", prov.copilot.inner.api_key_env_names);
     }
 }
 
