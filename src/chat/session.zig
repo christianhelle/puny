@@ -600,7 +600,6 @@ fn printSkillList(writer: *std.Io.Writer, records: []const skills.SkillRecord) !
     try writer.print("\nAvailable skills:\n", .{});
     if (records.len == 0) {
         try writer.print("  (none found)\n", .{});
-        return;
     }
     for (records) |r| {
         if (r.description) |desc| {
@@ -609,6 +608,7 @@ fn printSkillList(writer: *std.Io.Writer, records: []const skills.SkillRecord) !
             try writer.print("{s}{s}{s}\n", .{ ansi.bright, r.name, ansi.reset });
         }
     }
+    try writer.flush();
 }
 
 /// Prints a dim status line, such as a loaded skill, one blank line below the
@@ -1429,4 +1429,14 @@ test "printSkillList reports when no skills are found" {
     try printSkillList(&output.writer, &.{});
 
     try std.testing.expectEqualStrings("\nAvailable skills:\n  (none found)\n", output.written());
+}
+
+test "printSkillList flushes so a one-shot listing is not left buffered" {
+    var buffer: [256]u8 = undefined;
+    var discarding = std.Io.Writer.Discarding.init(&buffer);
+
+    try printSkillList(&discarding.writer, &.{});
+
+    try std.testing.expectEqual(@as(usize, 0), discarding.writer.end);
+    try std.testing.expect(discarding.fullCount() > 0);
 }
