@@ -56,17 +56,18 @@ pub const LineEditor = struct {
     /// redraw containing an incomplete sequence.
     pub fn appendSlice(self: *LineEditor, bytes: []const u8) !void {
         const old_len = self.line_alloc.written().len;
+        const old_prefix_width = self.prefixWidth();
         try self.line_alloc.writer.writeAll(bytes);
         const text = self.line_alloc.written();
         std.mem.copyBackwards(u8, text[self.cursor + bytes.len ..], text[self.cursor..old_len]);
         @memcpy(text[self.cursor..][0..bytes.len], bytes);
         self.cursor += bytes.len;
-        if (self.width == null) {
+        if (self.width == null and self.cursor == text.len) {
             try self.stdout_writer.writeAll(bytes);
             try self.stdout_writer.flush();
             return;
         }
-        try self.redraw();
+        try self.refresh(old_prefix_width);
     }
 
     /// Deletes the code point before the cursor.
@@ -114,16 +115,18 @@ pub const LineEditor = struct {
         if (start == end) return;
         const text = self.line_alloc.written();
         const deleted_width = textWidth(text[start..end]);
+        const at_end = self.cursor == end and end == text.len;
+        const old_prefix_width = self.prefixWidth();
         std.mem.copyForwards(u8, text[start..], text[end..]);
         self.line_alloc.shrinkRetainingCapacity(text.len - (end - start));
         self.cursor = start;
-        if (self.width == null) {
+        if (self.width == null and at_end) {
             // Erase every column the deleted code points occupied.
             for (0..deleted_width) |_| try self.stdout_writer.writeAll(terminal.backspace_echo);
             try self.stdout_writer.flush();
             return;
         }
-        try self.redraw();
+        try self.refresh(old_prefix_width);
     }
 
     /// Bytes to remove from the end of `text` so that a complete UTF-8 code
@@ -189,8 +192,39 @@ pub const LineEditor = struct {
 
     fn moveTo(self: *LineEditor, pos: usize) !void {
         if (pos == self.cursor) return;
+        if (self.width != null) {
+            self.cursor = pos;
+            return self.redraw();
+        }
+        const old_prefix_width = self.prefixWidth();
         self.cursor = pos;
-        try self.redraw();
+        const new_prefix_width = self.prefixWidth();
+        if (new_prefix_width < old_prefix_width) {
+            try self.stdout_writer.print(terminal.cursor_left, .{old_prefix_width - new_prefix_width});
+        } else if (new_prefix_width > old_prefix_width) {
+            try self.stdout_writer.print(terminal.cursor_right, .{new_prefix_width - old_prefix_width});
+        }
+        try self.stdout_writer.flush();
+    }
+
+    /// Display width of the text before the cursor.
+    fn prefixWidth(self: *LineEditor) usize {
+        return textWidth(self.line_alloc.written()[0..self.cursor]);
+    }
+
+    /// Shows the buffer after an edit. Without a known width there is no
+    /// prompt to redraw from, so the single-row fallback steps back over the
+    /// `old_prefix_width` columns before the old cursor, rewrites the text,
+    /// and steps back over the tail to the new cursor.
+    fn refresh(self: *LineEditor, old_prefix_width: usize) !void {
+        if (self.width != null) return self.redraw();
+        const text = self.line_alloc.written();
+        if (old_prefix_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{old_prefix_width});
+        try self.stdout_writer.writeAll(text);
+        try self.stdout_writer.writeAll(terminal.clear_to_end_of_line);
+        const tail_width = textWidth(text[self.cursor..]);
+        if (tail_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{tail_width});
+        try self.stdout_writer.flush();
     }
 
     fn replace(self: *LineEditor, text: []const u8) !void {
@@ -1110,4 +1144,62 @@ test "editor killToStart and killToEnd remove text on either side of the cursor"
     try expectCursorAfter("hello big world", &.{ L, LineEditor.killToStart }, "|world");
     try expectCursorAfter("hello big world", &.{ L, LineEditor.killToEnd }, "hello big |");
     try expectCursorAfter("hello", &.{LineEditor.killToEnd}, "hello|");
+}
+
+test "editor without width moves the cursor with relative column moves" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.appendSlice("a中b");
+    out.clearRetainingCapacity();
+    try editor.moveHome();
+    try std.testing.expectEqualStrings("\x1b[4D", out.written());
+
+    out.clearRetainingCapacity();
+    try editor.moveWordRight();
+    try std.testing.expectEqualStrings("\x1b[4C", out.written());
+}
+
+test "editor without width rewrites the tail when inserting mid-line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.appendSlice("ac");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.append('b');
+
+    try std.testing.expectEqualStrings("abc", line_alloc.written());
+    try std.testing.expectEqualStrings("\x1b[1Dabc\x1b[K\x1b[1D", out.written());
+}
+
+test "editor without width rewrites the tail when deleting mid-line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.appendSlice("abc");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("ac", line_alloc.written());
+    try std.testing.expectEqualStrings("\x1b[2Dac\x1b[K\x1b[1D", out.written());
+
+    try editor.moveHome();
+    out.clearRetainingCapacity();
+    try editor.killToEnd();
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("\x1b[K", out.written());
 }
