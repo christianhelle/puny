@@ -44,6 +44,10 @@ pub const control = struct {
 /// Byte that begins a CSI escape sequence after ESC.
 pub const csi_leader: u8 = '[';
 
+/// Byte that begins an SS3 escape sequence after ESC (application-mode
+/// cursor keys).
+pub const ss3_leader: u8 = 'O';
+
 /// Default timeout when waiting for the rest of an escape sequence.
 pub const escape_sequence_timeout_ms = 50;
 
@@ -60,6 +64,18 @@ pub const cursor_up = "\x1b[{d}A";
 /// Move the cursor down `n` lines without changing column (CSI B).
 /// Use with `print(cursor_down, .{n})`.
 pub const cursor_down = "\x1b[{d}B";
+
+/// Move the cursor right `n` columns (CSI C).
+/// Use with `print(cursor_right, .{n})`.
+pub const cursor_right = "\x1b[{d}C";
+
+/// Move the cursor left `n` columns (CSI D).
+/// Use with `print(cursor_left, .{n})`.
+pub const cursor_left = "\x1b[{d}D";
+
+/// Move the cursor to the one-based column `n` on the current line (CSI G).
+/// Use with `print(cursor_to_column, .{n})`.
+pub const cursor_to_column = "\x1b[{d}G";
 
 /// Clear from the cursor to the end of the current line (CSI K).
 pub const clear_to_end_of_line = "\x1b[K";

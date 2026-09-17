@@ -314,6 +314,26 @@ The model replies in the terminal. You can keep sending follow-up messages; Puny
 The project has source files under src/, including main.c, utils.h, and a tests/ folder.
 ```
 
+### Edit the prompt
+
+The prompt supports shell-style (readline) editing:
+
+| Keys                                                      | Action                                                            |
+| --------------------------------------------------------- | ----------------------------------------------------------------- |
+| `←` / `→`, `Ctrl+B` / `Ctrl+F`                            | Move one character                                                |
+| `Ctrl+←` / `Ctrl+→`, `Alt+←` / `Alt+→`, `Alt+B` / `Alt+F` | Move one word                                                     |
+| `Home` / `End`, `Ctrl+A` / `Ctrl+E`                       | Move to the start or end of the line                              |
+| `Backspace` / `Delete`                                    | Delete the character before or under the cursor                   |
+| `Ctrl+Backspace`, `Alt+Backspace`                         | Delete the word before the cursor (see note below)                |
+| `Ctrl+Delete`, `Alt+Delete`, `Alt+D`                      | Delete the word after the cursor                                  |
+| `Ctrl+W`                                                  | Delete back to the previous whitespace                            |
+| `Ctrl+U` / `Ctrl+K`                                       | Delete to the start or end of the line                            |
+| `Ctrl+D`                                                  | Delete the character under the cursor; cancels on an empty prompt |
+| `↑` / `↓`                                                 | Browse prompt history                                             |
+| `Esc` `Esc`                                               | Cancel                                                            |
+
+On POSIX terminals whose erase key is `Ctrl+H`, `Ctrl+Backspace` sends the same byte as `Backspace` and deletes a single character. Use `Alt+Backspace` or `Ctrl+W` there instead.
+
 ### Attach files to a prompt
 
 Type `@` at the start of a prompt or after whitespace to open a searchable file

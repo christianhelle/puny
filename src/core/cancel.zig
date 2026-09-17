@@ -104,6 +104,14 @@ fn setRawModePosix(enable: bool) !void {
     }
 }
 
+/// True when the terminal's erase character, saved when raw mode was last
+/// enabled, is ^H. Backspace then sends 0x08 itself, so 0x08 cannot mean
+/// Ctrl+Backspace.
+pub fn eraseIsCtrlH() bool {
+    if (is_windows) return false;
+    return saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] == 0x08;
+}
+
 fn setRawModeWindows(enable: bool) !void {
     const hStdin = getStdinHandle();
     if (enable) {
@@ -366,4 +374,16 @@ test "first escape prints the press-esc-again hint" {
     handleKeyByte(0x1b, &first_esc_ts);
     try std.testing.expect(std.mem.indexOf(u8, stderr_alloc.written(), "Press Esc again to cancel") != null);
     reset();
+}
+
+test "eraseIsCtrlH reports whether the saved erase character is ^H" {
+    if (is_windows) return std.testing.expect(!eraseIsCtrlH());
+    const original = saved_termios;
+    defer saved_termios = original;
+    saved_termios = std.mem.zeroes(std.posix.termios);
+
+    saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] = 0x08;
+    try std.testing.expect(eraseIsCtrlH());
+    saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] = 0x7f;
+    try std.testing.expect(!eraseIsCtrlH());
 }

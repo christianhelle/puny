@@ -4,6 +4,7 @@ const prompt_history = @import("../../prompts/history.zig");
 const terminal = @import("../terminal.zig");
 const prompts = @import("../../prompts/prompts.zig");
 const ansi = @import("../ansi.zig");
+const keys = @import("./keys.zig");
 
 /// Line editor state for the raw-mode prompt. Mutations to the buffer redraw
 /// the entire input area (all wrapped rows) instead of echoing bytes, so
@@ -15,10 +16,14 @@ pub const LineEditor = struct {
     /// Terminal width in columns. When unknown (e.g. piped stdout), the
     /// editor falls back to legacy single-row echo behavior.
     width: ?usize,
-    /// Rows the input currently occupies on screen, counting an extra row
-    /// when the text ends exactly at the right edge, where a forced wrap
-    /// leaves the cursor on a fresh continuation row.
+    /// Rows from the prompt row down to the row the cursor rests on. With
+    /// the cursor at the end this counts an extra row when the text ends
+    /// exactly at the right edge, where a forced wrap leaves the cursor on a
+    /// fresh continuation row.
     cursor_rows: usize,
+    /// Byte offset of the cursor in the buffer, always on a code point
+    /// boundary.
+    cursor: usize = 0,
     /// When false, `@` is inserted literally instead of opening the file
     /// picker, for plain prompts such as a URL or an API key.
     mentions_enabled: bool = true,
@@ -47,33 +52,82 @@ pub const LineEditor = struct {
         try self.appendSlice(&single);
     }
 
-    /// Appends a run of bytes (typically one complete UTF-8 code point) and
-    /// redraws once, so multi-byte input never flashes a redraw containing
-    /// an incomplete sequence.
+    /// Inserts a run of bytes (typically one complete UTF-8 code point) at
+    /// the cursor and redraws once, so multi-byte input never flashes a
+    /// redraw containing an incomplete sequence.
     pub fn appendSlice(self: *LineEditor, bytes: []const u8) !void {
+        const old_len = self.line_alloc.written().len;
+        const old_prefix_width = self.prefixWidth();
         try self.line_alloc.writer.writeAll(bytes);
-        if (self.width == null) {
+        const text = self.line_alloc.written();
+        std.mem.copyBackwards(u8, text[self.cursor + bytes.len ..], text[self.cursor..old_len]);
+        @memcpy(text[self.cursor..][0..bytes.len], bytes);
+        self.cursor += bytes.len;
+        if (self.width == null and self.cursor == text.len) {
             try self.stdout_writer.writeAll(bytes);
             try self.stdout_writer.flush();
             return;
         }
-        try self.redraw();
+        try self.refresh(old_prefix_width);
     }
 
+    /// Deletes the code point before the cursor.
     pub fn backspace(self: *LineEditor) !void {
-        const written = self.line_alloc.written();
-        if (written.len == 0) return;
-        const n = backspaceLen(written);
-        const deleted = written[written.len - n ..];
-        self.line_alloc.shrinkRetainingCapacity(written.len - n);
-        if (self.width == null) {
-            // Erase every column the deleted code point occupied.
-            const echo_width = deletedCodePointWidth(deleted);
-            for (0..echo_width) |_| try self.stdout_writer.writeAll(terminal.backspace_echo);
+        if (self.cursor == 0) return;
+        try self.deleteRange(self.cursor - backspaceLen(self.line_alloc.written()[0..self.cursor]), self.cursor);
+    }
+
+    /// Deletes the code point under the cursor.
+    pub fn deleteForward(self: *LineEditor) !void {
+        try self.deleteRange(self.cursor, nextCodePointEnd(self.line_alloc.written(), self.cursor));
+    }
+
+    /// Deletes back to the start of the word before the cursor.
+    pub fn deleteWordBackward(self: *LineEditor) !void {
+        try self.deleteRange(prevWordStart(self.line_alloc.written(), self.cursor), self.cursor);
+    }
+
+    /// Deletes back to the previous whitespace, like Ctrl+W in a Unix shell.
+    pub fn deleteWhitespaceWordBackward(self: *LineEditor) !void {
+        const text = self.line_alloc.written();
+        var start = self.cursor;
+        while (start > 0 and std.ascii.isWhitespace(text[start - 1])) start -= 1;
+        while (start > 0 and !std.ascii.isWhitespace(text[start - 1])) start -= 1;
+        try self.deleteRange(start, self.cursor);
+    }
+
+    /// Deletes up to the end of the word after the cursor.
+    pub fn deleteWordForward(self: *LineEditor) !void {
+        try self.deleteRange(self.cursor, nextWordEnd(self.line_alloc.written(), self.cursor));
+    }
+
+    /// Deletes everything before the cursor.
+    pub fn killToStart(self: *LineEditor) !void {
+        try self.deleteRange(0, self.cursor);
+    }
+
+    /// Deletes everything from the cursor to the end of the line.
+    pub fn killToEnd(self: *LineEditor) !void {
+        try self.deleteRange(self.cursor, self.line_alloc.written().len);
+    }
+
+    /// Removes `text[start..end]`, leaves the cursor at `start`, and redraws.
+    fn deleteRange(self: *LineEditor, start: usize, end: usize) !void {
+        if (start == end) return;
+        const text = self.line_alloc.written();
+        const deleted_width = textWidth(text[start..end]);
+        const at_end = self.cursor == end and end == text.len;
+        const old_prefix_width = self.prefixWidth();
+        std.mem.copyForwards(u8, text[start..], text[end..]);
+        self.line_alloc.shrinkRetainingCapacity(text.len - (end - start));
+        self.cursor = start;
+        if (self.width == null and at_end) {
+            // Erase every column the deleted code points occupied.
+            for (0..deleted_width) |_| try self.stdout_writer.writeAll(terminal.backspace_echo);
             try self.stdout_writer.flush();
             return;
         }
-        try self.redraw();
+        try self.refresh(old_prefix_width);
     }
 
     /// Bytes to remove from the end of `text` so that a complete UTF-8 code
@@ -86,13 +140,13 @@ pub const LineEditor = struct {
         return n;
     }
 
-    /// Display width of the code point removed by backspace, used by the
-    /// legacy echo path. Invalid UTF-8 renders as a single replacement column.
-    fn deletedCodePointWidth(deleted: []const u8) usize {
-        const seq_len = std.unicode.utf8ByteSequenceLength(deleted[0]) catch return 1;
-        if (seq_len > deleted.len) return 1;
-        const cp = std.unicode.utf8Decode(deleted[0..seq_len]) catch return 1;
-        return markdown.codePointWidth(cp);
+    /// Offset just past the code point starting at `pos`, skipping any
+    /// continuation bytes so the cursor never splits a UTF-8 sequence.
+    fn nextCodePointEnd(text: []const u8, pos: usize) usize {
+        if (pos >= text.len) return text.len;
+        var end = pos + 1;
+        while (end < text.len and text[end] & 0xC0 == 0x80) end += 1;
+        return end;
     }
 
     pub fn historyPrevious(self: *LineEditor) !void {
@@ -108,9 +162,94 @@ pub const LineEditor = struct {
         try self.replace(replacement);
     }
 
+    /// Applies a decoded editing key.
+    pub fn handleKey(self: *LineEditor, key: keys.Key) !void {
+        switch (key) {
+            .up => try self.historyPrevious(),
+            .down => try self.historyNext(),
+            .left => try self.moveLeft(),
+            .right => try self.moveRight(),
+            .word_left => try self.moveWordLeft(),
+            .word_right => try self.moveWordRight(),
+            .home => try self.moveHome(),
+            .end => try self.moveEnd(),
+            .delete => try self.deleteForward(),
+            .delete_word_forward => try self.deleteWordForward(),
+            .delete_word_backward => try self.deleteWordBackward(),
+            .unknown => {},
+        }
+    }
+
+    /// Moves the cursor one code point to the left.
+    pub fn moveLeft(self: *LineEditor) !void {
+        if (self.cursor == 0) return;
+        try self.moveTo(self.cursor - backspaceLen(self.line_alloc.written()[0..self.cursor]));
+    }
+
+    /// Moves the cursor one code point to the right.
+    pub fn moveRight(self: *LineEditor) !void {
+        try self.moveTo(nextCodePointEnd(self.line_alloc.written(), self.cursor));
+    }
+
+    pub fn moveHome(self: *LineEditor) !void {
+        try self.moveTo(0);
+    }
+
+    pub fn moveEnd(self: *LineEditor) !void {
+        try self.moveTo(self.line_alloc.written().len);
+    }
+
+    /// Moves the cursor to the start of the word before it.
+    pub fn moveWordLeft(self: *LineEditor) !void {
+        try self.moveTo(prevWordStart(self.line_alloc.written(), self.cursor));
+    }
+
+    /// Moves the cursor to the end of the word after it.
+    pub fn moveWordRight(self: *LineEditor) !void {
+        try self.moveTo(nextWordEnd(self.line_alloc.written(), self.cursor));
+    }
+
+    fn moveTo(self: *LineEditor, pos: usize) !void {
+        if (pos == self.cursor) return;
+        if (self.width != null) {
+            self.cursor = pos;
+            return self.redraw();
+        }
+        const old_prefix_width = self.prefixWidth();
+        self.cursor = pos;
+        const new_prefix_width = self.prefixWidth();
+        if (new_prefix_width < old_prefix_width) {
+            try self.stdout_writer.print(terminal.cursor_left, .{old_prefix_width - new_prefix_width});
+        } else if (new_prefix_width > old_prefix_width) {
+            try self.stdout_writer.print(terminal.cursor_right, .{new_prefix_width - old_prefix_width});
+        }
+        try self.stdout_writer.flush();
+    }
+
+    /// Display width of the text before the cursor.
+    fn prefixWidth(self: *LineEditor) usize {
+        return textWidth(self.line_alloc.written()[0..self.cursor]);
+    }
+
+    /// Shows the buffer after an edit. Without a known width there is no
+    /// prompt to redraw from, so the single-row fallback steps back over the
+    /// `old_prefix_width` columns before the old cursor, rewrites the text,
+    /// and steps back over the tail to the new cursor.
+    fn refresh(self: *LineEditor, old_prefix_width: usize) !void {
+        if (self.width != null) return self.redraw();
+        const text = self.line_alloc.written();
+        if (old_prefix_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{old_prefix_width});
+        try self.stdout_writer.writeAll(text);
+        try self.stdout_writer.writeAll(terminal.clear_to_end_of_line);
+        const tail_width = textWidth(text[self.cursor..]);
+        if (tail_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{tail_width});
+        try self.stdout_writer.flush();
+    }
+
     fn replace(self: *LineEditor, text: []const u8) !void {
         self.line_alloc.clearRetainingCapacity();
         try self.line_alloc.writer.writeAll(text);
+        self.cursor = text.len;
         if (self.width == null) {
             try self.stdout_writer.writeAll(terminal.move_to_line_start);
             try self.stdout_writer.writeAll(terminal.clear_to_end_of_line);
@@ -121,8 +260,23 @@ pub const LineEditor = struct {
         try self.redraw();
     }
 
+    /// Moves the terminal cursor down to the last row the input occupies
+    /// without moving the edit cursor, so an overlay drawn below the cursor
+    /// (like the file picker) clears the whole wrapped prompt.
+    pub fn parkAtInputEnd(self: *LineEditor) !void {
+        const width = self.width orelse return;
+        const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
+        const info = rowsNeeded(start_col, width, self.line_alloc.written());
+        const end_rows = info.rows + @intFromBool(info.ends_at_edge);
+        if (end_rows <= self.cursor_rows) return;
+        try self.stdout_writer.print(terminal.cursor_down, .{end_rows - self.cursor_rows});
+        try self.stdout_writer.flush();
+        self.cursor_rows = end_rows;
+    }
+
     /// Clears every row the input currently occupies and reprints the prompt
-    /// and buffer, letting the terminal place the cursor after the text.
+    /// and buffer, then moves the terminal cursor back to the edit cursor
+    /// when it is not at the end of the text.
     pub fn redraw(self: *LineEditor) !void {
         const width = self.width orelse return;
         try self.stdout_writer.writeByte('\r');
@@ -133,8 +287,9 @@ pub const LineEditor = struct {
         try self.stdout_writer.print("{s} ", .{prompts.prompt_text});
         try writeMentionHighlighted(self.stdout_writer, self.line_alloc.written());
 
+        const text = self.line_alloc.written();
         const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
-        const info = rowsNeeded(start_col, width, self.line_alloc.written());
+        const info = rowsNeeded(start_col, width, text);
         if (info.ends_at_edge) {
             // Force the auto-wrap with a space so the cursor never rests in
             // the terminal's pending-wrap state. Some terminals cancel the
@@ -143,8 +298,22 @@ pub const LineEditor = struct {
             // row too far and erase the line above the prompt.
             try self.stdout_writer.writeByte(' ');
         }
+        const end_rows = info.rows + @intFromBool(info.ends_at_edge);
+        if (self.cursor == text.len) {
+            self.cursor_rows = end_rows;
+        } else {
+            // A prefix ending at the edge puts the cursor at the start of the
+            // next row, where the following code point is drawn.
+            const prefix = rowsNeeded(start_col, width, text[0..self.cursor]);
+            const cursor_rows = prefix.rows + @intFromBool(prefix.ends_at_edge);
+            const col = if (prefix.ends_at_edge) 0 else prefix.col;
+            if (end_rows > cursor_rows) {
+                try self.stdout_writer.print(terminal.cursor_up, .{end_rows - cursor_rows});
+            }
+            try self.stdout_writer.print(terminal.cursor_to_column, .{col + 1});
+            self.cursor_rows = cursor_rows;
+        }
         try self.stdout_writer.flush();
-        self.cursor_rows = info.rows + @intFromBool(info.ends_at_edge);
     }
 };
 
@@ -154,7 +323,52 @@ pub const RowsInfo = struct {
     /// True when the text ends exactly at the right edge of the terminal,
     /// leaving the cursor in the pending-wrap state.
     ends_at_edge: bool,
+    /// Zero-based column just past the last code point on the final row.
+    col: usize,
 };
+
+/// Word characters for word-wise motion and deletion: ASCII letters, digits,
+/// and `_`, plus every non-ASCII byte so a word never splits a UTF-8 sequence.
+fn isWordByte(byte: u8) bool {
+    return std.ascii.isAlphanumeric(byte) or byte == '_' or byte >= 0x80;
+}
+
+/// Start of the word before `pos`, skipping any separators first.
+fn prevWordStart(text: []const u8, pos: usize) usize {
+    var i = pos;
+    while (i > 0 and !isWordByte(text[i - 1])) i -= 1;
+    while (i > 0 and isWordByte(text[i - 1])) i -= 1;
+    return i;
+}
+
+/// End of the word after `pos`, skipping any separators first.
+fn nextWordEnd(text: []const u8, pos: usize) usize {
+    var i = pos;
+    while (i < text.len and !isWordByte(text[i])) i += 1;
+    while (i < text.len and isWordByte(text[i])) i += 1;
+    return i;
+}
+
+/// Display width and byte length of the code point starting at `text[i]`.
+/// Invalid or truncated UTF-8 renders as a single replacement column.
+fn codePointAt(text: []const u8, i: usize) struct { len: usize, width: usize } {
+    const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+    if (seq_len == 1 or i + seq_len > text.len) return .{ .len = 1, .width = 1 };
+    const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch return .{ .len = 1, .width = 1 };
+    return .{ .len = seq_len, .width = markdown.codePointWidth(cp) };
+}
+
+/// Total display width of `text` on a single row.
+fn textWidth(text: []const u8) usize {
+    var width: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const cp = codePointAt(text, i);
+        width += cp.width;
+        i += cp.len;
+    }
+    return width;
+}
 
 /// Computes how many terminal rows `text` occupies when it starts at
 /// `start_col` (the column after the prompt) on a terminal `width` columns
@@ -165,20 +379,16 @@ pub fn rowsNeeded(start_col: usize, width: usize, text: []const u8) RowsInfo {
     var rows: usize = 1;
     var i: usize = 0;
     while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const cp_width = if (seq_len > 1 and i + seq_len <= text.len)
-            markdown.codePointWidth(std.unicode.utf8Decode(text[i..][0..seq_len]) catch 1)
-        else
-            1;
-        if (col + cp_width > width) {
+        const cp = codePointAt(text, i);
+        if (col + cp.width > width) {
             rows += 1;
-            col = cp_width;
+            col = cp.width;
         } else {
-            col += cp_width;
+            col += cp.width;
         }
-        i += seq_len;
+        i += cp.len;
     }
-    return .{ .rows = rows, .ends_at_edge = col == width };
+    return .{ .rows = rows, .ends_at_edge = col == width, .col = col };
 }
 
 /// Writes `text` to `writer`, wrapping attached-file mentions in the
@@ -275,6 +485,16 @@ test "rowsNeeded wide code point filling the row exactly flags pending wrap" {
     const info = rowsNeeded(2, 10, "abcdef😀");
     try std.testing.expectEqual(@as(usize, 1), info.rows);
     try std.testing.expect(info.ends_at_edge);
+}
+
+test "textWidth counts an incomplete lead byte as one column without swallowing the next byte" {
+    try std.testing.expectEqual(@as(usize, 2), textWidth("\xC3b"));
+}
+
+test "rowsNeeded wraps at the right column around an incomplete lead byte" {
+    const info = rowsNeeded(2, 10, "abcdefg\xC3b");
+    try std.testing.expectEqual(@as(usize, 2), info.rows);
+    try std.testing.expectEqual(@as(usize, 1), info.col);
 }
 
 test "editor append redraws the prompt and buffer on one row" {
@@ -681,4 +901,465 @@ test "editor legacy replace path when called out of line" {
         terminal.move_to_line_start ++ terminal.clear_to_end_of_line ++ "> first",
         out.written(),
     );
+}
+
+test "editor moveLeft redraws and parks the cursor before the last char" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ac");
+    out.clearRetainingCapacity();
+    try editor.moveLeft();
+
+    try std.testing.expectEqualStrings("\r\x1b[J> ac\x1b[4G", out.written());
+}
+
+test "editor moveLeft is a no-op at the start of the buffer" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.moveLeft();
+
+    try std.testing.expectEqualStrings("", out.written());
+}
+
+test "editor moveLeft steps over a whole multi-byte code point" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("a中");
+    out.clearRetainingCapacity();
+    try editor.moveLeft();
+
+    try std.testing.expectEqualStrings("\r\x1b[J> a中\x1b[4G", out.written());
+}
+
+test "editor moveLeft positions the cursor on the second wrapped row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijk");
+    out.clearRetainingCapacity();
+    try editor.moveLeft();
+
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghijk\x1b[3G", out.written());
+}
+
+test "editor moveLeft from the second row back to the first moves the cursor up" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghij");
+    for (0..2) |_| try editor.moveLeft();
+    out.clearRetainingCapacity();
+    // The cursor rests at the start of the second row, so the redraw starts
+    // one row up and parks the cursor at the end of the first row.
+    try editor.moveLeft();
+
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghij\x1b[1A\x1b[10G", out.written());
+}
+
+test "editor moveLeft from text ending at the edge leaves the forced-wrap row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefgh");
+    out.clearRetainingCapacity();
+    try editor.moveLeft();
+
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefgh \x1b[1A\x1b[10G", out.written());
+}
+
+test "editor parkAtInputEnd moves the terminal cursor to the last input row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijk");
+    try editor.moveHome();
+    out.clearRetainingCapacity();
+    try editor.parkAtInputEnd();
+
+    try std.testing.expectEqualStrings("\x1b[1B", out.written());
+    try std.testing.expectEqual(@as(usize, 2), editor.cursor_rows);
+    try std.testing.expectEqual(@as(usize, 0), editor.cursor);
+}
+
+test "editor parkAtInputEnd counts the forced-wrap row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefgh");
+    try editor.moveHome();
+    out.clearRetainingCapacity();
+    try editor.parkAtInputEnd();
+
+    try std.testing.expectEqualStrings("\x1b[1B", out.written());
+    try std.testing.expectEqual(@as(usize, 2), editor.cursor_rows);
+}
+
+test "editor parkAtInputEnd is a no-op on the last row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijk");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.parkAtInputEnd();
+
+    try std.testing.expectEqualStrings("", out.written());
+    try std.testing.expectEqual(@as(usize, 2), editor.cursor_rows);
+}
+
+test "editor redraw after parkAtInputEnd starts from the last input row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijk");
+    try editor.moveHome();
+    try editor.parkAtInputEnd();
+    out.clearRetainingCapacity();
+    try editor.redraw();
+
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghijk\x1b[1A\x1b[3G", out.written());
+}
+
+test "editor append inserts at the cursor and keeps it after the new char" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ac");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.append('b');
+
+    try std.testing.expectEqualStrings("abc", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> abc\x1b[5G", out.written());
+}
+
+test "editor appendSlice inserts a multi-byte code point mid-line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ab");
+    try editor.moveLeft();
+    try editor.appendSlice("中");
+    try editor.appendSlice("é");
+
+    try std.testing.expectEqualStrings("a中éb", line_alloc.written());
+}
+
+test "editor moveRight steps over a code point and stops at the end" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("a中b");
+    try editor.moveLeft();
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.moveRight();
+    try std.testing.expectEqualStrings("\r\x1b[J> a中b\x1b[6G", out.written());
+
+    try editor.moveRight();
+    out.clearRetainingCapacity();
+    try editor.moveRight();
+    try std.testing.expectEqualStrings("", out.written());
+}
+
+test "editor moveHome and moveEnd jump across wrapped rows" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("abcdefghijkl");
+    out.clearRetainingCapacity();
+    try editor.moveHome();
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefghijkl\x1b[1A\x1b[3G", out.written());
+
+    out.clearRetainingCapacity();
+    try editor.moveEnd();
+    try std.testing.expectEqualStrings("\r\x1b[J> abcdefghijkl", out.written());
+}
+
+test "editor backspace deletes the code point before a mid-line cursor" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("a中c");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("ac", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> ac\x1b[4G", out.written());
+}
+
+test "editor deleteForward deletes the code point under the cursor" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("a中c");
+    try editor.moveHome();
+    try editor.moveRight();
+    out.clearRetainingCapacity();
+    try editor.deleteForward();
+
+    try std.testing.expectEqualStrings("ac", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[J> ac\x1b[4G", out.written());
+}
+
+test "editor deleteForward is a no-op at the end of the buffer" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 10);
+    try editor.appendSlice("ab");
+    out.clearRetainingCapacity();
+    try editor.deleteForward();
+
+    try std.testing.expectEqualStrings("ab", line_alloc.written());
+    try std.testing.expectEqualStrings("", out.written());
+}
+
+/// Types `text`, runs `ops` on the editor, then inserts a `|` marker so the
+/// resulting buffer shows where the cursor landed.
+fn expectCursorAfter(text: []const u8, ops: []const *const fn (*LineEditor) anyerror!void, expected: []const u8) !void {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 80);
+    try editor.appendSlice(text);
+    for (ops) |op| try op(&editor);
+    try editor.append('|');
+    try std.testing.expectEqualStrings(expected, line_alloc.written());
+}
+
+test "editor moveWordLeft stops at the start of each word" {
+    const L = LineEditor.moveWordLeft;
+    try expectCursorAfter("read src/main.zig", &.{L}, "read src/main.|zig");
+    try expectCursorAfter("read src/main.zig", &.{ L, L }, "read src/|main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ L, L, L, L }, "|read src/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ L, L, L, L, L }, "|read src/main.zig");
+    try expectCursorAfter("hello   ", &.{L}, "|hello   ");
+    try expectCursorAfter("héllo wörld", &.{L}, "héllo |wörld");
+    try expectCursorAfter("snake_case", &.{L}, "|snake_case");
+}
+
+test "editor moveWordRight stops at the end of each word" {
+    const H = LineEditor.moveHome;
+    const R = LineEditor.moveWordRight;
+    try expectCursorAfter("read src/main.zig", &.{ H, R }, "read| src/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ H, R, R }, "read src|/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ H, R, R, R, R, R }, "read src/main.zig|");
+    try expectCursorAfter("   hello", &.{ H, R }, "   hello|");
+    try expectCursorAfter("héllo wörld", &.{ H, R }, "héllo| wörld");
+}
+
+test "editor deleteWordBackward removes the word before the cursor" {
+    const B = LineEditor.deleteWordBackward;
+    const L = LineEditor.moveWordLeft;
+    try expectCursorAfter("read src/main.zig", &.{B}, "read src/main.|");
+    try expectCursorAfter("read src/main.zig", &.{ B, B }, "read src/|");
+    try expectCursorAfter("hello world  ", &.{B}, "hello |");
+    try expectCursorAfter("hello wörld", &.{ L, B }, "|wörld");
+    try expectCursorAfter("", &.{B}, "|");
+}
+
+test "editor deleteWordForward removes the word after the cursor" {
+    const H = LineEditor.moveHome;
+    const F = LineEditor.deleteWordForward;
+    try expectCursorAfter("read src/main.zig", &.{ H, F }, "| src/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ H, F, F }, "|/main.zig");
+    try expectCursorAfter("héllo wörld", &.{ H, F, F }, "|");
+    try expectCursorAfter("abc", &.{F}, "abc|");
+}
+
+test "editor deleteWhitespaceWordBackward removes back to the previous whitespace" {
+    const W = LineEditor.deleteWhitespaceWordBackward;
+    try expectCursorAfter("read src/main.zig", &.{W}, "read |");
+    try expectCursorAfter("read src/main.zig  ", &.{W}, "read |");
+    try expectCursorAfter("read src/main.zig", &.{ W, W }, "|");
+}
+
+test "editor killToStart and killToEnd remove text on either side of the cursor" {
+    const L = LineEditor.moveWordLeft;
+    try expectCursorAfter("hello big world", &.{ L, LineEditor.killToStart }, "|world");
+    try expectCursorAfter("hello big world", &.{ L, LineEditor.killToEnd }, "hello big |");
+    try expectCursorAfter("hello", &.{LineEditor.killToEnd}, "hello|");
+}
+
+test "editor without width moves the cursor with relative column moves" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.appendSlice("a中b");
+    out.clearRetainingCapacity();
+    try editor.moveHome();
+    try std.testing.expectEqualStrings("\x1b[4D", out.written());
+
+    out.clearRetainingCapacity();
+    try editor.moveWordRight();
+    try std.testing.expectEqualStrings("\x1b[4C", out.written());
+}
+
+test "editor without width rewrites the tail when inserting mid-line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.appendSlice("ac");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.append('b');
+
+    try std.testing.expectEqualStrings("abc", line_alloc.written());
+    try std.testing.expectEqualStrings("\x1b[1Dabc\x1b[K\x1b[1D", out.written());
+}
+
+test "editor without width rewrites the tail when deleting mid-line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, null);
+    try editor.appendSlice("abc");
+    try editor.moveLeft();
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("ac", line_alloc.written());
+    try std.testing.expectEqualStrings("\x1b[2Dac\x1b[K\x1b[1D", out.written());
+
+    try editor.moveHome();
+    out.clearRetainingCapacity();
+    try editor.killToEnd();
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqualStrings("\x1b[K", out.written());
+}
+
+test "editor handleKey dispatches decoded editing keys" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 80);
+    try editor.appendSlice("one two three");
+    try editor.handleKey(.word_left);
+    try editor.handleKey(.left);
+    try editor.handleKey(.right);
+    try editor.handleKey(.delete_word_backward);
+    try std.testing.expectEqualStrings("one three", line_alloc.written());
+
+    try editor.handleKey(.home);
+    try editor.handleKey(.delete_word_forward);
+    try editor.handleKey(.delete);
+    try std.testing.expectEqualStrings("three", line_alloc.written());
+
+    try editor.handleKey(.end);
+    try editor.handleKey(.unknown);
+    try editor.append('!');
+    try std.testing.expectEqualStrings("three!", line_alloc.written());
+}
+
+test "editor handleKey dispatches history and word-right keys" {
+    const allocator = std.testing.allocator;
+    var history = prompt_history.History.init(allocator, "");
+    defer history.deinit();
+    try history.add("earlier prompt");
+
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, &history, 80);
+    try editor.appendSlice("draft");
+    try editor.handleKey(.up);
+    try std.testing.expectEqualStrings("earlier prompt", line_alloc.written());
+
+    try editor.handleKey(.home);
+    try editor.handleKey(.word_right);
+    try std.testing.expectEqual(@as(usize, "earlier".len), editor.cursor);
+
+    try editor.handleKey(.down);
+    try std.testing.expectEqualStrings("draft", line_alloc.written());
 }
