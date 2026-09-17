@@ -353,11 +353,9 @@ fn nextWordEnd(text: []const u8, pos: usize) usize {
 /// Invalid or truncated UTF-8 renders as a single replacement column.
 fn codePointAt(text: []const u8, i: usize) struct { len: usize, width: usize } {
     const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-    const width = if (seq_len > 1 and i + seq_len <= text.len)
-        markdown.codePointWidth(std.unicode.utf8Decode(text[i..][0..seq_len]) catch 1)
-    else
-        1;
-    return .{ .len = seq_len, .width = width };
+    if (seq_len == 1 or i + seq_len > text.len) return .{ .len = 1, .width = 1 };
+    const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch return .{ .len = 1, .width = 1 };
+    return .{ .len = seq_len, .width = markdown.codePointWidth(cp) };
 }
 
 /// Total display width of `text` on a single row.
@@ -487,6 +485,17 @@ test "rowsNeeded wide code point filling the row exactly flags pending wrap" {
     const info = rowsNeeded(2, 10, "abcdef😀");
     try std.testing.expectEqual(@as(usize, 1), info.rows);
     try std.testing.expect(info.ends_at_edge);
+}
+
+test "textWidth counts an incomplete lead byte as one column without swallowing the next byte" {
+    try std.testing.expectEqual(@as(usize, 2), textWidth("\xC3b"));
+    try std.testing.expectEqual(@as(usize, 3), textWidth("\xF0\x9Fab"));
+}
+
+test "rowsNeeded wraps at the right column around an incomplete lead byte" {
+    const info = rowsNeeded(2, 10, "abcdefg\xC3b");
+    try std.testing.expectEqual(@as(usize, 2), info.rows);
+    try std.testing.expectEqual(@as(usize, 1), info.col);
 }
 
 test "editor append redraws the prompt and buffer on one row" {
