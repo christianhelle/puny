@@ -80,6 +80,16 @@ pub const LineEditor = struct {
         try self.deleteRange(self.cursor, nextCodePointEnd(self.line_alloc.written(), self.cursor));
     }
 
+    /// Deletes back to the start of the word before the cursor.
+    pub fn deleteWordBackward(self: *LineEditor) !void {
+        try self.deleteRange(prevWordStart(self.line_alloc.written(), self.cursor), self.cursor);
+    }
+
+    /// Deletes up to the end of the word after the cursor.
+    pub fn deleteWordForward(self: *LineEditor) !void {
+        try self.deleteRange(self.cursor, nextWordEnd(self.line_alloc.written(), self.cursor));
+    }
+
     /// Removes `text[start..end]`, leaves the cursor at `start`, and redraws.
     fn deleteRange(self: *LineEditor, start: usize, end: usize) !void {
         if (start == end) return;
@@ -1048,4 +1058,23 @@ test "editor moveWordRight stops at the end of each word" {
     try expectCursorAfter("read src/main.zig", &.{ H, R, R, R, R, R }, "read src/main.zig|");
     try expectCursorAfter("   hello", &.{ H, R }, "   hello|");
     try expectCursorAfter("héllo wörld", &.{ H, R }, "héllo| wörld");
+}
+
+test "editor deleteWordBackward removes the word before the cursor" {
+    const B = LineEditor.deleteWordBackward;
+    const L = LineEditor.moveWordLeft;
+    try expectCursorAfter("read src/main.zig", &.{B}, "read src/main.|");
+    try expectCursorAfter("read src/main.zig", &.{ B, B }, "read src/|");
+    try expectCursorAfter("hello world  ", &.{B}, "hello |");
+    try expectCursorAfter("hello wörld", &.{ L, B }, "|wörld");
+    try expectCursorAfter("", &.{B}, "|");
+}
+
+test "editor deleteWordForward removes the word after the cursor" {
+    const H = LineEditor.moveHome;
+    const F = LineEditor.deleteWordForward;
+    try expectCursorAfter("read src/main.zig", &.{ H, F }, "| src/main.zig");
+    try expectCursorAfter("read src/main.zig", &.{ H, F, F }, "|/main.zig");
+    try expectCursorAfter("héllo wörld", &.{ H, F, F }, "|");
+    try expectCursorAfter("abc", &.{F}, "abc|");
 }
