@@ -308,8 +308,6 @@ pub const ChatSession = struct {
                         try ctx.stdout_writer.print("\n\nSkills are disabled.\n", .{});
                         try ctx.stdout_writer.flush();
                         if (ctx.parsed.oneshot) {
-                            try ctx.stdout_writer.print("\n", .{});
-                            try ctx.stdout_writer.flush();
                             finalizeSession(ctx);
                             return;
                         }
@@ -331,8 +329,6 @@ pub const ChatSession = struct {
                         }
                     }
                     if (ctx.parsed.oneshot) {
-                        try ctx.stdout_writer.print("\n", .{});
-                        try ctx.stdout_writer.flush();
                         finalizeSession(ctx);
                         return;
                     }
@@ -763,7 +759,6 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     // this turn just produced. Saving first would serialize the whole
     // conversation and rewrite the whole index twice over, back to back.
     if (honor_oneshot and ctx.parsed.oneshot) {
-        try ctx.stdout_writer.print("\n", .{});
         finalizeSession(ctx);
         return .{ .cancelled = turn_cancelled, .had_error = turn_had_error, .exited = true };
     }
