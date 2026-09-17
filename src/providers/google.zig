@@ -445,7 +445,7 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
         }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            http_client.printAuthHint(client.io);
+            http_client.printAuthHint(client);
         }
 
         http_client.emitDiagnostic("Google chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{

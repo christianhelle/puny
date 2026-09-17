@@ -142,6 +142,9 @@ pub const Client = struct {
     session_id: ?[]const u8 = null,
     http_observer: ?HttpObserver = null,
     last_http_failure: ?HttpFailure = null,
+    /// Environment variables that supply this provider's API key, named in the
+    /// hint printed after an authentication failure.
+    api_key_env_names: []const u8 = "PUNY_API_KEY",
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8) Client {
         return .{
@@ -362,11 +365,23 @@ pub fn emitDiagnostic(comptime format: []const u8, args: anytype) void {
     std.debug.print(format, args);
 }
 
-pub fn printAuthHint(io: std.Io) void {
+/// The recovery hint for an authentication failure, naming the key variables
+/// that apply to `c`'s provider.
+pub fn authHintText(buf: []u8, c: *const Client) []const u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "Authentication failed. Configure an API key with --api-key, {s}, or --reconfigure.\n",
+        .{c.api_key_env_names},
+    ) catch "Authentication failed. Configure an API key with --api-key or --reconfigure.\n";
+}
+
+pub fn printAuthHint(c: *const Client) void {
     if (builtin.is_test) return;
+    var text_buf: [256]u8 = undefined;
+    const text = authHintText(&text_buf, c);
     var buf: [256]u8 = undefined;
-    var fw: std.Io.File.Writer = .init(.stderr(), io, &buf);
-    fw.interface.print("Authentication failed. Configure an API key with --api-key, PUNY_API_KEY, or --reconfigure.\n", .{}) catch {};
+    var fw: std.Io.File.Writer = .init(.stderr(), c.io, &buf);
+    fw.interface.print("{s}", .{text}) catch {};
     fw.interface.flush() catch {};
 }
 
@@ -1403,4 +1418,28 @@ test "appendClientHeaders omits the OpenCode session header for an empty session
     defer if (auth_header) |value| allocator.free(value);
 
     try std.testing.expect(findHeader(headers.items, "x-opencode-session") == null);
+}
+
+test "authHintText names the default API key variable" {
+    var buf: [256]u8 = undefined;
+    const c = Client{ .allocator = std.testing.allocator, .io = std.testing.io, .http = undefined, .api_key = "" };
+    try std.testing.expectEqualStrings(
+        "Authentication failed. Configure an API key with --api-key, PUNY_API_KEY, or --reconfigure.\n",
+        authHintText(&buf, &c),
+    );
+}
+
+test "authHintText names the provider's own API key variable" {
+    var buf: [256]u8 = undefined;
+    const c = Client{
+        .allocator = std.testing.allocator,
+        .io = std.testing.io,
+        .http = undefined,
+        .api_key = "",
+        .api_key_env_names = "PUNY_API_KEY/OLLAMA_API_KEY",
+    };
+    try std.testing.expectEqualStrings(
+        "Authentication failed. Configure an API key with --api-key, PUNY_API_KEY/OLLAMA_API_KEY, or --reconfigure.\n",
+        authHintText(&buf, &c),
+    );
 }

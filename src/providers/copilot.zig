@@ -170,7 +170,7 @@ pub fn ensureCopilotToken(self: *Client) ![]const u8 {
     defer raw.deinit();
 
     if (raw.status.class() != .success) {
-        if (client.isAuthFailure(raw.status)) client.printAuthHint(self.inner.io);
+        if (client.isAuthFailure(raw.status)) client.printAuthHint(&self.inner);
         return error.TokenExchangeFailed;
     }
 
@@ -286,7 +286,7 @@ pub fn listModels(self: *Client) !client.Owned(ModelsList) {
     defer raw.deinit();
 
     if (raw.status.class() != .success) {
-        if (client.isAuthFailure(raw.status)) client.printAuthHint(self.inner.io);
+        if (client.isAuthFailure(raw.status)) client.printAuthHint(&self.inner);
         return error.ResponseError;
     }
 
@@ -535,7 +535,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            client.printAuthHint(self.inner.io);
+            client.printAuthHint(&self.inner);
         }
 
         if (builtin.mode == .Debug) {

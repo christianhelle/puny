@@ -138,7 +138,7 @@ pub fn listModels(client: *http_client.Client) !http_client.Owned(ModelsList) {
     switch (result) {
         .ok => |ok| return ok,
         .api_error => |*err| {
-            if (http_client.isAuthFailure(err.status)) http_client.printAuthHint(client.io);
+            if (http_client.isAuthFailure(err.status)) http_client.printAuthHint(client);
             err.deinit();
             return error.ResponseError;
         },
