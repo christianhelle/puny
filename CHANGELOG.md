@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Merged Pull Requests
+- Readline-style prompt editing ([#209](https://github.com/christianhelle/puny/pull/209)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.4.0](https://github.com/christianhelle/puny/releases/tag/v0.4.0) (2026-09-16)
 
 ### Features
