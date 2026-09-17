@@ -1339,3 +1339,27 @@ test "editor handleKey dispatches decoded editing keys" {
     try editor.append('!');
     try std.testing.expectEqualStrings("three!", line_alloc.written());
 }
+
+test "editor handleKey dispatches history and word-right keys" {
+    const allocator = std.testing.allocator;
+    var history = prompt_history.History.init(allocator, "");
+    defer history.deinit();
+    try history.add("earlier prompt");
+
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, &history, 80);
+    try editor.appendSlice("draft");
+    try editor.handleKey(.up);
+    try std.testing.expectEqualStrings("earlier prompt", line_alloc.written());
+
+    try editor.handleKey(.home);
+    try editor.handleKey(.word_right);
+    try std.testing.expectEqual(@as(usize, "earlier".len), editor.cursor);
+
+    try editor.handleKey(.down);
+    try std.testing.expectEqualStrings("draft", line_alloc.written());
+}
