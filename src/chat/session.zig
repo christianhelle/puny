@@ -364,8 +364,7 @@ pub const ChatSession = struct {
                     // text was supplied (e.g. `/empty-skill hello`), so no empty
                     // system message is appended and no chat turn is run.
                     if (std.mem.trim(u8, content, " \t\r\n").len == 0) {
-                        try ctx.stdout_writer.print("\n\n{s}Skill '{s}' has no content.{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                        try ctx.stdout_writer.flush();
+                        try printNotice(ctx.stdout_writer, "Skill '{s}' has no content.", .{skill_name});
                         continue;
                     }
 
@@ -373,8 +372,7 @@ pub const ChatSession = struct {
                     if (has_text) {
                         // Skill loaded as system context, trailing text as the user request.
                         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-                        try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                        try ctx.stdout_writer.flush();
+                        try printNotice(ctx.stdout_writer, "Skill: {s}", .{skill_name});
                         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = user_text.? });
                         try ctx.stdout_writer.print(" {s}\n", .{user_text.?});
                         try ctx.stdout_writer.flush();
@@ -385,8 +383,7 @@ pub const ChatSession = struct {
 
                     // Bare skill command: send the skill content itself as the prompt.
                     try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = content });
-                    try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, skill_name, ansi.reset });
-                    try ctx.stdout_writer.flush();
+                    try printNotice(ctx.stdout_writer, "Skill: {s}", .{skill_name});
                     const turn_result = try runChatTurn(ctx);
                     if (turn_result == .exit) return;
                     continue;
@@ -607,10 +604,16 @@ fn maybeLoadTriggeredSkills(
         if (!skills.recordMatchesTrigger(r, text)) continue;
         const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
-        try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, r.name, ansi.reset });
-        try ctx.stdout_writer.flush();
+        try printNotice(ctx.stdout_writer, "Skill: {s}", .{r.name});
         loaded_skills.put(ctx.arena, r.name, {}) catch {};
     }
+}
+
+/// Prints a dim status line, such as a loaded skill, one blank line below the
+/// output before it.
+fn printNotice(writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
+    try writer.print("\n" ++ ansi.dim ++ fmt ++ ansi.reset ++ "\n", args);
+    try writer.flush();
 }
 
 fn readUserInput(
@@ -727,8 +730,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
 
         if (skills.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
             try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = pending.content });
-            try ctx.stdout_writer.print("\n\n{s}Skill: {s}{s}\n", .{ ansi.dim, pending.name, ansi.reset });
-            try ctx.stdout_writer.flush();
+            try printNotice(ctx.stdout_writer, "Skill: {s}", .{pending.name});
         }
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
@@ -1388,4 +1390,13 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
     }) catch |err| {
         std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
     };
+}
+
+test "printNotice writes a dim line with a single blank line above it" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try printNotice(&output.writer, "Skill: {s}", .{"tdd"});
+
+    try std.testing.expectEqualStrings("\n\x1b[2mSkill: tdd\x1b[0m\n", output.written());
 }
