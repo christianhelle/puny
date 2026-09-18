@@ -297,7 +297,12 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
     }
 
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
-        ctx.prov.deinit();
+        // Kept alive until the new provider answers, so an unreachable server
+        // can hand the session back to it.
+        var previous_prov = ctx.prov.*;
+        errdefer previous_prov.deinit();
+        const previous_url = ctx.provider_url.*;
+
         ctx.prov.* = resolver.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
         if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
         if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
@@ -309,7 +314,7 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             ctx.parsed.oneshot or
             !std.mem.eql(u8, new_provider_url, config.default_lm_studio_url);
 
-        const model_selection_result = try model_selection.select(
+        const model_selection_result = model_selection.select(
             ctx.prov,
             null,
             ctx.arena,
@@ -320,7 +325,13 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             new_provider_name,
             ctx.init.environ_map,
             ctx.random,
-        );
+        ) catch |err| {
+            if (err != error.ProviderUnreachable) return err;
+            restoreProvider(ctx, previous_prov, old_provider_name, previous_url);
+            try printProviderUnreachable(ctx.stdout_writer, new_provider_name, new_provider_url, old_provider_name);
+            return;
+        };
+        previous_prov.deinit();
 
         if (model_selection_result) |sel| {
             ctx.model_key.* = sel.model_key;
@@ -792,6 +803,29 @@ test "switchProvider explains an unreachable server and keeps the previous provi
     var loaded = try config.load(std.testing.allocator, std.testing.io, &h.env);
     defer loaded.deinit();
     try std.testing.expectEqual(ModelProvider.lmstudio, loaded.config.provider);
+}
+
+test "applyReconfiguredProvider explains an unreachable server and keeps the previous provider" {
+    var h: SwitchHarness = undefined;
+    try h.init();
+    defer h.deinit();
+    var url_buf: [64]u8 = undefined;
+    const ollama_url = try closedPortUrl(&url_buf);
+    h.cfg.providerEntry(.ollama).url = ollama_url;
+    // /config has already saved the newly picked provider by this point.
+    h.cfg.provider = .ollama;
+    var ctx = h.context();
+
+    try applyReconfiguredProvider(&ctx, .lmstudio);
+
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), "Could not connect to Ollama at") != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), "Still using LM Studio.") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, h.model_provider);
+    try std.testing.expectEqual(ModelProvider.lmstudio, h.cfg.provider);
+    try std.testing.expectEqualStrings("http://previous:1234", h.provider_url);
+    try std.testing.expectEqualStrings("http://previous:1234", h.prov.lmstudio.base_url);
+    // The url typed into /config is kept, ready for when the server is up.
+    try std.testing.expectEqualStrings(ollama_url, h.cfg.providerEntryConst(.ollama).url);
 }
 
 test "switchProvider keeps the configured url of the provider it switches to" {
