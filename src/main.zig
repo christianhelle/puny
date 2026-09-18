@@ -587,6 +587,19 @@ fn runStartupReconfigure(
     }
 }
 
+/// Explains a provider whose server did not answer, so a stopped local server
+/// ends startup with a hint instead of a raw socket error.
+fn printProviderUnreachable(io: std.Io, selected_provider: ModelProvider, url: []const u8) void {
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
+    const stderr_writer = &stderr_file_writer.interface;
+    stderr_writer.print(
+        "Could not connect to {s} at {s}. Make sure it is running, or pick another provider with --provider or --reconfigure.\n",
+        .{ provider.getProviderDisplayName(selected_provider), url },
+    ) catch {};
+    stderr_writer.flush() catch {};
+}
+
 fn initializeProviderAndModel(
     arena: std.mem.Allocator,
     provider_arena: std.mem.Allocator,
@@ -637,7 +650,7 @@ fn initializeProviderAndModel(
         provider_url.*,
         config.default_lm_studio_url,
     );
-    const init_result = (try model_selection.select(
+    const init_result = (model_selection.select(
         prov,
         configured_model,
         arena,
@@ -648,14 +661,17 @@ fn initializeProviderAndModel(
         selected_provider.*,
         init.environ_map,
         random,
-    )) orelse blk: {
+    ) catch |err| {
+        if (err == error.ProviderUnreachable) printProviderUnreachable(io, selected_provider.*, provider_url.*);
+        return err;
+    }) orelse blk: {
         if (configured_model) |model_id| {
             try stdout_writer.print(
                 "Model '{s}' not found in running models. Showing picker.\n",
                 .{model_id},
             );
         }
-        break :blk (try model_selection.select(
+        break :blk (model_selection.select(
             prov,
             null,
             arena,
@@ -666,7 +682,10 @@ fn initializeProviderAndModel(
             selected_provider.*,
             init.environ_map,
             random,
-        )) orelse {
+        ) catch |err| {
+            if (err == error.ProviderUnreachable) printProviderUnreachable(io, selected_provider.*, provider_url.*);
+            return err;
+        }) orelse {
             try stdout_writer.print("No model selected.\n", .{});
             return;
         };

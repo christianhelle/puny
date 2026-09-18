@@ -265,6 +265,14 @@
     "exit_code": 1
   },
   {
+    "name": "Unreachable Ollama server explains itself instead of crashing",
+    "args": ["--provider", "ollama", "--url", "http://127.0.0.1:1", "--prompt", "hello", "--oneshot"],
+    "expect": [],
+    "not_expect": [],
+    "expect_stderr": ["Could not connect to Ollama at http://127.0.0.1:1. Make sure it is running, or pick another provider with --provider or --reconfigure."],
+    "exit_code": 1
+  },
+  {
     "name": "Markdown table response",
     "args": ["--mock", "--model", "mock-model", "--prompt", "im testing the markdown table renderer. generate a markdown table with a realistic data set", "--oneshot"],
     "expect": ["Smith", "employee data"],
