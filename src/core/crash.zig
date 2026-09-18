@@ -253,7 +253,7 @@ const hangup_errors = [_][]const u8{ "Canceled", "BrokenPipe" };
 /// Failures that mean puny is misconfigured rather than broken. Each one is
 /// raised alongside a message telling the user how to fix it, so filing an
 /// issue about it would waste everyone's time.
-const configuration_errors = [_][]const u8{ "MissingApiKey", "NoConfigDir", "BadPath" };
+const configuration_errors = [_][]const u8{ "MissingApiKey", "NoConfigDir", "BadPath", "ProviderUnreachable" };
 
 /// Whether a failure is worth reporting as a crash.
 pub fn isReportable(error_name: []const u8) bool {
@@ -877,4 +877,5 @@ test "configuration problems are not crashes" {
     try std.testing.expect(!isReportable("MissingApiKey"));
     try std.testing.expect(!isReportable("NoConfigDir"));
     try std.testing.expect(!isReportable("BadPath"));
+    try std.testing.expect(!isReportable("ProviderUnreachable"));
 }
