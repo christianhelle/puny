@@ -41,12 +41,12 @@ test "listModelsWithRetry recovers after a transient error" {
     try std.testing.expectEqual(@as(usize, 0), result.value().models.len);
 }
 
-test "listModelsWithRetry exhausts retries on repeated transient errors" {
+test "listModelsWithRetry retries a refused connection, then reports the server unreachable" {
     var prov = TestProvider{
         .allocator = std.testing.allocator,
         .fail_count = 3,
     };
     const result = select.listModelsWithRetry(&prov, std.testing.io, testRandom(), 1);
-    try std.testing.expectError(error.ConnectionRefused, result);
+    try std.testing.expectError(error.ProviderUnreachable, result);
     try std.testing.expectEqual(@as(usize, 2), prov.calls);
 }
