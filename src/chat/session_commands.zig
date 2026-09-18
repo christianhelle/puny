@@ -98,7 +98,7 @@ pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8)
 
 pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void {
     const model_skip_validation = ctx.parsed.mock;
-    if (try model_selection.switchModel(
+    const switched = model_selection.switchModel(
         ctx.prov,
         model_id,
         ctx.model_key.*,
@@ -112,7 +112,12 @@ pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !v
         ctx.model_provider.*,
         ctx.init.environ_map,
         ctx.random,
-    )) |result| {
+    ) catch |err| {
+        if (err != error.ProviderUnreachable) return err;
+        try printProviderUnreachable(ctx.stdout_writer, ctx.model_provider.*, ctx.provider_url.*, null);
+        return;
+    };
+    if (switched) |result| {
         ctx.model_key.* = result.model_key;
         if (result.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
@@ -233,16 +238,21 @@ fn restoreProvider(
     config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map) catch {};
 }
 
+/// Explains a provider whose server did not answer, naming the provider the
+/// session fell back to when a switch was undone.
 fn printProviderUnreachable(
     stdout_writer: *std.Io.Writer,
     unreachable_provider: ModelProvider,
     url: []const u8,
-    still_using: ModelProvider,
+    still_using: ?ModelProvider,
 ) !void {
     try stdout_writer.print(
-        "\nCould not connect to {s} at {s}. Make sure it is running, then try again.\nStill using {s}.\n",
-        .{ provider.getProviderDisplayName(unreachable_provider), url, provider.getProviderDisplayName(still_using) },
+        "\nCould not connect to {s} at {s}. Make sure it is running, then try again.\n",
+        .{ provider.getProviderDisplayName(unreachable_provider), url },
     );
+    if (still_using) |previous| {
+        try stdout_writer.print("Still using {s}.\n", .{provider.getProviderDisplayName(previous)});
+    }
     try stdout_writer.flush();
 }
 
@@ -826,6 +836,26 @@ test "applyReconfiguredProvider explains an unreachable server and keeps the pre
     try std.testing.expectEqualStrings("http://previous:1234", h.prov.lmstudio.base_url);
     // The url typed into /config is kept, ready for when the server is up.
     try std.testing.expectEqualStrings(ollama_url, h.cfg.providerEntryConst(.ollama).url);
+}
+
+test "handleSwitchModelCommand explains an unreachable server and keeps the model" {
+    var h: SwitchHarness = undefined;
+    try h.init();
+    defer h.deinit();
+    var url_buf: [64]u8 = undefined;
+    const ollama_url = try closedPortUrl(&url_buf);
+    // The session is on Ollama, whose server has since stopped.
+    h.prov.setConfig(.{ .base_url = ollama_url });
+    h.model_provider = .ollama;
+    h.provider_url = ollama_url;
+    var ctx = h.context();
+
+    try handleSwitchModelCommand(&ctx, null);
+
+    const expected = try std.fmt.allocPrint(h.arena_state.allocator(), "Could not connect to Ollama at {s}. Make sure it is running, then try again.", .{ollama_url});
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), expected) != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), "Still using") == null);
+    try std.testing.expectEqualStrings("previous-model", h.model_key);
 }
 
 test "switchProvider keeps the configured url of the provider it switches to" {
