@@ -170,7 +170,8 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     // Kept alive until the new provider answers, so an unreachable server can
     // hand the session back to it.
     var previous_prov = ctx.prov.*;
-    errdefer previous_prov.deinit();
+    var owns_previous_prov = true;
+    errdefer if (owns_previous_prov) previous_prov.deinit();
     const previous_url = ctx.provider_url.*;
 
     ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
@@ -194,10 +195,12 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     ) catch |err| {
         if (err != error.ProviderUnreachable) return err;
         restoreProvider(ctx, previous_prov, current_provider, previous_url);
+        owns_previous_prov = false;
         try printProviderUnreachable(ctx.stdout_writer, picked_provider, new_provider_url, current_provider);
         return;
     };
     previous_prov.deinit();
+    owns_previous_prov = false;
 
     if (model_selection_result) |sel| {
         ctx.model_key.* = sel.model_key;
