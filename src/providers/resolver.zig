@@ -57,9 +57,13 @@ pub fn apiKeyEnv(environ_map: *const std.process.Environ.Map, selected_provider:
     return null;
 }
 
-/// Names of the variables `apiKeyEnv` reads, for missing-key hints.
+/// Names of the variables that supply a provider's credentials, for key hints.
 pub fn apiKeyEnvNames(selected_provider: ModelProvider) []const u8 {
-    return if (selected_provider == .ollama_cloud) "PUNY_API_KEY/OLLAMA_API_KEY" else "PUNY_API_KEY";
+    return switch (selected_provider) {
+        .ollama_cloud => "PUNY_API_KEY/OLLAMA_API_KEY",
+        .copilot => "PUNY_API_KEY/GITHUB_COPILOT_OAUTH_TOKEN",
+        else => "PUNY_API_KEY",
+    };
 }
 
 /// True when a real (non-mock) provider that needs an API key has none, so
@@ -248,9 +252,10 @@ test "apiKeyEnv falls back to OLLAMA_API_KEY only for ollama_cloud" {
     try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .ollama_cloud).?);
 }
 
-test "apiKeyEnvNames lists the variables apiKeyEnv reads" {
+test "apiKeyEnvNames lists the variables that supply credentials" {
     try std.testing.expectEqualStrings("PUNY_API_KEY", apiKeyEnvNames(.opencode_go));
     try std.testing.expectEqualStrings("PUNY_API_KEY/OLLAMA_API_KEY", apiKeyEnvNames(.ollama_cloud));
+    try std.testing.expectEqualStrings("PUNY_API_KEY/GITHUB_COPILOT_OAUTH_TOKEN", apiKeyEnvNames(.copilot));
 }
 
 test "resolveApiKey uses CLI key over env and config" {
@@ -540,7 +545,7 @@ test "createProvider tells each client which key variables its provider uses" {
     {
         var prov = createProvider(false, .copilot, "http://copilot", "gho_x", allocator, std.testing.io, "");
         defer prov.deinit();
-        try std.testing.expectEqualStrings("PUNY_API_KEY", prov.copilot.inner.api_key_env_names);
+        try std.testing.expectEqualStrings("PUNY_API_KEY/GITHUB_COPILOT_OAUTH_TOKEN", prov.copilot.inner.api_key_env_names);
     }
 }
 
