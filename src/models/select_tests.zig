@@ -25,17 +25,13 @@ const TestProvider = struct {
     }
 };
 
-fn testRandom() std.Random {
-    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
-    return random_source.interface();
-}
-
 test "listModelsWithRetry recovers after a transient error" {
     var prov = TestProvider{
         .allocator = std.testing.allocator,
         .fail_count = 1,
     };
-    var result = try select.listModelsWithRetry(&prov, std.testing.io, testRandom(), 1);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    var result = try select.listModelsWithRetry(&prov, std.testing.io, random_source.interface(), 1);
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 2), prov.calls);
     try std.testing.expectEqual(@as(usize, 0), result.value().models.len);
@@ -46,7 +42,8 @@ test "listModelsWithRetry retries a refused connection, then reports the server 
         .allocator = std.testing.allocator,
         .fail_count = 3,
     };
-    const result = select.listModelsWithRetry(&prov, std.testing.io, testRandom(), 1);
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const result = select.listModelsWithRetry(&prov, std.testing.io, random_source.interface(), 1);
     try std.testing.expectError(error.ProviderUnreachable, result);
     try std.testing.expectEqual(@as(usize, 2), prov.calls);
 }
