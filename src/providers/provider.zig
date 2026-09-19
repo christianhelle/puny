@@ -19,6 +19,8 @@ pub const ModelProvider = enum {
     opencode_go,
     copilot,
     unsloth,
+    ollama,
+    ollama_cloud,
     mock,
 };
 
@@ -38,6 +40,8 @@ pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
         .opencode_go => "OpenCode Go",
         .copilot => "GitHub Copilot",
         .unsloth => "Unsloth",
+        .ollama => "Ollama",
+        .ollama_cloud => "Ollama Cloud",
         .mock => "Mock",
     };
 }
@@ -48,6 +52,8 @@ pub const Provider = union(enum) {
     opencode_go: client.Client,
     copilot: copilot.Client,
     unsloth: unsloth.Client,
+    ollama: client.Client,
+    ollama_cloud: client.Client,
     mock: mock.MockClient,
 
     pub fn deinit(self: *Provider) void {
@@ -62,7 +68,7 @@ pub const Provider = union(enum) {
                 var owned = try lmstudio_shim.listModels(c);
                 break :blk try lmstudio_shim.toSharedModels(&owned);
             },
-            .opencode, .opencode_go => |*c| blk: {
+            .opencode, .opencode_go, .ollama, .ollama_cloud => |*c| blk: {
                 var owned = try openai_shim.listModels(c);
                 break :blk try openai_shim.toSharedModels(&owned);
             },
@@ -100,6 +106,7 @@ pub const Provider = union(enum) {
                 chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
             .copilot => |*c| chatStreamingCopilotCaptured(c, request, callback),
             .unsloth => |*c| chatStreamingUnslothCaptured(c, request, callback),
+            .ollama, .ollama_cloud => |*c| chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
             .mock => |*c| c.chatStreaming(request, callback),
         };
     }
@@ -111,6 +118,7 @@ pub const Provider = union(enum) {
             .opencode_go => |*c| c.lastHttpFailure(),
             .copilot => |*c| c.inner.lastHttpFailure(),
             .unsloth => |*c| c.inner.lastHttpFailure(),
+            .ollama, .ollama_cloud => |*c| c.lastHttpFailure(),
             .mock => null,
         };
     }
@@ -125,7 +133,7 @@ pub const Provider = union(enum) {
 
     pub fn setConfig(self: *Provider, config: ClientConfig) void {
         switch (self.*) {
-            .lmstudio, .opencode, .opencode_go => |*c| c.setConfig(config),
+            .lmstudio, .opencode, .opencode_go, .ollama, .ollama_cloud => |*c| c.setConfig(config),
             .copilot => |*c| c.setConfig(config),
             .unsloth => |*c| c.setConfig(config),
             .mock => |*c| c.setConfig(config),
@@ -187,7 +195,7 @@ fn chatStreamingUnslothCaptured(c: *unsloth.Client, request: openai.ChatRequest,
 }
 
 /// Streams through the hand-written OpenAI-compatible transport. This
-/// intentionally routes LM Studio, OpenCode Zen/Go via the OpenAI-compatible
+/// intentionally routes LM Studio, Ollama, OpenCode Zen/Go via the OpenAI-compatible
 /// `/v1/chat/completions` endpoint.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     return openai.chatStreaming(c, request, callback);
@@ -203,6 +211,8 @@ test "getProviderDisplayName maps known providers" {
     try std.testing.expectEqualStrings("OpenCode Go", getProviderDisplayName(.opencode_go));
     try std.testing.expectEqualStrings("GitHub Copilot", getProviderDisplayName(.copilot));
     try std.testing.expectEqualStrings("Unsloth", getProviderDisplayName(.unsloth));
+    try std.testing.expectEqualStrings("Ollama", getProviderDisplayName(.ollama));
+    try std.testing.expectEqualStrings("Ollama Cloud", getProviderDisplayName(.ollama_cloud));
     try std.testing.expectEqualStrings("Mock", getProviderDisplayName(.mock));
 }
 
@@ -214,6 +224,8 @@ test "parseModelProvider accepts canonical names and legacy aliases" {
     try std.testing.expectEqual(.opencode_go, parseModelProvider("opencode-go").?);
     try std.testing.expectEqual(.copilot, parseModelProvider("copilot").?);
     try std.testing.expectEqual(.unsloth, parseModelProvider("unsloth").?);
+    try std.testing.expectEqual(.ollama, parseModelProvider("ollama").?);
+    try std.testing.expectEqual(.ollama_cloud, parseModelProvider("ollama_cloud").?);
     try std.testing.expect(parseModelProvider("mock") == null);
     try std.testing.expect(parseModelProvider("unknown") == null);
 }
@@ -503,6 +515,164 @@ test "Provider.listModels dispatches to the unsloth provider" {
     defer owned.deinit();
     try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
     try expectModelIds(&owned, &.{"unsloth/Qwen3-8B-GGUF"});
+}
+
+test "Provider.listModels dispatches to the ollama provider" {
+    const body =
+        \\{"object":"list","data":[{"id":"qwen3:8b","object":"model","created":1757000000,"owned_by":"library"}]}
+    ;
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var owned = try prov.listModels();
+    defer owned.deinit();
+    try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
+    try expectModelIds(&owned, &.{"qwen3:8b"});
+}
+
+test "Provider.chatStreaming dispatches to the ollama provider" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hi from Ollama\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "qwen3:8b",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 2), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hi from Ollama", content),
+        else => return error.ExpectedContentEvent,
+    }
+}
+
+test "Provider.chatStreaming preserves ollama HTTP error details" {
+    const body = "{\"error\":{\"message\":\"model \\\"missing\\\" not found, try pulling it first\"}}";
+    const ctx = try startProviderTestServer(.not_found, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "missing",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, rec.callback()));
+
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(std.http.Status.not_found, failure.status);
+    try std.testing.expectEqualStrings(body, failure.body);
+}
+
+test "Provider.listModels dispatches to the ollama_cloud provider" {
+    const body =
+        \\{"object":"list","data":[{"id":"gpt-oss:120b","object":"model","created":1757000000,"owned_by":"ollama"}]}
+    ;
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama_cloud = client.Client.init(std.testing.allocator, std.testing.io, "ollama-cloud-key") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var owned = try prov.listModels();
+    defer owned.deinit();
+    try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
+    try expectModelIds(&owned, &.{"gpt-oss:120b"});
+}
+
+test "Provider.chatStreaming dispatches to the ollama_cloud provider" {
+    const body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hi from Ollama Cloud\"}}]}\n\n" ++
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+        "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama_cloud = client.Client.init(std.testing.allocator, std.testing.io, "ollama-cloud-key") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "gpt-oss:120b",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    try std.testing.expectEqualStrings("/v1/chat/completions", ctx.getRequestPath());
+    try std.testing.expectEqual(@as(usize, 2), rec.events.items.len);
+    switch (rec.events.items[0]) {
+        .content => |content| try std.testing.expectEqualStrings("Hi from Ollama Cloud", content),
+        else => return error.ExpectedContentEvent,
+    }
+}
+
+test "Provider.chatStreaming preserves ollama_cloud HTTP error details" {
+    const body = "{\"error\":{\"message\":\"unauthorized\"}}";
+    const ctx = try startProviderTestServer(.unauthorized, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama_cloud = client.Client.init(std.testing.allocator, std.testing.io, "wrong-key") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "gpt-oss:120b",
+        .messages = &.{.{ .user = "hi" }},
+        .tools = &.{},
+    };
+    try std.testing.expectError(error.ResponseError, prov.chatStreaming(request, rec.callback()));
+
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(std.http.Status.unauthorized, failure.status);
+    try std.testing.expectEqualStrings(body, failure.body);
 }
 
 test "Provider.chatStreaming loads the unsloth model and reports a late load failure" {

@@ -246,6 +246,33 @@
     "not_expect": []
   },
   {
+    "name": "Mock flag with ollama provider does not crash",
+    "args": ["--mock", "--provider", "ollama", "--model", "mock-model", "--prompt", "hello world", "--oneshot"],
+    "expect": ["mock response"],
+    "not_expect": []
+  },
+  {
+    "name": "Mock flag with ollama_cloud provider does not crash",
+    "args": ["--mock", "--provider", "ollama_cloud", "--model", "mock-model", "--prompt", "hello world", "--oneshot"],
+    "expect": ["mock response"],
+    "not_expect": []
+  },
+  {
+    "name": "Invalid provider lists the Ollama providers",
+    "args": ["--provider", "not_a_provider"],
+    "expect": ["Expected one of: lmstudio, opencode_zen, opencode_go, copilot, unsloth, ollama, ollama_cloud.", "copilot, unsloth, ollama, or ollama_cloud"],
+    "not_expect": [],
+    "exit_code": 1
+  },
+  {
+    "name": "Unreachable Ollama server explains itself instead of crashing",
+    "args": ["--provider", "ollama", "--url", "http://127.0.0.1:1", "--prompt", "hello", "--oneshot"],
+    "expect": [],
+    "not_expect": [],
+    "expect_stderr": ["Could not connect to Ollama at http://127.0.0.1:1. Make sure it is running, or pick another provider with --provider or --reconfigure."],
+    "exit_code": 1
+  },
+  {
     "name": "Markdown table response",
     "args": ["--mock", "--model", "mock-model", "--prompt", "im testing the markdown table renderer. generate a markdown table with a realistic data set", "--oneshot"],
     "expect": ["Smith", "employee data"],

@@ -38,29 +38,35 @@ pub fn selectProviderInteractive(
     return e;
 }
 
-fn getDefaultProviders() [6]ProviderOption {
+fn getDefaultProviders() [8]ProviderOption {
     return .{
         .{ .id = .lmstudio, .display_name = "LM Studio" },
         .{ .id = .opencode_zen, .display_name = "OpenCode Zen" },
         .{ .id = .opencode_go, .display_name = "OpenCode Go" },
         .{ .id = .copilot, .display_name = "GitHub Copilot" },
         .{ .id = .unsloth, .display_name = "Unsloth" },
+        .{ .id = .ollama, .display_name = "Ollama" },
+        .{ .id = .ollama_cloud, .display_name = "Ollama Cloud" },
         .{ .id = .mock, .display_name = "Mock" },
     };
 }
 
-test "getDefaultProviders returns six known providers" {
+test "getDefaultProviders returns eight known providers" {
     const providers = comptime getDefaultProviders();
-    try std.testing.expectEqual(@as(usize, 6), providers.len);
+    try std.testing.expectEqual(@as(usize, 8), providers.len);
     try std.testing.expectEqualStrings("lmstudio", @tagName(providers[0].id));
     try std.testing.expectEqualStrings("opencode_zen", @tagName(providers[1].id));
     try std.testing.expectEqualStrings("opencode_go", @tagName(providers[2].id));
     try std.testing.expectEqualStrings("copilot", @tagName(providers[3].id));
     try std.testing.expectEqualStrings("unsloth", @tagName(providers[4].id));
-    try std.testing.expectEqualStrings("mock", @tagName(providers[5].id));
+    try std.testing.expectEqualStrings("ollama", @tagName(providers[5].id));
+    try std.testing.expectEqualStrings("ollama_cloud", @tagName(providers[6].id));
+    try std.testing.expectEqualStrings("mock", @tagName(providers[7].id));
     try std.testing.expectEqualStrings("LM Studio", providers[0].display_name);
     try std.testing.expectEqualStrings("Unsloth", providers[4].display_name);
-    try std.testing.expectEqualStrings("Mock", providers[5].display_name);
+    try std.testing.expectEqualStrings("Ollama", providers[5].display_name);
+    try std.testing.expectEqualStrings("Ollama Cloud", providers[6].display_name);
+    try std.testing.expectEqualStrings("Mock", providers[7].display_name);
 }
 
 test "buildProviderItems creates list picker items" {
@@ -72,14 +78,18 @@ test "buildProviderItems creates list picker items" {
     defer items.deinit(arena);
 
     // Mock is deliberately excluded from the interactive provider list: the
-    // remaining five providers must appear in order and no item may be "mock".
-    try std.testing.expectEqual(@as(usize, 5), items.items.len);
+    // remaining seven providers must appear in order and no item may be "mock".
+    try std.testing.expectEqual(@as(usize, 7), items.items.len);
     try std.testing.expectEqualStrings("lmstudio", items.items[0].value);
     try std.testing.expectEqualStrings("opencode_zen", items.items[1].value);
     try std.testing.expectEqualStrings("opencode_go", items.items[2].value);
     try std.testing.expectEqualStrings("copilot", items.items[3].value);
     try std.testing.expectEqualStrings("unsloth", items.items[4].value);
     try std.testing.expectEqualStrings("Unsloth", items.items[4].label);
+    try std.testing.expectEqualStrings("ollama", items.items[5].value);
+    try std.testing.expectEqualStrings("Ollama", items.items[5].label);
+    try std.testing.expectEqualStrings("ollama_cloud", items.items[6].value);
+    try std.testing.expectEqualStrings("Ollama Cloud", items.items[6].label);
     for (items.items) |item| {
         try std.testing.expect(!std.mem.eql(u8, item.value, "mock"));
     }

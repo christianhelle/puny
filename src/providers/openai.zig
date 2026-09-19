@@ -88,6 +88,8 @@ const DeltaChoice = struct {
     delta: struct {
         content: ?[]const u8 = null,
         reasoning_content: ?[]const u8 = null,
+        /// Ollama streams thinking under `reasoning` instead.
+        reasoning: ?[]const u8 = null,
         role: ?[]const u8 = null,
         tool_calls: ?[]const DeltaToolCall = null,
     },
@@ -127,7 +129,7 @@ pub const SseCallback = struct {
         defer parsed.deinit();
 
         for (parsed.value.choices) |choice| {
-            if (choice.delta.reasoning_content) |rc| {
+            if (choice.delta.reasoning_content orelse choice.delta.reasoning) |rc| {
                 try self.callback.emit(.{ .reasoning = rc });
             }
 
@@ -274,7 +276,7 @@ pub fn chatStreaming(chat_client: *client.Client, request: ChatRequest, callback
         }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            client.printAuthHint(chat_client.io);
+            client.printAuthHint(chat_client);
         }
 
         client.emitDiagnostic("OpenAI chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
@@ -607,6 +609,25 @@ test "SseCallback emits content reasoning and tool call events" {
 
     try std.testing.expectEqual(@as(usize, 1), chunks.items.len);
     try std.testing.expectEqualStrings(data, chunks.items[0]);
+}
+
+test "SseCallback emits reasoning from the reasoning field Ollama streams" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(SseTestEvent).empty;
+    var chunks = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events, .chunks = &chunks };
+    var sse = SseCallback{ .allocator = allocator, .callback = recorder.callback() };
+
+    try sse.event(
+        \\{"id":"chatcmpl-1","object":"chat.completion.chunk","model":"qwen3:8b","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":"think"},"finish_reason":null}]}
+    );
+
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expectEqualStrings("think", events.items[0].reasoning);
+    try std.testing.expectEqualStrings("", events.items[1].content);
 }
 
 test "SseCallback emits a null finish for an empty finish reason" {

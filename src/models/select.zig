@@ -117,13 +117,18 @@ pub fn switchModel(
     return result;
 }
 
+/// Lists the provider's models, retrying transient failures. A server that
+/// cannot be reached at all comes back as `error.ProviderUnreachable`, so
+/// callers can explain it instead of failing with a raw socket error.
 pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, comptime retries: usize) !client.Owned(client.ModelsList) {
     var retry_count: usize = 0;
     const cfg = retry.default_config;
     while (true) {
         if (prov.listModels()) |models| return models else |err| {
             retry_count += 1;
-            if (retry_count > retries or !retry.isTransientError(err)) return err;
+            if (retry_count > retries or !retry.isTransientError(err)) {
+                return if (retry.isConnectFailure(err)) error.ProviderUnreachable else err;
+            }
 
             const delay_ms = retry.computeDelay(cfg, retry_count, random);
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
@@ -180,15 +185,25 @@ test "listModelsWithRetry fails fast on non-transient error" {
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
 }
 
-test "listModelsWithRetry gives up when retries exhausted" {
+test "listModelsWithRetry reports an unreachable server once retries are exhausted" {
     var prov = TestProvider{
         .allocator = std.testing.allocator,
         .fail_count = 2,
         .err = error.ConnectionRefused,
     };
     const result = listModelsWithRetry(&prov, undefined, testRandom(), 0);
-    try std.testing.expectError(error.ConnectionRefused, result);
+    try std.testing.expectError(error.ProviderUnreachable, result);
     try std.testing.expectEqual(@as(usize, 1), prov.calls);
+}
+
+test "listModelsWithRetry keeps transient errors that are not connect failures" {
+    var prov = TestProvider{
+        .allocator = std.testing.allocator,
+        .fail_count = 2,
+        .err = error.ReadTimedOut,
+    };
+    const result = listModelsWithRetry(&prov, undefined, testRandom(), 0);
+    try std.testing.expectError(error.ReadTimedOut, result);
 }
 
 test "listModelsWithRetry sleeps the canonical backoff delay between retries" {

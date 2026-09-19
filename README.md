@@ -12,7 +12,7 @@ and stays out of your way.
 
 ## Features
 
-- **Multiple providers**: local-first LM Studio or Unsloth, or hosted models via OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
+- **Multiple providers**: local-first LM Studio, Unsloth, or Ollama, or hosted models via Ollama Cloud, OpenCode Zen, OpenCode Go, or your GitHub Copilot subscription.
 - **Interactive model picker**: choose the model to load when Puny starts.
 - **Multi-turn chat**: keeps the conversation history across messages.
 - **Session management**: each run, `/new`, or `/reset` creates a new UUID-identified session, with the conversation automatically saved after every turn and PRDs saved to the session folder. Sessions can be resumed with `/resume` or `--session`.
@@ -65,6 +65,8 @@ The five supported providers are the ones I use personally:
 - [OpenCode Zen](https://opencode.ai/zen) — wide selection of reliable optimized models
 - [OpenCode Go](https://opencode.ai/go) — cheaper hosted models when I need them
 - [GitHub Copilot](https://github.com/features/copilot) — comes with my sponsored GitHub subscription
+
+Puny also supports [Ollama](https://ollama.com/), both a local Ollama server and Ollama Cloud.
 
 Puny lets you chat with an LLM and gives it a curated set of coding tools so it can
 read, edit, search, and inspect your codebase.
@@ -166,9 +168,9 @@ zig build test-regression
 ## Quick start
 
 On first run, Puny launches a one-time setup wizard that asks you to pick a
-provider and API key (and a URL only for LM Studio and Unsloth; OpenCode Zen,
-OpenCode Go, and GitHub Copilot use fixed URLs). Your choices are saved to
-`config.json` and the wizard is skipped on later runs.
+provider and API key (and a URL only for LM Studio, Unsloth, and Ollama;
+Ollama Cloud, OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs).
+Your choices are saved to `config.json` and the wizard is skipped on later runs.
 
 ### LM Studio
 
@@ -215,6 +217,50 @@ Unsloth serves plain HTTP, so any API key travels unencrypted. To reach
 Unsloth on another machine, forward the port over SSH
 (`ssh -L 8888:127.0.0.1:8888 gpu-box`) or put it behind an HTTPS reverse
 proxy and pass that `https://` URL, rather than exposing it with `-H 0.0.0.0`.
+
+### Ollama
+
+Start the [Ollama](https://ollama.com/) server (the desktop app, or
+`ollama serve`) and pull a model with tool-calling support, then:
+
+```bash
+ollama pull qwen3:8b
+puny --provider ollama
+```
+
+Puny connects to `http://127.0.0.1:11434` by default
+(`http://host.docker.internal:11434` in the Docker image), lists models from
+`/v1/models`, and streams through Ollama's OpenAI-compatible
+`/v1/chat/completions` endpoint, loading the selected model on first use. If
+Ollama runs elsewhere, pass `--url`:
+
+```bash
+puny --provider ollama --url http://gpu-box:11434
+```
+
+No API key is needed. If you point Puny at a remote Ollama behind an
+authenticating proxy and set a key, note that an `http://` URL sends that key
+as a `Bearer` token in cleartext: use an `https://` URL, or forward the port
+over SSH (`ssh -L 11434:127.0.0.1:11434 gpu-box`) and keep the URL on
+`127.0.0.1`.
+
+After `ollama signin`, the local server also offers Ollama's cloud models (for
+example `gpt-oss:120b-cloud`) and relays them to ollama.com for you.
+
+### Ollama Cloud
+
+To use Ollama's cloud models without running a local server, create an API key
+at [ollama.com/settings/keys](https://ollama.com/settings/keys) and set it in
+`OLLAMA_API_KEY` or `PUNY_API_KEY` (or use `--api-key-file`), then:
+
+```bash
+puny --provider ollama_cloud
+```
+
+Puny connects to `https://ollama.com`, sends the key as a `Bearer` token, and
+shows the cloud models in the picker. The key is resolved in this order:
+`--api-key`, then `--api-key-file`, then `PUNY_API_KEY`, then `OLLAMA_API_KEY`,
+then the key saved in `config.json`.
 
 ### OpenCode Zen
 
@@ -293,8 +339,8 @@ puny
 
 Puny uses the provider saved during setup and reuses its saved model when
 available. If no usable model is saved, Puny opens the provider's model picker
-before opening the chat prompt. When using LM Studio or Unsloth, start it and
-load a tool-capable model first.
+before opening the chat prompt. When using LM Studio, Unsloth, or Ollama, start
+it and load or pull a tool-capable model first.
 
 ### Interactive chat
 
@@ -516,7 +562,8 @@ responses are limited to 10 MiB, and remote fetches time out after 30 seconds.
 
 Use `--provider` to switch between LM Studio (`lmstudio`, the default),
 OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), GitHub Copilot
-(`copilot`), and Unsloth (`unsloth`). The same identifiers apply to
+(`copilot`), Unsloth (`unsloth`), Ollama (`ollama`), and Ollama Cloud
+(`ollama_cloud`). The same identifiers apply to
 `PUNY_PROVIDER` and the `provider` field in `config.json`.
 
 ```bash
@@ -571,13 +618,13 @@ puny --reconfigure
 
 You will be prompted for:
 
-1. **Provider** — LM Studio (`lmstudio`), OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), GitHub Copilot (`copilot`), or Unsloth (`unsloth`).
-2. **Provider URL** — only for LM Studio and Unsloth; press Enter to use the default (`http://127.0.0.1:1234` and `http://127.0.0.1:8888` respectively, or `http://host.docker.internal:1234` and `http://host.docker.internal:8888` in the Docker image). OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
+1. **Provider** — LM Studio (`lmstudio`), OpenCode Zen (`opencode_zen`), OpenCode Go (`opencode_go`), GitHub Copilot (`copilot`), Unsloth (`unsloth`), Ollama (`ollama`), or Ollama Cloud (`ollama_cloud`).
+2. **Provider URL** — only for LM Studio, Unsloth, and Ollama; press Enter to use the default (`http://127.0.0.1:1234`, `http://127.0.0.1:8888`, and `http://127.0.0.1:11434` respectively, or the same ports on `http://host.docker.internal` in the Docker image). Ollama Cloud, OpenCode Zen, OpenCode Go, and GitHub Copilot use fixed URLs (`https://ollama.com`, `https://opencode.ai/zen`, `https://opencode.ai/zen/go`, and `https://api.githubcopilot.com` respectively).
 3. **API key** — press Enter to keep the existing key, or `-` to clear it.
 
 Once saved, Puny uses the stored provider and key on subsequent runs, so you only need to pass `--provider` or `--api-key` again if you want to override them for a single session. If an OpenCode Zen or OpenCode Go request fails with an authentication error, Puny prints an auth hint; use `--reconfigure` to update the key.
 
-`--url` and `PUNY_PROVIDER_URL` only affect LM Studio and Unsloth; OpenCode Zen always uses `https://opencode.ai/zen`, OpenCode Go always uses `https://opencode.ai/zen/go`, and GitHub Copilot always uses `https://api.githubcopilot.com`.
+`--url` and `PUNY_PROVIDER_URL` only affect LM Studio, Unsloth, and Ollama; Ollama Cloud always uses `https://ollama.com`, OpenCode Zen always uses `https://opencode.ai/zen`, OpenCode Go always uses `https://opencode.ai/zen/go`, and GitHub Copilot always uses `https://api.githubcopilot.com`.
 
 The config file stores per-provider settings (URL, API key, and last-selected model) so you can switch between providers without re-entering credentials.
 
@@ -793,8 +840,8 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 | Flag                    | Description                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------- |
-| `--provider <name>`     | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, `copilot`, or `unsloth` (CLI/env/config precedence) |
-| `-u`, `--url <url>`     | LM Studio or Unsloth endpoint URL (defaults: `http://127.0.0.1:1234`, `http://127.0.0.1:8888`; Docker image uses `host.docker.internal`) |
+| `--provider <name>`     | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, `copilot`, `unsloth`, `ollama`, or `ollama_cloud` (CLI/env/config precedence) |
+| `-u`, `--url <url>`     | LM Studio, Unsloth, or Ollama endpoint URL (defaults: `http://127.0.0.1:1234`, `http://127.0.0.1:8888`, `http://127.0.0.1:11434`; Docker image uses `host.docker.internal`) |
 | `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
 | `--api-key-file <path>` | Read provider API token from file (session only)                                          |
 | `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
@@ -827,8 +874,9 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `PUNY_CHAT_LOG`              | Set to `1` or `true` to save full conversation to `puny_chat.log` |
 | `PUNY_REASONING_EFFORT`      | Reasoning effort level to request (below `--effort`)              |
 | `PUNY_PROVIDER`              | Default provider name (overrides config)            |
-| `PUNY_PROVIDER_URL`          | LM Studio or Unsloth endpoint URL (overrides config, unless `--url` is set) |
+| `PUNY_PROVIDER_URL`          | LM Studio, Unsloth, or Ollama endpoint URL (overrides config, unless `--url` is set) |
 | `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
+| `OLLAMA_API_KEY`             | Ollama Cloud API token, below `--api-key`, `--api-key-file` and `PUNY_API_KEY`, above `config.json` |
 | `PUNY_MODEL`                 | Default model identifier (overrides config)         |
 | `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider        |
 | `PUNY_NO_SKILLS`             | Set to `1` or `true` to disable skill loading       |
@@ -970,7 +1018,7 @@ panics or segfaults.
 
 ## Development / testing
 
-### Mock mode (no LM Studio, Unsloth, OpenCode Zen, or GitHub Copilot required)
+### Mock mode (no LM Studio, Unsloth, Ollama, OpenCode Zen, or GitHub Copilot required)
 
 Start without a running AI backend:
 

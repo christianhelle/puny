@@ -531,7 +531,7 @@ pub fn chatStreamingResponses(chat_client: *client.Client, request: ChatRequest,
         }
 
         if (response.head.status == .unauthorized or response.head.status == .forbidden) {
-            client.printAuthHint(chat_client.io);
+            client.printAuthHint(chat_client);
         }
 
         client.emitDiagnostic("OpenAI responses request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{

@@ -8,6 +8,7 @@ const opencode_zen = @import("opencode_zen.zig");
 const opencode_go = @import("opencode_go.zig");
 const copilot = @import("copilot.zig");
 const unsloth = @import("unsloth.zig");
+const ollama_cloud = @import("ollama_cloud.zig");
 
 const ModelProvider = provider.ModelProvider;
 
@@ -48,18 +49,37 @@ pub fn resolveApiKey(
     return cfg.providerEntryConst(effective_provider).apiKey orelse "";
 }
 
+/// API key from the environment: PUNY_API_KEY, else the variable Ollama's own
+/// tooling uses for its cloud API.
+pub fn apiKeyEnv(environ_map: *const std.process.Environ.Map, selected_provider: ModelProvider) ?[]const u8 {
+    if (environ_map.get("PUNY_API_KEY")) |key| return key;
+    if (selected_provider == .ollama_cloud) return environ_map.get("OLLAMA_API_KEY");
+    return null;
+}
+
+/// Names of the variables that supply a provider's credentials, for key hints.
+pub fn apiKeyEnvNames(selected_provider: ModelProvider) []const u8 {
+    return switch (selected_provider) {
+        .ollama_cloud => "PUNY_API_KEY/OLLAMA_API_KEY",
+        .copilot => "PUNY_API_KEY/GITHUB_COPILOT_OAUTH_TOKEN",
+        else => "PUNY_API_KEY",
+    };
+}
+
 /// True when a real (non-mock) provider that needs an API key has none, so
 /// callers can stop with a hint instead of sending unauthenticated requests.
 pub fn missingRequiredApiKey(is_mock: bool, selected_provider: ModelProvider, api_key: []const u8) bool {
     if (is_mock or api_key.len > 0) return false;
     return selected_provider == .opencode_zen or
-        selected_provider == .opencode_go;
+        selected_provider == .opencode_go or
+        selected_provider == .ollama_cloud;
 }
 
 pub fn providerHasFixedUrl(selectedProvider: provider.ModelProvider) bool {
     return selectedProvider == .opencode_zen or
         selectedProvider == .opencode_go or
         selectedProvider == .copilot or
+        selectedProvider == .ollama_cloud or
         selectedProvider == .mock;
 }
 
@@ -68,6 +88,8 @@ pub fn defaultProviderUrl(selectedProvider: provider.ModelProvider) []const u8 {
     if (selectedProvider == .opencode_go) return opencode_go.default_base_url;
     if (selectedProvider == .copilot) return copilot.default_base_url;
     if (selectedProvider == .unsloth) return config.default_unsloth_url;
+    if (selectedProvider == .ollama) return config.default_ollama_url;
+    if (selectedProvider == .ollama_cloud) return ollama_cloud.default_base_url;
     if (selectedProvider == .mock) return "-";
     return config.default_lm_studio_url;
 }
@@ -93,7 +115,20 @@ pub fn createProvider(
 ) provider.Provider {
     var created = createClient(is_mock, prov, url, api_key, arena, io);
     applySessionId(&created, session_id);
+    applyApiKeyEnvNames(&created, prov);
     return created;
+}
+
+/// Tells the client which key variables its provider reads, so an auth failure
+/// hints at the ones that actually apply.
+fn applyApiKeyEnvNames(prov_client: *provider.Provider, selected_provider: ModelProvider) void {
+    const names = apiKeyEnvNames(selected_provider);
+    switch (prov_client.*) {
+        .lmstudio, .opencode, .opencode_go, .ollama, .ollama_cloud => |*c| c.api_key_env_names = names,
+        .copilot => |*c| c.inner.api_key_env_names = names,
+        .unsloth => |*c| c.inner.api_key_env_names = names,
+        .mock => {},
+    }
 }
 
 fn createClient(
@@ -130,6 +165,16 @@ fn createClient(
             var c = unsloth.Client.init(arena, io, api_key);
             c.withBaseUrl(url);
             return .{ .unsloth = c };
+        },
+        .ollama => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .ollama = c };
+        },
+        .ollama_cloud => {
+            var c = http_client.Client.init(arena, io, api_key);
+            c.withBaseUrl(url);
+            return .{ .ollama_cloud = c };
         },
         .mock => {
             return .{ .mock = mock.MockClient.init(arena, io) };
@@ -182,6 +227,35 @@ test "createProvider returns mock for mock flag or provider name" {
     var by_name = createProvider(false, .mock, "-", "", allocator, std.testing.io, "");
     defer by_name.deinit();
     try std.testing.expectEqual(std.meta.activeTag(by_name), std.meta.Tag(provider.Provider).mock);
+}
+
+test "apiKeyEnv reads PUNY_API_KEY for every provider" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try std.testing.expect(apiKeyEnv(&env, .lmstudio) == null);
+
+    try env.put("PUNY_API_KEY", "puny-key");
+    try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .lmstudio).?);
+    try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .ollama_cloud).?);
+}
+
+test "apiKeyEnv falls back to OLLAMA_API_KEY only for ollama_cloud" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("OLLAMA_API_KEY", "ollama-key");
+
+    try std.testing.expectEqualStrings("ollama-key", apiKeyEnv(&env, .ollama_cloud).?);
+    try std.testing.expect(apiKeyEnv(&env, .ollama) == null);
+    try std.testing.expect(apiKeyEnv(&env, .opencode_go) == null);
+
+    try env.put("PUNY_API_KEY", "puny-key");
+    try std.testing.expectEqualStrings("puny-key", apiKeyEnv(&env, .ollama_cloud).?);
+}
+
+test "apiKeyEnvNames lists the variables that supply credentials" {
+    try std.testing.expectEqualStrings("PUNY_API_KEY", apiKeyEnvNames(.opencode_go));
+    try std.testing.expectEqualStrings("PUNY_API_KEY/OLLAMA_API_KEY", apiKeyEnvNames(.ollama_cloud));
+    try std.testing.expectEqualStrings("PUNY_API_KEY/GITHUB_COPILOT_OAUTH_TOKEN", apiKeyEnvNames(.copilot));
 }
 
 test "resolveApiKey uses CLI key over env and config" {
@@ -285,10 +359,40 @@ test "baseUrlFor resolves unsloth urls from CLI, config, then its own default" {
     try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.unsloth, .{ .url = "http://cli.example" }, cfg));
 }
 
+test "baseUrlFor resolves ollama urls from CLI, config, then its own default" {
+    var cfg = config.Config{};
+    try std.testing.expectEqualStrings("http://127.0.0.1:11434", baseUrlFor(.ollama, .{}, cfg));
+
+    cfg.providerEntry(.ollama).url = "";
+    try std.testing.expectEqualStrings("http://127.0.0.1:11434", baseUrlFor(.ollama, .{}, cfg));
+
+    cfg.providerEntry(.ollama).url = "http://gpu-box:11434";
+    try std.testing.expectEqualStrings("http://gpu-box:11434", baseUrlFor(.ollama, .{}, cfg));
+    try std.testing.expectEqualStrings("http://cli.example", baseUrlFor(.ollama, .{ .url = "http://cli.example" }, cfg));
+}
+
+test "ollama url is configurable and defaults to the local server" {
+    try std.testing.expect(!providerHasFixedUrl(.ollama));
+    try std.testing.expectEqualStrings("http://127.0.0.1:11434", defaultProviderUrl(.ollama));
+}
+
+test "ollama_cloud url is fixed at ollama.com" {
+    try std.testing.expect(providerHasFixedUrl(.ollama_cloud));
+    try std.testing.expectEqualStrings(ollama_cloud.default_base_url, defaultProviderUrl(.ollama_cloud));
+
+    var cfg = config.Config{};
+    cfg.providerEntry(.ollama_cloud).url = "http://stale.example";
+    const parsed = cli.Options{ .url = "http://cli.example" };
+    try std.testing.expectEqualStrings("https://ollama.com", baseUrlFor(.ollama_cloud, parsed, cfg));
+}
+
 test "missingRequiredApiKey flags key-gated providers without a key" {
     try std.testing.expect(missingRequiredApiKey(false, .opencode_zen, ""));
     try std.testing.expect(missingRequiredApiKey(false, .opencode_go, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .opencode_go, "sk-go-key"));
+    try std.testing.expect(missingRequiredApiKey(false, .ollama_cloud, ""));
+    try std.testing.expect(!missingRequiredApiKey(false, .ollama_cloud, "ollama-key"));
+    try std.testing.expect(!missingRequiredApiKey(false, .ollama, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .lmstudio, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .unsloth, ""));
     try std.testing.expect(!missingRequiredApiKey(false, .copilot, ""));
@@ -396,6 +500,52 @@ test "createProvider builds each provider type" {
         try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).unsloth);
         try std.testing.expectEqualStrings("http://unsloth", prov.unsloth.inner.base_url);
         try std.testing.expectEqualStrings("sk-unsloth-5", prov.unsloth.inner.api_key);
+    }
+
+    {
+        var prov = createProvider(false, .ollama, "http://ollama", "", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).ollama);
+        try std.testing.expectEqualStrings("http://ollama", prov.ollama.base_url);
+        try std.testing.expectEqualStrings("", prov.ollama.api_key);
+    }
+
+    {
+        var prov = createProvider(false, .ollama_cloud, "http://ollama-cloud", "ollama-key-7", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqual(std.meta.activeTag(prov), std.meta.Tag(provider.Provider).ollama_cloud);
+        try std.testing.expectEqualStrings("http://ollama-cloud", prov.ollama_cloud.base_url);
+        try std.testing.expectEqualStrings("ollama-key-7", prov.ollama_cloud.api_key);
+    }
+}
+
+test "createProvider tells each client which key variables its provider uses" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    {
+        var prov = createProvider(false, .ollama_cloud, "https://ollama.com", "key", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY/OLLAMA_API_KEY", prov.ollama_cloud.api_key_env_names);
+    }
+
+    {
+        var prov = createProvider(false, .ollama, "http://ollama", "", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY", prov.ollama.api_key_env_names);
+    }
+
+    {
+        var prov = createProvider(false, .unsloth, "http://unsloth", "", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY", prov.unsloth.inner.api_key_env_names);
+    }
+
+    {
+        var prov = createProvider(false, .copilot, "http://copilot", "gho_x", allocator, std.testing.io, "");
+        defer prov.deinit();
+        try std.testing.expectEqualStrings("PUNY_API_KEY/GITHUB_COPILOT_OAUTH_TOKEN", prov.copilot.inner.api_key_env_names);
     }
 }
 
