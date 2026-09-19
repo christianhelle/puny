@@ -23,8 +23,7 @@ pub fn listModels(http_client: *client.Client) !client.Owned(ModelsList) {
     errdefer raw.deinit();
 
     if (raw.status.class() != .success) {
-        if (client.isAuthFailure(raw.status)) client.printAuthHint(http_client.io);
-        raw.deinit();
+        if (client.isAuthFailure(raw.status)) client.printAuthHint(http_client);
         return error.ResponseError;
     }
 

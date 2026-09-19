@@ -98,7 +98,7 @@ pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8)
 
 pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !void {
     const model_skip_validation = ctx.parsed.mock;
-    if (try model_selection.switchModel(
+    const switched = model_selection.switchModel(
         ctx.prov,
         model_id,
         ctx.model_key.*,
@@ -112,7 +112,12 @@ pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !v
         ctx.model_provider.*,
         ctx.init.environ_map,
         ctx.random,
-    )) |result| {
+    ) catch |err| {
+        if (err != error.ProviderUnreachable) return err;
+        try printProviderUnreachable(ctx.stdout_writer, ctx.model_provider.*, ctx.provider_url.*, null);
+        return;
+    };
+    if (switched) |result| {
         ctx.model_key.* = result.model_key;
         if (result.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
@@ -145,7 +150,7 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
         return;
     }
 
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, picked_provider, resolver.apiKeyEnv(ctx.init.environ_map, picked_provider));
     if (resolver.missingRequiredApiKey(ctx.parsed.mock, picked_provider, new_api_key)) {
         try printMissingApiKey(ctx.stdout_writer, picked_provider);
         return;
@@ -162,7 +167,13 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
         return err;
     };
 
-    ctx.prov.deinit();
+    // Kept alive until the new provider answers, so an unreachable server can
+    // hand the session back to it.
+    var previous_prov = ctx.prov.*;
+    var owns_previous_prov = true;
+    errdefer if (owns_previous_prov) previous_prov.deinit();
+    const previous_url = ctx.provider_url.*;
+
     ctx.prov.* = resolver.createProvider(ctx.parsed.mock, picked_provider, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
     if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
     if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
@@ -170,7 +181,7 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     ctx.provider_url.* = new_provider_url;
 
     const model_skip_validation = ctx.parsed.mock;
-    const model_selection_result = try model_selection.select(
+    const model_selection_result = model_selection.select(
         ctx.prov,
         null,
         ctx.arena,
@@ -181,7 +192,15 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
         picked_provider,
         ctx.init.environ_map,
         ctx.random,
-    );
+    ) catch |err| {
+        if (err != error.ProviderUnreachable) return err;
+        restoreProvider(ctx, previous_prov, current_provider, previous_url);
+        owns_previous_prov = false;
+        try printProviderUnreachable(ctx.stdout_writer, picked_provider, new_provider_url, current_provider);
+        return;
+    };
+    previous_prov.deinit();
+    owns_previous_prov = false;
 
     if (model_selection_result) |sel| {
         ctx.model_key.* = sel.model_key;
@@ -204,10 +223,46 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     try ctx.stdout_writer.flush();
 }
 
+/// Puts back the provider a switch replaced, live and in the saved config, so a
+/// switch to a server that cannot be reached leaves the session as it was.
+fn restoreProvider(
+    ctx: *ChatLoopContext,
+    previous_prov: provider.Provider,
+    previous_provider: ModelProvider,
+    previous_url: []const u8,
+) void {
+    ctx.prov.deinit();
+    ctx.prov.* = previous_prov;
+    ctx.model_provider.* = previous_provider;
+    ctx.provider_url.* = previous_url;
+    ctx.cfg.provider = previous_provider;
+    // The switch saved this same config moments ago; if that write now fails,
+    // the next startup explains the unreachable provider instead.
+    config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map) catch {};
+}
+
+/// Explains a provider whose server did not answer, naming the provider the
+/// session fell back to when a switch was undone.
+fn printProviderUnreachable(
+    stdout_writer: *std.Io.Writer,
+    unreachable_provider: ModelProvider,
+    url: []const u8,
+    still_using: ?ModelProvider,
+) !void {
+    try stdout_writer.print(
+        "\nCould not connect to {s} at {s}. Make sure it is running, then try again.\n",
+        .{ provider.getProviderDisplayName(unreachable_provider), url },
+    );
+    if (still_using) |previous| {
+        try stdout_writer.print("Still using {s}.\n", .{provider.getProviderDisplayName(previous)});
+    }
+    try stdout_writer.flush();
+}
+
 fn printMissingApiKey(stdout_writer: *std.Io.Writer, selected_provider: ModelProvider) !void {
     try stdout_writer.print(
-        "\nProvider '{s}' requires an API key. Set one with /config or PUNY_API_KEY.\n",
-        .{provider.getProviderDisplayName(selected_provider)},
+        "\nProvider '{s}' requires an API key. Set one with /config or {s}.\n",
+        .{ provider.getProviderDisplayName(selected_provider), resolver.apiKeyEnvNames(selected_provider) },
     );
     try stdout_writer.flush();
 }
@@ -233,7 +288,7 @@ pub fn handleReconfigureCommand(ctx: *ChatLoopContext) !void {
 fn commitReconfigure(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
     const candidate = ctx.cfg.provider;
     if (candidate != old_provider_name) {
-        const candidate_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, candidate, ctx.init.environ_map.get("PUNY_API_KEY"));
+        const candidate_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, candidate, resolver.apiKeyEnv(ctx.init.environ_map, candidate));
         if (resolver.missingRequiredApiKey(ctx.parsed.mock, candidate, candidate_key)) {
             try printMissingApiKey(ctx.stdout_writer, candidate);
             ctx.cfg.provider = old_provider_name;
@@ -248,14 +303,20 @@ fn commitReconfigure(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !v
 fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProvider) !void {
     const new_provider_name = ctx.cfg.provider;
     const new_provider_url = if (ctx.parsed.mock) "-" else resolver.baseUrlFor(new_provider_name, ctx.parsed, ctx.cfg.*);
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, ctx.init.environ_map.get("PUNY_API_KEY"));
+    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, new_provider_name, resolver.apiKeyEnv(ctx.init.environ_map, new_provider_name));
     if (resolver.missingRequiredApiKey(ctx.parsed.mock, new_provider_name, new_api_key)) {
         try printMissingApiKey(ctx.stdout_writer, new_provider_name);
         return;
     }
 
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
-        ctx.prov.deinit();
+        // Kept alive until the new provider answers, so an unreachable server
+        // can hand the session back to it.
+        var previous_prov = ctx.prov.*;
+        var owns_previous_prov = true;
+        errdefer if (owns_previous_prov) previous_prov.deinit();
+        const previous_url = ctx.provider_url.*;
+
         ctx.prov.* = resolver.createProvider(ctx.parsed.mock, new_provider_name, new_provider_url, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
         if (ctx.debug_log) |log| debug_log.attachHttpDebugObserver(ctx.prov, log);
         if (!ctx.parsed.mock) try resolver.ensureCopilotAuth(ctx.arena, ctx.io, ctx.init, ctx.cfg, ctx.stdout_writer, ctx.prov);
@@ -267,7 +328,7 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             ctx.parsed.oneshot or
             !std.mem.eql(u8, new_provider_url, config.default_lm_studio_url);
 
-        const model_selection_result = try model_selection.select(
+        const model_selection_result = model_selection.select(
             ctx.prov,
             null,
             ctx.arena,
@@ -278,7 +339,15 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             new_provider_name,
             ctx.init.environ_map,
             ctx.random,
-        );
+        ) catch |err| {
+            if (err != error.ProviderUnreachable) return err;
+            restoreProvider(ctx, previous_prov, old_provider_name, previous_url);
+            owns_previous_prov = false;
+            try printProviderUnreachable(ctx.stdout_writer, new_provider_name, new_provider_url, old_provider_name);
+            return;
+        };
+        previous_prov.deinit();
+        owns_previous_prov = false;
 
         if (model_selection_result) |sel| {
             ctx.model_key.* = sel.model_key;
@@ -585,6 +654,214 @@ test "switchProvider refuses a key-gated provider without an API key" {
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'OpenCode Go' requires an API key") != null);
     try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
     try std.testing.expectEqual(ModelProvider.lmstudio, cfg.provider);
+}
+
+test "switchProvider hints at OLLAMA_API_KEY when Ollama Cloud has no key" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try switchProvider(&ctx, .ollama_cloud);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Provider 'Ollama Cloud' requires an API key. Set one with /config or PUNY_API_KEY/OLLAMA_API_KEY.") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, model_provider);
+}
+
+test "switchProvider accepts OLLAMA_API_KEY for Ollama Cloud" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .lmstudio;
+    var cfg = config.Config.default();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+    ctx.parsed.mock = false;
+
+    // The key passes the gate; without a config dir the save then fails,
+    // which stops the switch before it builds a client.
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("OLLAMA_API_KEY", "ollama-key");
+    ctx.io = std.testing.io;
+    ctx.init = .{
+        .minimal = undefined,
+        .arena = undefined,
+        .gpa = undefined,
+        .io = undefined,
+        .environ_map = &env,
+        .preopens = undefined,
+    };
+
+    try std.testing.expectError(error.NoConfigDir, switchProvider(&ctx, .ollama_cloud));
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "requires an API key") == null);
+}
+
+/// A loopback URL nothing listens on, so connecting to it is refused.
+fn closedPortUrl(buf: []u8) ![]const u8 {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = try std.Io.net.IpAddress.listen(&address, std.testing.io, .{});
+    const port = server.socket.address.getPort();
+    server.deinit(std.testing.io);
+    return std.fmt.bufPrint(buf, "http://127.0.0.1:{d}", .{port});
+}
+
+/// Everything a provider switch touches, wired up so the switch can run for
+/// real: a live previous provider, a session, and a writable config dir.
+const SwitchHarness = struct {
+    out: std.Io.Writer.Allocating,
+    arena_state: std.heap.ArenaAllocator,
+    messages_arena: std.heap.ArenaAllocator,
+    tmp: std.testing.TmpDir,
+    env: std.process.Environ.Map,
+    reasoning_effort: ?openai.ReasoningEffort = null,
+    model_provider: ModelProvider = .lmstudio,
+    cfg: config.Config,
+    prov: provider.Provider,
+    provider_url: []const u8 = "http://previous:1234",
+    model_key: []const u8 = "previous-model",
+    session: @import("../core/session.zig").Session = .{ .id = "test-session", .base = "", .dir = "", .prd_path = "", .html_path = "" },
+    random_source: std.Random.IoSource = .{ .io = std.testing.io },
+
+    fn init(self: *SwitchHarness) !void {
+        const http_client = @import("../providers/client.zig");
+        self.out = .init(std.testing.allocator);
+        self.arena_state = .init(std.testing.allocator);
+        self.messages_arena = .init(std.testing.allocator);
+        self.tmp = std.testing.tmpDir(.{});
+        self.env = .init(std.testing.allocator);
+        self.cfg = config.Config.default();
+        self.reasoning_effort = null;
+        self.model_provider = .lmstudio;
+        self.provider_url = "http://previous:1234";
+        self.model_key = "previous-model";
+        self.session = .{ .id = "test-session", .base = "", .dir = "", .prd_path = "", .html_path = "" };
+        self.random_source = .{ .io = std.testing.io };
+
+        var previous = http_client.Client.init(self.messages_arena.allocator(), std.testing.io, "");
+        previous.withBaseUrl(self.provider_url);
+        self.prov = .{ .lmstudio = previous };
+
+        const config_dir = try std.fs.path.join(self.arena_state.allocator(), &.{ ".zig-cache", "tmp", &self.tmp.sub_path });
+        try self.env.put("APPDATA", config_dir);
+        try self.env.put("XDG_CONFIG_HOME", config_dir);
+    }
+
+    fn deinit(self: *SwitchHarness) void {
+        self.prov.deinit();
+        self.env.deinit();
+        self.tmp.cleanup();
+        self.messages_arena.deinit();
+        self.arena_state.deinit();
+        self.out.deinit();
+    }
+
+    fn context(self: *SwitchHarness) ChatLoopContext {
+        var ctx = testChatLoopContext(self.arena_state.allocator(), &self.out.writer, &self.reasoning_effort, &self.model_provider, &self.cfg);
+        ctx.parsed.mock = false;
+        ctx.io = std.testing.io;
+        ctx.init = .{
+            .minimal = undefined,
+            .arena = undefined,
+            .gpa = undefined,
+            .io = undefined,
+            .environ_map = &self.env,
+            .preopens = undefined,
+        };
+        ctx.messages_arena = &self.messages_arena;
+        ctx.prov = &self.prov;
+        ctx.provider_url = &self.provider_url;
+        ctx.model_key = &self.model_key;
+        ctx.session = &self.session;
+        ctx.random = self.random_source.interface();
+        return ctx;
+    }
+};
+
+test "switchProvider explains an unreachable server and keeps the previous provider" {
+    var h: SwitchHarness = undefined;
+    try h.init();
+    defer h.deinit();
+    var url_buf: [64]u8 = undefined;
+    const ollama_url = try closedPortUrl(&url_buf);
+    h.cfg.providerEntry(.ollama).url = ollama_url;
+    var ctx = h.context();
+
+    try switchProvider(&ctx, .ollama);
+
+    const expected = try std.fmt.allocPrint(h.arena_state.allocator(), "Could not connect to Ollama at {s}. Make sure it is running, then try again.", .{ollama_url});
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), expected) != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), "Still using LM Studio.") != null);
+
+    // The live session and the saved config both stay on the previous provider.
+    try std.testing.expectEqual(ModelProvider.lmstudio, h.model_provider);
+    try std.testing.expectEqual(ModelProvider.lmstudio, h.cfg.provider);
+    try std.testing.expectEqualStrings("http://previous:1234", h.provider_url);
+    try std.testing.expectEqualStrings("previous-model", h.model_key);
+    try std.testing.expectEqualStrings("http://previous:1234", h.prov.lmstudio.base_url);
+
+    var loaded = try config.load(std.testing.allocator, std.testing.io, &h.env);
+    defer loaded.deinit();
+    try std.testing.expectEqual(ModelProvider.lmstudio, loaded.config.provider);
+}
+
+test "applyReconfiguredProvider explains an unreachable server and keeps the previous provider" {
+    var h: SwitchHarness = undefined;
+    try h.init();
+    defer h.deinit();
+    var url_buf: [64]u8 = undefined;
+    const ollama_url = try closedPortUrl(&url_buf);
+    h.cfg.providerEntry(.ollama).url = ollama_url;
+    // /config has already saved the newly picked provider by this point.
+    h.cfg.provider = .ollama;
+    var ctx = h.context();
+
+    try applyReconfiguredProvider(&ctx, .lmstudio);
+
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), "Could not connect to Ollama at") != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), "Still using LM Studio.") != null);
+    try std.testing.expectEqual(ModelProvider.lmstudio, h.model_provider);
+    try std.testing.expectEqual(ModelProvider.lmstudio, h.cfg.provider);
+    try std.testing.expectEqualStrings("http://previous:1234", h.provider_url);
+    try std.testing.expectEqualStrings("http://previous:1234", h.prov.lmstudio.base_url);
+    // The url typed into /config is kept, ready for when the server is up.
+    try std.testing.expectEqualStrings(ollama_url, h.cfg.providerEntryConst(.ollama).url);
+}
+
+test "handleSwitchModelCommand explains an unreachable server and keeps the model" {
+    var h: SwitchHarness = undefined;
+    try h.init();
+    defer h.deinit();
+    var url_buf: [64]u8 = undefined;
+    const ollama_url = try closedPortUrl(&url_buf);
+    // The session is on Ollama, whose server has since stopped.
+    h.prov.setConfig(.{ .base_url = ollama_url });
+    h.model_provider = .ollama;
+    h.provider_url = ollama_url;
+    var ctx = h.context();
+
+    try handleSwitchModelCommand(&ctx, null);
+
+    const expected = try std.fmt.allocPrint(h.arena_state.allocator(), "Could not connect to Ollama at {s}. Make sure it is running, then try again.", .{ollama_url});
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), expected) != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.out.written(), "Still using") == null);
+    try std.testing.expectEqualStrings("previous-model", h.model_key);
 }
 
 test "switchProvider keeps the configured url of the provider it switches to" {

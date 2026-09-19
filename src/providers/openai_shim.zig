@@ -17,7 +17,7 @@ pub fn listModels(c: *Client) !client.Owned(ListModelsResponse) {
     var raw = try client.requestRaw(c, std.http.Method.GET, uri_buf.written(), null);
     defer raw.deinit();
     if (raw.status.class() != .success) {
-        if (client.isAuthFailure(raw.status)) client.printAuthHint(c.io);
+        if (client.isAuthFailure(raw.status)) client.printAuthHint(c);
         return error.ResponseError;
     }
     // Try generated parsing first, transferring body ownership on success.

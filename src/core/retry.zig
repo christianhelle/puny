@@ -1,4 +1,24 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+/// Whether a request failed because the server could not be reached at all,
+/// typically a local provider that is not running.
+pub fn isConnectFailure(err: anyerror) bool {
+    return switch (err) {
+        error.ConnectionRefused,
+        error.ConnectionTimedOut,
+        error.NetworkUnreachable,
+        error.HostUnreachable,
+        error.UnknownHostName,
+        error.DnsFailed,
+        error.NameResolveFailed,
+        => true,
+        // The Windows socket layer reports a refused connection
+        // (STATUS_CONNECTION_REFUSED) as Unexpected.
+        error.Unexpected => builtin.os.tag == .windows,
+        else => false,
+    };
+}
 
 pub fn isTransientError(err: anyerror) bool {
     return switch (err) {
@@ -134,4 +154,26 @@ test "computeDelay saturates jitter addition at u64 max" {
     const random = random_source.interface();
     const cfg: Config = .{ .max_retries = 3, .base_delay_ms = std.math.maxInt(u64), .jitter_max_ms = std.math.maxInt(u64) };
     try std.testing.expectEqual(std.math.maxInt(u64), computeDelay(cfg, 3, random));
+}
+
+test "isConnectFailure recognizes a server that cannot be reached" {
+    const unreachable_errors = [_]anyerror{
+        error.ConnectionRefused,
+        error.ConnectionTimedOut,
+        error.NetworkUnreachable,
+        error.HostUnreachable,
+        error.UnknownHostName,
+        error.DnsFailed,
+        error.NameResolveFailed,
+    };
+    for (unreachable_errors) |err| {
+        try std.testing.expect(isConnectFailure(err));
+    }
+    try std.testing.expect(!isConnectFailure(error.OutOfMemory));
+    try std.testing.expect(!isConnectFailure(error.ResponseError));
+    try std.testing.expect(!isConnectFailure(error.ReadTimedOut));
+}
+
+test "isConnectFailure counts Unexpected as a refused connection only on Windows" {
+    try std.testing.expectEqual(builtin.os.tag == .windows, isConnectFailure(error.Unexpected));
 }

@@ -189,7 +189,7 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
     validate(opts) catch |err| switch (err) {
         error.InvalidProvider => fatal(
             io,
-            "Invalid provider '{s}'. Expected one of: lmstudio, opencode_zen, opencode_go, copilot, unsloth.\n\n",
+            "Invalid provider '{s}'. Expected one of: lmstudio, opencode_zen, opencode_go, copilot, unsloth, ollama, ollama_cloud.\n\n",
             .{opts.provider.?},
         ),
         error.ReviewConflictsPrompt => fatal(io, "--review cannot be combined with --prompt or --prompt-file\n\n", .{}),
@@ -261,8 +261,8 @@ pub fn printHelp(io: std.Io) void {
         \\Usage: puny [options]
         \\
         \\Options:
-        \\      --provider <name>        Provider: lmstudio, opencode_zen, opencode_go, copilot, or unsloth (CLI/env/config precedence)
-        \\  -u, --url <url>              LM Studio or Unsloth endpoint URL (CLI > env > config > default)
+        \\      --provider <name>        Provider: lmstudio, opencode_zen, opencode_go, copilot, unsloth, ollama, or ollama_cloud (CLI/env/config precedence)
+        \\  -u, --url <url>              LM Studio, Unsloth or Ollama endpoint URL (CLI > env > config > default)
         \\  -k, --api-key <key>          Provider API token (CLI > file > env > config; session only)
         \\      --api-key-file <path>    Read API token from file (below --api-key in precedence)
         \\  -m, --model <id>             Model identifier (skip picker if found in running models)
