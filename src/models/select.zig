@@ -126,7 +126,17 @@ pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, compti
     while (true) {
         if (prov.listModels()) |models| return models else |err| {
             retry_count += 1;
-            if (retry_count > retries or !retry.isTransientError(err)) {
+
+            const retryable_http = err == error.ResponseError and lastHttpStatusIsRetryable(prov);
+            if (!retryable_http and !retry.isTransientError(err)) {
+                return if (retry.isConnectFailure(err)) error.ProviderUnreachable else err;
+            }
+
+            // A transient HTTP status gets the shared retry budget: the caller
+            // budget covers connect failures, but a busy provider deserves the
+            // same persistence as a busy chat request.
+            const budget = if (retryable_http) @max(retries, cfg.max_retries) else retries;
+            if (retry_count > budget) {
                 return if (retry.isConnectFailure(err)) error.ProviderUnreachable else err;
             }
 
@@ -134,6 +144,13 @@ pub fn listModelsWithRetry(prov: anytype, io: std.Io, random: std.Random, compti
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
+}
+
+fn lastHttpStatusIsRetryable(prov: anytype) bool {
+    const ProviderType = @typeInfo(@TypeOf(prov)).pointer.child;
+    if (comptime !@hasDecl(ProviderType, "lastHttpFailure")) return false;
+    const failure = prov.lastHttpFailure() orelse return false;
+    return retry.isRetryableHttpStatus(failure.status);
 }
 
 fn emptyListModelsResponse(allocator: std.mem.Allocator) !client.Owned(client.ModelsList) {
@@ -161,9 +178,61 @@ const TestProvider = struct {
     }
 };
 
+const TestHttpProvider = struct {
+    allocator: std.mem.Allocator,
+    failure: client.HttpFailure,
+    calls: usize = 0,
+    fail_count: usize = 0,
+
+    pub fn listModels(self: *@This()) !client.Owned(client.ModelsList) {
+        self.calls += 1;
+        if (self.calls <= self.fail_count) return error.ResponseError;
+        return emptyListModelsResponse(self.allocator);
+    }
+
+    pub fn lastHttpFailure(self: *const @This()) ?*const client.HttpFailure {
+        return &self.failure;
+    }
+};
+
 fn testRandom() std.Random {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     return random_source.interface();
+}
+
+test "listModelsWithRetry retries a service unavailable response" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
+    var prov = TestHttpProvider{
+        .allocator = std.testing.allocator,
+        .failure = .{ .status = .service_unavailable, .body = @constCast("busy") },
+        .fail_count = 2,
+    };
+    var prng = std.Random.DefaultPrng.init(11);
+    var result = try listModelsWithRetry(&prov, recorder.io, prng.random(), 0);
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 3), prov.calls);
+    try std.testing.expectEqual(@as(usize, 2), recorder.sleeps.items.len);
+}
+
+test "listModelsWithRetry fails fast on a non-retryable HTTP status" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
+    var prov = TestHttpProvider{
+        .allocator = std.testing.allocator,
+        .failure = .{ .status = .bad_request, .body = @constCast("bad request") },
+        .fail_count = 1,
+    };
+    const result = listModelsWithRetry(&prov, recorder.io, testRandom(), 1);
+
+    try std.testing.expectError(error.ResponseError, result);
+    try std.testing.expectEqual(@as(usize, 1), prov.calls);
+    try std.testing.expectEqual(@as(usize, 0), recorder.sleeps.items.len);
 }
 
 test "listModelsWithRetry succeeds on first call" {
