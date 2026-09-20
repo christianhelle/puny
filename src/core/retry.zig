@@ -43,6 +43,20 @@ pub fn isTransientError(err: anyerror) bool {
     };
 }
 
+/// HTTP statuses that indicate a temporary server-side condition, so the
+/// request can be retried after a backoff.
+pub fn isRetryableHttpStatus(status: std.http.Status) bool {
+    return switch (status) {
+        .too_many_requests,
+        .internal_server_error,
+        .bad_gateway,
+        .service_unavailable,
+        .gateway_timeout,
+        => true,
+        else => false,
+    };
+}
+
 pub fn isDownloadTransientError(err: anyerror) bool {
     return isTransientError(err) or switch (err) {
         error.Unexpected,
@@ -106,6 +120,34 @@ test "isTransientError recognizes network and transport errors" {
 
 test "isTransientError treats HttpConnectionClosing as transient" {
     try std.testing.expect(isTransientError(error.HttpConnectionClosing));
+}
+
+test "isRetryableHttpStatus accepts transient server statuses" {
+    const retryable = [_]std.http.Status{
+        .too_many_requests,
+        .internal_server_error,
+        .bad_gateway,
+        .service_unavailable,
+        .gateway_timeout,
+    };
+    for (retryable) |status| {
+        try std.testing.expect(isRetryableHttpStatus(status));
+    }
+}
+
+test "isRetryableHttpStatus rejects success and client errors" {
+    const permanent = [_]std.http.Status{
+        .ok,
+        .created,
+        .bad_request,
+        .unauthorized,
+        .forbidden,
+        .not_found,
+        .unprocessable_entity,
+    };
+    for (permanent) |status| {
+        try std.testing.expect(!isRetryableHttpStatus(status));
+    }
 }
 
 test "isTransientError rejects generic and archive errors" {
