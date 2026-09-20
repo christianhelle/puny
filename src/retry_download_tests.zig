@@ -31,6 +31,21 @@ test "retryDownload retries transient errors" {
     f.close(std.testing.io);
 }
 
+test "retryDownload retries a retryable HTTP status" {
+    test_download_attempts = 0;
+    test_download_fail_until = 1;
+    test_download_error = error.HttpRetryableStatus;
+    defer test_download_error = error.ConnectionTimedOut;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    try retry_download.retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
+    try std.testing.expectEqual(@as(usize, 2), test_download_attempts);
+    var f = try tmp_dir.dir.openFile(std.testing.io, "test.zip", .{});
+    f.close(std.testing.io);
+}
+
 test "retryDownload fails after exhausting retries" {
     var recorder: test_support.RecordingIo = undefined;
     recorder.init(std.testing.allocator);

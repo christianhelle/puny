@@ -656,6 +656,7 @@ test "findInDir locates a file by name" {
 }
 
 var test_flaky_download_attempts: usize = 0;
+var test_flaky_download_error: anyerror = error.ConnectionRefused;
 
 fn testFlakyDownload(
     allocator: std.mem.Allocator,
@@ -667,7 +668,7 @@ fn testFlakyDownload(
     _ = allocator;
     _ = url;
     test_flaky_download_attempts += 1;
-    if (test_flaky_download_attempts == 1) return error.ConnectionRefused;
+    if (test_flaky_download_attempts == 1) return test_flaky_download_error;
     var file = try dest_dir.createFile(io, dest_name, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, "test-archive");
@@ -689,6 +690,42 @@ fn testFlakyExtractUnpack(
 
 test "retryExtract retries a transient download failure" {
     test_flaky_download_attempts = 0;
+    test_flaky_download_error = error.ConnectionRefused;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var tmp, var tmp_dir = try testTmpSubDir();
+    defer {
+        tmp_dir.close(std.testing.io);
+        tmp.cleanup();
+    }
+
+    var progress_buf: [128]u8 = undefined;
+    var progress_writer = std.Io.Writer.fixed(&progress_buf);
+
+    const result = try retryExtract(
+        std.testing.allocator,
+        std.testing.io,
+        tmp_dir,
+        "archive.zip",
+        "puny",
+        "http://example.com/archive.zip",
+        null,
+        random,
+        &progress_writer,
+        testFlakyDownload,
+        testFlakyExtractUnpack,
+    );
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualStrings("puny", result);
+    try std.testing.expectEqual(@as(usize, 2), test_flaky_download_attempts);
+}
+
+test "retryExtract retries a retryable HTTP download failure" {
+    test_flaky_download_attempts = 0;
+    test_flaky_download_error = error.HttpRetryableStatus;
+    defer test_flaky_download_error = error.ConnectionRefused;
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 

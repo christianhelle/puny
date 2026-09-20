@@ -62,6 +62,7 @@ pub fn isDownloadTransientError(err: anyerror) bool {
         error.Unexpected,
         error.SystemResources,
         error.TruncatedDownload,
+        error.HttpRetryableStatus,
         error.ZipNoEndRecord,
         error.ZipTruncated,
         error.WrongGzipChecksum,
@@ -171,6 +172,10 @@ test "isDownloadTransientError includes all transient plus download-specific err
     try std.testing.expect(!isDownloadTransientError(error.OutOfMemory));
     try std.testing.expect(!isDownloadTransientError(error.AccessDenied));
     try std.testing.expect(!isDownloadTransientError(error.InvalidArgument));
+}
+
+test "isDownloadTransientError accepts a retryable HTTP status" {
+    try std.testing.expect(isDownloadTransientError(error.HttpRetryableStatus));
 }
 
 test "computeDelay doubles per attempt with zero jitter" {
