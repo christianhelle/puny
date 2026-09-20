@@ -79,7 +79,7 @@ pub const Config = struct {
 };
 
 pub const default_config: Config = .{
-    .max_retries = 5,
+    .max_retries = 10,
     .base_delay_ms = 500,
     .jitter_max_ms = 250,
 };

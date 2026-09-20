@@ -4,6 +4,7 @@ const std = @import("std");
 const chat_retry = @import("chat/retry.zig");
 const http_client = @import("providers/client.zig");
 const openai = @import("providers/openai.zig");
+const test_support = @import("test_support.zig");
 
 const TestChatProvider = struct {
     calls: usize = 0,
@@ -227,6 +228,10 @@ test "runChatWithRetry reports HTTP status and API message" {
 }
 
 test "runChatWithRetry gives up after max retries" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
     var prov = TestChatProvider{ .fail_count = 10 };
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
@@ -250,8 +255,9 @@ test "runChatWithRetry gives up after max retries" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
-    const outcome = try chat_retry.runChatWithRetry(&prov, std.testing.allocator, request, callback, std.testing.io, random, &output.writer);
+    const outcome = try chat_retry.runChatWithRetry(&prov, std.testing.allocator, request, callback, recorder.io, random, &output.writer);
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome{ .failed = error.ConnectionRefused }, outcome);
-    try std.testing.expectEqual(@as(usize, 5), prov.calls);
-    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Chat failed after 5 retries") != null);
+    try std.testing.expectEqual(@as(usize, 10), prov.calls);
+    try std.testing.expectEqual(@as(usize, 9), recorder.sleeps.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Chat failed after 10 retries") != null);
 }
