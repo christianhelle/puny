@@ -63,6 +63,32 @@ pub const Provider = union(enum) {
     }
 
     pub fn listModels(self: *Provider) !client.Owned(client.ModelsList) {
+        const http_client_ptr: ?*client.Client = switch (self.*) {
+            .lmstudio => |*c| c,
+            .opencode, .opencode_go, .ollama, .ollama_cloud => |*c| c,
+            .copilot => |*c| &c.inner,
+            .unsloth => |*c| &c.inner,
+            .mock => null,
+        };
+        const c = http_client_ptr orelse return self.listModelsInner();
+
+        c.clearLastHttpFailure();
+        var capture = client.HttpFailureCapture.init(c);
+        defer capture.deinit();
+
+        const original_observer = c.http_observer;
+        c.http_observer = capture.observer();
+        defer c.http_observer = original_observer;
+
+        const result = self.listModelsInner() catch |err| {
+            try capture.commit(c);
+            return err;
+        };
+        try capture.commit(c);
+        return result;
+    }
+
+    fn listModelsInner(self: *Provider) !client.Owned(client.ModelsList) {
         return switch (self.*) {
             .lmstudio => |*c| blk: {
                 var owned = try lmstudio_shim.listModels(c);
@@ -478,6 +504,48 @@ test "Provider.listModels dispatches to the opencode provider" {
     defer owned.deinit();
     try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
     try expectModelIds(&owned, &.{"deepseek-v4-pro"});
+}
+
+test "Provider.listModels records the HTTP status on a server error" {
+    const ctx = try startProviderTestServer(.service_unavailable, "overloaded");
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    try std.testing.expectError(error.ResponseError, prov.listModels());
+    const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
+    try std.testing.expectEqual(std.http.Status.service_unavailable, failure.status);
+    try std.testing.expectEqualStrings("overloaded", failure.body);
+}
+
+test "Provider.listModels clears a stale HTTP failure" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+    server.deinit(std.testing.io);
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    switch (prov) {
+        .opencode => |*c| c.last_http_failure = .{
+            .status = .service_unavailable,
+            .body = try std.testing.allocator.dupe(u8, "stale"),
+        },
+        else => unreachable,
+    }
+
+    if (prov.listModels()) |_| {
+        return error.ExpectedConnectionFailure;
+    } else |_| {}
+
+    try std.testing.expect(prov.lastHttpFailure() == null);
 }
 
 test "Provider.listModels dispatches to the opencode-go provider" {
