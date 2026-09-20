@@ -5,7 +5,7 @@
 
 Puny is a minimal natively compiled single-binary coding agent with a ~1 MB footprint.
 
-It's designed for people who want a fast, lightweight coding agent that runs smoothly 
+It's designed for people who want a fast, lightweight coding agent that runs smoothly
 on limited hardware or remote machines. This is a coding agent that starts in under 1
 millisecond, uses around 1 MB of disk space, uses minimal memory, uses <1% CPU,
 and stays out of your way.
@@ -33,16 +33,16 @@ and stays out of your way.
 
 Startup time ~1ms means Puny is always ready when you are — no spinner, no animations, no
 waiting. The ~1 MB binary and minimal memory footprint mean it runs comfortably on
-a Raspberry Pi, a slow remote server over SSH, or a cheap decade-old laptop. 
-Every millisecond and megabyte is deliberate: there is no hidden runtime, no garbage collector, 
+a Raspberry Pi, a slow remote server over SSH, or a cheap decade-old laptop.
+Every millisecond and megabyte is deliberate: there is no hidden runtime, no garbage collector,
 no Node.js dependencies, no JavaScript.
 
 ## Why the feature set is intentionally limited
 
 Puny is designed around the way I work. It is highly opinionated. That means it will
 never try to be everything to everyone. It's a tool and will never take credit itself for your work
-by adding itself as a co-author to your commits. It will never try to be a platform, a framework, 
-or a plugin ecosystem. 
+by adding itself as a co-author to your commits. It will never try to be a platform, a framework,
+or a plugin ecosystem.
 
 Other coding agents include MCP, subagents, plugins, extensions, animations, and dozens
 of other features I never asked for. Puny does not. The feature set is limited to what
@@ -58,7 +58,7 @@ to scroll past to get to the actual answer. If you want it, pass `--show-thinkin
 If you think you want it later, pass `--chat-log` which saves the entire conversation,
 noise included, to puny_chat.log
 
-The five supported providers are the ones I use personally:
+The supported providers are the ones I use personally:
 
 - [LM Studio](https://lmstudio.ai/) — local inference on my own hardware
 - [Unsloth](https://unsloth.ai/) — local inference through Unsloth Studio
@@ -447,11 +447,11 @@ assessment, validation performed, findings, and a binary conclusion:
 `MERGE WORTHY: YES` or `MERGE WORTHY: NO`. Incomplete evidence forces `NO`.
 A branch with no committed changes also receives `NO`.
 
-| Exit code | Meaning |
-| --------- | ------- |
-| `0` | Review completed and the branch is merge worthy |
-| `1` | Review completed and the branch is not merge worthy |
-| `2` | Retryable operational failure; a `NO` fallback report is written when possible |
+| Exit code | Meaning                                                                        |
+| --------- | ------------------------------------------------------------------------------ |
+| `0`       | Review completed and the branch is merge worthy                                |
+| `1`       | Review completed and the branch is not merge worthy                            |
+| `2`       | Retryable operational failure; a `NO` fallback report is written when possible |
 
 Review mode rejects `main`, detached HEAD, and directories outside a Git
 repository. Invoking it on `main` exits with code `2` without writing a report.
@@ -516,13 +516,13 @@ Preconditions: run from a repository on a feature branch (not `main`, not
 detached HEAD). The branch needs `origin/main` available so the review can
 compute `merge-base(origin/main, HEAD)..HEAD`.
 
-| Flag | Meaning |
-| ---- | ------- |
-| `--orchestrate` | Run the loop headlessly and exit with the review's code (requires `--prompt` or `--prompt-file`) |
-| `--max-iterations <n>` | Maximum review iterations; a fix runs between reviews, not after the last one (default `5`) |
-| `/orchestrate [task]` | Run the loop in a chat session; with no task, implement the session's `plan.md` |
-| `/orchestrate --plan <task>` | Plan interactively first, then start the loop when the PRD is saved |
-| `/orchestrate --iterations <n>` | Per-run iteration cap (alias `--max-iterations`) |
+| Flag                            | Meaning                                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `--orchestrate`                 | Run the loop headlessly and exit with the review's code (requires `--prompt` or `--prompt-file`) |
+| `--max-iterations <n>`          | Maximum review iterations; a fix runs between reviews, not after the last one (default `5`)      |
+| `/orchestrate [task]`           | Run the loop in a chat session; with no task, implement the session's `plan.md`                  |
+| `/orchestrate --plan <task>`    | Plan interactively first, then start the loop when the PRD is saved                              |
+| `/orchestrate --iterations <n>` | Per-run iteration cap (alias `--max-iterations`)                                                 |
 
 Exit codes mirror `puny --review`: `0` merge worthy, `1` still not merge worthy
 after the iteration budget, `2` operational failure (missing repo, detached
@@ -531,7 +531,6 @@ HEAD, on `main`, fetch failure, a failed commit, or an interrupted run).
 Press `Ctrl+C` to stop a run. Work already committed stays committed; anything
 still in the worktree is left for you. Interrupts are noticed between phases —
 use double-`Esc` to cancel a turn already in flight.
-
 
 ### Prompt from a file or URL
 
@@ -630,10 +629,10 @@ The config file stores per-provider settings (URL, API key, and last-selected mo
 
 Configuration is stored at:
 
-| OS            | Path                                                                 |
-| ------------- | -------------------------------------------------------------------- |
-| Linux / macOS | `$XDG_CONFIG_HOME/puny/config.json` or `~/.config/puny/config.json`   |
-| Windows       | `%APPDATA%\puny\config.json` or `%USERPROFILE%\puny\config.json`      |
+| OS            | Path                                                                |
+| ------------- | ------------------------------------------------------------------- |
+| Linux / macOS | `$XDG_CONFIG_HOME/puny/config.json` or `~/.config/puny/config.json` |
+| Windows       | `%APPDATA%\puny\config.json` or `%USERPROFILE%\puny\config.json`    |
 
 Use `--reconfigure` at startup or `/config` during a session to update this
 file. Provider keys written by Puny are encrypted, so copying an `apiKey` value
@@ -669,8 +668,8 @@ configuration containing keys, each key is encrypted at rest with
 XChaCha20-Poly1305 and written as an `enc:v1:` blob. The encryption key is a
 random 32-byte file that never leaves your machine:
 
-| OS      | Key file location                                                        |
-| ------- | ----------------------------------------------------------------------- |
+| OS      | Key file location                                                           |
+| ------- | --------------------------------------------------------------------------- |
 | Linux   | `$XDG_DATA_HOME/puny/encryption.key` → `~/.local/share/puny/encryption.key` |
 | macOS   | `$XDG_DATA_HOME/puny/encryption.key` → `~/.local/share/puny/encryption.key` |
 | Windows | `%LOCALAPPDATA%\puny\encryption.key` → `%USERPROFILE%\puny\encryption.key`  |
@@ -838,50 +837,50 @@ Tools execute **automatically without confirmation**. This includes file writes 
 
 ### CLI options
 
-| Flag                    | Description                                                                               |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `--provider <name>`     | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, `copilot`, `unsloth`, `ollama`, or `ollama_cloud` (CLI/env/config precedence) |
-| `-u`, `--url <url>`     | LM Studio, Unsloth, or Ollama endpoint URL (defaults: `http://127.0.0.1:1234`, `http://127.0.0.1:8888`, `http://127.0.0.1:11434`; Docker image uses `host.docker.internal`) |
-| `-k`, `--api-key <key>` | Provider API token (session only)                                                         |
-| `--api-key-file <path>` | Read provider API token from file (session only)                                          |
-| `--chat-log`            | Save full conversation (including reasoning) to `puny_chat.log`                           |
-| `--no-skills`           | Disable skill loading entirely (slash commands, triggers, and model invocation)          |
-| `-m`, `--model <id>`    | Model identifier (skips picker if found in running models)                                |
-| `--effort <level>`      | Reasoning effort: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (CLI/env/config precedence) |
-| `-p`, `--prompt <text>` | Pre-fill prompt as first user message                                                     |
-| `--prompt-file <file-or-url>` | Read first prompt from a file or URL (10 MiB limit) |
-| `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                              |
-| `--review`               | Review the current branch against the latest `origin/main`, write `review-results.md`, and exit       |
-| `--orchestrate`          | Implement, review, and fix the current branch until merge worthy, then exit (requires `--prompt` or `--prompt-file`) |
-| `--max-iterations <n>`   | Maximum review iterations for `--orchestrate`; a fix runs between reviews, not after the last one (default `5`) |
-| `--max-context <tokens>` | Context window budget; the conversation is compacted near it (overrides `max_context_tokens` in config, which overrides the model's reported window) |
-| `-M`, `--mock`          | Use mock provider (no backend required)                                                   |
-| `--reconfigure`         | Re-run first-run setup and update config                                                  |
-| `--show-thinking`       | Show reasoning/thinking output from the model                                             |
-| `--session <id>`        | Resume a previous session by UUID or unique prefix                                        |
-| `--resume`              | Resume the most recent session with a saved conversation                                  |
-| `--prune`               | Delete old sessions (use with `--session` to keep one)                                    |
-| `--debug`               | Log HTTP requests and responses to `puny_http.log`                                       |
-| `-U`, `--upgrade`       | Upgrade to the latest release via install script                                          |
-| `--force`               | Force upgrade even if already on the latest version (use with `--upgrade`)                |
-| `-h`, `--help`          | Show help text                                                                            |
-| `-V`, `--version`       | Print version                                                                             |
+| Flag                            | Description                                                                                                                                                                 |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--provider <name>`             | Provider: `lmstudio`, `opencode_zen`, `opencode_go`, `copilot`, `unsloth`, `ollama`, or `ollama_cloud` (CLI/env/config precedence)                                          |
+| `-u`, `--url <url>`             | LM Studio, Unsloth, or Ollama endpoint URL (defaults: `http://127.0.0.1:1234`, `http://127.0.0.1:8888`, `http://127.0.0.1:11434`; Docker image uses `host.docker.internal`) |
+| `-k`, `--api-key <key>`         | Provider API token (session only)                                                                                                                                           |
+| `--api-key-file <path>`         | Read provider API token from file (session only)                                                                                                                            |
+| `--chat-log`                    | Save full conversation (including reasoning) to `puny_chat.log`                                                                                                             |
+| `--no-skills`                   | Disable skill loading entirely (slash commands, triggers, and model invocation)                                                                                             |
+| `-m`, `--model <id>`            | Model identifier (skips picker if found in running models)                                                                                                                  |
+| `--effort <level>`              | Reasoning effort: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (CLI/env/config precedence)                                                                |
+| `-p`, `--prompt <text>`         | Pre-fill prompt as first user message                                                                                                                                       |
+| `--prompt-file <file-or-url>`   | Read first prompt from a file or URL (10 MiB limit)                                                                                                                         |
+| `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                                                                                                   |
+| `--review`                      | Review the current branch against the latest `origin/main`, write `review-results.md`, and exit                                                                             |
+| `--orchestrate`                 | Implement, review, and fix the current branch until merge worthy, then exit (requires `--prompt` or `--prompt-file`)                                                        |
+| `--max-iterations <n>`          | Maximum review iterations for `--orchestrate`; a fix runs between reviews, not after the last one (default `5`)                                                             |
+| `--max-context <tokens>`        | Context window budget; the conversation is compacted near it (overrides `max_context_tokens` in config, which overrides the model's reported window)                        |
+| `-M`, `--mock`                  | Use mock provider (no backend required)                                                                                                                                     |
+| `--reconfigure`                 | Re-run first-run setup and update config                                                                                                                                    |
+| `--show-thinking`               | Show reasoning/thinking output from the model                                                                                                                               |
+| `--session <id>`                | Resume a previous session by UUID or unique prefix                                                                                                                          |
+| `--resume`                      | Resume the most recent session with a saved conversation                                                                                                                    |
+| `--prune`                       | Delete old sessions (use with `--session` to keep one)                                                                                                                      |
+| `--debug`                       | Log HTTP requests and responses to `puny_http.log`                                                                                                                          |
+| `-U`, `--upgrade`               | Upgrade to the latest release via install script                                                                                                                            |
+| `--force`                       | Force upgrade even if already on the latest version (use with `--upgrade`)                                                                                                  |
+| `-h`, `--help`                  | Show help text                                                                                                                                                              |
+| `-V`, `--version`               | Print version                                                                                                                                                               |
 
 ### Environment variables
 
-| Variable                     | Description                                         |
-| ---------------------------- | --------------------------------------------------- |
-| `PUNY_CHAT_LOG`              | Set to `1` or `true` to save full conversation to `puny_chat.log` |
-| `PUNY_REASONING_EFFORT`      | Reasoning effort level to request (below `--effort`)              |
-| `PUNY_PROVIDER`              | Default provider name (overrides config)            |
-| `PUNY_PROVIDER_URL`          | LM Studio, Unsloth, or Ollama endpoint URL (overrides config, unless `--url` is set) |
-| `PUNY_API_KEY`               | Provider API token (overrides config, session only) |
+| Variable                     | Description                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| `PUNY_CHAT_LOG`              | Set to `1` or `true` to save full conversation to `puny_chat.log`                                   |
+| `PUNY_REASONING_EFFORT`      | Reasoning effort level to request (below `--effort`)                                                |
+| `PUNY_PROVIDER`              | Default provider name (overrides config)                                                            |
+| `PUNY_PROVIDER_URL`          | LM Studio, Unsloth, or Ollama endpoint URL (overrides config, unless `--url` is set)                |
+| `PUNY_API_KEY`               | Provider API token (overrides config, session only)                                                 |
 | `OLLAMA_API_KEY`             | Ollama Cloud API token, below `--api-key`, `--api-key-file` and `PUNY_API_KEY`, above `config.json` |
-| `PUNY_MODEL`                 | Default model identifier (overrides config)         |
-| `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider        |
-| `PUNY_NO_SKILLS`             | Set to `1` or `true` to disable skill loading       |
-| `PUNY_SHOW_THINKING`         | Set to `1` or `true` to show reasoning output       |
-| `GITHUB_COPILOT_OAUTH_TOKEN` | GitHub OAuth token for Copilot provider             |
+| `PUNY_MODEL`                 | Default model identifier (overrides config)                                                         |
+| `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider                                                        |
+| `PUNY_NO_SKILLS`             | Set to `1` or `true` to disable skill loading                                                       |
+| `PUNY_SHOW_THINKING`         | Set to `1` or `true` to show reasoning output                                                       |
+| `GITHUB_COPILOT_OAUTH_TOKEN` | GitHub OAuth token for Copilot provider                                                             |
 
 ### Interactive commands
 
@@ -932,7 +931,7 @@ use `$XDG_CONFIG_HOME/puny` when set on Linux/macOS, and on Windows fall back to
 | `plan.md`       | PRD markdown produced by the model during `/plan` mode          |
 | `plan.html`     | HTML version of the PRD                                         |
 | `messages.json` | Full conversation history, saved automatically after every turn |
-| `session.json`  | Session metadata (agent mode, first user prompt)                 |
+| `session.json`  | Session metadata (agent mode, first user prompt)                |
 
 #### Conversation persistence
 
