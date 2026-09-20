@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Retry transient HTTP responses with a ten attempt budget ([#212](https://github.com/christianhelle/puny/pull/212)) ([@christianhelle](https://github.com/christianhelle/))
 - Readline-style prompt editing ([#209](https://github.com/christianhelle/puny/pull/209)) ([@christianhelle](https://github.com/christianhelle/))
 - Add Ollama and Ollama Cloud as model providers ([#211](https://github.com/christianhelle/puny/pull/211)) ([@christianhelle](https://github.com/christianhelle/))
 - Never print more than one blank line between chat output blocks ([#210](https://github.com/christianhelle/puny/pull/210)) ([@christianhelle](https://github.com/christianhelle/))
