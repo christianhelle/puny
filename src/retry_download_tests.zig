@@ -2,6 +2,7 @@
 //! (`zig build test-regression`) so that `zig build test` stays fast.
 const std = @import("std");
 const retry_download = @import("tools/retry_download.zig");
+const test_support = @import("test_support.zig");
 
 var test_download_attempts: usize = 0;
 var test_download_fail_until: usize = 0;
@@ -30,15 +31,37 @@ test "retryDownload retries transient errors" {
     f.close(std.testing.io);
 }
 
-test "retryDownload fails after exhausting retries" {
+test "retryDownload retries a retryable HTTP status" {
     test_download_attempts = 0;
-    test_download_fail_until = 999;
+    test_download_fail_until = 1;
+    test_download_error = error.HttpRetryableStatus;
+    defer test_download_error = error.ConnectionTimedOut;
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const result = retry_download.retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
+    try retry_download.retryDownload(std.testing.allocator, std.testing.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
+    try std.testing.expectEqual(@as(usize, 2), test_download_attempts);
+    var f = try tmp_dir.dir.openFile(std.testing.io, "test.zip", .{});
+    f.close(std.testing.io);
+}
+
+test "retryDownload fails after exhausting retries" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
+    test_download_attempts = 0;
+    test_download_fail_until = 999;
+    test_download_error = error.ConnectionTimedOut;
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const result = retry_download.retryDownload(std.testing.allocator, recorder.io, "http://example.com/test", tmp_dir.dir, "test.zip", random, testDownload);
     try std.testing.expectError(error.ConnectionTimedOut, result);
+    try std.testing.expectEqual(@as(usize, 11), test_download_attempts);
+    try std.testing.expectEqual(@as(usize, 10), recorder.sleeps.items.len);
 }
 
 test "retryDownload fails immediately on non-transient error" {

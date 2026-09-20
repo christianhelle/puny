@@ -2,6 +2,7 @@ const std = @import("std");
 
 /// Test double for `std.Io` that records every `sleep` duration instead of
 /// sleeping, so retry backoff wiring can be asserted without real delays.
+/// File deletes performed while cleaning up failed attempts are a no-op.
 pub const RecordingIo = struct {
     allocator: std.mem.Allocator,
     sleeps: std.ArrayList(i96) = .empty,
@@ -12,6 +13,7 @@ pub const RecordingIo = struct {
         self.* = .{ .allocator = allocator };
         self.vtable.sleep = &recordSleep;
         self.vtable.now = &dummyNow;
+        self.vtable.dirDeleteFile = &noopDirDeleteFile;
         self.io = .{ .userdata = self, .vtable = &self.vtable };
     }
 
@@ -30,5 +32,11 @@ pub const RecordingIo = struct {
         _ = userdata;
         _ = clock;
         return .{ .nanoseconds = 0 };
+    }
+
+    fn noopDirDeleteFile(userdata: ?*anyopaque, dir: std.Io.Dir, sub_path: []const u8) std.Io.Dir.DeleteFileError!void {
+        _ = userdata;
+        _ = dir;
+        _ = sub_path;
     }
 };

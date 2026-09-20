@@ -43,11 +43,26 @@ pub fn isTransientError(err: anyerror) bool {
     };
 }
 
+/// HTTP statuses that indicate a temporary server-side condition, so the
+/// request can be retried after a backoff.
+pub fn isRetryableHttpStatus(status: std.http.Status) bool {
+    return switch (status) {
+        .too_many_requests,
+        .internal_server_error,
+        .bad_gateway,
+        .service_unavailable,
+        .gateway_timeout,
+        => true,
+        else => false,
+    };
+}
+
 pub fn isDownloadTransientError(err: anyerror) bool {
     return isTransientError(err) or switch (err) {
         error.Unexpected,
         error.SystemResources,
         error.TruncatedDownload,
+        error.HttpRetryableStatus,
         error.ZipNoEndRecord,
         error.ZipTruncated,
         error.WrongGzipChecksum,
@@ -65,7 +80,7 @@ pub const Config = struct {
 };
 
 pub const default_config: Config = .{
-    .max_retries = 5,
+    .max_retries = 10,
     .base_delay_ms = 500,
     .jitter_max_ms = 250,
 };
@@ -108,6 +123,34 @@ test "isTransientError treats HttpConnectionClosing as transient" {
     try std.testing.expect(isTransientError(error.HttpConnectionClosing));
 }
 
+test "isRetryableHttpStatus accepts transient server statuses" {
+    const retryable = [_]std.http.Status{
+        .too_many_requests,
+        .internal_server_error,
+        .bad_gateway,
+        .service_unavailable,
+        .gateway_timeout,
+    };
+    for (retryable) |status| {
+        try std.testing.expect(isRetryableHttpStatus(status));
+    }
+}
+
+test "isRetryableHttpStatus rejects success and client errors" {
+    const permanent = [_]std.http.Status{
+        .ok,
+        .created,
+        .bad_request,
+        .unauthorized,
+        .forbidden,
+        .not_found,
+        .unprocessable_entity,
+    };
+    for (permanent) |status| {
+        try std.testing.expect(!isRetryableHttpStatus(status));
+    }
+}
+
 test "isTransientError rejects generic and archive errors" {
     try std.testing.expect(!isTransientError(error.Unexpected));
     try std.testing.expect(!isTransientError(error.SystemResources));
@@ -129,6 +172,10 @@ test "isDownloadTransientError includes all transient plus download-specific err
     try std.testing.expect(!isDownloadTransientError(error.OutOfMemory));
     try std.testing.expect(!isDownloadTransientError(error.AccessDenied));
     try std.testing.expect(!isDownloadTransientError(error.InvalidArgument));
+}
+
+test "isDownloadTransientError accepts a retryable HTTP status" {
+    try std.testing.expect(isDownloadTransientError(error.HttpRetryableStatus));
 }
 
 test "computeDelay doubles per attempt with zero jitter" {

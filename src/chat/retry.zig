@@ -44,7 +44,7 @@ pub fn runChatWithRetry(
 
             if (err == error.Canceled) return .cancelled;
 
-            if (!retry.isTransientError(err)) {
+            if (!isRetryableFailure(prov, err)) {
                 try printChatFailure(prov, allocator, stdout_writer, err, null);
                 try stdout_writer.flush();
                 return .{ .failed = err };
@@ -61,6 +61,16 @@ pub fn runChatWithRetry(
             io.sleep(.{ .nanoseconds = @as(i96, @intCast(delay_ms * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
+}
+
+/// A failure is retryable when the transport reports a transient condition or
+/// when an HTTP response carried a status that indicates a temporary server
+/// condition (429, 5xx).
+fn isRetryableFailure(prov: anytype, err: anyerror) bool {
+    if (retry.isTransientError(err)) return true;
+    if (err != error.ResponseError) return false;
+    const failure = lastHttpFailure(prov) orelse return false;
+    return retry.isRetryableHttpStatus(failure.status);
 }
 
 fn printChatFailure(prov: anytype, allocator: std.mem.Allocator, writer: *std.Io.Writer, err: anyerror, retries: ?usize) !void {
@@ -334,6 +344,80 @@ fn noopStreamCallback() openai.StreamCallback {
             }.event,
         },
     };
+}
+
+const FakeHttpStatusProvider = struct {
+    failure: http_client.HttpFailure,
+    failures_left: usize = 0,
+
+    pub fn chatStreaming(self: *@This(), request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+        _ = request;
+        _ = callback;
+        if (self.failures_left > 0) {
+            self.failures_left -= 1;
+            return error.ResponseError;
+        }
+    }
+
+    pub fn lastHttpFailure(self: *const @This()) ?*const http_client.HttpFailure {
+        return &self.failure;
+    }
+};
+
+test "runChatWithRetry retries a service unavailable response" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    var fake = FakeHttpStatusProvider{
+        .failure = .{ .status = .service_unavailable, .body = @constCast("overloaded") },
+        .failures_left = 2,
+    };
+    var prng = std.Random.DefaultPrng.init(7);
+    const outcome = try runChatWithRetry(
+        &fake,
+        std.testing.allocator,
+        .{ .model = "test-model", .messages = &.{}, .tools = &.{} },
+        noopStreamCallback(),
+        recorder.io,
+        prng.random(),
+        &output.writer,
+    );
+
+    try std.testing.expect(outcome == .success);
+    try std.testing.expectEqual(@as(usize, 2), recorder.sleeps.items.len);
+    try std.testing.expectEqualStrings("", output.written());
+}
+
+test "runChatWithRetry fails fast on a non-retryable HTTP status" {
+    var recorder: test_support.RecordingIo = undefined;
+    recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+
+    var fake = FakeHttpStatusProvider{
+        .failure = .{ .status = .bad_request, .body = @constCast("bad model") },
+        .failures_left = 1,
+    };
+    var prng = std.Random.DefaultPrng.init(7);
+    const outcome = try runChatWithRetry(
+        &fake,
+        std.testing.allocator,
+        .{ .model = "test-model", .messages = &.{}, .tools = &.{} },
+        noopStreamCallback(),
+        recorder.io,
+        prng.random(),
+        &output.writer,
+    );
+
+    try std.testing.expectEqual(ChatRetryOutcome{ .failed = error.ResponseError }, outcome);
+    try std.testing.expectEqual(@as(usize, 0), recorder.sleeps.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "HTTP 400 Bad Request") != null);
 }
 
 test "runChatWithRetry sleeps the canonical backoff delay between retries" {
