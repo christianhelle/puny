@@ -2,10 +2,8 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
-- Readline-style prompt editing ([#209](https://github.com/christianhelle/puny/pull/209)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Readline-style prompt editing ([#209](https://github.com/christianhelle/puny/pull/209)) ([@christianhelle](https://github.com/christianhelle/))
 - Add Ollama and Ollama Cloud as model providers ([#211](https://github.com/christianhelle/puny/pull/211)) ([@christianhelle](https://github.com/christianhelle/))
 - Never print more than one blank line between chat output blocks ([#210](https://github.com/christianhelle/puny/pull/210)) ([@christianhelle](https://github.com/christianhelle/))
 
