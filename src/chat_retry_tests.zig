@@ -178,7 +178,7 @@ test "runChatWithRetry reports non-transient failures immediately" {
 test "runChatWithRetry reports HTTP status and API message" {
     const FailingProvider = struct {
         failure: http_client.HttpFailure = .{
-            .status = .internal_server_error,
+            .status = .bad_request,
             .body = @constCast("{\"error\":{\"message\":\"model is temporarily unavailable\"}}"),
         },
 
@@ -222,7 +222,7 @@ test "runChatWithRetry reports HTTP status and API message" {
 
     try std.testing.expectEqual(chat_retry.ChatRetryOutcome{ .failed = error.ResponseError }, outcome);
     try std.testing.expectEqualStrings(
-        "\nChat failed: HTTP 500 Internal Server Error: model is temporarily unavailable\n",
+        "\nChat failed: HTTP 400 Bad Request: model is temporarily unavailable\n",
         output.written(),
     );
 }
