@@ -1,4 +1,5 @@
 const std = @import("std");
+const retry = @import("../core/retry.zig");
 const version = @import("../version.zig");
 
 /// Default timeout applied to web_fetch when the model does not provide one.
@@ -46,6 +47,7 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
     try file_writer.interface.flush();
 
     if (result.status != .ok) {
+        if (retry.isRetryableHttpStatus(result.status)) return error.HttpRetryableStatus;
         return error.HttpNotOk;
     }
 
@@ -377,6 +379,18 @@ test "httpDownloadFile fails and cleans up on an HTTP error status" {
     try withDownloadServer(tmp.dir, "not found", .not_found, struct {
         fn call(url: []const u8, dir: std.Io.Dir) !void {
             try std.testing.expectError(error.HttpNotOk, httpDownloadFile(std.testing.allocator, std.testing.io, url, dir, "dl.bin"));
+            try std.testing.expectError(error.FileNotFound, dir.statFile(std.testing.io, "dl.bin", .{}));
+        }
+    }.call);
+}
+
+test "httpDownloadFile reports a retryable HTTP status" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try withDownloadServer(tmp.dir, "overloaded", .service_unavailable, struct {
+        fn call(url: []const u8, dir: std.Io.Dir) !void {
+            try std.testing.expectError(error.HttpRetryableStatus, httpDownloadFile(std.testing.allocator, std.testing.io, url, dir, "dl.bin"));
             try std.testing.expectError(error.FileNotFound, dir.statFile(std.testing.io, "dl.bin", .{}));
         }
     }.call);
