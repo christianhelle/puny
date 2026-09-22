@@ -42,14 +42,14 @@ pub fn main(init: std.process.Init) !void {
 
     // Streaming clients must consume non-success response bodies before
     // notifying observers; provider regression tests guard this behavior.
-    // 2. openai – Chat + Models + Responses are used (provider.zig, openai_shim.zig, responses transport)
+    // 2. openai – only the Models contracts are used via openai_shim.zig
     try openapi2zig.generateFromSpec(allocator, io, .{
         .input_path = "src/providers/openapi/openai.json",
         .output_path = "src/providers/openai/",
         .multiple_files = true,
+        .models_only = true,
         .file_names = .{ .models = "contracts.zig" },
-        .runtime_module = "../runtime.zig",
-        .tags = &.{ "Chat", "Models", "Responses" },
+        .tags = &.{"Models"},
     });
 
     // 3. lmstudio – only Models is used via lmstudio_shim.zig
