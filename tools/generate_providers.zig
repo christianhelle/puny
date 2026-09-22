@@ -12,7 +12,6 @@ const openapi2zig = @import("openapi2zig");
 const generated_dirs = [_][]const u8{
     "src/providers/openai",
     "src/providers/lmstudio",
-    "src/providers/anthropic",
     "src/providers/google",
 };
 
@@ -63,17 +62,7 @@ pub fn main(init: std.process.Init) !void {
         .tags = &.{"Models"},
     });
 
-    // 4. anthropic – only Messages is used (anthropic.zig + provider.zig)
-    try openapi2zig.generateFromSpec(allocator, io, .{
-        .input_path = "src/providers/openapi/anthropic.json",
-        .output_path = "src/providers/anthropic/",
-        .multiple_files = true,
-        .file_names = .{ .models = "contracts.zig" },
-        .runtime_module = "../runtime.zig",
-        .tags = &.{"Messages"},
-    });
-
-    // 5. google – only models is used (google.zig)
+    // 4. google – only models is used (google.zig)
     try openapi2zig.generateFromSpec(allocator, io, .{
         .input_path = "src/providers/openapi/google.json",
         .output_path = "src/providers/google/",
