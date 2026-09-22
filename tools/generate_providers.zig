@@ -12,6 +12,7 @@ const openapi2zig = @import("openapi2zig");
 const generated_dirs = [_][]const u8{
     "src/providers/openai",
     "src/providers/lmstudio",
+    "src/providers/anthropic",
     "src/providers/google",
 };
 
