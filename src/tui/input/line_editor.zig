@@ -27,6 +27,9 @@ pub const LineEditor = struct {
     /// When false, `@` is inserted literally instead of opening the file
     /// picker, for plain prompts such as a URL or an API key.
     mentions_enabled: bool = true,
+    /// False for plain prompts such as a URL or an API key, which have no
+    /// prompt text in front of the input.
+    shows_prompt: bool = true,
 
     pub fn init(
         line_alloc: *std.Io.Writer.Allocating,
@@ -290,7 +293,8 @@ pub const LineEditor = struct {
             return self.redraw();
         }
         const text = self.line_alloc.written();
-        try self.stdout_writer.print("{s} {s}", .{ prompts.prompt_text, text });
+        if (self.shows_prompt) try self.stdout_writer.print("{s} ", .{prompts.prompt_text});
+        try self.stdout_writer.writeAll(text);
         const tail_width = textWidth(text[self.cursor..]);
         if (tail_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{tail_width});
         try self.stdout_writer.flush();
