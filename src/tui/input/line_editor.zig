@@ -274,6 +274,21 @@ pub const LineEditor = struct {
         self.cursor_rows = end_rows;
     }
 
+    /// Ends the input's last row so whatever prints while the prompt is
+    /// away, like the shell's job-control messages after Ctrl+Z, starts on a
+    /// fresh line.
+    pub fn leave(self: *LineEditor) !void {
+        try self.parkAtInputEnd();
+        try self.stdout_writer.writeAll("\r\n");
+        try self.stdout_writer.flush();
+    }
+
+    /// Reprints the prompt and buffer from the current row after `leave`.
+    pub fn reshow(self: *LineEditor) !void {
+        self.cursor_rows = 1;
+        try self.redraw();
+    }
+
     /// Clears every row the input currently occupies and reprints the prompt
     /// and buffer, then moves the terminal cursor back to the edit cursor
     /// when it is not at the end of the text.
