@@ -19,8 +19,9 @@ pub fn readLinePosix(
 }
 
 /// Edits the prompt from the bytes of `source`, which provides `read()`
-/// (blocks; null at end of input) and `readWithTimeout(ms)` (null when
-/// nothing arrives in time).
+/// (blocks; null at end of input), `readWithTimeout(ms)` (null when
+/// nothing arrives in time), and `suspendJob()` (returns once the stopped
+/// job is continued).
 fn readLineFrom(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -45,6 +46,13 @@ fn readLineFrom(
                 try editor.moveEnd();
                 sigint.trigger();
                 return .interrupted;
+            },
+            // Raw mode turns the terminal's suspend key off, so stop the job
+            // here and bring the prompt back once the shell continues it.
+            terminal.control.sub => {
+                try editor.leave();
+                source.suspendJob();
+                try editor.reshow();
             },
             // Ctrl+D deletes forward, and cancels only on an empty prompt.
             terminal.control.eot => if (editor.line_alloc.written().len == 0) return .cancelled else try editor.deleteForward(),
@@ -148,6 +156,10 @@ const StdinSource = struct {
         if (n == 0) return null;
         return buf[0];
     }
+
+    fn suspendJob(_: *StdinSource) void {
+        cancel.suspendJob();
+    }
 };
 
 /// Scripted terminal input for `readLineFrom`. A null event is a pause long
@@ -155,6 +167,7 @@ const StdinSource = struct {
 const TestSource = struct {
     events: []const ?u8,
     pos: usize = 0,
+    suspends: usize = 0,
 
     fn read(self: *TestSource) !?u8 {
         while (self.pos < self.events.len) {
@@ -169,6 +182,10 @@ const TestSource = struct {
         if (self.pos >= self.events.len) return null;
         defer self.pos += 1;
         return self.events[self.pos];
+    }
+
+    fn suspendJob(self: *TestSource) void {
+        self.suspends += 1;
     }
 };
 
@@ -290,4 +307,21 @@ test "readLineFrom treats Esc Esc CSI as the Alt-modified key" {
 
 test "readLineFrom cancels on a double Esc followed by a non-CSI byte" {
     try expectReadLine(&input("a\x1b\x1bz\r"), false, .cancelled, "a");
+}
+
+test "readLineFrom suspends on Ctrl+Z and reshows the prompt on a fresh line" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    var source: TestSource = .{ .events = &input("ab\x1ac\r") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &source, false);
+
+    try std.testing.expectEqualStrings("abc", result.submitted);
+    try std.testing.expectEqual(@as(usize, 1), source.suspends);
+    try std.testing.expectEqualStrings("\r\x1b[J> a\r\x1b[J> ab\r\n\r\x1b[J> ab\r\x1b[J> abc", out.written());
 }
