@@ -10,6 +10,9 @@ test "include core crash tests" {
 test "include core mode tests" {
     _ = @import("core/mode.zig");
 }
+test "include core.job_control tests" {
+    _ = @import("core/job_control.zig");
+}
 test "include core.git_root tests" {
     _ = @import("core/git_root.zig");
 }
