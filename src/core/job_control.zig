@@ -129,6 +129,8 @@ test "stop suspends tracked command groups and continues them with the job" {
     _ = linux.setpgid(command, command);
     trackGroup(command);
     defer untrackGroup(command);
+    // Tracking alone leaves the command running.
+    try std.testing.expect(!waitForChange(command, linux.W.UNTRACED, linux.W.IFSTOPPED, 10));
 
     const job_rc = linux.fork();
     try std.testing.expectEqual(linux.E.SUCCESS, linux.errno(job_rc));
@@ -142,20 +144,20 @@ test "stop suspends tracked command groups and continues them with the job" {
     var status: u32 = 0;
     _ = linux.waitpid(job, &status, linux.W.UNTRACED);
     try std.testing.expect(linux.W.IFSTOPPED(status));
-    try std.testing.expect(waitForChange(command, linux.W.UNTRACED, linux.W.IFSTOPPED));
+    try std.testing.expect(waitForChange(command, linux.W.UNTRACED, linux.W.IFSTOPPED, 1000));
 
     _ = linux.kill(job, .CONT);
     _ = linux.waitpid(job, &status, 0);
     try std.testing.expect(linux.W.IFEXITED(status));
-    try std.testing.expect(waitForChange(command, linux.W.CONTINUED, isContinued));
+    try std.testing.expect(waitForChange(command, linux.W.CONTINUED, isContinued, 1000));
 }
 
-/// Waits up to a second for `pid` to report a state change matching
+/// Waits up to `max_ms` for `pid` to report a state change matching
 /// `matches`, without blocking on a change that never comes.
-fn waitForChange(pid: i32, flags: u32, comptime matches: fn (u32) bool) bool {
+fn waitForChange(pid: i32, flags: u32, comptime matches: fn (u32) bool, max_ms: usize) bool {
     const linux = std.os.linux;
     var nothing = [1]std.posix.pollfd{.{ .fd = -1, .events = 0, .revents = 0 }};
-    for (0..1000) |_| {
+    for (0..max_ms) |_| {
         var status: u32 = 0;
         if (linux.waitpid(pid, &status, flags | linux.W.NOHANG) == pid) return matches(status);
         _ = std.posix.poll(&nothing, 1) catch return false;
@@ -165,4 +167,22 @@ fn waitForChange(pid: i32, flags: u32, comptime matches: fn (u32) bool) bool {
 
 fn isContinued(status: u32) bool {
     return status == 0xffff;
+}
+
+test "trackGroup leaves a group untracked when every slot is taken" {
+    defer for (&command_groups) |*slot| slot.store(0, .release);
+    for (&command_groups, 1..) |_, i| trackGroup(@intCast(i));
+
+    trackGroup(100);
+
+    for (&command_groups) |*slot| try std.testing.expect(slot.load(.acquire) != 100);
+}
+
+test "untrackGroup ignores a group it never tracked" {
+    trackGroup(1);
+    defer untrackGroup(1);
+
+    untrackGroup(2);
+
+    try std.testing.expectEqual(@as(i32, 1), command_groups[0].load(.acquire));
 }
