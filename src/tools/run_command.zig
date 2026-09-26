@@ -1,4 +1,5 @@
 const std = @import("std");
+const job_control = @import("../core/job_control.zig");
 
 pub fn ownedSliceOrEmpty(list: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
     if (list.items.len == 0) return "";
@@ -153,6 +154,9 @@ const RunCommandShared = struct {
     cancel: std.atomic.Value(bool),
     result: anyerror![]const u8,
     arena: std.heap.ArenaAllocator,
+    /// The command's own process group on POSIX, registered so Ctrl+Z
+    /// suspends it along with Puny.
+    pgid: ?i32,
 };
 
 /// Number of timed-out `runCommandTimed` calls whose worker thread was
@@ -162,6 +166,7 @@ pub var test_run_command_worker_detached: usize = 0;
 
 fn runCommandThread(shared: *RunCommandShared) void {
     shared.result = runCommandInArena(shared.arena.allocator(), shared.io, shared.child, &shared.cancel);
+    if (shared.pgid) |pgid| job_control.untrackGroup(pgid);
     shared.done.set(shared.io);
     shared.ack.waitUncancelable(shared.io);
     shared.arena.deinit();
@@ -304,6 +309,7 @@ pub fn runCommandTimed(
             .cancel = .init(false),
             .result = undefined,
             .arena = arena,
+            .pgid = if (@import("builtin").os.tag == .windows) null else child.id,
         };
 
         shared.done = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
@@ -311,7 +317,9 @@ pub fn runCommandTimed(
         shared.done.* = .unset;
         shared.ack.* = .unset;
 
+        if (shared.pgid) |pgid| job_control.trackGroup(pgid);
         const thread = std.Thread.spawn(.{}, runCommandThread, .{shared}) catch |err| {
+            if (shared.pgid) |pgid| job_control.untrackGroup(pgid);
             child.kill(io);
             return err;
         };
