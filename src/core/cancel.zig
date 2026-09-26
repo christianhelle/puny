@@ -19,6 +19,8 @@ var global_io: Io = undefined;
 /// Stderr writer from the caller, for printing hints that shouldn't
 /// interleave with the AI stream on stdout.
 var global_stderr: *Io.Writer = undefined;
+/// Suspends the job when the monitor reads Ctrl+Z; tests substitute a fake.
+var suspend_job: *const fn () void = suspendJob;
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
@@ -207,6 +209,9 @@ fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
         handleFirstEscape(first_esc_ts);
     } else {
         first_esc_ts.* = null;
+        // Raw mode turns the terminal's suspend key off, so Ctrl+Z (0x1a)
+        // stops the job here instead.
+        if (byte == 0x1a) suspend_job();
     }
 }
 
@@ -396,4 +401,27 @@ test "eraseIsCtrlH reports whether the saved erase character is ^H" {
     try std.testing.expect(eraseIsCtrlH());
     saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] = 0x7f;
     try std.testing.expect(!eraseIsCtrlH());
+}
+
+test "Ctrl+Z while a response streams suspends the job without cancelling" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+    const FakeSuspend = struct {
+        var count: usize = 0;
+        fn suspendJob() void {
+            count += 1;
+        }
+    };
+    const original = suspend_job;
+    defer suspend_job = original;
+    suspend_job = FakeSuspend.suspendJob;
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1a, &first_esc_ts);
+
+    try std.testing.expectEqual(@as(usize, 1), FakeSuspend.count);
+    try std.testing.expect(!isCancelled());
 }
