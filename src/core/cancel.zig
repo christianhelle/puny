@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const is_windows = builtin.os.tag == .windows;
 const Io = std.Io;
 const job_control = @import("job_control.zig");
+const test_support = @import("../test_support.zig");
 
 /// Atomic flags shared between monitor thread and main thread.
 var cancelled: std.atomic.Value(bool) = .{ .raw = false };
@@ -424,4 +425,8 @@ test "Ctrl+Z while a response streams suspends the job without cancelling" {
 
     try std.testing.expectEqual(@as(usize, 1), FakeSuspend.count);
     try std.testing.expect(!isCancelled());
+}
+
+test "suspendJob stops the job and returns once it is continued" {
+    try test_support.expectSuspends(suspendJob);
 }
