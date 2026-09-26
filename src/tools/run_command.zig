@@ -166,6 +166,7 @@ const RunCommandShared = struct {
 pub var test_run_command_worker_detached: usize = 0;
 
 fn runCommandThread(shared: *RunCommandShared) void {
+    if (shared.pgid) |pgid| job_control.trackGroup(pgid);
     shared.result = runCommandInArena(shared.arena.allocator(), shared.io, shared.child, &shared.cancel);
     if (shared.pgid) |pgid| job_control.untrackGroup(pgid);
     shared.done.set(shared.io);
@@ -318,9 +319,7 @@ pub fn runCommandTimed(
         shared.done.* = .unset;
         shared.ack.* = .unset;
 
-        if (shared.pgid) |pgid| job_control.trackGroup(pgid);
         const thread = std.Thread.spawn(.{}, runCommandThread, .{shared}) catch |err| {
-            if (shared.pgid) |pgid| job_control.untrackGroup(pgid);
             child.kill(io);
             return err;
         };
