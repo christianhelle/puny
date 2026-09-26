@@ -285,8 +285,15 @@ pub const LineEditor = struct {
 
     /// Reprints the prompt and buffer from the current row after `leave`.
     pub fn reshow(self: *LineEditor) !void {
-        self.cursor_rows = 1;
-        try self.redraw();
+        if (self.width != null) {
+            self.cursor_rows = 1;
+            return self.redraw();
+        }
+        const text = self.line_alloc.written();
+        try self.stdout_writer.print("{s} {s}", .{ prompts.prompt_text, text });
+        const tail_width = textWidth(text[self.cursor..]);
+        if (tail_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{tail_width});
+        try self.stdout_writer.flush();
     }
 
     /// Clears every row the input currently occupies and reprints the prompt

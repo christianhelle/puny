@@ -325,3 +325,20 @@ test "readLineFrom suspends on Ctrl+Z and reshows the prompt on a fresh line" {
     try std.testing.expectEqual(@as(usize, 1), source.suspends);
     try std.testing.expectEqualStrings("\r\x1b[J> a\r\x1b[J> ab\r\n\r\x1b[J> ab\r\x1b[J> abc", out.written());
 }
+
+test "readLineFrom reshows the prompt after Ctrl+Z when the terminal width is unknown" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, null);
+    editor.mentions_enabled = false;
+    var source: TestSource = .{ .events = &input("ac\x02\x1ab\r") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &source, false);
+
+    try std.testing.expectEqualStrings("abc", result.submitted);
+    try std.testing.expectEqual(@as(usize, 1), source.suspends);
+    try std.testing.expectEqualStrings("ac\x1b[1D\r\n> ac\x1b[1D\x1b[1Dabc\x1b[K\x1b[1D\x1b[1C", out.written());
+}
