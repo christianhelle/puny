@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const is_windows = builtin.os.tag == .windows;
 const Io = std.Io;
+const job_control = @import("job_control.zig");
 
 /// Atomic flags shared between monitor thread and main thread.
 var cancelled: std.atomic.Value(bool) = .{ .raw = false };
@@ -102,6 +103,15 @@ fn setRawModePosix(enable: bool) !void {
     } else {
         posix.tcsetattr(0, .NOW, saved_termios) catch {};
     }
+}
+
+/// Suspends the job from a raw-mode input loop that read Ctrl+Z itself. The
+/// terminal gets its saved mode back while the job is stopped, and raw mode
+/// returns once the shell continues it.
+pub fn suspendJob() void {
+    setRawMode(false) catch {};
+    job_control.stop();
+    setRawMode(true) catch {};
 }
 
 /// True when the terminal's erase character, saved when raw mode was last
