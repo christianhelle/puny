@@ -27,6 +27,9 @@ pub const LineEditor = struct {
     /// When false, `@` is inserted literally instead of opening the file
     /// picker, for plain prompts such as a URL or an API key.
     mentions_enabled: bool = true,
+    /// False for plain prompts such as a URL or an API key, which have no
+    /// prompt text in front of the input.
+    shows_prompt: bool = true,
 
     pub fn init(
         line_alloc: *std.Io.Writer.Allocating,
@@ -272,6 +275,29 @@ pub const LineEditor = struct {
         try self.stdout_writer.print(terminal.cursor_down, .{end_rows - self.cursor_rows});
         try self.stdout_writer.flush();
         self.cursor_rows = end_rows;
+    }
+
+    /// Ends the input's last row so whatever prints while the prompt is
+    /// away, like the shell's job-control messages after Ctrl+Z, starts on a
+    /// fresh line.
+    pub fn leave(self: *LineEditor) !void {
+        try self.parkAtInputEnd();
+        try self.stdout_writer.writeAll("\r\n");
+        try self.stdout_writer.flush();
+    }
+
+    /// Reprints the prompt and buffer from the current row after `leave`.
+    pub fn reshow(self: *LineEditor) !void {
+        if (self.width != null) {
+            self.cursor_rows = 1;
+            return self.redraw();
+        }
+        const text = self.line_alloc.written();
+        if (self.shows_prompt) try self.stdout_writer.print("{s} ", .{prompts.prompt_text});
+        try self.stdout_writer.writeAll(text);
+        const tail_width = textWidth(text[self.cursor..]);
+        if (tail_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{tail_width});
+        try self.stdout_writer.flush();
     }
 
     /// Clears every row the input currently occupies and reprints the prompt

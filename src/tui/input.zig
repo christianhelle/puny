@@ -108,6 +108,7 @@ fn readPlainLine(
 
     var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, null, null);
     editor.mentions_enabled = false;
+    editor.shows_prompt = false;
 
     return switch (try C.readRaw(allocator, io, &editor)) {
         .submitted => |text| {

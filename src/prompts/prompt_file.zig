@@ -1,4 +1,5 @@
 const std = @import("std");
+const event_wait = @import("../core/event_wait.zig");
 const version = @import("../version.zig");
 
 /// Maximum number of bytes loaded from a local file or remote URL.
@@ -130,11 +131,7 @@ fn loadRemote(allocator: std.mem.Allocator, io: std.Io, url: []const u8, limit: 
         return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "Failed to start fetch: {s}", .{@errorName(err)}) };
     };
 
-    const timeout: std.Io.Timeout = .{ .duration = .{
-        .raw = .{ .nanoseconds = timeout_ns },
-        .clock = .awake,
-    } };
-    shared.event.waitTimeout(io, timeout) catch |err| switch (err) {
+    event_wait.waitTimeout(shared.event, io, timeout_ns) catch |err| switch (err) {
         error.Timeout => {
             // The fetch thread may still be running, but from here on it owns
             // everything it touches: shared, the events, the URL, and the

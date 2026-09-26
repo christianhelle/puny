@@ -1,4 +1,6 @@
 const std = @import("std");
+const event_wait = @import("../core/event_wait.zig");
+const job_control = @import("../core/job_control.zig");
 
 pub fn ownedSliceOrEmpty(list: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
     if (list.items.len == 0) return "";
@@ -153,6 +155,9 @@ const RunCommandShared = struct {
     cancel: std.atomic.Value(bool),
     result: anyerror![]const u8,
     arena: std.heap.ArenaAllocator,
+    /// The command's own process group on POSIX, registered so Ctrl+Z
+    /// suspends it along with Puny.
+    pgid: ?i32,
 };
 
 /// Number of timed-out `runCommandTimed` calls whose worker thread was
@@ -161,7 +166,9 @@ const RunCommandShared = struct {
 pub var test_run_command_worker_detached: usize = 0;
 
 fn runCommandThread(shared: *RunCommandShared) void {
+    if (shared.pgid) |pgid| job_control.trackGroup(pgid);
     shared.result = runCommandInArena(shared.arena.allocator(), shared.io, shared.child, &shared.cancel);
+    if (shared.pgid) |pgid| job_control.untrackGroup(pgid);
     shared.done.set(shared.io);
     shared.ack.waitUncancelable(shared.io);
     shared.arena.deinit();
@@ -304,6 +311,7 @@ pub fn runCommandTimed(
             .cancel = .init(false),
             .result = undefined,
             .arena = arena,
+            .pgid = if (@import("builtin").os.tag == .windows) null else child.id,
         };
 
         shared.done = arena.allocator().create(std.Io.Event) catch return error.OutOfMemory;
@@ -321,11 +329,7 @@ pub fn runCommandTimed(
     const shared = spawn_ctx.shared;
     const child = spawn_ctx.child;
 
-    const timeout = std.Io.Timeout{ .duration = .{
-        .raw = .{ .nanoseconds = timeout_ns },
-        .clock = .awake,
-    } };
-    shared.done.waitTimeout(io, timeout) catch |wait_err| switch (wait_err) {
+    event_wait.waitTimeout(shared.done, io, timeout_ns) catch |wait_err| switch (wait_err) {
         error.Timeout => {
             // The worker may be blocked reading the child's pipes and unable
             // to observe `cancel`, so terminate the whole process tree from
@@ -333,11 +337,7 @@ pub fn runCommandTimed(
             // worker; it then finishes and can be joined.
             shared.cancel.store(true, .release);
             killProcessTree(io, child);
-            const grace = std.Io.Timeout{ .duration = .{
-                .raw = .{ .nanoseconds = kill_grace_ns },
-                .clock = .awake,
-            } };
-            shared.done.waitTimeout(io, grace) catch {
+            event_wait.waitTimeout(shared.done, io, kill_grace_ns) catch {
                 shared.ack.set(io);
                 thread.detach();
                 test_run_command_worker_detached += 1;

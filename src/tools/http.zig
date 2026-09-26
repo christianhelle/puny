@@ -1,4 +1,5 @@
 const std = @import("std");
+const event_wait = @import("../core/event_wait.zig");
 const retry = @import("../core/retry.zig");
 const version = @import("../version.zig");
 
@@ -127,11 +128,7 @@ pub fn httpGetTimed(allocator: std.mem.Allocator, io: std.Io, url: []const u8, t
     const thread = spawn_ctx.thread;
     const shared = spawn_ctx.shared;
 
-    const timeout = std.Io.Timeout{ .duration = .{
-        .raw = .{ .nanoseconds = timeout_ns },
-        .clock = .awake,
-    } };
-    shared.done.waitTimeout(io, timeout) catch |wait_err| switch (wait_err) {
+    event_wait.waitTimeout(shared.done, io, timeout_ns) catch |wait_err| switch (wait_err) {
         error.Timeout => {
             // The request cannot be aborted mid-flight. The worker owns
             // everything it touches and tears it down when the fetch settles,

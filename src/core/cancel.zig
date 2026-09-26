@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const is_windows = builtin.os.tag == .windows;
 const Io = std.Io;
+const job_control = @import("job_control.zig");
+const test_support = @import("../test_support.zig");
 
 /// Atomic flags shared between monitor thread and main thread.
 var cancelled: std.atomic.Value(bool) = .{ .raw = false };
@@ -18,6 +20,8 @@ var global_io: Io = undefined;
 /// Stderr writer from the caller, for printing hints that shouldn't
 /// interleave with the AI stream on stdout.
 var global_stderr: *Io.Writer = undefined;
+/// Suspends the job when the monitor reads Ctrl+Z; tests substitute a fake.
+var suspend_job: *const fn () void = suspendJob;
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
@@ -102,6 +106,15 @@ fn setRawModePosix(enable: bool) !void {
     } else {
         posix.tcsetattr(0, .NOW, saved_termios) catch {};
     }
+}
+
+/// Suspends the job from a raw-mode input loop that read Ctrl+Z itself. The
+/// terminal gets its saved mode back while the job is stopped, and raw mode
+/// returns once the shell continues it.
+pub fn suspendJob() void {
+    setRawMode(false) catch {};
+    job_control.stop();
+    setRawMode(true) catch {};
 }
 
 /// True when the terminal's erase character, saved when raw mode was last
@@ -197,6 +210,9 @@ fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
         handleFirstEscape(first_esc_ts);
     } else {
         first_esc_ts.* = null;
+        // Raw mode turns the terminal's suspend key off, so Ctrl+Z (0x1a)
+        // stops the job here instead.
+        if (byte == 0x1a) suspend_job();
     }
 }
 
@@ -386,4 +402,31 @@ test "eraseIsCtrlH reports whether the saved erase character is ^H" {
     try std.testing.expect(eraseIsCtrlH());
     saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] = 0x7f;
     try std.testing.expect(!eraseIsCtrlH());
+}
+
+test "Ctrl+Z while a response streams suspends the job without cancelling" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+    const FakeSuspend = struct {
+        var count: usize = 0;
+        fn suspendJob() void {
+            count += 1;
+        }
+    };
+    const original = suspend_job;
+    defer suspend_job = original;
+    suspend_job = FakeSuspend.suspendJob;
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1a, &first_esc_ts);
+
+    try std.testing.expectEqual(@as(usize, 1), FakeSuspend.count);
+    try std.testing.expect(!isCancelled());
+}
+
+test "suspendJob stops the job and returns once it is continued" {
+    try test_support.expectSuspends(suspendJob);
 }
