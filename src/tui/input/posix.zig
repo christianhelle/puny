@@ -6,6 +6,7 @@ const line_editor = @import("./line_editor.zig");
 const mention = @import("./mention.zig");
 const sigint = @import("../../core/sigint.zig");
 const terminal = @import("../terminal.zig");
+const test_support = @import("../../test_support.zig");
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
@@ -358,4 +359,13 @@ test "readLineFrom reshows only the text after Ctrl+Z on a plain prompt" {
 
     try std.testing.expectEqualStrings("abc", result.submitted);
     try std.testing.expectEqualStrings("ab\r\nabc", out.written());
+}
+
+test "the stdin source suspends the job on request" {
+    try test_support.expectSuspends(struct {
+        fn run() void {
+            var stdin: StdinSource = .{};
+            stdin.suspendJob();
+        }
+    }.run);
 }
