@@ -377,8 +377,13 @@ The prompt supports shell-style (readline) editing:
 | `Ctrl+D`                                                  | Delete the character under the cursor; cancels on an empty prompt |
 | `↑` / `↓`                                                 | Browse prompt history                                             |
 | `Esc` `Esc`                                               | Cancel                                                            |
+| `Ctrl+Z`                                                  | Suspend Puny (Linux and macOS); resume with `fg`                  |
 
 On POSIX terminals whose erase key is `Ctrl+H`, `Ctrl+Backspace` sends the same byte as `Backspace` and deletes a single character. Use `Alt+Backspace` or `Ctrl+W` there instead.
+
+On Linux and macOS, `Ctrl+Z` suspends Puny like any other terminal program, at the
+prompt or while a response streams. Run `fg` to bring it back: the prompt returns
+with whatever you had typed, and a streaming response carries on.
 
 ### Attach files to a prompt
 
