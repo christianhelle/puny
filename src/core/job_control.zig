@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const test_support = @import("../test_support.zig");
 
 /// Stops the process's job the way the terminal's suspend key (Ctrl+Z)
 /// would, and returns once the shell continues it with `fg` or `bg`. Raw
@@ -64,28 +65,7 @@ fn markContinued(_: std.posix.SIG) callconv(.c) void {
 }
 
 test "stop suspends the job until it is continued" {
-    if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
-    const linux = std.os.linux;
-
-    const fork_rc = linux.fork();
-    try std.testing.expectEqual(linux.E.SUCCESS, linux.errno(fork_rc));
-    const pid: linux.pid_t = @intCast(fork_rc);
-    if (pid == 0) {
-        // A process group of its own keeps the stop away from the test runner.
-        _ = linux.setpgid(0, 0);
-        stop();
-        linux.exit_group(0);
-    }
-
-    var status: u32 = 0;
-    _ = linux.waitpid(pid, &status, linux.W.UNTRACED);
-    try std.testing.expect(linux.W.IFSTOPPED(status));
-    try std.testing.expectEqual(linux.SIG.TSTP, linux.W.STOPSIG(status));
-
-    _ = linux.kill(pid, .CONT);
-    _ = linux.waitpid(pid, &status, 0);
-    try std.testing.expect(linux.W.IFEXITED(status));
-    try std.testing.expectEqual(@as(u8, 0), linux.W.EXITSTATUS(status));
+    try test_support.expectSuspends(stop);
 }
 
 test "stop holds a background thread until the job is continued" {
