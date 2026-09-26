@@ -21,9 +21,12 @@ pub fn stop() void {
     // Another thread may take the signal, letting this one run on before the
     // job stops, so wait for the continue. A stop the kernel discards, as in
     // an orphaned process group, is never continued; give up after a second.
+    // poll ignores a negative fd, so this is a portable 1 ms sleep; an empty
+    // slice's pointer can make the kernel fail it with EFAULT.
+    var nothing = [1]std.posix.pollfd{.{ .fd = -1, .events = 0, .revents = 0 }};
     var waited_ms: usize = 0;
     while (!continued.load(.acquire) and waited_ms < 1000) : (waited_ms += 1) {
-        _ = std.posix.poll(&.{}, 1) catch return;
+        _ = std.posix.poll(&nothing, 1) catch return;
     }
 }
 
