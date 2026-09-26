@@ -56,3 +56,10 @@ test "waitTimeout reports a timeout once the deadline passes" {
     var event: std.Io.Event = .unset;
     try std.testing.expectError(error.Timeout, waitTimeout(&event, std.testing.io, 10 * std.time.ns_per_ms));
 }
+
+test "waitTimeout passes a cancellation through" {
+    const io = std.testing.io;
+    var event: std.Io.Event = .unset;
+    var wait = try io.concurrent(waitTimeout, .{ &event, io, 5 * std.time.ns_per_s });
+    try std.testing.expectError(error.Canceled, wait.cancel(io));
+}
