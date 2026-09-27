@@ -854,6 +854,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--effort <level>`              | Reasoning effort: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (CLI/env/config precedence)                                                                |
 | `-p`, `--prompt <text>`         | Pre-fill prompt as first user message                                                                                                                                       |
 | `--prompt-file <file-or-url>`   | Read first prompt from a file or URL (10 MiB limit)                                                                                                                         |
+| `--system-prompt <text>`       | Override the system prompt for this session (overrides `prompts.system` in `config.json`)                                                                                   |
 | `-1`, `--oneshot`, `--one-shot` | Exit after processing the prompt (requires `--prompt` or `--prompt-file`)                                                                                                   |
 | `--review`                      | Review the current branch against the latest `origin/main`, write `review-results.md`, and exit                                                                             |
 | `--orchestrate`                 | Implement, review, and fix the current branch until merge worthy, then exit (requires `--prompt` or `--prompt-file`)                                                        |
