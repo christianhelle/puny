@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const cancel = @import("../core/cancel.zig");
 const client = @import("client.zig");
 const openai = @import("openai.zig");
+const responses = @import("responses.zig");
 
 // GitHub Copilot is OpenAI-compatible on the wire but uses a two-token auth flow:
 // a long-lived GitHub OAuth token is exchanged for a short-lived Copilot token that
@@ -35,6 +36,9 @@ pub const Client = struct {
     copilot_token: ?[]u8 = null,
     /// Unix seconds at which the cached Copilot token expires.
     copilot_token_expires_at: i64 = 0,
+    /// Ids of the models the last `/models` catalog serves only over `/responses`,
+    /// or null until a catalog has been fetched.
+    responses_models: ?[][]u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, github_token: []const u8) Client {
         var inner = client.Client.init(allocator, io, "");
@@ -48,7 +52,44 @@ pub const Client = struct {
     pub fn deinit(self: *Client) void {
         if (self.copilot_token) |token| self.inner.allocator.free(token);
         self.copilot_token = null;
+        self.freeResponsesModels();
         self.inner.deinit();
+    }
+
+    fn freeResponsesModels(self: *Client) void {
+        const ids = self.responses_models orelse return;
+        for (ids) |id| self.inner.allocator.free(id);
+        self.inner.allocator.free(ids);
+        self.responses_models = null;
+    }
+
+    /// Remember which catalog models must be streamed over `/responses`.
+    fn rememberEndpoints(self: *Client, models: []const ModelInfo) !void {
+        const allocator = self.inner.allocator;
+        var ids: std.ArrayList([]u8) = .empty;
+        errdefer {
+            for (ids.items) |id| allocator.free(id);
+            ids.deinit(allocator);
+        }
+        for (models) |m| {
+            if (m.endpoint != .responses) continue;
+            const id = try allocator.dupe(u8, m.id);
+            ids.append(allocator, id) catch |err| {
+                allocator.free(id);
+                return err;
+            };
+        }
+        const owned = try ids.toOwnedSlice(allocator);
+        self.freeResponsesModels();
+        self.responses_models = owned;
+    }
+
+    fn usesResponses(self: *const Client, model: []const u8) bool {
+        const ids = self.responses_models orelse return false;
+        for (ids) |id| {
+            if (std.mem.eql(u8, id, model)) return true;
+        }
+        return false;
     }
 
     pub fn withBaseUrl(self: *Client, base_url: []const u8) void {
@@ -294,7 +335,10 @@ pub fn listModels(self: *Client) !client.Owned(ModelsList) {
         return error.ResponseError;
     }
 
-    return parseModels(allocator, raw.body);
+    var owned = try parseModels(allocator, raw.body);
+    errdefer owned.deinit();
+    try self.rememberEndpoints(owned.value().data);
+    return owned;
 }
 
 /// Convert a Copilot-specific model list into the app-wide shared model list.
@@ -410,13 +454,13 @@ fn isModelPickerEnabled(item: std.json.Value) bool {
 fn modelEndpoint(item: std.json.Value) ?Endpoint {
     const endpoints = item.object.get("supported_endpoints") orelse return .chat_completions;
     if (endpoints != .array) return .chat_completions;
-    var responses = false;
+    var has_responses = false;
     for (endpoints.array.items) |ep| {
         if (ep != .string) continue;
         if (std.mem.eql(u8, ep.string, "/chat/completions")) return .chat_completions;
-        if (std.mem.eql(u8, ep.string, "/responses")) responses = true;
+        if (std.mem.eql(u8, ep.string, "/responses")) has_responses = true;
     }
-    return if (responses) .responses else null;
+    return if (has_responses) .responses else null;
 }
 
 fn modelContextLength(item: std.json.Value) i64 {
@@ -479,6 +523,8 @@ fn requestInitiator(messages: []const openai.Message) []const u8 {
 }
 
 pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    if (self.usesResponses(request.model)) return chatStreamingResponses(self, request, callback);
+
     const allocator = self.inner.allocator;
 
     const payload = try openai.requestPayload(allocator, request);
@@ -490,6 +536,21 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         .observer = self.inner.http_observer,
     };
     return streamSse(self, "/chat/completions", payload, requestInitiator(request.messages), &sse);
+}
+
+/// Stream a chat turn for a model Copilot only serves over the Responses API.
+fn chatStreamingResponses(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    const allocator = self.inner.allocator;
+
+    const payload = try responses.responsesRequestPayload(allocator, request);
+    defer allocator.free(payload);
+
+    var sse = responses.ResponsesSseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .observer = self.inner.http_observer,
+    };
+    return streamSse(self, "/responses", payload, requestInitiator(request.messages), &sse);
 }
 
 /// POST `payload` to `path` on the Copilot API and feed the SSE response to `sse`,
@@ -1598,6 +1659,139 @@ test "chatStreaming propagates SSE parse errors from a local server" {
         return error.ExpectedSseParseFailure;
     } else |_| {}
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
+
+// ── Responses routing tests ─────────────────────────────────────────
+
+/// Serves a `/models` catalog and canned SSE bodies for `/chat/completions` and
+/// `/responses`, recording each request path so tests can see where chat turns go.
+const RoutingServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    models_body: []const u8,
+    chat_body: []const u8,
+    responses_body: []const u8,
+    thread: std.Thread = undefined,
+    paths: [8][32]u8 = undefined,
+    path_lens: [8]usize = undefined,
+    count: usize = 0,
+    stopping: std.atomic.Value(bool) = .init(false),
+
+    fn serve(self: *@This()) void {
+        while (true) {
+            var stream = self.server.accept(self.io) catch return;
+            defer stream.close(self.io);
+            if (self.stopping.load(.acquire)) return;
+
+            var in_buf: [4096]u8 = undefined;
+            var out_buf: [4096]u8 = undefined;
+            var reader = stream.reader(self.io, &in_buf);
+            var writer = stream.writer(self.io, &out_buf);
+
+            var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+            var request = http_server.receiveHead() catch continue;
+            const target = request.head.target;
+            if (self.count < self.paths.len) {
+                const len = @min(target.len, self.paths[self.count].len);
+                @memcpy(self.paths[self.count][0..len], target[0..len]);
+                self.path_lens[self.count] = len;
+                self.count += 1;
+            }
+            const body = if (std.mem.eql(u8, target, "/models"))
+                self.models_body
+            else if (std.mem.eql(u8, target, "/responses"))
+                self.responses_body
+            else
+                self.chat_body;
+            request.respond(body, .{ .keep_alive = false }) catch continue;
+        }
+    }
+
+    fn path(self: *const @This(), index: usize) []const u8 {
+        return self.paths[index][0..self.path_lens[index]];
+    }
+};
+
+fn startRoutingServer(models_body: []const u8, chat_body: []const u8, responses_body: []const u8) !*RoutingServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = std.testing.allocator.create(RoutingServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
+    ctx.* = .{
+        .io = std.testing.io,
+        .server = server,
+        .models_body = models_body,
+        .chat_body = chat_body,
+        .responses_body = responses_body,
+    };
+    errdefer {
+        ctx.server.deinit(std.testing.io);
+        std.testing.allocator.destroy(ctx);
+    }
+    ctx.thread = try std.Thread.spawn(.{}, RoutingServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopRoutingServer(ctx: *RoutingServer) void {
+    // Closing the listener doesn't wake a blocked accept, so connect once to
+    // let the serve loop see the stop flag and exit.
+    ctx.stopping.store(true, .release);
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(ctx.server.socket.address.getPort()) };
+    if (address.connect(std.testing.io, .{ .mode = .stream })) |stream| stream.close(std.testing.io) else |_| {}
+    ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
+    std.testing.allocator.destroy(ctx);
+}
+
+fn routingClient(ctx: *RoutingServer, allocator: std.mem.Allocator) !Client {
+    const url = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_token");
+    c.withBaseUrl(url);
+    try seedCopilotToken(&c);
+    return c;
+}
+
+const routing_catalog =
+    \\{"data":[
+    \\{"id":"claude-sonnet-4.5","model_picker_enabled":true,"capabilities":{"type":"chat"},"supported_endpoints":["/chat/completions","/v1/messages"]},
+    \\{"id":"gpt-5.5","model_picker_enabled":true,"capabilities":{"type":"chat"},"supported_endpoints":["/responses","ws:/responses"]}
+    \\]}
+;
+const routing_chat_sse =
+    "data: {\"choices\":[{\"delta\":{\"content\":\"from chat\"}}]}\n\n" ++
+    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" ++
+    "data: [DONE]\n\n";
+const routing_responses_sse =
+    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"from responses\"}\n\n" ++
+    "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n";
+
+test "chatStreaming sends models the catalog lists as /responses-only to /responses" {
+    const ctx = try startRoutingServer(routing_catalog, routing_chat_sse, routing_responses_sse);
+    defer stopRoutingServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try routingClient(ctx, arena);
+    defer c.deinit();
+
+    var owned = try listModels(&c);
+    owned.deinit();
+
+    var events = std.ArrayList(CopilotSseEvent).empty;
+    var recorder = CopilotSseRecorder{ .allocator = arena, .events = &events };
+    cancel.reset();
+    try chatStreaming(&c, .{ .model = "gpt-5.5", .messages = &.{.{ .user = "hi" }}, .tools = &.{} }, recorder.callback());
+
+    try std.testing.expectEqual(@as(usize, 2), ctx.count);
+    try std.testing.expectEqualStrings("/models", ctx.path(0));
+    try std.testing.expectEqualStrings("/responses", ctx.path(1));
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expectEqualStrings("from responses", events.items[0].content);
+    try std.testing.expectEqualStrings("stop", events.items[1].finish.?);
 }
 
 // ── User-agent wire tests ─────────────────────────────────────────────
