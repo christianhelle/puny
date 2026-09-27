@@ -479,13 +479,26 @@ fn requestInitiator(messages: []const openai.Message) []const u8 {
 }
 
 pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
-    const token = try ensureCopilotToken(self);
     const allocator = self.inner.allocator;
 
     const payload = try openai.requestPayload(allocator, request);
     defer allocator.free(payload);
 
-    const url = try std.fmt.allocPrint(allocator, "{s}/chat/completions", .{self.inner.base_url});
+    var sse = openai.SseCallback{
+        .allocator = allocator,
+        .callback = callback,
+        .observer = self.inner.http_observer,
+    };
+    return streamSse(self, "/chat/completions", payload, requestInitiator(request.messages), &sse);
+}
+
+/// POST `payload` to `path` on the Copilot API and feed the SSE response to `sse`,
+/// which must expose `event(data: []const u8) !void`.
+fn streamSse(self: *Client, path: []const u8, payload: []const u8, initiator: []const u8, sse: anytype) !void {
+    const token = try ensureCopilotToken(self);
+    const allocator = self.inner.allocator;
+
+    const url = try std.fmt.allocPrint(allocator, "{s}{s}", .{ self.inner.base_url, path });
     defer allocator.free(url);
 
     var request_id: [36]u8 = undefined;
@@ -499,7 +512,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         token,
         "text/event-stream",
         &request_id,
-        requestInitiator(request.messages),
+        initiator,
     );
     defer allocator.free(auth);
 
@@ -573,13 +586,7 @@ pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: opena
         if (obs.onResponse) |cb| cb(obs.ctx, .POST, url, response.head.status, &.{}, "", elapsed_ns);
     }
 
-    var sse = openai.SseCallback{
-        .allocator = allocator,
-        .callback = callback,
-        .observer = self.inner.http_observer,
-    };
-
-    client.parseSseReader(allocator, reader, &sse, null) catch |err| switch (err) {
+    client.parseSseReader(allocator, reader, sse, null) catch |err| switch (err) {
         error.ReadFailed => {
             if (cancel.isCancelled()) return error.Canceled;
             return err;
