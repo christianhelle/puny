@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Support GitHub Copilot models served only over the Responses API ([#216](https://github.com/christianhelle/puny/pull/216)) ([@christianhelle](https://github.com/christianhelle/))
 - Add --system-prompt CLI flag ([#215](https://github.com/christianhelle/puny/pull/215)) ([@christianhelle](https://github.com/christianhelle/))
 - Suspend with Ctrl+Z on Linux and macOS ([#214](https://github.com/christianhelle/puny/pull/214)) ([@christianhelle](https://github.com/christianhelle/))
 - Retry transient HTTP responses with a ten attempt budget ([#212](https://github.com/christianhelle/puny/pull/212)) ([@christianhelle](https://github.com/christianhelle/))
