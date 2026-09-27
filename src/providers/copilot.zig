@@ -27,6 +27,9 @@ const max_token_file_size = 1024 * 1024;
 // Refresh the Copilot token this many seconds before it actually expires.
 const token_refresh_buffer_seconds = 120;
 
+// After a failed lazy `/models` fetch, chat turns skip refetching it for this long.
+const catalog_retry_cooldown_seconds = 60;
+
 pub const Client = struct {
     inner: client.Client,
     /// Long-lived GitHub OAuth token (gho_...). Resolved from manual config,
@@ -39,6 +42,8 @@ pub const Client = struct {
     /// Ids of the models the last `/models` catalog serves only over `/responses`,
     /// or null until a catalog has been fetched.
     responses_models: ?[][]u8 = null,
+    /// Unix seconds before which a chat turn won't retry a failed catalog fetch.
+    catalog_retry_at: i64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, github_token: []const u8) Client {
         var inner = client.Client.init(allocator, io, "");
@@ -57,6 +62,7 @@ pub const Client = struct {
     }
 
     fn freeResponsesModels(self: *Client) void {
+        self.catalog_retry_at = 0;
         const ids = self.responses_models orelse return;
         for (ids) |id| self.inner.allocator.free(id);
         self.inner.allocator.free(ids);
@@ -530,12 +536,15 @@ fn requestInitiator(messages: []const openai.Message) []const u8 {
 pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     // Which endpoint a model needs comes from the `/models` catalog. Fetch it once
     // if this turn arrived before any listing (e.g. oneshot mode skips model
-    // validation); on failure the turn falls back to `/chat/completions`.
-    if (self.responses_models == null) {
+    // validation); on failure the turn falls back to `/chat/completions` and
+    // later turns wait out a cooldown before trying again.
+    if (self.responses_models == null and nowUnixSeconds(self.inner.io) >= self.catalog_retry_at) {
         if (listModels(self)) |owned| {
             var models = owned;
             models.deinit();
-        } else |_| {}
+        } else |_| {
+            self.catalog_retry_at = nowUnixSeconds(self.inner.io) + catalog_retry_cooldown_seconds;
+        }
     }
     if (self.usesResponses(request.model)) return chatStreamingResponses(self, request, callback);
 
@@ -1842,6 +1851,31 @@ test "chatStreaming fetches the model catalog first when none has been listed" {
     try std.testing.expectEqualStrings("/chat/completions", ctx.path(2));
     try std.testing.expectEqualStrings("from responses", events.items[0].content);
     try std.testing.expectEqualStrings("from chat", events.items[2].content);
+}
+
+test "chatStreaming waits out a cooldown before refetching a catalog that failed to load" {
+    const ctx = try startRoutingServer("not json", routing_chat_sse, routing_responses_sse);
+    defer stopRoutingServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try routingClient(ctx, arena);
+    defer c.deinit();
+
+    var events = std.ArrayList(CopilotSseEvent).empty;
+    var recorder = CopilotSseRecorder{ .allocator = arena, .events = &events };
+    const request = openai.ChatRequest{ .model = "claude-sonnet-4.5", .messages = &.{.{ .user = "hi" }}, .tools = &.{} };
+    cancel.reset();
+    try chatStreaming(&c, request, recorder.callback());
+    try chatStreaming(&c, request, recorder.callback());
+
+    // The failed fetch isn't repeated on the very next turn.
+    try std.testing.expectEqual(@as(usize, 3), ctx.count);
+    try std.testing.expectEqualStrings("/models", ctx.path(0));
+    try std.testing.expectEqualStrings("/chat/completions", ctx.path(1));
+    try std.testing.expectEqualStrings("/chat/completions", ctx.path(2));
 }
 
 test "changing the GitHub token or base URL forgets the cached model catalog" {
