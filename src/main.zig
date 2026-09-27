@@ -196,7 +196,6 @@ fn run(init: std.process.Init) !u8 {
     var cfg_result = try config.load(arena, init.io, init.environ_map);
     defer cfg_result.deinit();
     const cfg = &cfg_result.config;
-    applyCliSystemPromptOverride(cfg, parsed.system_prompt);
 
     if (!cfg_result.file_existed and !parsed.reconfigure) {
         parsed.reconfigure = true;
@@ -214,6 +213,10 @@ fn run(init: std.process.Init) !u8 {
         // Ctrl+C at a setup prompt quits, as it does at the chat prompt.
         if (sigint.isTriggered()) return 0;
     }
+
+    // Applied after reconfiguration, which can persist `cfg` to config.json:
+    // a session-only override must never be written to disk.
+    applyCliSystemPromptOverride(cfg, parsed.system_prompt);
 
     var random_source: std.Random.IoSource = .{ .io = init.io };
     const random = random_source.interface();
