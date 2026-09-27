@@ -1753,13 +1753,14 @@ fn startRoutingServer(models_body: []const u8, chat_body: []const u8, responses_
 }
 
 fn stopRoutingServer(ctx: *RoutingServer) void {
-    // Closing the listener doesn't wake a blocked accept, so connect once to
-    // let the serve loop see the stop flag and exit.
+    // Closing the listener doesn't wake a blocked accept, so connect once to let
+    // the serve loop see the stop flag and exit. Join before closing the listener:
+    // the serve thread may still be finishing a request and about to accept again.
     ctx.stopping.store(true, .release);
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(ctx.server.socket.address.getPort()) };
     if (address.connect(std.testing.io, .{ .mode = .stream })) |stream| stream.close(std.testing.io) else |_| {}
-    ctx.server.deinit(std.testing.io);
     ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
     std.testing.allocator.destroy(ctx);
 }
 
