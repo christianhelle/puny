@@ -92,16 +92,21 @@ pub const Client = struct {
         return false;
     }
 
+    /// Point the client at another Copilot endpoint and forget the model catalog
+    /// fetched from the previous one.
     pub fn withBaseUrl(self: *Client, base_url: []const u8) void {
         self.inner.withBaseUrl(base_url);
+        self.freeResponsesModels();
     }
 
-    /// Replace the GitHub OAuth token and invalidate any cached Copilot token.
+    /// Replace the GitHub OAuth token and invalidate any cached Copilot token and
+    /// the model catalog fetched for the previous account.
     pub fn setGithubToken(self: *Client, github_token: []const u8) void {
         self.github_token = github_token;
         if (self.copilot_token) |token| self.inner.allocator.free(token);
         self.copilot_token = null;
         self.copilot_token_expires_at = 0;
+        self.freeResponsesModels();
     }
 
     pub fn setConfig(self: *Client, config: client.ClientConfig) void {
@@ -1837,6 +1842,41 @@ test "chatStreaming fetches the model catalog first when none has been listed" {
     try std.testing.expectEqualStrings("/chat/completions", ctx.path(2));
     try std.testing.expectEqualStrings("from responses", events.items[0].content);
     try std.testing.expectEqualStrings("from chat", events.items[2].content);
+}
+
+test "changing the GitHub token or base URL forgets the cached model catalog" {
+    const ctx = try startRoutingServer(routing_catalog, routing_chat_sse, routing_responses_sse);
+    defer stopRoutingServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try routingClient(ctx, arena);
+    defer c.deinit();
+    const request = openai.ChatRequest{ .model = "claude-sonnet-4.5", .messages = &.{.{ .user = "hi" }}, .tools = &.{} };
+    var events = std.ArrayList(CopilotSseEvent).empty;
+    var recorder = CopilotSseRecorder{ .allocator = arena, .events = &events };
+
+    var owned = try listModels(&c);
+    owned.deinit();
+
+    // Another account may be served a different catalog, so the next turn refetches it.
+    c.setGithubToken("gho_other");
+    try seedCopilotToken(&c);
+    cancel.reset();
+    try chatStreaming(&c, request, recorder.callback());
+
+    // So may another Copilot endpoint.
+    c.withBaseUrl(c.inner.base_url);
+    try chatStreaming(&c, request, recorder.callback());
+
+    try std.testing.expectEqual(@as(usize, 5), ctx.count);
+    try std.testing.expectEqualStrings("/models", ctx.path(0));
+    try std.testing.expectEqualStrings("/models", ctx.path(1));
+    try std.testing.expectEqualStrings("/chat/completions", ctx.path(2));
+    try std.testing.expectEqualStrings("/models", ctx.path(3));
+    try std.testing.expectEqualStrings("/chat/completions", ctx.path(4));
 }
 
 // ── User-agent wire tests ─────────────────────────────────────────────
