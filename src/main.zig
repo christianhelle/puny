@@ -196,6 +196,7 @@ fn run(init: std.process.Init) !u8 {
     var cfg_result = try config.load(arena, init.io, init.environ_map);
     defer cfg_result.deinit();
     const cfg = &cfg_result.config;
+    applyCliSystemPromptOverride(cfg, parsed.system_prompt);
 
     if (!cfg_result.file_existed and !parsed.reconfigure) {
         parsed.reconfigure = true;
@@ -713,6 +714,12 @@ fn resolveReasoningEffort(
     return null;
 }
 
+/// The `--system-prompt` flag takes precedence over any override already
+/// loaded from the config file.
+fn applyCliSystemPromptOverride(cfg: *config.Config, cli_override: ?[]const u8) void {
+    if (cli_override) |value| cfg.prompts.system.override = value;
+}
+
 fn buildPlanningToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.ArrayList(openai.ToolDefinition) {
     var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
     errdefer definitions.deinit(arena);
@@ -939,6 +946,19 @@ test "resolveReasoningEffort ignores an unrecognised configured level" {
         @as(?openai.ReasoningEffort, null),
         resolveReasoningEffort(null, null, "enthusiastic"),
     );
+}
+
+test "applyCliSystemPromptOverride sets the config override from the flag" {
+    var cfg = config.Config{};
+    applyCliSystemPromptOverride(&cfg, "You are a pirate.");
+    try std.testing.expectEqualStrings("You are a pirate.", cfg.prompts.system.override.?);
+}
+
+test "applyCliSystemPromptOverride leaves the config override untouched without a flag" {
+    var cfg = config.Config{};
+    cfg.prompts.system.override = "from config file";
+    applyCliSystemPromptOverride(&cfg, null);
+    try std.testing.expectEqualStrings("from config file", cfg.prompts.system.override.?);
 }
 
 test "printStartupTime ends its line" {
