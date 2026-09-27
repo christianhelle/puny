@@ -256,11 +256,15 @@ fn appendCopilotHeaders(
     return auth;
 }
 
+/// The Copilot endpoint Puny streams a model's chat turns through.
+pub const Endpoint = enum { chat_completions, responses };
+
 pub const ModelInfo = struct {
     id: []const u8,
     name: []const u8,
     vendor: []const u8,
     context_length: i64,
+    endpoint: Endpoint = .chat_completions,
 };
 
 pub const ModelsList = struct {
@@ -351,7 +355,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
         const id = if (item.object.get("id")) |v| v.string else continue;
         if (!isChatModel(item)) continue;
         if (!isModelPickerEnabled(item)) continue;
-        if (!supportsChatCompletions(item)) continue;
+        const endpoint = modelEndpoint(item) orelse continue;
 
         const name = if (item.object.get("name")) |v| v.string else id;
         const vendor = if (item.object.get("vendor")) |v| v.string else "github-copilot";
@@ -361,6 +365,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
             .name = try arena_alloc.dupe(u8, name),
             .vendor = try arena_alloc.dupe(u8, vendor),
             .context_length = modelContextLength(item),
+            .endpoint = endpoint,
         });
     }
 
@@ -397,18 +402,21 @@ fn isModelPickerEnabled(item: std.json.Value) bool {
     };
 }
 
-/// Puny drives Copilot over the OpenAI-compatible `/chat/completions` endpoint, so
-/// picker-enabled models that are only served over `/responses` (e.g. gpt-5.5,
-/// gpt-5.3-codex, mai-code-1-flash-picker) can't be used here and are excluded. A
-/// missing `supported_endpoints` field means the model uses the default
-/// `/chat/completions` transport.
-fn supportsChatCompletions(item: std.json.Value) bool {
-    const endpoints = item.object.get("supported_endpoints") orelse return true;
-    if (endpoints != .array) return true;
+/// Pick the endpoint Puny streams a model through. Models served on
+/// `/chat/completions` stay there; picker-enabled models that are only served over
+/// `/responses` (e.g. gpt-5.5, gpt-5.3-codex, grok-4.5) use the Responses API. A
+/// missing `supported_endpoints` field means the default `/chat/completions`
+/// transport. Returns null for models Puny can't drive (e.g. `/v1/messages` only).
+fn modelEndpoint(item: std.json.Value) ?Endpoint {
+    const endpoints = item.object.get("supported_endpoints") orelse return .chat_completions;
+    if (endpoints != .array) return .chat_completions;
+    var responses = false;
     for (endpoints.array.items) |ep| {
-        if (ep == .string and std.mem.eql(u8, ep.string, "/chat/completions")) return true;
+        if (ep != .string) continue;
+        if (std.mem.eql(u8, ep.string, "/chat/completions")) return .chat_completions;
+        if (std.mem.eql(u8, ep.string, "/responses")) responses = true;
     }
-    return false;
+    return if (responses) .responses else null;
 }
 
 fn modelContextLength(item: std.json.Value) i64 {
@@ -423,7 +431,7 @@ fn modelContextLength(item: std.json.Value) i64 {
     };
 }
 
-test "parseModels keeps only picker-enabled chat models on /chat/completions" {
+test "parseModels keeps picker-enabled chat models served on /chat/completions or /responses" {
     const allocator = std.testing.allocator;
     const body =
         \\{"data":[
@@ -431,6 +439,8 @@ test "parseModels keeps only picker-enabled chat models on /chat/completions" {
         \\{"id":"gpt-4o","name":"GPT-4o","vendor":"Azure OpenAI","model_picker_enabled":false,"capabilities":{"type":"chat","limits":{"max_context_window_tokens":128000}}},
         \\{"id":"text-embedding-3-small","name":"Embedding","vendor":"openai","model_picker_enabled":true,"capabilities":{"type":"embeddings"}},
         \\{"id":"gpt-5.5","name":"GPT-5.5","vendor":"OpenAI","model_picker_enabled":true,"capabilities":{"type":"chat"},"supported_endpoints":["/responses","ws:/responses"]},
+        \\{"id":"gpt-5-mini","name":"GPT-5 mini","vendor":"Azure OpenAI","model_picker_enabled":true,"capabilities":{"type":"chat"},"supported_endpoints":["/chat/completions","/responses","ws:/responses"]},
+        \\{"id":"messages-only","name":"Messages only","vendor":"Anthropic","model_picker_enabled":true,"capabilities":{"type":"chat"},"supported_endpoints":["/v1/messages"]},
         \\{"id":"gemini-2.5-pro","name":"Gemini 2.5 Pro","vendor":"Google","model_picker_enabled":true,"capabilities":{"type":"chat"}}
         \\],"object":"list"}
     ;
@@ -438,16 +448,22 @@ test "parseModels keeps only picker-enabled chat models on /chat/completions" {
     defer owned.deinit();
 
     const models = owned.value().data;
-    // Kept: claude-sonnet-4.5 (picker + /chat/completions) and gemini-2.5-pro
-    // (picker + no supported_endpoints => default /chat/completions).
     // Dropped: gpt-4o (picker disabled), text-embedding-3-small (not chat),
-    // gpt-5.5 (picker enabled but /responses-only).
-    try std.testing.expectEqual(@as(usize, 2), models.len);
+    // messages-only (no endpoint Puny can drive).
+    try std.testing.expectEqual(@as(usize, 4), models.len);
     try std.testing.expectEqualStrings("claude-sonnet-4.5", models[0].id);
     try std.testing.expectEqualStrings("Claude Sonnet 4.5", models[0].name);
     try std.testing.expectEqualStrings("Anthropic", models[0].vendor);
     try std.testing.expectEqual(@as(i64, 200000), models[0].context_length);
-    try std.testing.expectEqualStrings("gemini-2.5-pro", models[1].id);
+    try std.testing.expectEqual(Endpoint.chat_completions, models[0].endpoint);
+    try std.testing.expectEqualStrings("gpt-5.5", models[1].id);
+    try std.testing.expectEqual(Endpoint.responses, models[1].endpoint);
+    // Models served on both endpoints stay on the proven /chat/completions path.
+    try std.testing.expectEqualStrings("gpt-5-mini", models[2].id);
+    try std.testing.expectEqual(Endpoint.chat_completions, models[2].endpoint);
+    // No supported_endpoints means the default /chat/completions transport.
+    try std.testing.expectEqualStrings("gemini-2.5-pro", models[3].id);
+    try std.testing.expectEqual(Endpoint.chat_completions, models[3].endpoint);
 }
 
 /// The Copilot API expects `X-Initiator: agent` once the conversation contains
