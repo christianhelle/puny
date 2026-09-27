@@ -320,14 +320,14 @@ Puny resolves a GitHub OAuth token in this order:
 
 It then exchanges that OAuth token for a short-lived Copilot token and shows the model
 picker. The picker lists the same curated models the GitHub Copilot CLI offers — the
-models your subscription marks as picker-enabled that are served over the OpenAI-compatible
-`/chat/completions` endpoint. Legacy models (e.g. GPT-3.5, GPT-4o), internal agent models,
-and `/responses`-only models (e.g. GPT-5.5, GPT-5 Codex) are filtered out because Puny
-can't drive them. The general-purpose `GH_TOKEN`/`GITHUB_TOKEN` environment variables are
+models your subscription marks as picker-enabled. Models served over the OpenAI-compatible
+`/chat/completions` endpoint use it; models Copilot only serves over the Responses API
+(e.g. GPT-5.5, GPT-5 Codex, Grok) are streamed through `/responses` instead. Legacy models
+(e.g. GPT-3.5, GPT-4o) and internal agent models are filtered out. The general-purpose `GH_TOKEN`/`GITHUB_TOKEN` environment variables are
 intentionally **not** used, so an unrelated GitHub token can't break the exchange.
 
 Support for GitHub Copilot is experimental, but both chat and tool calling work across the
-listed models (Claude, GPT-5 mini, Gemini, Kimi, and more).
+listed models (Claude, GPT-5, Gemini, Grok, Kimi, and more).
 
 ## Usage
 
