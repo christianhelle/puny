@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Show cached share of input tokens and count Anthropic cache tokens as input ([#217](https://github.com/christianhelle/puny/pull/217)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.4.1](https://github.com/christianhelle/puny/releases/tag/v0.4.1) (2026-09-27)
 
 ### Features
