@@ -307,6 +307,7 @@ const GoogleSseCallback = struct {
             try self.callback.emit(.{ .usage = .{
                 .input_tokens = self.input_tokens,
                 .output_tokens = output_tokens,
+                .cached_input_tokens = usage.cachedContentTokenCount,
             } });
         }
     }
@@ -694,6 +695,25 @@ test "GoogleSseCallback emits content and usage events" {
     try std.testing.expectEqualStrings("STOP", events.items[2].finish.?);
     try std.testing.expectEqual(@as(i64, 10), events.items[3].usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 20), events.items[3].usage.output_tokens);
+}
+
+test "GoogleSseCallback reports cached content tokens as cached input" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    var sse = GoogleSseCallback{ .allocator = allocator, .callback = .{
+        .context = &sse_callback,
+        .vtable = &.{ .event = TestSseCallback.event },
+    } };
+
+    try sse.event("{\"usageMetadata\":{\"promptTokenCount\":1000,\"cachedContentTokenCount\":900,\"candidatesTokenCount\":20}}");
+
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqual(@as(i64, 1000), events.items[0].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 900), events.items[0].usage.cached_input_tokens.?);
 }
 
 test "GoogleSseCallback emits tool call events" {
