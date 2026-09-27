@@ -204,6 +204,12 @@
     "not_expect": []
   },
   {
+    "name": "System prompt flag overrides the default system prompt",
+    "args": ["--mock", "--model", "mock-model", "--system-prompt", "You are a pirate assistant.", "--prompt", "echo hello world", "--oneshot"],
+    "expect": ["You are a pirate assistant.", "Echo:", "hello world"],
+    "not_expect": ["You are Puny, an AI coding agent"]
+  },
+  {
     "name": "Empty response",
     "args": ["--mock", "--model", "mock-model", "--prompt", "give me an empty response", "--oneshot"],
     "expect": [],

@@ -212,7 +212,8 @@ pub const MockClient = struct {
 
         // Check for echo mode
         if (isKeyword(last_content, .echo)) {
-            return respondWithEcho(callback, last_content, speed, self.io);
+            const system_message = findFirstSystemMessage(request.messages);
+            return respondWithEcho(callback, last_content, system_message, speed, self.io);
         }
 
         // Check for empty mode
@@ -257,6 +258,16 @@ fn findLastUserMessage(messages: []const openai.Message) []const u8 {
         i -= 1;
         switch (messages[i]) {
             .user => |content| return content,
+            else => {},
+        }
+    }
+    return "";
+}
+
+fn findFirstSystemMessage(messages: []const openai.Message) []const u8 {
+    for (messages) |message| {
+        switch (message) {
+            .system => |content| return content,
             else => {},
         }
     }
@@ -327,10 +338,12 @@ fn respondWithContent(callback: openai.StreamCallback, user_message: []const u8,
     try callback.emit(.{ .finish = "stop" });
 }
 
-fn respondWithEcho(callback: openai.StreamCallback, user_message: []const u8, speed: MockSpeed, io: std.Io) !void {
+fn respondWithEcho(callback: openai.StreamCallback, user_message: []const u8, system_message: []const u8, speed: MockSpeed, io: std.Io) !void {
     const chunks = [_][]const u8{
         "Echo: ",
         user_message,
+        "\n\nSystem: ",
+        system_message,
         "\n\nThis is your input echoed back in mock mode.",
     };
 
@@ -837,6 +850,30 @@ test "chatStreaming echoes the user message in echo mode" {
     defer arena_state.deinit();
     const content = try joinedContent(arena_state.allocator(), rec.events.items);
     try std.testing.expect(std.mem.indexOf(u8, content, "Echo: echo hello world") != null);
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming echoes the system message in echo mode" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{
+            .{ .system = "You are a pirate assistant." },
+            .{ .user = "echo hello world" },
+        },
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "Echo: echo hello world") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "You are a pirate assistant.") != null);
     try expectFinish(rec.events.items, "stop");
 }
 
