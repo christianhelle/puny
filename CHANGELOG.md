@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.4.1](https://github.com/christianhelle/puny/releases/tag/v0.4.1) (2026-09-27)
 
 ### Features
 - Support GitHub Copilot models served only over the Responses API ([#216](https://github.com/christianhelle/puny/pull/216)) ([@christianhelle](https://github.com/christianhelle/))
