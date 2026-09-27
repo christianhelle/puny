@@ -523,6 +523,15 @@ fn requestInitiator(messages: []const openai.Message) []const u8 {
 }
 
 pub fn chatStreaming(self: *Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    // Which endpoint a model needs comes from the `/models` catalog. Fetch it once
+    // if this turn arrived before any listing (e.g. oneshot mode skips model
+    // validation); on failure the turn falls back to `/chat/completions`.
+    if (self.responses_models == null) {
+        if (listModels(self)) |owned| {
+            var models = owned;
+            models.deinit();
+        } else |_| {}
+    }
     if (self.usesResponses(request.model)) return chatStreamingResponses(self, request, callback);
 
     const allocator = self.inner.allocator;
@@ -1145,6 +1154,12 @@ fn seedCopilotToken(c: *Client) !void {
     c.copilot_token_expires_at = nowUnixSeconds(c.inner.io) + 3600;
 }
 
+/// Mark the model catalog as already fetched, so chat tests against single-request
+/// servers don't trigger the lazy `/models` fetch.
+fn seedEmptyModelCatalog(c: *Client) !void {
+    try c.rememberEndpoints(&.{});
+}
+
 test "ensureCopilotToken returns the cached token while it is still valid" {
     var c = Client.init(std.testing.allocator, std.testing.io, "");
     defer c.deinit();
@@ -1313,6 +1328,7 @@ fn copilotClientForServer(ctx: *CopilotServer, arena: std.mem.Allocator) !Client
     const url = try std.fmt.allocPrint(arena, "http://127.0.0.1:{d}", .{ctx.server.socket.address.getPort()});
     var c = Client.init(std.testing.allocator, std.testing.io, "gho_test");
     c.withBaseUrl(url);
+    try seedEmptyModelCatalog(&c);
     return c;
 }
 
@@ -1578,6 +1594,7 @@ test "chatStreaming reports response head failures to the http observer" {
     c.withBaseUrl(url);
     c.inner.http_observer = observer;
     try seedCopilotToken(&c);
+    try seedEmptyModelCatalog(&c);
 
     const request = openai.ChatRequest{
         .model = "claude-sonnet-4.5",
@@ -1621,6 +1638,7 @@ test "chatStreaming reports request creation failures to the http observer" {
     c.withBaseUrl(url);
     c.inner.http_observer = observer;
     try seedCopilotToken(&c);
+    try seedEmptyModelCatalog(&c);
 
     const request = openai.ChatRequest{
         .model = "claude-sonnet-4.5",
@@ -1794,6 +1812,32 @@ test "chatStreaming sends models the catalog lists as /responses-only to /respon
     try std.testing.expectEqualStrings("stop", events.items[1].finish.?);
 }
 
+test "chatStreaming fetches the model catalog first when none has been listed" {
+    const ctx = try startRoutingServer(routing_catalog, routing_chat_sse, routing_responses_sse);
+    defer stopRoutingServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try routingClient(ctx, arena);
+    defer c.deinit();
+
+    var events = std.ArrayList(CopilotSseEvent).empty;
+    var recorder = CopilotSseRecorder{ .allocator = arena, .events = &events };
+    cancel.reset();
+    try chatStreaming(&c, .{ .model = "gpt-5.5", .messages = &.{.{ .user = "hi" }}, .tools = &.{} }, recorder.callback());
+    try chatStreaming(&c, .{ .model = "claude-sonnet-4.5", .messages = &.{.{ .user = "hi" }}, .tools = &.{} }, recorder.callback());
+
+    // The catalog is fetched once, then each turn goes to its model's endpoint.
+    try std.testing.expectEqual(@as(usize, 3), ctx.count);
+    try std.testing.expectEqualStrings("/models", ctx.path(0));
+    try std.testing.expectEqualStrings("/responses", ctx.path(1));
+    try std.testing.expectEqualStrings("/chat/completions", ctx.path(2));
+    try std.testing.expectEqualStrings("from responses", events.items[0].content);
+    try std.testing.expectEqualStrings("from chat", events.items[2].content);
+}
+
 // ── User-agent wire tests ─────────────────────────────────────────────
 
 /// Records every `user-agent` header a request arrives with, so the tests can
@@ -1870,6 +1914,7 @@ fn clientWithSeededToken(ctx: *UserAgentServer, allocator: std.mem.Allocator) !C
     c.withBaseUrl(url);
     c.copilot_token = try std.testing.allocator.dupe(u8, "tid=seeded");
     c.copilot_token_expires_at = std.math.maxInt(i64);
+    try seedEmptyModelCatalog(&c);
     return c;
 }
 
