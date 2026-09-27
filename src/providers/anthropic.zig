@@ -117,6 +117,7 @@ const AnthropicSseCallback = struct {
     callback: openai.StreamCallback,
     block_types: std.ArrayList(BlockType),
     input_tokens: i64 = 0,
+    cached_input_tokens: i64 = 0,
     observer: ?http_client.HttpObserver = null,
 
     pub fn event(self: *@This(), data: []const u8) !void {
@@ -132,7 +133,13 @@ const AnthropicSseCallback = struct {
         if (std.mem.eql(u8, event_type, "message_start")) {
             if (parsed.value.object.get("message")) |message| {
                 if (message.object.get("usage")) |usage| {
-                    if (usage.object.get("input_tokens")) |v| self.input_tokens = v.integer;
+                    // input_tokens excludes cache reads and writes; add them so
+                    // input covers the whole prompt like other providers report.
+                    const uncached = integerField(usage, "input_tokens");
+                    const cache_writes = integerField(usage, "cache_creation_input_tokens");
+                    const cache_reads = integerField(usage, "cache_read_input_tokens");
+                    self.input_tokens = uncached + cache_writes + cache_reads;
+                    self.cached_input_tokens = cache_reads;
                 }
             }
             return;
@@ -210,10 +217,16 @@ const AnthropicSseCallback = struct {
             try self.callback.emit(.{ .usage = .{
                 .input_tokens = self.input_tokens,
                 .output_tokens = output_tokens,
+                .cached_input_tokens = self.cached_input_tokens,
             } });
         }
     }
 };
+
+fn integerField(obj: std.json.Value, name: []const u8) i64 {
+    const v = obj.object.get(name) orelse return 0;
+    return if (v == .integer) v.integer else 0;
+}
 
 /// Merges `anthropic-version` into `default_headers`, deduplicating a
 /// caller-supplied `anthropic-version` header (case-insensitive) instead of
@@ -596,6 +609,29 @@ test "AnthropicSseCallback emits content and usage events" {
     try std.testing.expectEqualStrings("end_turn", events.items[2].finish.?);
     try std.testing.expectEqual(@as(i64, 10), events.items[3].usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 20), events.items[3].usage.output_tokens);
+}
+
+test "AnthropicSseCallback counts cache reads and writes as input tokens" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList(TestEvent).empty;
+    var sse_callback = TestSseCallback{ .allocator = allocator, .events = &events };
+    var sse = AnthropicSseCallback{
+        .allocator = allocator,
+        .callback = .{ .context = &sse_callback, .vtable = &.{ .event = TestSseCallback.event } },
+        .block_types = .empty,
+    };
+
+    // Anthropic reports uncached input separately from cache reads and writes;
+    // the whole prompt is their sum, matching OpenAI's prompt_tokens.
+    try sse.event("{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4.6\",\"content\":[],\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":90,\"cache_read_input_tokens\":900}}}");
+    try sse.event("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":20}}");
+
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expectEqual(@as(i64, 1000), events.items[1].usage.input_tokens);
+    try std.testing.expectEqual(@as(i64, 900), events.items[1].usage.cached_input_tokens.?);
 }
 
 test "AnthropicSseCallback emits tool call events" {

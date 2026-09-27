@@ -13,6 +13,8 @@ pub const TurnUsage = struct {
     input_tokens: i64,
     output_tokens: i64,
     reasoning_output_tokens: ?i64 = null,
+    /// Portion of input_tokens served from the provider's prompt cache.
+    cached_input_tokens: ?i64 = null,
     tokens_per_second: ?f64 = null,
     time_to_first_token_seconds: ?f64 = null,
 };
@@ -100,12 +102,17 @@ const CompletionTokensDetails = struct {
     reasoning_tokens: ?i64 = null,
 };
 
+const PromptTokensDetails = struct {
+    cached_tokens: ?i64 = null,
+};
+
 const UsageJson = struct {
     prompt_tokens: i64,
     completion_tokens: i64,
     reasoning_output_tokens: ?i64 = null,
     reasoning_tokens: ?i64 = null,
     completion_tokens_details: ?CompletionTokensDetails = null,
+    prompt_tokens_details: ?PromptTokensDetails = null,
     tokens_per_second: ?f64 = null,
     time_to_first_token_seconds: ?f64 = null,
 };
@@ -163,6 +170,7 @@ pub const SseCallback = struct {
                 .input_tokens = usage.prompt_tokens,
                 .output_tokens = usage.completion_tokens,
                 .reasoning_output_tokens = usage.reasoning_output_tokens orelse usage.reasoning_tokens orelse (if (usage.completion_tokens_details) |d| d.reasoning_tokens else null),
+                .cached_input_tokens = if (usage.prompt_tokens_details) |d| d.cached_tokens else null,
                 .tokens_per_second = usage.tokens_per_second,
                 .time_to_first_token_seconds = usage.time_to_first_token_seconds,
             } });
@@ -485,6 +493,40 @@ test "usage event parses nested completion_tokens_details reasoning_tokens" {
 
     try std.testing.expectEqual(@as(usize, 1), events.items.len);
     try std.testing.expectEqual(@as(i64, 5), events.items[0].reasoning_output_tokens.?);
+}
+
+test "usage event reports cached prompt tokens from prompt_tokens_details" {
+    var events: std.ArrayList(TurnUsage) = .empty;
+    defer events.deinit(std.testing.allocator);
+
+    const UsageListener = struct {
+        events: *std.ArrayList(TurnUsage),
+
+        pub fn event(self: *@This(), ev: StreamEvent) !void {
+            if (ev == .usage) try self.events.append(std.testing.allocator, ev.usage);
+        }
+    };
+
+    var listener = UsageListener{ .events = &events };
+    const callback = StreamCallback{
+        .context = &listener,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(ctx: *anyopaque, ev: StreamEvent) !void {
+                    const state: *UsageListener = @ptrCast(@alignCast(ctx));
+                    try state.event(ev);
+                }
+            }.event,
+        },
+    };
+
+    var sse = SseCallback{ .allocator = std.testing.allocator, .callback = callback };
+
+    try sse.event("{\"choices\":[],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":900}}}");
+
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqual(@as(i64, 1000), events.items[0].input_tokens);
+    try std.testing.expectEqual(@as(i64, 900), events.items[0].cached_input_tokens.?);
 }
 
 test "requestPayload omits reasoning_effort when null" {

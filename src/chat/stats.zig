@@ -7,6 +7,8 @@ const openai = @import("../providers/openai.zig");
 pub const PerModelStats = struct {
     turn_count: usize = 0,
     input_tokens: i64 = 0,
+    /// Portion of input_tokens the provider served from its prompt cache.
+    cached_input_tokens: i64 = 0,
     output_tokens: i64 = 0,
     reasoning_output_tokens: i64 = 0,
     ttft_sum: f64 = 0,
@@ -100,6 +102,7 @@ pub const SessionStats = struct {
         const stats = self.activeModelStats();
         if (usage) |u| {
             stats.input_tokens += u.input_tokens - self.current_turn_input;
+            stats.cached_input_tokens += u.cached_input_tokens orelse 0;
 
             // Providers count reasoning tokens inside the output total; track
             // them separately so totals are not double-counted.
@@ -180,7 +183,16 @@ pub const SessionStats = struct {
             var output_buf: [32]u8 = undefined;
             var reasoning_buf: [32]u8 = undefined;
             var total_buf: [32]u8 = undefined;
-            try writer.print("  Input tokens:        {s}\n", .{token_stats.formatGrouped(&input_buf, stats.input_tokens)});
+            const input = token_stats.formatGrouped(&input_buf, stats.input_tokens);
+            if (stats.cached_input_tokens > 0) {
+                var cached_buf: [32]u8 = undefined;
+                try writer.print("  Input tokens:        {s} (cached: {s})\n", .{
+                    input,
+                    token_stats.formatGrouped(&cached_buf, stats.cached_input_tokens),
+                });
+            } else {
+                try writer.print("  Input tokens:        {s}\n", .{input});
+            }
             try writer.print("  Output tokens:       {s} (reasoning: {s})\n", .{
                 token_stats.formatGrouped(&output_buf, stats.output_tokens),
                 token_stats.formatGrouped(&reasoning_buf, stats.reasoning_output_tokens),
@@ -371,6 +383,21 @@ test "SessionStats.print groups large token counts with commas" {
     try std.testing.expect(std.mem.indexOf(u8, written, "Input tokens:        1,234,567") != null);
     try std.testing.expect(std.mem.indexOf(u8, written, "Output tokens:       86,667 (reasoning: 2,345)") != null);
     try std.testing.expect(std.mem.indexOf(u8, written, "Total tokens:        1,323,579") != null);
+}
+
+test "SessionStats.print shows cached share of input tokens" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 900);
+    stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 5, .cached_input_tokens = 800 }, true);
+    stats.beginTurn("model-a", 1_900);
+    stats.finalizeTurn(.{ .input_tokens = 2_000, .output_tokens = 5, .cached_input_tokens = 1_000 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Input tokens:        3,000 (cached: 1,800)") != null);
 }
 
 test "SessionStats.print groups large turn counts with commas" {

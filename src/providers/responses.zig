@@ -47,6 +47,25 @@ fn isNullableSchema(value: std.json.Value) bool {
     return false;
 }
 
+fn integerField(obj: std.json.ObjectMap, name: []const u8) ?i64 {
+    const v = obj.get(name) orelse return null;
+    return if (v == .integer) v.integer else null;
+}
+
+fn detailField(obj: std.json.ObjectMap, details_name: []const u8, name: []const u8) ?i64 {
+    const details = obj.get(details_name) orelse return null;
+    return if (details == .object) integerField(details.object, name) else null;
+}
+
+fn parseUsage(usage_obj: std.json.ObjectMap) openai.TurnUsage {
+    return .{
+        .input_tokens = integerField(usage_obj, "input_tokens") orelse 0,
+        .output_tokens = integerField(usage_obj, "output_tokens") orelse 0,
+        .reasoning_output_tokens = detailField(usage_obj, "output_tokens_details", "reasoning_tokens"),
+        .cached_input_tokens = detailField(usage_obj, "input_tokens_details", "cached_tokens"),
+    };
+}
+
 pub const ResponsesSseCallback = struct {
     allocator: std.mem.Allocator,
     callback: StreamCallback,
@@ -173,30 +192,7 @@ pub const ResponsesSseCallback = struct {
                     const resp_obj = resp_val.object;
                     if (resp_obj.get("usage")) |usage_val| {
                         if (usage_val == .object) {
-                            const usage_obj = usage_val.object;
-                            const input_tokens: i64 = if (usage_obj.get("input_tokens")) |v| switch (v) {
-                                .integer => |i| i,
-                                else => 0,
-                            } else 0;
-                            const output_tokens: i64 = if (usage_obj.get("output_tokens")) |v| switch (v) {
-                                .integer => |i| i,
-                                else => 0,
-                            } else 0;
-                            var reasoning_output_tokens: ?i64 = null;
-                            if (usage_obj.get("output_tokens_details")) |details| {
-                                if (details == .object) {
-                                    if (details.object.get("reasoning_tokens")) |rt| {
-                                        if (rt == .integer) reasoning_output_tokens = rt.integer;
-                                    }
-                                }
-                            }
-                            try self.callback.emit(.{ .usage = .{
-                                .input_tokens = input_tokens,
-                                .output_tokens = output_tokens,
-                                .reasoning_output_tokens = reasoning_output_tokens,
-                                .tokens_per_second = null,
-                                .time_to_first_token_seconds = null,
-                            } });
+                            try self.callback.emit(.{ .usage = parseUsage(usage_val.object) });
                         }
                     }
                 }
@@ -211,30 +207,7 @@ pub const ResponsesSseCallback = struct {
                     const resp_obj = resp_val.object;
                     if (resp_obj.get("usage")) |usage_val| {
                         if (usage_val == .object) {
-                            const usage_obj = usage_val.object;
-                            const input_tokens: i64 = if (usage_obj.get("input_tokens")) |v| switch (v) {
-                                .integer => |i| i,
-                                else => 0,
-                            } else 0;
-                            const output_tokens: i64 = if (usage_obj.get("output_tokens")) |v| switch (v) {
-                                .integer => |i| i,
-                                else => 0,
-                            } else 0;
-                            var reasoning_output_tokens: ?i64 = null;
-                            if (usage_obj.get("output_tokens_details")) |details| {
-                                if (details == .object) {
-                                    if (details.object.get("reasoning_tokens")) |rt| {
-                                        if (rt == .integer) reasoning_output_tokens = rt.integer;
-                                    }
-                                }
-                            }
-                            try self.callback.emit(.{ .usage = .{
-                                .input_tokens = input_tokens,
-                                .output_tokens = output_tokens,
-                                .reasoning_output_tokens = reasoning_output_tokens,
-                                .tokens_per_second = null,
-                                .time_to_first_token_seconds = null,
-                            } });
+                            try self.callback.emit(.{ .usage = parseUsage(usage_val.object) });
                         }
                     }
                 }
@@ -735,6 +708,34 @@ test "ResponsesSseCallback emits content and tool events" {
     try std.testing.expectEqual(@as(i64, 10), events.items[6].usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 20), events.items[6].usage.output_tokens);
     try std.testing.expectEqualStrings("stop", events.items[7].finish.?);
+}
+
+test "ResponsesSseCallback reports cached input tokens from input_tokens_details" {
+    var usages = std.ArrayList(openai.TurnUsage).empty;
+    defer usages.deinit(std.testing.allocator);
+
+    const Recorder = struct {
+        usages: *std.ArrayList(openai.TurnUsage),
+        fn event(ctx: *anyopaque, ev: StreamEvent) !void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            if (ev == .usage) try self.usages.append(std.testing.allocator, ev.usage);
+        }
+    };
+
+    var recorder = Recorder{ .usages = &usages };
+    var sse = ResponsesSseCallback{ .allocator = std.testing.allocator, .callback = .{
+        .context = &recorder,
+        .vtable = &.{ .event = Recorder.event, .reset = null },
+    } };
+
+    try sse.event("{\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"x\",\"output\":[],\"usage\":{\"input_tokens\":1000,\"input_tokens_details\":{\"cached_tokens\":900},\"output_tokens\":20,\"total_tokens\":1020}}}");
+    try sse.event("{\"type\":\"response.incomplete\",\"sequence_number\":2,\"response\":{\"id\":\"resp_2\",\"object\":\"response\",\"status\":\"incomplete\",\"model\":\"x\",\"output\":[],\"usage\":{\"input_tokens\":500,\"input_tokens_details\":{\"cached_tokens\":400},\"output_tokens\":20,\"total_tokens\":520}}}");
+
+    try std.testing.expectEqual(@as(usize, 2), usages.items.len);
+    try std.testing.expectEqual(@as(i64, 1000), usages.items[0].input_tokens);
+    try std.testing.expectEqual(@as(i64, 900), usages.items[0].cached_input_tokens.?);
+    try std.testing.expectEqual(@as(i64, 500), usages.items[1].input_tokens);
+    try std.testing.expectEqual(@as(i64, 400), usages.items[1].cached_input_tokens.?);
 }
 
 test "ResponsesSseCallback handles output at streaming server" {
