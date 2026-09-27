@@ -16,6 +16,7 @@ pub const Options = struct {
     effort: ?openai.ReasoningEffort = null,
     prompt: ?[]const u8 = null,
     prompt_file: ?[]const u8 = null,
+    system_prompt: ?[]const u8 = null,
     oneshot: bool = false,
     review: bool = false,
     orchestrate: bool = false,
@@ -148,6 +149,10 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.prompt_file = args[i];
+        } else if (std.mem.eql(u8, arg, "--system-prompt")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.system_prompt = args[i];
         } else if (std.mem.eql(u8, arg, "--reconfigure")) {
             opts.reconfigure = true;
         } else if (std.mem.eql(u8, arg, "--show-thinking")) {
@@ -269,6 +274,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --effort <level>         Reasoning effort: default, none, minimal, low, medium, high, xhigh (CLI > env > config)
         \\  -p, --prompt <text>          Pre-fill prompt as first user message
         \\      --prompt-file <path|url> Read first prompt from a file or URL
+        \\      --system-prompt <text>   Override the system prompt for this session
         \\  -1, --oneshot, --one-shot    Exit after processing the prompt (requires --prompt or --prompt-file)
         \\      --review                 Review the current branch against the latest origin/main and exit
         \\      --orchestrate            Implement, review, and fix the current branch until merge worthy
@@ -468,6 +474,14 @@ test "parseArgs sets prune with session" {
     const opts = parseArgs(undefined, &env, args);
     try std.testing.expect(opts.prune);
     try std.testing.expectEqualStrings("abc-123", opts.session.?);
+}
+
+test "parseArgs sets system_prompt from flag" {
+    const argv = [_][:0]const u8{ "puny", "--system-prompt", "You are a pirate." };
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    const opts = parseArgs(std.testing.io, &env, &argv);
+    try std.testing.expectEqualStrings("You are a pirate.", opts.system_prompt.?);
 }
 
 test "parseArgs sets prompt_file from flag" {

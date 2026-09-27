@@ -214,6 +214,10 @@ fn run(init: std.process.Init) !u8 {
         if (sigint.isTriggered()) return 0;
     }
 
+    // Applied after reconfiguration, which can persist `cfg` to config.json:
+    // a session-only override must never be written to disk.
+    applyCliSystemPromptOverride(cfg, parsed.system_prompt);
+
     var random_source: std.Random.IoSource = .{ .io = init.io };
     const random = random_source.interface();
 
@@ -391,6 +395,9 @@ fn run(init: std.process.Init) !u8 {
             const review_context = try branch_review.buildPromptContext(messages_arena, scope);
             try messages.append(messages_arena, .{ .system = review_context });
         }
+    } else if (parsed.system_prompt != null) {
+        const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
+        overrideRestoredSystemPrompt(messages.items, system_prompt);
     }
 
     var session_stats = stats.SessionStats.init(arena, init.io);
@@ -713,6 +720,24 @@ fn resolveReasoningEffort(
     return null;
 }
 
+/// The `--system-prompt` flag takes precedence over any override already
+/// loaded from the config file.
+fn applyCliSystemPromptOverride(cfg: *config.Config, cli_override: ?[]const u8) void {
+    if (cli_override) |value| cfg.prompts.system.override = value;
+}
+
+/// Replaces the first system message of a restored session so `--system-prompt`
+/// still takes effect when `--resume` or `--session` skips the fresh-session
+/// context build. A no-op when the restored conversation has no system message.
+fn overrideRestoredSystemPrompt(messages: []openai.Message, new_prompt: []const u8) void {
+    for (messages) |*message| {
+        if (message.* == .system) {
+            message.* = .{ .system = new_prompt };
+            return;
+        }
+    }
+}
+
 fn buildPlanningToolDefinitions(arena: std.mem.Allocator, no_skills: bool) !std.ArrayList(openai.ToolDefinition) {
     var definitions: std.ArrayList(openai.ToolDefinition) = .empty;
     errdefer definitions.deinit(arena);
@@ -939,6 +964,41 @@ test "resolveReasoningEffort ignores an unrecognised configured level" {
         @as(?openai.ReasoningEffort, null),
         resolveReasoningEffort(null, null, "enthusiastic"),
     );
+}
+
+test "applyCliSystemPromptOverride sets the config override from the flag" {
+    var cfg = config.Config{};
+    applyCliSystemPromptOverride(&cfg, "You are a pirate.");
+    try std.testing.expectEqualStrings("You are a pirate.", cfg.prompts.system.override.?);
+}
+
+test "applyCliSystemPromptOverride leaves the config override untouched without a flag" {
+    var cfg = config.Config{};
+    cfg.prompts.system.override = "from config file";
+    applyCliSystemPromptOverride(&cfg, null);
+    try std.testing.expectEqualStrings("from config file", cfg.prompts.system.override.?);
+}
+
+test "overrideRestoredSystemPrompt replaces the first system message" {
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "old system prompt" });
+    try messages.append(std.testing.allocator, .{ .user = "hi" });
+
+    overrideRestoredSystemPrompt(messages.items, "new system prompt");
+
+    try std.testing.expectEqualStrings("new system prompt", messages.items[0].system);
+    try std.testing.expectEqualStrings("hi", messages.items[1].user);
+}
+
+test "overrideRestoredSystemPrompt is a no-op without a system message" {
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .user = "hi" });
+
+    overrideRestoredSystemPrompt(messages.items, "new system prompt");
+
+    try std.testing.expectEqualStrings("hi", messages.items[0].user);
 }
 
 test "printStartupTime ends its line" {
