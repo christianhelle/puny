@@ -9,7 +9,7 @@ pub fn pickEffort(
     var items: std.ArrayList(list_picker.Item) = .empty;
     defer items.deinit(arena);
 
-    inline for ([_]openai.ReasoningEffort{ .default, .none, .low, .medium, .high, .xhigh }) |effort| {
+    inline for ([_]openai.ReasoningEffort{ .default, .none, .low, .medium, .high, .xhigh, .max }) |effort| {
         try items.append(arena, .{
             .value = @tagName(effort),
             .label = switch (effort) {
@@ -19,6 +19,7 @@ pub fn pickEffort(
                 .medium => "Medium",
                 .high => "High",
                 .xhigh => "Extra High",
+                .max => "Max",
             },
         });
     }
@@ -51,6 +52,7 @@ test "parseEffort parses valid level names" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .medium), parseEffort("medium"));
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), parseEffort("high"));
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), parseEffort("xhigh"));
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .max), parseEffort("max"));
 }
 
 test "parseEffort trims whitespace and rejects invalid levels" {
@@ -66,7 +68,7 @@ test "parseEffort rejects the removed minimal level" {
 
 test "pickEffort maps every pickable label back to its enum value" {
     // Mirrors the item list built by pickEffort without touching stdin.
-    const labels = [_]openai.ReasoningEffort{ .default, .none, .low, .medium, .high, .xhigh };
+    const labels = [_]openai.ReasoningEffort{ .default, .none, .low, .medium, .high, .xhigh, .max };
     for (labels) |effort| {
         const tag = @tagName(effort);
         try std.testing.expectEqual(effort, std.meta.stringToEnum(openai.ReasoningEffort, tag).?);
