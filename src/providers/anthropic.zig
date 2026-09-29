@@ -448,7 +448,8 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest)
     if (request.reasoning_effort) |effort| {
         if (effort != .default) {
             try w.writeAll(",\"thinking\":{\"type\":\"enabled\"},\"output_config\":{\"effort\":\"");
-            try w.writeAll(@tagName(effort));
+            // Not every Claude model accepts "xhigh", so it keeps mapping to "max".
+            try w.writeAll(if (effort == .xhigh) "max" else @tagName(effort));
             try w.writeAll("\"}");
         }
     }
@@ -747,7 +748,7 @@ test "requestPayload omits thinking when reasoning_effort default" {
     try std.testing.expect(parsed.value.object.get("output_config") == null);
 }
 
-test "requestPayload sends max and xhigh effort as their own levels" {
+test "requestPayload sends xhigh and max as max effort" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -765,7 +766,7 @@ test "requestPayload sends max and xhigh effort as their own levels" {
         defer parsed.deinit();
 
         const root = parsed.value.object;
-        try std.testing.expectEqualStrings(@tagName(effort), root.get("output_config").?.object.get("effort").?.string);
+        try std.testing.expectEqualStrings("max", root.get("output_config").?.object.get("effort").?.string);
     }
 }
 
