@@ -1,6 +1,7 @@
 const std = @import("std");
 const openai = @import("../providers/openai.zig");
 const skills = @import("../skills/skills.zig");
+const usage = @import("usage.zig");
 
 /// Approximate tokens each part of the next request takes, at roughly four
 /// characters per token.
@@ -23,11 +24,9 @@ pub fn measure(messages: []const openai.Message, tools: []const openai.ToolDefin
             else => message_chars += conversationChars(message),
         }
     }
-    var tool_chars: usize = 0;
-    for (tools) |tool| tool_chars += toolChars(tool);
     return .{
         .system_prompt = tokensFor(system_chars),
-        .system_tools = tokensFor(tool_chars),
+        .system_tools = usage.estimateToolTokens(tools),
         .skills = tokensFor(skill_chars),
         .messages = tokensFor(message_chars),
     };
@@ -48,14 +47,6 @@ fn conversationChars(message: openai.Message) usize {
         },
         .tool => |result| result.content.len,
     };
-}
-
-/// Characters of a tool definition serialized as JSON, the way it is sent.
-fn toolChars(tool: openai.ToolDefinition) usize {
-    var buffer: [256]u8 = undefined;
-    var counter = std.Io.Writer.Discarding.init(&buffer);
-    std.json.Stringify.value(tool, .{}, &counter.writer) catch return 0;
-    return @intCast(counter.fullCount());
 }
 
 /// Writes one line per part of the context, with its share of `limit` when

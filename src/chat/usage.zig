@@ -24,6 +24,15 @@ pub fn estimateUsage(messages: []const openai.Message, output_chars: usize) open
     };
 }
 
+/// Approximate tokens the tool definitions take, serialized as JSON the way
+/// they are sent.
+pub fn estimateToolTokens(tools: []const openai.ToolDefinition) i64 {
+    var buffer: [256]u8 = undefined;
+    var counter = std.Io.Writer.Discarding.init(&buffer);
+    for (tools) |tool| std.json.Stringify.value(tool, .{}, &counter.writer) catch {};
+    return @intCast(@divFloor(counter.fullCount(), 4));
+}
+
 test "empty messages returns zero input" {
     const result = estimateUsage(&.{}, 0);
     try std.testing.expectEqual(@as(i64, 0), result.input_tokens);
@@ -162,4 +171,13 @@ test "empty system and user messages contribute zero" {
     };
     const result = estimateUsage(&msgs, 0);
     try std.testing.expectEqual(@as(i64, 0), result.input_tokens);
+}
+
+test "estimateToolTokens counts tool definitions as they are sent" {
+    var function: std.json.ObjectMap = .empty;
+    defer function.deinit(std.testing.allocator);
+    try function.put(std.testing.allocator, "name", .{ .string = "read_file" });
+    const tools = [_]openai.ToolDefinition{ .{ .function = .{ .object = function } }, .{ .function = .{ .object = function } } };
+    // Each {"type":"function","function":{"name":"read_file"}} is 51 characters.
+    try std.testing.expectEqual(@as(i64, 25), estimateToolTokens(&tools));
 }
