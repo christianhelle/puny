@@ -150,3 +150,16 @@ test "write lists each part with its share of the limit" {
         \\
     , writer.buffered());
 }
+
+test "write leaves out shares when no limit is set" {
+    var buffer: [512]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try write(&writer, .{ .system_prompt = 1200, .system_tools = 3450, .skills = 80, .messages = 64000 }, null);
+    try std.testing.expectEqualStrings(
+        \\  System prompt      1200 tokens
+        \\  System tools       3450 tokens
+        \\  Skills               80 tokens
+        \\  Messages          64000 tokens
+        \\
+    , writer.buffered());
+}
