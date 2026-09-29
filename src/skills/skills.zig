@@ -10,6 +10,14 @@ pub const SkillRecord = struct {
     disable_model_invocation: bool,
 };
 
+/// Opens the system message that lists the available skills.
+const listing_open = "<available_skills>";
+
+/// True when a system message was put in the context by the skills feature.
+pub fn isSkillContext(text: []const u8) bool {
+    return std.mem.startsWith(u8, text, listing_open);
+}
+
 pub const Registry = struct {
     allocator: std.mem.Allocator,
     records: std.ArrayList(SkillRecord),
@@ -73,7 +81,7 @@ pub const Registry = struct {
         var buf = std.ArrayList(u8).empty;
         errdefer buf.deinit(allocator);
 
-        try buf.appendSlice(allocator, "<available_skills>\n");
+        try buf.appendSlice(allocator, listing_open ++ "\n");
         for (self.records.items) |r| {
             if (r.description) |desc| {
                 try buf.appendSlice(allocator, "  <skill>\n    <name>");

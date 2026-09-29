@@ -1,5 +1,6 @@
 const std = @import("std");
 const openai = @import("../providers/openai.zig");
+const skills = @import("../skills/skills.zig");
 
 /// Approximate tokens each part of the next request takes, at roughly four
 /// characters per token.
@@ -12,10 +13,13 @@ pub const Breakdown = struct {
 
 pub fn measure(messages: []const openai.Message, tools: []const openai.ToolDefinition) Breakdown {
     var system_chars: usize = 0;
+    var skill_chars: usize = 0;
     var message_chars: usize = 0;
     for (messages) |message| {
         switch (message) {
-            .system => |text| system_chars += text.len,
+            .system => |text| {
+                if (skills.isSkillContext(text)) skill_chars += text.len else system_chars += text.len;
+            },
             else => message_chars += conversationChars(message),
         }
     }
@@ -24,6 +28,7 @@ pub fn measure(messages: []const openai.Message, tools: []const openai.ToolDefin
     return .{
         .system_prompt = tokensFor(system_chars),
         .system_tools = tokensFor(tool_chars),
+        .skills = tokensFor(skill_chars),
         .messages = tokensFor(message_chars),
     };
 }
@@ -89,4 +94,14 @@ test "measure counts tool definitions as they are sent" {
     const breakdown = measure(&.{}, &tools);
     // {"type":"function","function":{"name":"read_file"}} is 51 characters.
     try std.testing.expectEqual(@as(i64, 12), breakdown.system_tools);
+}
+
+test "measure counts the available skills listing as skills" {
+    const messages = [_]openai.Message{
+        .{ .system = "You are puny." },
+        .{ .system = "<available_skills>\n  <skill>\n    <name>tdd</name>\n  </skill>\n</available_skills>" },
+    };
+    const breakdown = measure(&messages, &.{});
+    try std.testing.expectEqual(@as(i64, 3), breakdown.system_prompt);
+    try std.testing.expectEqual(@as(i64, 20), breakdown.skills);
 }
