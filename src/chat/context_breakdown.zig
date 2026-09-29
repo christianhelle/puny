@@ -11,7 +11,6 @@ pub const Breakdown = struct {
 };
 
 pub fn measure(messages: []const openai.Message, tools: []const openai.ToolDefinition) Breakdown {
-    _ = tools;
     var system_chars: usize = 0;
     var message_chars: usize = 0;
     for (messages) |message| {
@@ -20,8 +19,11 @@ pub fn measure(messages: []const openai.Message, tools: []const openai.ToolDefin
             else => message_chars += conversationChars(message),
         }
     }
+    var tool_chars: usize = 0;
+    for (tools) |tool| tool_chars += toolChars(tool);
     return .{
         .system_prompt = tokensFor(system_chars),
+        .system_tools = tokensFor(tool_chars),
         .messages = tokensFor(message_chars),
     };
 }
@@ -41,6 +43,14 @@ fn conversationChars(message: openai.Message) usize {
         },
         .tool => |result| result.content.len,
     };
+}
+
+/// Characters of a tool definition serialized as JSON, the way it is sent.
+fn toolChars(tool: openai.ToolDefinition) usize {
+    var buffer: [256]u8 = undefined;
+    var counter = std.Io.Writer.Discarding.init(&buffer);
+    std.json.Stringify.value(tool, .{}, &counter.writer) catch return 0;
+    return @intCast(counter.fullCount());
 }
 
 fn tokensFor(chars: usize) i64 {
@@ -69,4 +79,14 @@ test "measure counts the conversation as messages" {
     // 14 + 11 + 9 + 20 + 27 = 81 characters.
     try std.testing.expectEqual(@as(i64, 20), breakdown.messages);
     try std.testing.expectEqual(@as(i64, 0), breakdown.system_prompt);
+}
+
+test "measure counts tool definitions as they are sent" {
+    var function: std.json.ObjectMap = .empty;
+    defer function.deinit(std.testing.allocator);
+    try function.put(std.testing.allocator, "name", .{ .string = "read_file" });
+    const tools = [_]openai.ToolDefinition{.{ .function = .{ .object = function } }};
+    const breakdown = measure(&.{}, &tools);
+    // {"type":"function","function":{"name":"read_file"}} is 51 characters.
+    try std.testing.expectEqual(@as(i64, 12), breakdown.system_tools);
 }
