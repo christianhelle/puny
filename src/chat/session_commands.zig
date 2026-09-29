@@ -4,6 +4,7 @@ const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
 const context = @import("context.zig");
 const compact = @import("compact.zig");
+const context_breakdown = @import("context_breakdown.zig");
 const debug_log = @import("debug_log.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const input = @import("../tui/input.zig");
@@ -18,20 +19,23 @@ const welcome = @import("../tui/welcome.zig");
 const ModelProvider = provider.ModelProvider;
 const ChatLoopContext = context.ChatLoopContext;
 
-/// `/context [tokens|off]`: shows how full the context is, or changes the
-/// limit for the current conversation.
+/// `/context [tokens|off]`: shows how full the context is and what fills it,
+/// or changes the limit for the current conversation.
 pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void {
     const budget = ctx.context_budget;
     const w = ctx.stdout_writer;
     switch (compact.parseContextArgument(argument)) {
         .show => {
             const used = budget.estimate(ctx.messages.items);
-            if (budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
-                const percent = @divFloor(@as(u128, @intCast(@max(used, 0))) * 100, limit);
-                try w.print("\nContext: ~{d} of {d} tokens ({d}%); compacts at {d}%.\n", .{ used, limit, percent, compact.threshold_percent });
+            const limit = budget.resolveLimit(ctx.prov, ctx.model_key.*);
+            if (limit) |total| {
+                const percent = @divFloor(@as(u128, @intCast(@max(used, 0))) * 100, total);
+                try w.print("\nContext: ~{d} of {d} tokens ({d}%); compacts at {d}%.\n", .{ used, total, percent, compact.threshold_percent });
             } else {
                 try w.print("\nContext: ~{d} tokens. No limit is set, so auto compaction is off.\n", .{used});
             }
+            const breakdown = context_breakdown.measure(ctx.messages.items, ctx.activeToolDefinitions());
+            try context_breakdown.write(w, breakdown, limit);
         },
         .set => |tokens| {
             budget.setExplicit(tokens);
@@ -1004,4 +1008,47 @@ test "handleReconfigureCommand refuses oneshot mode" {
     try handleReconfigureCommand(&ctx);
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "/config not available in oneshot mode.") != null);
+}
+
+test "handleContextCommand breaks the context down by part" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "You are puny, a coding agent." });
+    try messages.append(std.testing.allocator, .{ .user = "Read build.zig" });
+    var function: std.json.ObjectMap = .empty;
+    defer function.deinit(std.testing.allocator);
+    try function.put(std.testing.allocator, "name", .{ .string = "read_file" });
+    var tools: std.ArrayList(openai.ToolDefinition) = .empty;
+    defer tools.deinit(std.testing.allocator);
+    try tools.append(std.testing.allocator, .{ .function = .{ .object = function } });
+    var mode: @import("../core/mode.zig").AgentMode = .build;
+    var budget = compact.ContextBudget.init(1000, null);
+    var model_key: []const u8 = "mock-model";
+    var prov = provider.Provider{ .mock = @import("../providers/mock.zig").MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    ctx.prov = &prov;
+    ctx.messages = &messages;
+    ctx.full_tool_definitions = &tools;
+    ctx.mode = &mode;
+    ctx.context_budget = &budget;
+    ctx.model_key = &model_key;
+
+    try handleContextCommand(&ctx, null);
+
+    try std.testing.expectEqualStrings(
+        \\
+        \\Context: ~10 of 1000 tokens (1%); compacts at 80%.
+        \\  System prompt         7 tokens (0.7%)
+        \\  System tools         12 tokens (1.2%)
+        \\  Skills                0 tokens (0.0%)
+        \\  Messages              3 tokens (0.3%)
+        \\
+    , out.written());
 }
