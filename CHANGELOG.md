@@ -2,6 +2,9 @@
 
 ## [Unreleased Changes]
 
+### Merged Pull Requests
+- Replace minimal reasoning effort with max ([#219](https://github.com/christianhelle/puny/pull/219)) ([@christianhelle](https://github.com/christianhelle/))
+
 ### Features
 - Fix MissingGithubToken after resetting a Copilot conversation ([#218](https://github.com/christianhelle/puny/pull/218)) ([@christianhelle](https://github.com/christianhelle/))
 - Show cached share of input tokens and count Anthropic cache tokens as input ([#217](https://github.com/christianhelle/puny/pull/217)) ([@christianhelle](https://github.com/christianhelle/))
