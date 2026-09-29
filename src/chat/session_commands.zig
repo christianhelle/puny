@@ -26,7 +26,7 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
     const w = ctx.stdout_writer;
     switch (compact.parseContextArgument(argument)) {
         .show => {
-            const used = budget.estimate(ctx.messages.items);
+            const used = budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());
             const limit = budget.resolveLimit(ctx.prov, ctx.model_key.*);
             if (limit) |total| {
                 const percent = @divFloor(@as(u128, @intCast(@max(used, 0))) * 100, total);
@@ -1044,7 +1044,7 @@ test "handleContextCommand breaks the context down by part" {
 
     try std.testing.expectEqualStrings(
         \\
-        \\Context: ~10 of 1000 tokens (1%); compacts at 80%.
+        \\Context: ~22 of 1000 tokens (2%); compacts at 80%.
         \\  System prompt         7 tokens (0.7%)
         \\  System tools         12 tokens (1.2%)
         \\  Skills                0 tokens (0.0%)

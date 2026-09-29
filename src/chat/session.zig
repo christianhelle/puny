@@ -670,7 +670,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     while (!turn_complete) {
         if (!compaction_failed) {
             if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
-                if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items), limit)) {
+                if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions()), limit)) {
                     const outcome = try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) });
                     compaction_failed = outcome == .failed or outcome == .cancelled;
                 }
@@ -806,7 +806,7 @@ const CompactOutcome = enum { compacted, nothing_to_compact, cancelled, failed }
 /// summary leaves the conversation untouched.
 fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactOutcome {
     const split = compact.planSplit(ctx.messages.items, mode) orelse return .nothing_to_compact;
-    const before = ctx.context_budget.estimate(ctx.messages.items);
+    const before = ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());
 
     try ctx.stdout_writer.print("\n{s}Compacting conversation...{s}\n", .{ ansi.dim, ansi.reset });
     try ctx.stdout_writer.flush();
@@ -833,7 +833,7 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
             try compact.apply(ctx.messages_arena.allocator(), ctx.messages, split, summary);
             try reclaimCompactedHistory(ctx);
             ctx.context_budget.resetUsage();
-            const after = ctx.context_budget.estimate(ctx.messages.items);
+            const after = ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());
             try ctx.stdout_writer.print("{s}Compacted conversation: ~{d} -> ~{d} tokens.{s}\n", .{ ansi.dim, before, after, ansi.reset });
             try ctx.stdout_writer.flush();
             return .compacted;
