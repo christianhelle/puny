@@ -247,6 +247,7 @@ pub const ChatSession = struct {
                         try ctx.stdout_writer.print("\nRestoring session {s}...\n", .{s.id});
                         try ctx.stdout_writer.flush();
 
+                        const new_api_key = resolver.retainedApiKey(ctx.prov, try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, resolver.apiKeyEnv(ctx.init.environ_map, ctx.model_provider.*)));
                         ctx.prov.deinit();
                         ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
                         _ = ctx.messages_arena.reset(.free_all);
@@ -272,7 +273,6 @@ pub const ChatSession = struct {
                         ctx.session_stats.* = stats.SessionStats.init(ctx.arena, ctx.io);
                         ctx.session_stats.session_id = ctx.session.id;
 
-                        const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, resolver.apiKeyEnv(ctx.init.environ_map, ctx.model_provider.*));
                         ctx.prov.* = resolver.createProvider(ctx.parsed.mock, ctx.model_provider.*, ctx.provider_url.*, new_api_key, ctx.messages_arena.allocator(), ctx.io, ctx.session.id);
                         if (ctx.debug_log) |log| attachHttpDebugObserver(ctx.prov, log);
 
