@@ -677,11 +677,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
             }
         }
 
-        const active_tool_definitions = switch (ctx.mode.*) {
-            .build => ctx.full_tool_definitions.items,
-            .planning => ctx.planning_tool_definitions.items,
-            .review => ctx.review_tool_definitions.items,
-        };
+        const active_tool_definitions = ctx.activeToolDefinitions();
 
         var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
         try thinking_indicator.show(ctx.stdout_writer);
