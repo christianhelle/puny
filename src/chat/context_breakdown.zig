@@ -58,6 +58,25 @@ fn toolChars(tool: openai.ToolDefinition) usize {
     return @intCast(counter.fullCount());
 }
 
+/// Writes one line per part of the context, with its share of `limit` when
+/// a limit is known.
+pub fn write(writer: *std.Io.Writer, breakdown: Breakdown, limit: ?usize) !void {
+    try writeRow(writer, "System prompt", breakdown.system_prompt, limit);
+    try writeRow(writer, "System tools", breakdown.system_tools, limit);
+    try writeRow(writer, "Skills", breakdown.skills, limit);
+    try writeRow(writer, "Messages", breakdown.messages, limit);
+}
+
+fn writeRow(writer: *std.Io.Writer, label: []const u8, tokens: i64, limit: ?usize) !void {
+    const count: u64 = @intCast(@max(tokens, 0));
+    try writer.print("  {s:<14}{d:>9} tokens", .{ label, count });
+    if (limit) |total| {
+        const permille = @as(u128, count) * 1000 / total;
+        try writer.print(" ({d}.{d}%)", .{ permille / 10, permille % 10 });
+    }
+    try writer.writeByte('\n');
+}
+
 fn tokensFor(chars: usize) i64 {
     return @intCast(chars / 4);
 }
@@ -117,4 +136,17 @@ test "measure counts loaded skills as skills" {
     try std.testing.expectEqual(@as(i64, 3), breakdown.system_prompt);
     // <skill name="tdd">\nRed, then green.\n</skill> is 44 characters.
     try std.testing.expectEqual(@as(i64, 11), breakdown.skills);
+}
+
+test "write lists each part with its share of the limit" {
+    var buffer: [512]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try write(&writer, .{ .system_prompt = 1200, .system_tools = 3450, .skills = 80, .messages = 64000 }, 128000);
+    try std.testing.expectEqualStrings(
+        \\  System prompt      1200 tokens (0.9%)
+        \\  System tools       3450 tokens (2.6%)
+        \\  Skills               80 tokens (0.0%)
+        \\  Messages          64000 tokens (50.0%)
+        \\
+    , writer.buffered());
 }
