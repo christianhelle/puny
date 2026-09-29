@@ -215,6 +215,15 @@ pub fn ensureCopilotAuth(
     };
 }
 
+/// The key to rebuild `prov` with. `ensureCopilotAuth` may have discovered a
+/// GitHub token that no config or flag holds, so `resolveApiKey` comes back
+/// empty for it; carry that token over instead of dropping it.
+pub fn retainedApiKey(prov: *provider.Provider, resolved: []const u8) []const u8 {
+    if (resolved.len > 0) return resolved;
+    const client = prov.asCopilot() orelse return resolved;
+    return client.github_token;
+}
+
 test "createProvider returns mock for mock flag or provider name" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -640,4 +649,38 @@ test "applySessionId retags OpenCode clients and leaves others alone" {
     defer other.deinit();
     applySessionId(&other, "second-id");
     try std.testing.expect(other.lmstudio.session_id == null);
+}
+
+test "retainedApiKey keeps a discovered copilot token when none is configured" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var prov = provider.Provider{ .copilot = copilot.Client.init(allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.copilot.setGithubToken("gho_discovered");
+
+    try std.testing.expectEqualStrings("gho_discovered", retainedApiKey(&prov, ""));
+}
+
+test "retainedApiKey prefers a freshly resolved key" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var prov = provider.Provider{ .copilot = copilot.Client.init(allocator, std.testing.io, "gho_old") };
+    defer prov.deinit();
+
+    try std.testing.expectEqualStrings("gho_new", retainedApiKey(&prov, "gho_new"));
+}
+
+test "retainedApiKey leaves other providers' keys alone" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var prov = provider.Provider{ .mock = mock.MockClient.init(allocator, std.testing.io) };
+    defer prov.deinit();
+
+    try std.testing.expectEqualStrings("", retainedApiKey(&prov, ""));
 }
