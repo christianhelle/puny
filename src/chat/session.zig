@@ -356,7 +356,7 @@ pub const ChatSession = struct {
                     const has_text = if (user_text) |text| std.mem.trim(u8, text, " \t\r\n").len > 0 else false;
                     if (has_text) {
                         // Skill loaded as system context, trailing text as the user request.
-                        try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
+                        try appendSkillContext(ctx, skill_name, content);
                         try printNotice(ctx.stdout_writer, "Skill: {s}", .{skill_name});
                         try ctx.messages.append(ctx.messages_arena.allocator(), .{ .user = user_text.? });
                         try ctx.stdout_writer.print(" {s}\n", .{user_text.?});
@@ -575,6 +575,13 @@ pub const ChatSession = struct {
     }
 };
 
+/// Adds a skill's instructions to the conversation as system context, tagged
+/// with the skill's name.
+fn appendSkillContext(ctx: *ChatLoopContext, name: []const u8, content: []const u8) !void {
+    const tagged = try skills.formatLoaded(ctx.messages_arena.allocator(), name, content);
+    try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = tagged });
+}
+
 /// Loads any skill whose trigger phrase matches `text` into the message list,
 /// skipping skills that were already loaded. Shared by the plain prompt path
 /// and the prompt-file path.
@@ -588,7 +595,7 @@ fn maybeLoadTriggeredSkills(
         if (loaded_skills.contains(r.name)) continue;
         if (!skills.recordMatchesTrigger(r, text)) continue;
         const content = ctx.skill_registry.loadContent(ctx.io, r.name, ctx.messages_arena.allocator()) catch continue;
-        try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = content });
+        try appendSkillContext(ctx, r.name, content);
         try printNotice(ctx.stdout_writer, "Skill: {s}", .{r.name});
         loaded_skills.put(ctx.arena, r.name, {}) catch {};
     }
@@ -731,7 +738,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         turn_estimated = turn_estimated or result.usage_estimated;
 
         if (skills.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
-            try ctx.messages.append(ctx.messages_arena.allocator(), .{ .system = pending.content });
+            try appendSkillContext(ctx, pending.name, pending.content);
             try printNotice(ctx.stdout_writer, "Skill: {s}", .{pending.name});
         }
 
