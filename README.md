@@ -851,7 +851,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--chat-log`                    | Save full conversation (including reasoning) to `puny_chat.log`                                                                                                             |
 | `--no-skills`                   | Disable skill loading entirely (slash commands, triggers, and model invocation)                                                                                             |
 | `-m`, `--model <id>`            | Model identifier (skips picker if found in running models)                                                                                                                  |
-| `--effort <level>`              | Reasoning effort: `default`, `none`, `low`, `medium`, `high`, `xhigh` (CLI/env/config precedence)                                                                |
+| `--effort <level>`              | Reasoning effort: `default`, `none`, `low`, `medium`, `high`, `xhigh`, `max` (CLI/env/config precedence)                                                                |
 | `-p`, `--prompt <text>`         | Pre-fill prompt as first user message                                                                                                                                       |
 | `--prompt-file <file-or-url>`   | Read first prompt from a file or URL (10 MiB limit)                                                                                                                         |
 | `--system-prompt <text>`       | Override the system prompt for this session (overrides `prompts.system` in `config.json`)                                                                                   |
@@ -904,7 +904,7 @@ While in a chat session:
 - `/orchestrate [task]` — run the implement to review to fix loop until the branch is merge worthy; `--plan <task>` plans interactively first, `--iterations <n>` caps the rounds, and a bare `/orchestrate` implements the PRD this session saved
 - `/model [id]` — switch to another model; shows the model picker if no ID is given
 - `/provider` — open the provider picker, then choose a model for the new provider
-- `/thinking [level]` — change the reasoning effort of the current model; shows the effort picker if no level is given (valid levels: `default`, `none`, `low`, `medium`, `high`, `xhigh`)
+- `/thinking [level]` — change the reasoning effort of the current model; shows the effort picker if no level is given (valid levels: `default`, `none`, `low`, `medium`, `high`, `xhigh`, `max`)
 - `/sessions` — list all saved sessions, showing their UUID, whether they have a `plan.md` or saved conversation, and a preview of the first user message
 - `/resume [id]` — list saved sessions and pick one to restore, or restore a specific session by UUID prefix
 - `/prune` — delete all session directories except the current one

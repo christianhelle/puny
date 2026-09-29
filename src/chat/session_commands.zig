@@ -52,7 +52,7 @@ pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8)
         if (effort_picker.parseEffort(trimmed)) |e| {
             break :blk e;
         }
-        try ctx.stdout_writer.print("\nUnknown reasoning effort '{s}'. Valid levels: default, none, low, medium, high, xhigh.\n", .{trimmed});
+        try ctx.stdout_writer.print("\nUnknown reasoning effort '{s}'. Valid levels: default, none, low, medium, high, xhigh, max.\n", .{trimmed});
         try ctx.stdout_writer.flush();
         return;
     } else (try effort_picker.pickEffort(ctx.arena, ctx.io)) orelse {

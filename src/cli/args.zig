@@ -165,7 +165,7 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.effort = effort_picker.parseEffort(args[i]) orelse
-                fatal(io, "Unknown reasoning effort '{s}'. Valid levels: default, none, low, medium, high, xhigh.\n\n", .{args[i]});
+                fatal(io, "Unknown reasoning effort '{s}'. Valid levels: default, none, low, medium, high, xhigh, max.\n\n", .{args[i]});
         } else if (std.mem.eql(u8, arg, "--no-skills")) {
             opts.no_skills = true;
         } else if (std.mem.eql(u8, arg, "--session")) {
@@ -244,7 +244,7 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
     if (opts.effort == null) {
         if (environ_map.get("PUNY_REASONING_EFFORT")) |value| {
             opts.effort = effort_picker.parseEffort(value) orelse
-                fatal(io, "Unknown reasoning effort '{s}' in PUNY_REASONING_EFFORT. Valid levels: default, none, low, medium, high, xhigh.\n\n", .{value});
+                fatal(io, "Unknown reasoning effort '{s}' in PUNY_REASONING_EFFORT. Valid levels: default, none, low, medium, high, xhigh, max.\n\n", .{value});
         }
     }
 
@@ -271,7 +271,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -k, --api-key <key>          Provider API token (CLI > file > env > config; session only)
         \\      --api-key-file <path>    Read API token from file (below --api-key in precedence)
         \\  -m, --model <id>             Model identifier (skip picker if found in running models)
-        \\      --effort <level>         Reasoning effort: default, none, low, medium, high, xhigh (CLI > env > config)
+        \\      --effort <level>         Reasoning effort: default, none, low, medium, high, xhigh, max (CLI > env > config)
         \\  -p, --prompt <text>          Pre-fill prompt as first user message
         \\      --prompt-file <path|url> Read first prompt from a file or URL
         \\      --system-prompt <text>   Override the system prompt for this session
