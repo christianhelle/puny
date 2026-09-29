@@ -846,7 +846,7 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
 /// because its scope lives in the same arena.
 fn reclaimCompactedHistory(ctx: *ChatLoopContext) !void {
     if (branch_review.isActive()) return;
-    const api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, resolver.apiKeyEnv(ctx.init.environ_map, ctx.model_provider.*));
+    const api_key = resolver.retainedApiKey(ctx.prov, try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, resolver.apiKeyEnv(ctx.init.environ_map, ctx.model_provider.*)));
 
     var fresh = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     errdefer fresh.deinit();
@@ -875,7 +875,7 @@ fn rebuildProvider(ctx: *ChatLoopContext, api_key: []const u8) void {
 /// orchestrate loop, which starts every phase from a clean conversation.
 fn recycleMessagesArena(ctx: *ChatLoopContext) !void {
     // Resolved first, so a key that cannot be read fails before anything is torn down.
-    const new_api_key = try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, resolver.apiKeyEnv(ctx.init.environ_map, ctx.model_provider.*));
+    const new_api_key = resolver.retainedApiKey(ctx.prov, try resolver.resolveApiKey(ctx.arena, ctx.io, ctx.parsed, ctx.cfg.*, ctx.model_provider.*, resolver.apiKeyEnv(ctx.init.environ_map, ctx.model_provider.*)));
 
     ctx.prov.deinit();
     ctx.prov.* = .{ .mock = mock.MockClient.init(ctx.messages_arena.allocator(), ctx.io) };
