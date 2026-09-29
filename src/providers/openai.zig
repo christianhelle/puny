@@ -27,7 +27,6 @@ pub const ToolDefinition = struct {
 pub const ReasoningEffort = enum {
     default,
     none,
-    minimal,
     low,
     medium,
     high,
@@ -371,7 +370,7 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: ChatRequest) ![]u8 
 }
 
 test "requestPayload includes reasoning_effort and thinking for each level" {
-    const levels = [_]ReasoningEffort{ .none, .minimal, .low, .medium, .high, .xhigh };
+    const levels = [_]ReasoningEffort{ .none, .low, .medium, .high, .xhigh };
     for (levels) |effort| {
         const request = ChatRequest{
             .model = "test-model",
@@ -547,7 +546,7 @@ test "requestPayload omits reasoning_effort when null" {
 }
 
 test "ReasoningEffort JSON serialization" {
-    const efforts = [_]ReasoningEffort{ .default, .none, .minimal, .low, .medium, .high, .xhigh };
+    const efforts = [_]ReasoningEffort{ .default, .none, .low, .medium, .high, .xhigh };
 
     for (efforts) |effort| {
         var buf: std.Io.Writer.Allocating = .init(std.testing.allocator);

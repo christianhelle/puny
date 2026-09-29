@@ -629,8 +629,8 @@ test "responsesRequestPayload omits reasoning when default" {
     try std.testing.expect(parsed.value.object.get("reasoning") == null);
 }
 
-test "responsesRequestPayload handles minimal and xhigh reasoning" {
-    for ([_]ReasoningEffort{ .minimal, .high, .xhigh }) |effort| {
+test "responsesRequestPayload handles low and xhigh reasoning" {
+    for ([_]ReasoningEffort{ .low, .high, .xhigh }) |effort| {
         const request = ChatRequest{
             .model = "muse-spark-1.2-contributor",
             .messages = &.{},

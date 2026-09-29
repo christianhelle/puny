@@ -672,8 +672,8 @@ test "effectiveEffort keeps an explicit level even when the chat log is on" {
 
 test "effectiveEffort keeps an explicit level even when thinking is shown" {
     try std.testing.expectEqual(
-        @as(?openai.ReasoningEffort, .minimal),
-        effectiveEffort(.minimal, true, false),
+        @as(?openai.ReasoningEffort, .low),
+        effectiveEffort(.low, true, false),
     );
 }
 
