@@ -105,3 +105,16 @@ test "measure counts the available skills listing as skills" {
     try std.testing.expectEqual(@as(i64, 3), breakdown.system_prompt);
     try std.testing.expectEqual(@as(i64, 20), breakdown.skills);
 }
+
+test "measure counts loaded skills as skills" {
+    const loaded = try skills.formatLoaded(std.testing.allocator, "tdd", "Red, then green.");
+    defer std.testing.allocator.free(loaded);
+    const messages = [_]openai.Message{
+        .{ .system = "You are puny." },
+        .{ .system = loaded },
+    };
+    const breakdown = measure(&messages, &.{});
+    try std.testing.expectEqual(@as(i64, 3), breakdown.system_prompt);
+    // <skill name="tdd">\nRed, then green.\n</skill> is 44 characters.
+    try std.testing.expectEqual(@as(i64, 11), breakdown.skills);
+}
