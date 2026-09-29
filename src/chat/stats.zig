@@ -148,6 +148,14 @@ pub const SessionStats = struct {
         return total;
     }
 
+    fn totalRequests(self: *const @This()) usize {
+        var total: usize = 0;
+        for (self.models.items) |entry| {
+            total += entry.stats.request_count;
+        }
+        return total;
+    }
+
     /// Total tokens consumed this session across all models, with reasoning
     /// tokens added back so the sum matches the per-turn `in + out` semantics
     /// (SessionStats.output_tokens excludes reasoning).
@@ -212,6 +220,9 @@ pub const SessionStats = struct {
             if (stats.ttft_count > 0) {
                 try writer.print("  Avg TTFT:            {d:.2}s\n", .{stats.ttft_sum / @as(f64, @floatFromInt(stats.ttft_count))});
             }
+        }
+        if (self.totalRequests() > 0) {
+            try writer.print("\n  {s}Input tokens add up every request, and each request resends the conversation. /context shows its current size.{s}\n", .{ ansi.dim, ansi.reset });
         }
         try writer.print("\n  Session duration:    {d:.1}s\n", .{elapsed_s});
 
@@ -512,4 +523,28 @@ test "SessionStats.print counts every request a turn makes" {
 
     const written = output.written();
     try std.testing.expect(std.mem.indexOf(u8, written, "  Turns:               1\n  Requests:            2\n") != null);
+}
+
+test "SessionStats.print explains that input tokens add up every request" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Input tokens add up every request, and each request resends the conversation. /context shows its current size.") != null);
+}
+
+test "SessionStats.print leaves out the input note before any request" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Input tokens add up") == null);
 }
