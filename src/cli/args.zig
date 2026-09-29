@@ -725,6 +725,15 @@ test "parseArgs prefers the effort flag over the environment" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .xhigh), opts.effort);
 }
 
+test "parseArgs accepts the max effort level" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const args = &[_][:0]const u8{ "puny", "--effort", "max" };
+    const opts = parseArgs(undefined, &env, args);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .max), opts.effort);
+}
+
 test "parseArgs sets max_context from flag" {
     const argv = [_][:0]const u8{ "puny", "--max-context", "64000" };
     var env = std.process.Environ.Map.init(std.testing.allocator);
