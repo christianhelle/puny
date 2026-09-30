@@ -6,6 +6,8 @@ const openai = @import("../providers/openai.zig");
 
 pub const PerModelStats = struct {
     turn_count: usize = 0,
+    /// Model calls made, several per turn when the model uses tools.
+    request_count: usize = 0,
     input_tokens: i64 = 0,
     /// Portion of input_tokens the provider served from its prompt cache.
     cached_input_tokens: i64 = 0,
@@ -65,6 +67,7 @@ pub const SessionStats = struct {
             self.active_model_index = self.models.items.len - 1;
         }
 
+        self.activeModelStats().request_count += 1;
         self.current_turn_input = input_tokens;
         self.current_turn_output = 0;
         self.current_turn_reasoning = 0;
@@ -179,6 +182,8 @@ pub const SessionStats = struct {
             } else {
                 try writer.print("  Turns:               {s}\n", .{turns});
             }
+            var requests_buf: [32]u8 = undefined;
+            try writer.print("  Requests:            {s}\n", .{token_stats.formatGrouped(&requests_buf, stats.request_count)});
             var input_buf: [32]u8 = undefined;
             var output_buf: [32]u8 = undefined;
             var reasoning_buf: [32]u8 = undefined;
@@ -490,4 +495,21 @@ test "SessionStats.print starts one blank line below the output before it" {
     try stats.print(std.testing.io, &output.writer);
 
     try std.testing.expect(std.mem.startsWith(u8, output.written(), "\n" ++ ansi.dim ++ "─── Session Stats ───"));
+}
+
+test "SessionStats.print counts every request a turn makes" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    // One turn: a tool call, then the reply that follows its result.
+    stats.beginTurn("model-a", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, false);
+    stats.beginTurn("model-a", 200);
+    stats.finalizeTurn(.{ .input_tokens = 200, .output_tokens = 5 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "  Turns:               1\n  Requests:            2\n") != null);
 }

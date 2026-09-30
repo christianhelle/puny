@@ -660,6 +660,20 @@ The context limit comes from the first of these that is set:
 
 When none is set, auto compaction is off, but `/compact` still works.
 
+Run `/context` to see how full the context is and what fills it. The breakdown
+estimates each part at roughly four characters per token:
+
+```text
+Context: ~12480 of 128000 tokens (9%); compacts at 80%.
+  System prompt      2310 tokens (1.8%)
+  System tools       4125 tokens (3.2%)
+  Skills              860 tokens (0.6%)
+  Messages           5185 tokens (4.0%)
+```
+
+Skills covers the list of available skills and the instructions of every skill
+loaded into the conversation.
+
 ```json
 {
   "max_context_tokens": 64000
@@ -894,9 +908,9 @@ While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
 - `/new` or `/reset` — clear the conversation, start a new session, and unload all skills
-- `/stats` — show session statistics and memory usage
+- `/stats` — show session statistics (turns, requests, and tokens summed over every request) and memory usage
 - `/compact` — summarize the conversation so far into one message to free context
-- `/context [tokens|off]` — show how full the context is, set the context limit for this conversation, or turn auto compaction off
+- `/context [tokens|off]` — show how full the context is and a breakdown of what fills it (system prompt, tools, skills, messages), set the context limit for this conversation, or turn auto compaction off
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`
 - `/build [task]` — switch to build mode (optionally with a task description)

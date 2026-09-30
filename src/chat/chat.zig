@@ -95,7 +95,8 @@ pub fn runTurnWithMode(
         .reasoning_effort = effective_effort,
     };
 
-    const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens;
+    const tool_tokens = usage_estimator.estimateToolTokens(tool_definitions);
+    const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens + tool_tokens;
     session_stats.beginTurn(model_key, input_estimate);
 
     var acc = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
@@ -126,7 +127,11 @@ pub fn runTurnWithMode(
     }
 
     const turn_usage_estimated = acc.usage == null;
-    const turn_usage = if (acc.usage) |u| u else usage_estimator.estimateUsage(messages.items, acc.estimatedOutputChars());
+    const turn_usage = if (acc.usage) |u| u else blk: {
+        var estimated = usage_estimator.estimateUsage(messages.items, acc.estimatedOutputChars());
+        estimated.input_tokens += tool_tokens;
+        break :blk estimated;
+    };
 
     const has_content = acc.content.items.len > 0;
     const has_streamed_content_after = acc.has_streamed_output or acc.hasToolCalls() or has_content;
@@ -756,4 +761,39 @@ test "agent loop output never leaves consecutive blank lines" {
     try std.testing.expect(std.mem.indexOf(u8, text, "\n\n\n") == null);
     try std.testing.expect(std.mem.indexOf(u8, text, "> read the file\n\n") != null);
     try std.testing.expect(std.mem.endsWith(u8, text, ")\n\n> "));
+}
+
+test "runTurn estimates unreported input with the tool definitions" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    const random = random_source.interface();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(arena);
+    try messages.append(arena, .{ .user = "say fast" });
+
+    var function: std.json.ObjectMap = .empty;
+    try function.put(arena, "name", .{ .string = "read_file" });
+    const tool_definitions = [_]openai.ToolDefinition{.{ .function = .{ .object = function } }};
+
+    const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &tool_definitions, null, null);
+    session_stats.finalizeTurn(result.usage, result.turn_complete);
+
+    // 2 tokens for "say fast" and 12 for the 51-character tool definition.
+    try std.testing.expect(result.usage_estimated);
+    try std.testing.expectEqual(@as(i64, 14), result.usage.?.input_tokens);
+    try std.testing.expectEqual(@as(i64, 14), session_stats.models.items[0].stats.input_tokens);
 }

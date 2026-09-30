@@ -10,6 +10,23 @@ pub const SkillRecord = struct {
     disable_model_invocation: bool,
 };
 
+/// Opens the system message that lists the available skills.
+const listing_open = "<available_skills>";
+
+/// Opens the system message that carries a loaded skill's instructions.
+const loaded_open = "<skill name=\"";
+
+/// Wraps a loaded skill's instructions so the model, and `/context`, can tell
+/// which skill they came from.
+pub fn formatLoaded(allocator: std.mem.Allocator, name: []const u8, content: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(allocator, loaded_open ++ "{s}\">\n{s}\n</skill>", .{ name, content });
+}
+
+/// True when a system message was put in the context by the skills feature.
+pub fn isSkillContext(text: []const u8) bool {
+    return std.mem.startsWith(u8, text, listing_open) or std.mem.startsWith(u8, text, loaded_open);
+}
+
 pub const Registry = struct {
     allocator: std.mem.Allocator,
     records: std.ArrayList(SkillRecord),
@@ -73,7 +90,7 @@ pub const Registry = struct {
         var buf = std.ArrayList(u8).empty;
         errdefer buf.deinit(allocator);
 
-        try buf.appendSlice(allocator, "<available_skills>\n");
+        try buf.appendSlice(allocator, listing_open ++ "\n");
         for (self.records.items) |r| {
             if (r.description) |desc| {
                 try buf.appendSlice(allocator, "  <skill>\n    <name>");
@@ -587,4 +604,16 @@ test "takePendingSkill returns null when it cannot duplicate the payload" {
 
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expect(takePendingSkill(failing.allocator()) == null);
+}
+
+test "formatLoaded tags a skill's instructions with its name" {
+    const loaded = try formatLoaded(std.testing.allocator, "tdd", "Red, then green.");
+    defer std.testing.allocator.free(loaded);
+    try std.testing.expectEqualStrings("<skill name=\"tdd\">\nRed, then green.\n</skill>", loaded);
+    try std.testing.expect(isSkillContext(loaded));
+}
+
+test "isSkillContext ignores other system messages" {
+    try std.testing.expect(!isSkillContext("You are puny."));
+    try std.testing.expect(!isSkillContext("Instructions from AGENTS.md:\n<skill> tags are fine here"));
 }

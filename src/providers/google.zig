@@ -33,18 +33,15 @@ fn googleToolNameForId(messages: []const openai.Message, tool_call_id: []const u
 
 pub fn buildGenerateContentRequest(arena: std.mem.Allocator, request: openai.ChatRequest) !contracts.GenerateContentRequest {
     var contents = std.ArrayList(contracts.Content).empty;
-    var system_instruction: ?contracts.Content = null;
+    // Every system message, including skills and instructions added later,
+    // becomes a part of the one system instruction Gemini accepts.
+    var system_parts = std.ArrayList(contracts.Part).empty;
 
     var i: usize = 0;
     while (i < request.messages.len) {
         switch (request.messages[i]) {
             .system => |content| {
-                if (system_instruction == null) {
-                    const part = contracts.Part{ .text = try arena.dupe(u8, content) };
-                    const parts = try arena.alloc(contracts.Part, 1);
-                    parts[0] = part;
-                    system_instruction = contracts.Content{ .role = null, .parts = parts };
-                }
+                try system_parts.append(arena, .{ .text = try arena.dupe(u8, content) });
                 i += 1;
             },
             .user => |content| {
@@ -144,7 +141,10 @@ pub fn buildGenerateContentRequest(arena: std.mem.Allocator, request: openai.Cha
 
     return contracts.GenerateContentRequest{
         .contents = try contents.toOwnedSlice(arena),
-        .systemInstruction = system_instruction,
+        .systemInstruction = if (system_parts.items.len > 0)
+            contracts.Content{ .role = null, .parts = try system_parts.toOwnedSlice(arena) }
+        else
+            null,
         .tools = tools,
         .generationConfig = generation_config,
         .safetySettings = null,
@@ -796,7 +796,7 @@ test "googleRequestPayload labels unknown tool results with the call id" {
     try std.testing.expectEqualStrings("result", parts[1].object.get("text").?.string);
 }
 
-test "googleRequestPayload keeps only the first system message" {
+test "googleRequestPayload sends every system message as a system part" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -817,7 +817,9 @@ test "googleRequestPayload keeps only the first system message" {
 
     const root = parsed.value.object;
     const system_parts = root.get("systemInstruction").?.object.get("parts").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), system_parts.len);
     try std.testing.expectEqualStrings("first system", system_parts[0].object.get("text").?.string);
+    try std.testing.expectEqualStrings("second system", system_parts[1].object.get("text").?.string);
     try std.testing.expectEqual(@as(usize, 1), root.get("contents").?.array.items.len);
 }
 
