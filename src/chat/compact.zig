@@ -6,7 +6,6 @@ const provider = @import("../providers/provider.zig");
 const stats = @import("stats.zig");
 const accumulator = @import("accumulator.zig");
 const chat_retry = @import("retry.zig");
-const client = @import("../providers/client.zig");
 
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
@@ -221,16 +220,6 @@ pub fn summarize(
     };
 }
 
-/// The context window a provider reports for `model_key`, if it reports one.
-pub fn contextLengthFor(models: []const client.Model, model_key: []const u8) ?usize {
-    for (models) |model| {
-        if (!std.mem.eql(u8, model.id, model_key)) continue;
-        if (model.context_length <= 0) return null;
-        return @intCast(model.context_length);
-    }
-    return null;
-}
-
 pub const ContextArgument = union(enum) {
     show,
     set: usize,
@@ -307,17 +296,12 @@ pub const ContextBudget = struct {
     }
 
     /// The context limit for `model_key`. Without an explicit budget, the
-    /// provider's model list is consulted once per model; a failed lookup
+    /// provider is asked once per model; a failed lookup
     /// leaves auto compaction off for that model.
     pub fn resolveLimit(self: *ContextBudget, prov: *provider.Provider, model_key: []const u8) ?usize {
         const provider_kind = std.meta.activeTag(prov.*);
         if (self.needsModelLookup(provider_kind, model_key)) {
-            const length: ?usize = blk: {
-                var models = prov.listModels() catch break :blk null;
-                defer models.deinit();
-                break :blk contextLengthFor(models.value().models, model_key);
-            };
-            self.setModelReported(provider_kind, model_key, length);
+            self.setModelReported(provider_kind, model_key, prov.contextLength(model_key));
         }
         return self.limit();
     }
@@ -610,22 +594,6 @@ test "estimate never drops below the character estimate when usage is under-repo
     budget.recordPrompt(1, 1);
     const messages = [_]openai.Message{ .{ .user = long_text }, .{ .user = "abcdefgh" } };
     try std.testing.expectEqual(@as(i64, 102), budget.estimate(&messages));
-}
-
-test "contextLengthFor finds the active model's reported window" {
-    const models = [_]client.Model{
-        .{ .id = "small", .display_name = "Small", .provider = "p", .context_length = 8192 },
-        .{ .id = "large", .display_name = "Large", .provider = "p", .context_length = 131072 },
-    };
-    try std.testing.expectEqual(@as(?usize, 131072), contextLengthFor(&models, "large"));
-}
-
-test "contextLengthFor ignores unknown models and unreported windows" {
-    const models = [_]client.Model{
-        .{ .id = "unreported", .display_name = "", .provider = "p", .context_length = 0 },
-    };
-    try std.testing.expectEqual(@as(?usize, null), contextLengthFor(&models, "unreported"));
-    try std.testing.expectEqual(@as(?usize, null), contextLengthFor(&models, "missing"));
 }
 
 test "needsModelLookup asks once per model and never with an explicit budget" {
