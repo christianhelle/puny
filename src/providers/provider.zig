@@ -12,6 +12,7 @@ const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const responses = @import("responses.zig");
 const ollama_cloud = @import("ollama_cloud.zig");
+const models_dev = @import("models_dev.zig");
 const cancel = @import("../core/cancel.zig");
 
 pub const ModelProvider = enum {
@@ -93,6 +94,13 @@ pub const Provider = union(enum) {
     pub fn contextLength(self: *Provider, model_key: []const u8) ?usize {
         switch (self.*) {
             .ollama_cloud => |*c| return ollama_cloud.showContextLength(c, model_key),
+            .opencode, .opencode_go => |*c| return models_dev.fetchContextLength(
+                c.allocator,
+                c.io,
+                models_dev.catalog_url,
+                catalogProviderId(std.meta.activeTag(self.*)).?,
+                model_key,
+            ),
             else => {},
         }
         var models = self.listModels() catch return null;
@@ -183,6 +191,16 @@ pub const Provider = union(enum) {
         }
     }
 };
+
+/// The id models.dev files a provider under, for providers whose own model
+/// list carries no context windows.
+pub fn catalogProviderId(kind: std.meta.Tag(Provider)) ?[]const u8 {
+    return switch (kind) {
+        .opencode => "opencode",
+        .opencode_go => "opencode-go",
+        else => null,
+    };
+}
 
 fn chatStreamingCaptured(
     c: *client.Client,
@@ -316,6 +334,13 @@ test "Provider.contextLength asks Ollama Cloud's show endpoint for the model's w
 
     try std.testing.expectEqual(@as(?usize, 1048576), prov.contextLength("deepseek-v4.1-flash"));
     try std.testing.expectEqualStrings("/api/show", server.getRequestPath());
+}
+
+test "catalogProviderId names OpenCode's providers as models.dev does" {
+    try std.testing.expectEqualStrings("opencode", catalogProviderId(.opencode).?);
+    try std.testing.expectEqualStrings("opencode-go", catalogProviderId(.opencode_go).?);
+    try std.testing.expectEqual(@as(?[]const u8, null), catalogProviderId(.copilot));
+    try std.testing.expectEqual(@as(?[]const u8, null), catalogProviderId(.ollama));
 }
 
 test "Provider.contextLength finds the window in the model list" {
