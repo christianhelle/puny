@@ -10,6 +10,10 @@ pub const Breakdown = struct {
     system_tools: i64 = 0,
     skills: i64 = 0,
     messages: i64 = 0,
+
+    pub fn total(self: Breakdown) i64 {
+        return self.system_prompt + self.system_tools + self.skills + self.messages;
+    }
 };
 
 pub fn measure(messages: []const openai.Message, tools: []const openai.ToolDefinition) Breakdown {

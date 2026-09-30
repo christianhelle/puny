@@ -7,6 +7,7 @@ const stats = @import("stats.zig");
 const accumulator = @import("accumulator.zig");
 const chat_retry = @import("retry.zig");
 const client = @import("../providers/client.zig");
+const context_breakdown = @import("context_breakdown.zig");
 
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
@@ -356,7 +357,7 @@ pub const ContextBudget = struct {
     /// messages added since. Never less than the character estimate, in case a
     /// provider under-reports.
     pub fn estimate(self: *const ContextBudget, messages: []const openai.Message, tools: []const openai.ToolDefinition) i64 {
-        const by_characters = usage.estimateUsage(messages, 0).input_tokens + usage.estimateToolTokens(tools);
+        const by_characters = context_breakdown.measure(messages, tools).total();
         if (self.last_prompt_tokens) |reported| {
             if (self.last_prompt_message_count <= messages.len) {
                 const newer = usage.estimateUsage(messages[self.last_prompt_message_count..], 0).input_tokens;
@@ -815,4 +816,14 @@ test "estimate counts tool definitions before any provider usage is known" {
     const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
     // 2 tokens of messages and 12 of the 51-character tool definition.
     try std.testing.expectEqual(@as(i64, 14), budget.estimate(&messages, &tools));
+}
+
+test "estimate matches the sum of the context breakdown" {
+    const budget = ContextBudget{};
+    const messages = [_]openai.Message{
+        .{ .system = "1234567" },
+        .{ .user = "abcdefg" },
+    };
+    // /context lists 1 token of system prompt and 1 of messages.
+    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages, &.{}));
 }
