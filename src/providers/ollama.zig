@@ -12,6 +12,19 @@ const RunningModels = struct {
     models: []const RunningModel = &.{},
 };
 
+/// Asks Ollama's `/api/ps` for the context `model` runs with. Its
+/// OpenAI-compatible model list carries no window, and `/api/show` gives the
+/// model's trained maximum rather than the context the server loaded it with.
+pub fn psContextLength(c: *client.Client, model: []const u8) ContextLookup {
+    const allocator = c.allocator;
+    const url = std.fmt.allocPrint(allocator, "{s}/api/ps", .{c.base_url}) catch return .unreported;
+    defer allocator.free(url);
+    var raw = client.requestRaw(c, .GET, url, null) catch return .unreported;
+    defer raw.deinit();
+    if (raw.status.class() != .success) return .unreported;
+    return parsePsContextLength(allocator, raw.body, model);
+}
+
 /// The context `model` runs with, from an `/api/ps` reply. Only loaded
 /// models are listed, and Ollama names untagged models `<name>:latest`.
 /// Ollama versions before `context_length` was added count as unreported.

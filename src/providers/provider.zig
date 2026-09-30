@@ -11,6 +11,7 @@ const unsloth = @import("unsloth.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const responses = @import("responses.zig");
+const ollama = @import("ollama.zig");
 const ollama_cloud = @import("ollama_cloud.zig");
 const models_dev = @import("models_dev.zig");
 const cancel = @import("../core/cancel.zig");
@@ -95,6 +96,7 @@ pub const Provider = union(enum) {
     /// The context window `model_key` accepts, if the provider reports one.
     pub fn contextLength(self: *Provider, model_key: []const u8) ContextLookup {
         switch (self.*) {
+            .ollama => |*c| return ollama.psContextLength(c, model_key),
             .ollama_cloud => |*c| return .from(ollama_cloud.showContextLength(c, model_key)),
             .opencode, .opencode_go => |*c| return .from(models_dev.fetchContextLength(
                 c.allocator,
@@ -336,6 +338,35 @@ test "Provider.contextLength asks Ollama Cloud's show endpoint for the model's w
 
     try std.testing.expectEqual(ContextLookup{ .window = 1048576 }, prov.contextLength("deepseek-v4.1-flash"));
     try std.testing.expectEqualStrings("/api/show", server.getRequestPath());
+}
+
+test "Provider.contextLength asks local Ollama for the context a loaded model runs with" {
+    const server = try startProviderTestServer(.ok,
+        \\{"models":[{"name":"qwen3:8b","model":"qwen3:8b","context_length":32768}]}
+    );
+    defer stopProviderTestServer(server);
+    const url = try providerTestUrl(server);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.ollama.withBaseUrl(url);
+
+    try std.testing.expectEqual(ContextLookup{ .window = 32768 }, prov.contextLength("qwen3:8b"));
+    try std.testing.expectEqualStrings("/api/ps", server.getRequestPath());
+}
+
+test "Provider.contextLength says a model local Ollama has not loaded is not loaded yet" {
+    const server = try startProviderTestServer(.ok, "{\"models\":[]}");
+    defer stopProviderTestServer(server);
+    const url = try providerTestUrl(server);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.ollama.withBaseUrl(url);
+
+    try std.testing.expectEqual(ContextLookup.not_loaded, prov.contextLength("qwen3:8b"));
 }
 
 test "catalogProviderId names OpenCode's providers as models.dev does" {
