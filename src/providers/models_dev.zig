@@ -86,8 +86,8 @@ test "fetchContextLength downloads the catalog without credentials" {
     defer std.testing.allocator.free(url);
 
     try std.testing.expectEqual(@as(?usize, 1048576), fetchContextLength(std.testing.allocator, std.testing.io, url, "opencode-go", "kimi-k3"));
-    try std.testing.expect(server.saw_request);
-    try std.testing.expect(!server.saw_authorization);
+    try std.testing.expect(server.saw_request.load(.acquire));
+    try std.testing.expect(!server.saw_authorization.load(.acquire));
 }
 
 test "fetchContextLength returns null when the catalog is unreachable" {
@@ -98,8 +98,8 @@ const CatalogServer = struct {
     server: std.Io.net.Server,
     body: []const u8,
     thread: std.Thread = undefined,
-    saw_request: bool = false,
-    saw_authorization: bool = false,
+    saw_request: std.atomic.Value(bool) = .init(false),
+    saw_authorization: std.atomic.Value(bool) = .init(false),
 
     fn start(body: []const u8) !*CatalogServer {
         const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
@@ -128,10 +128,10 @@ const CatalogServer = struct {
 
         var http_server = std.http.Server.init(&reader.interface, &writer.interface);
         var request = http_server.receiveHead() catch return;
-        self.saw_request = true;
+        self.saw_request.store(true, .release);
         var it = request.iterateHeaders();
         while (it.next()) |header| {
-            if (std.ascii.eqlIgnoreCase(header.name, "authorization")) self.saw_authorization = true;
+            if (std.ascii.eqlIgnoreCase(header.name, "authorization")) self.saw_authorization.store(true, .release);
         }
         request.respond(self.body, .{}) catch return;
     }
