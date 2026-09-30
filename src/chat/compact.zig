@@ -307,9 +307,17 @@ pub const ContextBudget = struct {
         return self.limit();
     }
 
-    pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, context_length: ?usize) void {
-        self.model_reported = context_length;
-        self.model_reported_key_hash = modelKeyHash(provider_kind, model_key);
+    /// Records a lookup's answer. A model that is not loaded yet is looked
+    /// up again on the next request rather than remembered as unreported.
+    pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, lookup: provider.ContextLookup) void {
+        self.model_reported = switch (lookup) {
+            .window => |tokens| tokens,
+            .unreported, .not_loaded => null,
+        };
+        self.model_reported_key_hash = switch (lookup) {
+            .not_loaded => null,
+            .window, .unreported => modelKeyHash(provider_kind, model_key),
+        };
     }
 
     fn modelKeyHash(provider_kind: ProviderKind, model_key: []const u8) u64 {
@@ -601,7 +609,7 @@ test "estimate never drops below the character estimate when usage is under-repo
 test "needsModelLookup asks once per model and never with an explicit budget" {
     var budget = ContextBudget{};
     try std.testing.expect(budget.needsModelLookup(.lmstudio, "model-a"));
-    budget.setModelReported(.lmstudio, "model-a", null);
+    budget.setModelReported(.lmstudio, "model-a", .unreported);
     try std.testing.expect(!budget.needsModelLookup(.lmstudio, "model-a"));
     try std.testing.expect(budget.needsModelLookup(.lmstudio, "model-b"));
 
@@ -611,8 +619,19 @@ test "needsModelLookup asks once per model and never with an explicit budget" {
 
 test "needsModelLookup asks again after switching provider with the same model id" {
     var budget = ContextBudget{};
-    budget.setModelReported(.lmstudio, "shared-model", 32768);
+    budget.setModelReported(.lmstudio, "shared-model", .{ .window = 32768 });
     try std.testing.expect(budget.needsModelLookup(.copilot, "shared-model"));
+}
+
+test "needsModelLookup asks again while the model is not loaded yet" {
+    var budget = ContextBudget{};
+    budget.setModelReported(.ollama, "qwen3:8b", .not_loaded);
+    try std.testing.expect(budget.needsModelLookup(.ollama, "qwen3:8b"));
+    try std.testing.expectEqual(@as(?usize, null), budget.limit());
+
+    budget.setModelReported(.ollama, "qwen3:8b", .{ .window = 32768 });
+    try std.testing.expect(!budget.needsModelLookup(.ollama, "qwen3:8b"));
+    try std.testing.expectEqual(@as(?usize, 32768), budget.limit());
 }
 
 test "a second compaction folds the earlier summary into the new one" {
