@@ -18,6 +18,19 @@ pub const ModelsList = struct {
     models: []const Model,
 };
 
+/// What a provider says about a model's context window.
+pub const ContextLookup = union(enum) {
+    window: usize,
+    /// The provider does not report one for this model.
+    unreported,
+    /// The provider reports it only once the model is loaded, so ask again later.
+    not_loaded,
+
+    pub fn from(length: ?usize) ContextLookup {
+        return if (length) |value| .{ .window = value } else .unreported;
+    }
+};
+
 /// Returns true when `s` is a valid UTF-8 byte sequence.
 pub fn isValidUtf8(s: []const u8) bool {
     var i: usize = 0;
