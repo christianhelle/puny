@@ -392,7 +392,10 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest)
     try w.writeAll("{\"model\":");
     try std.json.Stringify.value(request.model, .{}, w);
 
-    var system: ?[]const u8 = null;
+    // Anthropic takes one top-level system prompt, so every system message,
+    // including skills and instructions added later, is joined into it.
+    var system_parts: std.ArrayList([]const u8) = .empty;
+    defer system_parts.deinit(allocator);
 
     try w.writeAll(",\"messages\":[");
     var first_msg = true;
@@ -400,7 +403,7 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest)
     while (index < request.messages.len) {
         const msg = request.messages[index];
         if (msg == .system) {
-            if (system == null) system = msg.system;
+            try system_parts.append(allocator, msg.system);
             index += 1;
             continue;
         }
@@ -426,9 +429,11 @@ pub fn requestPayload(allocator: std.mem.Allocator, request: openai.ChatRequest)
     try w.writeAll(",\"stream\":");
     try std.json.Stringify.value(request.stream, .{}, w);
 
-    if (system) |value| {
+    if (system_parts.items.len > 0) {
+        const system = try std.mem.join(allocator, "\n\n", system_parts.items);
+        defer allocator.free(system);
         try w.writeAll(",\"system\":");
-        try std.json.Stringify.value(value, .{}, w);
+        try std.json.Stringify.value(system, .{}, w);
     }
 
     if (request.tools.len > 0) {
@@ -939,7 +944,7 @@ test "requestPayload starts a new message after a run of tool results" {
     try std.testing.expectEqualStrings("and now summarise", messages[2].object.get("content").?.array.items[0].object.get("text").?.string);
 }
 
-test "requestPayload keeps only the first system message" {
+test "requestPayload sends every system message in the system prompt" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -959,7 +964,7 @@ test "requestPayload keeps only the first system message" {
     defer parsed.deinit();
 
     const root = parsed.value.object;
-    try std.testing.expectEqualStrings("first system", root.get("system").?.string);
+    try std.testing.expectEqualStrings("first system\n\nsecond system", root.get("system").?.string);
     try std.testing.expectEqual(@as(usize, 1), root.get("messages").?.array.items.len);
 }
 
