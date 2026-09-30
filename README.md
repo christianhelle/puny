@@ -656,7 +656,7 @@ The context limit comes from the first of these that is set:
 1. `/context <tokens>` for the current conversation
 2. `--max-context <tokens>`
 3. `max_context_tokens` in `config.json`
-4. The context window the provider reports for the selected model: LM Studio, GitHub Copilot (its prompt limit, which leaves room for the reply), and Ollama Cloud report one; OpenCode Zen, OpenCode Go, Ollama, and Unsloth do not
+4. The context window the provider reports for the selected model: LM Studio, GitHub Copilot (its prompt limit, which leaves room for the reply), and Ollama Cloud report one. For OpenCode Zen and OpenCode Go it comes from the [models.dev](https://models.dev) catalog, downloaded without your API key. Ollama and Unsloth do not report one
 
 When none is set, auto compaction is off, but `/compact` still works.
 
