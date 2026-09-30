@@ -45,7 +45,7 @@ pub fn build(b: *std.Build) !void {
         "build",
         "-Ddocker",
         "-Doptimize=ReleaseSmall",
-        "-Dtarget=x86_64-linux",
+        "-Dtarget=x86_64-linux-musl",
     });
 
     const dockerfile_step = b.step("generate-dockerfile", "Generate Dockerfile for container builds");
@@ -102,8 +102,8 @@ pub fn build(b: *std.Build) !void {
     const test_regression_step = b.step("test-regression", "Run cross-platform builds, unit tests, and regression tests");
 
     const cross_targets = [_][]const u8{
-        "x86_64-linux",
-        "aarch64-linux",
+        "x86_64-linux-musl",
+        "aarch64-linux-musl",
         "x86_64-macos",
         "aarch64-macos",
         "x86_64-windows-gnu",
