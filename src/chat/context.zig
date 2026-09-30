@@ -52,4 +52,13 @@ pub const ChatLoopContext = struct {
     chat_log: ?*ChatLog,
     skill_registry: *skills.Registry,
     context_budget: *compact.ContextBudget,
+
+    /// The tools offered to the model in the current mode.
+    pub fn activeToolDefinitions(self: *const ChatLoopContext) []const openai.ToolDefinition {
+        return switch (self.mode.*) {
+            .build => self.full_tool_definitions.items,
+            .planning => self.planning_tool_definitions.items,
+            .review => self.review_tool_definitions.items,
+        };
+    }
 };

@@ -100,6 +100,9 @@ test "include chat.usage tests" {
 test "include chat.compact tests" {
     _ = @import("chat/compact.zig");
 }
+test "include chat.context_breakdown tests" {
+    _ = @import("chat/context_breakdown.zig");
+}
 test "include cli.args tests" {
     _ = @import("cli/args.zig");
 }

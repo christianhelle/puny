@@ -7,6 +7,7 @@ const stats = @import("stats.zig");
 const accumulator = @import("accumulator.zig");
 const chat_retry = @import("retry.zig");
 const client = @import("../providers/client.zig");
+const context_breakdown = @import("context_breakdown.zig");
 
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
@@ -350,12 +351,13 @@ pub const ContextBudget = struct {
         self.last_prompt_message_count = 0;
     }
 
-    /// Approximate tokens the next request will carry. Starts from the last
-    /// provider-reported prompt size when it still describes a prefix of the
-    /// conversation, and estimates only the messages added since. Never less
-    /// than the character estimate, in case a provider under-reports.
-    pub fn estimate(self: *const ContextBudget, messages: []const openai.Message) i64 {
-        const by_characters = usage.estimateUsage(messages, 0).input_tokens;
+    /// Approximate tokens the next request will carry, tool definitions
+    /// included. Starts from the last provider-reported prompt size when it
+    /// still describes a prefix of the conversation, and estimates only the
+    /// messages added since. Never less than the character estimate, in case a
+    /// provider under-reports.
+    pub fn estimate(self: *const ContextBudget, messages: []const openai.Message, tools: []const openai.ToolDefinition) i64 {
+        const by_characters = context_breakdown.measure(messages, tools).total();
         if (self.last_prompt_tokens) |reported| {
             if (self.last_prompt_message_count <= messages.len) {
                 const newer = usage.estimateUsage(messages[self.last_prompt_message_count..], 0).input_tokens;
@@ -387,7 +389,7 @@ test "estimate uses the character estimate before any provider usage is known" {
         .{ .system = "12345678" },
         .{ .user = "abcdefgh" },
     };
-    try std.testing.expectEqual(@as(i64, 4), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 4), budget.estimate(&messages, &.{}));
 }
 
 test "estimate adds newer messages to the last reported prompt size" {
@@ -398,14 +400,14 @@ test "estimate adds newer messages to the last reported prompt size" {
         .{ .assistant = .{ .content = "0123456789abcdef" } },
     };
     budget.recordPrompt(1000, 2);
-    try std.testing.expectEqual(@as(i64, 1004), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 1004), budget.estimate(&messages, &.{}));
 }
 
 test "estimate ignores reported usage once the conversation shrank" {
     var budget = ContextBudget{};
     budget.recordPrompt(1000, 5);
     const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
-    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages, &.{}));
 }
 
 test "resetUsage forgets the reported prompt size" {
@@ -413,7 +415,7 @@ test "resetUsage forgets the reported prompt size" {
     budget.recordPrompt(1000, 1);
     budget.resetUsage();
     const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
-    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages, &.{}));
 }
 
 test "shouldCompact triggers at 80 percent of the limit" {
@@ -594,7 +596,7 @@ test "recordTurn keeps provider-reported usage" {
     var budget = ContextBudget{};
     budget.recordTurn(.{ .input_tokens = 500, .output_tokens = 20 }, false, 1);
     const messages = [_]openai.Message{ .{ .user = "abcdefgh" }, .{ .user = "abcdefgh" } };
-    try std.testing.expectEqual(@as(i64, 502), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 502), budget.estimate(&messages, &.{}));
 }
 
 test "recordTurn ignores estimated usage" {
@@ -602,14 +604,14 @@ test "recordTurn ignores estimated usage" {
     budget.recordTurn(.{ .input_tokens = 500, .output_tokens = 20 }, true, 1);
     budget.recordTurn(null, false, 1);
     const messages = [_]openai.Message{ .{ .user = "abcdefgh" }, .{ .user = "abcdefgh" } };
-    try std.testing.expectEqual(@as(i64, 4), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 4), budget.estimate(&messages, &.{}));
 }
 
 test "estimate never drops below the character estimate when usage is under-reported" {
     var budget = ContextBudget{};
     budget.recordPrompt(1, 1);
     const messages = [_]openai.Message{ .{ .user = long_text }, .{ .user = "abcdefgh" } };
-    try std.testing.expectEqual(@as(i64, 102), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 102), budget.estimate(&messages, &.{}));
 }
 
 test "contextLengthFor finds the active model's reported window" {
@@ -716,7 +718,7 @@ test "resetConversation restores the startup budget and forgets usage" {
 
     try std.testing.expectEqual(@as(?usize, 16000), budget.limit());
     const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
-    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages));
+    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages, &.{}));
 }
 
 test "init ignores a zero budget" {
@@ -803,4 +805,25 @@ test "planSplit forced keeps a pending tool call even behind a system message" {
         .{ .system = "skill content" },
     };
     try std.testing.expectEqual(Split{ .start = 1, .end = 3 }, planSplit(&messages, .forced).?);
+}
+
+test "estimate counts tool definitions before any provider usage is known" {
+    var function: std.json.ObjectMap = .empty;
+    defer function.deinit(std.testing.allocator);
+    try function.put(std.testing.allocator, "name", .{ .string = "read_file" });
+    const tools = [_]openai.ToolDefinition{.{ .function = .{ .object = function } }};
+    const budget = ContextBudget{};
+    const messages = [_]openai.Message{.{ .user = "abcdefgh" }};
+    // 2 tokens of messages and 12 of the 51-character tool definition.
+    try std.testing.expectEqual(@as(i64, 14), budget.estimate(&messages, &tools));
+}
+
+test "estimate matches the sum of the context breakdown" {
+    const budget = ContextBudget{};
+    const messages = [_]openai.Message{
+        .{ .system = "1234567" },
+        .{ .user = "abcdefg" },
+    };
+    // /context lists 1 token of system prompt and 1 of messages.
+    try std.testing.expectEqual(@as(i64, 2), budget.estimate(&messages, &.{}));
 }
