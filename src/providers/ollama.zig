@@ -1,4 +1,7 @@
 const std = @import("std");
+const client = @import("client.zig");
+
+const ContextLookup = client.ContextLookup;
 
 const RunningModel = struct {
     name: []const u8 = "",
@@ -11,16 +14,17 @@ const RunningModels = struct {
 
 /// The context `model` runs with, from an `/api/ps` reply. Only loaded
 /// models are listed, and Ollama names untagged models `<name>:latest`.
-pub fn parsePsContextLength(allocator: std.mem.Allocator, body: []const u8, model: []const u8) ?usize {
-    const parsed = std.json.parseFromSlice(RunningModels, allocator, body, .{ .ignore_unknown_fields = true }) catch return null;
+/// Ollama versions before `context_length` was added count as unreported.
+pub fn parsePsContextLength(allocator: std.mem.Allocator, body: []const u8, model: []const u8) ContextLookup {
+    const parsed = std.json.parseFromSlice(RunningModels, allocator, body, .{ .ignore_unknown_fields = true }) catch return .unreported;
     defer parsed.deinit();
     for (parsed.value.models) |running| {
         if (!namesModel(running.name, model)) continue;
-        const length = running.context_length orelse return null;
-        if (length <= 0) return null;
-        return std.math.cast(usize, length);
+        const length = running.context_length orelse return .unreported;
+        if (length <= 0) return .unreported;
+        return .from(std.math.cast(usize, length));
     }
-    return null;
+    return .not_loaded;
 }
 
 fn namesModel(name: []const u8, model: []const u8) bool {
@@ -38,23 +42,27 @@ test "parsePsContextLength reads the context a loaded model runs with" {
         \\{"name":"gemma4:latest","model":"gemma4:latest","context_length":4096}
         \\]}
     ;
-    try std.testing.expectEqual(@as(?usize, 32768), parsePsContextLength(std.testing.allocator, body, "qwen3:8b"));
+    try std.testing.expectEqual(ContextLookup{ .window = 32768 }, parsePsContextLength(std.testing.allocator, body, "qwen3:8b"));
 }
 
 test "parsePsContextLength matches a model named without its latest tag" {
     const body =
         \\{"models":[{"name":"gemma4:latest","model":"gemma4:latest","context_length":4096}]}
     ;
-    try std.testing.expectEqual(@as(?usize, 4096), parsePsContextLength(std.testing.allocator, body, "gemma4"));
+    try std.testing.expectEqual(ContextLookup{ .window = 4096 }, parsePsContextLength(std.testing.allocator, body, "gemma4"));
 }
 
-test "parsePsContextLength returns null when the model is not loaded" {
+test "parsePsContextLength says a model missing from the list is not loaded yet" {
     const allocator = std.testing.allocator;
     const body =
-        \\{"models":[{"name":"gemma4:latest","context_length":4096},{"name":"old:1b"}]}
+        \\{"models":[{"name":"gemma4:latest","context_length":4096}]}
     ;
-    try std.testing.expectEqual(@as(?usize, null), parsePsContextLength(allocator, body, "qwen3:8b"));
-    try std.testing.expectEqual(@as(?usize, null), parsePsContextLength(allocator, body, "old:1b"));
-    try std.testing.expectEqual(@as(?usize, null), parsePsContextLength(allocator, "{\"models\":[]}", "gemma4"));
-    try std.testing.expectEqual(@as(?usize, null), parsePsContextLength(allocator, "not json", "gemma4"));
+    try std.testing.expectEqual(ContextLookup.not_loaded, parsePsContextLength(allocator, body, "qwen3:8b"));
+    try std.testing.expectEqual(ContextLookup.not_loaded, parsePsContextLength(allocator, "{\"models\":[]}", "gemma4"));
+}
+
+test "parsePsContextLength treats older Ollama versions and bad replies as unreported" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectEqual(ContextLookup.unreported, parsePsContextLength(allocator, "{\"models\":[{\"name\":\"old:1b\"}]}", "old:1b"));
+    try std.testing.expectEqual(ContextLookup.unreported, parsePsContextLength(allocator, "not json", "gemma4"));
 }
