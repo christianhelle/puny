@@ -1,6 +1,21 @@
 const std = @import("std");
+const client = @import("client.zig");
 
 pub const default_base_url = "https://ollama.com";
+
+/// Ollama's OpenAI-compatible model list carries no context window, so ask
+/// the native `/api/show` endpoint for `model`. Null when it cannot say.
+pub fn showContextLength(c: *client.Client, model: []const u8) ?usize {
+    const allocator = c.allocator;
+    const payload = std.json.Stringify.valueAlloc(allocator, .{ .model = model }, .{}) catch return null;
+    defer allocator.free(payload);
+    const url = std.fmt.allocPrint(allocator, "{s}/api/show", .{c.base_url}) catch return null;
+    defer allocator.free(url);
+    var raw = client.requestRaw(c, .POST, url, payload) catch return null;
+    defer raw.deinit();
+    if (raw.status.class() != .success) return null;
+    return parseShowContextLength(allocator, raw.body);
+}
 
 /// The context window in an `/api/show` reply. Ollama reports it under the
 /// model's architecture, e.g. `model_info["deepseek_v41.context_length"]`.

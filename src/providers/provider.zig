@@ -11,6 +11,7 @@ const unsloth = @import("unsloth.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const responses = @import("responses.zig");
+const ollama_cloud = @import("ollama_cloud.zig");
 const cancel = @import("../core/cancel.zig");
 
 pub const ModelProvider = enum {
@@ -86,6 +87,22 @@ pub const Provider = union(enum) {
         };
         try capture.commit(c);
         return result;
+    }
+
+    /// The context window `model_key` accepts, if the provider reports one.
+    pub fn contextLength(self: *Provider, model_key: []const u8) ?usize {
+        switch (self.*) {
+            .ollama_cloud => |*c| return ollama_cloud.showContextLength(c, model_key),
+            else => {},
+        }
+        var models = self.listModels() catch return null;
+        defer models.deinit();
+        for (models.value().models) |model| {
+            if (!std.mem.eql(u8, model.id, model_key)) continue;
+            if (model.context_length <= 0) return null;
+            return std.math.cast(usize, model.context_length);
+        }
+        return null;
     }
 
     fn listModelsInner(self: *Provider) !client.Owned(client.ModelsList) {
@@ -283,6 +300,30 @@ test "Provider.listModels dispatches to the mock provider" {
     try std.testing.expectEqualStrings("mock-model-fast", model_list[1].id);
     try std.testing.expectEqualStrings("mock", model_list[0].provider);
     try std.testing.expectEqual(@as(i64, 128000), model_list[0].context_length);
+}
+
+test "Provider.contextLength asks Ollama Cloud's show endpoint for the model's window" {
+    const server = try startProviderTestServer(.ok,
+        \\{"model_info":{"deepseek_v41.context_length":1048576,"general.architecture":"deepseek_v41"}}
+    );
+    defer stopProviderTestServer(server);
+    const url = try providerTestUrl(server);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama_cloud = client.Client.init(std.testing.allocator, std.testing.io, "key") };
+    defer prov.deinit();
+    prov.ollama_cloud.withBaseUrl(url);
+
+    try std.testing.expectEqual(@as(?usize, 1048576), prov.contextLength("deepseek-v4.1-flash"));
+    try std.testing.expectEqualStrings("/api/show", server.getRequestPath());
+}
+
+test "Provider.contextLength finds the window in the model list" {
+    var prov = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    try std.testing.expectEqual(@as(?usize, 32000), prov.contextLength("mock-model-fast"));
+    try std.testing.expectEqual(@as(?usize, null), prov.contextLength("missing"));
 }
 
 test "Provider.setConfig applies config to the copilot client" {
