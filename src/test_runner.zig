@@ -161,6 +161,12 @@ test "include providers.unsloth tests" {
 test "include providers.opencode_zen tests" {
     _ = @import("providers/opencode_zen.zig");
 }
+test "include providers.ollama_cloud tests" {
+    _ = @import("providers/ollama_cloud.zig");
+}
+test "include providers.models_dev tests" {
+    _ = @import("providers/models_dev.zig");
+}
 test "include providers.anthropic tests" {
     _ = @import("providers/anthropic.zig");
 }
