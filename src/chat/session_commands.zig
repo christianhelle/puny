@@ -127,6 +127,7 @@ pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !v
         model_id,
         ctx.model_key.*,
         ctx.reasoning_effort.*,
+        ctx.context_budget.tier,
         ctx.arena,
         ctx.io,
         ctx.init,
@@ -146,7 +147,17 @@ pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !v
         if (result.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
         }
+        applySelectedContext(ctx, result);
     }
+}
+
+/// Hands a selection's context sizes and picked tier to the budget, so the
+/// new model's window is known without asking the provider again.
+fn applySelectedContext(ctx: *ChatLoopContext, result: model_selection.SelectionResult) void {
+    if (result.context) |sizes| {
+        ctx.context_budget.rememberModel(std.meta.activeTag(ctx.prov.*), result.model_key, sizes.default, sizes.long_context);
+    }
+    if (result.context_tier) |tier| ctx.context_budget.setTier(tier);
 }
 
 pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) !void {
@@ -762,6 +773,7 @@ const SwitchHarness = struct {
     model_key: []const u8 = "previous-model",
     session: @import("../core/session.zig").Session = .{ .id = "test-session", .base = "", .dir = "", .prd_path = "", .html_path = "" },
     random_source: std.Random.IoSource = .{ .io = std.testing.io },
+    context_budget: compact.ContextBudget = .{},
 
     fn init(self: *SwitchHarness) !void {
         const http_client = @import("../providers/client.zig");
@@ -777,6 +789,7 @@ const SwitchHarness = struct {
         self.model_key = "previous-model";
         self.session = .{ .id = "test-session", .base = "", .dir = "", .prd_path = "", .html_path = "" };
         self.random_source = .{ .io = std.testing.io };
+        self.context_budget = .{};
 
         var previous = http_client.Client.init(self.messages_arena.allocator(), std.testing.io, "");
         previous.withBaseUrl(self.provider_url);
@@ -814,6 +827,7 @@ const SwitchHarness = struct {
         ctx.model_key = &self.model_key;
         ctx.session = &self.session;
         ctx.random = self.random_source.interface();
+        ctx.context_budget = &self.context_budget;
         return ctx;
     }
 };

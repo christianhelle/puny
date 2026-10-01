@@ -9,6 +9,7 @@ const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const retry = @import("../core/retry.zig");
 const test_support = @import("../test_support.zig");
+const welcome = @import("../tui/welcome.zig");
 
 pub const SelectionResult = struct {
     model_key: []const u8,
@@ -132,6 +133,7 @@ pub fn switchModel(
     model_id: ?[]const u8,
     current_key: []const u8,
     current_effort: ?openai.ReasoningEffort,
+    current_tier: client.ContextTier,
     arena: std.mem.Allocator,
     io: std.Io,
     init: std.process.Init,
@@ -149,21 +151,18 @@ pub fn switchModel(
         }
         return null;
     };
-    const effort_suffix = if (result.reasoning_effort) |effort| if (effort != .default) @tagName(effort) else null else null;
     const same_effort = if (result.reasoning_effort) |new_effort| if (current_effort) |cur| new_effort == cur else false else current_effort == null;
-    if (std.mem.eql(u8, result.model_key, current_key) and same_effort) {
-        try stdout_writer.print("\nAlready using model {s}", .{result.model_key});
-        if (effort_suffix) |suffix| {
-            try stdout_writer.print(" - {s}{s}{s}", .{ ansi.bold_start, suffix, ansi.bold_end });
-        }
+    const same_tier = if (result.context_tier) |tier| tier == current_tier else true;
+    const window = result.contextWindow(current_tier);
+    if (std.mem.eql(u8, result.model_key, current_key) and same_effort and same_tier) {
+        try stdout_writer.print("\nAlready using model ", .{});
+        try welcome.writeModel(stdout_writer, result.model_key, result.reasoning_effort, window);
         try stdout_writer.print(".\n", .{});
         try stdout_writer.flush();
         return null;
     }
-    try stdout_writer.print("\nSwitched to model {s}", .{result.model_key});
-    if (effort_suffix) |suffix| {
-        try stdout_writer.print(" - {s}{s}{s}", .{ ansi.bold_start, suffix, ansi.bold_end });
-    }
+    try stdout_writer.print("\nSwitched to model ", .{});
+    try welcome.writeModel(stdout_writer, result.model_key, result.reasoning_effort, window);
     try stdout_writer.print(".\n", .{});
     try stdout_writer.flush();
     return result;
@@ -427,7 +426,7 @@ test "switchModel reports when the requested model is not found" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "no-such-model", "mock-model", null, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "no-such-model", "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result == null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Model not found.") != null);
 }
@@ -440,7 +439,7 @@ test "switchModel returns the new selection when the model changes" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "mock-model-fast", "mock-model", null, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "mock-model-fast", "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result != null);
     try std.testing.expectEqualStrings("mock-model-fast", result.?.model_key);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Switched to model mock-model-fast") != null);
@@ -454,7 +453,7 @@ test "switchModel rejects switching to the current model and effort" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "mock-model", "mock-model", null, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "mock-model", "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result == null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Already using model mock-model") != null);
 }
@@ -467,7 +466,7 @@ test "switchModel switches when only the effort matches" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "mock-model", "mock-model", .medium, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "mock-model", "mock-model", .medium, .default, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result != null);
     try std.testing.expectEqualStrings("mock-model", result.?.model_key);
 }
