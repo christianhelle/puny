@@ -258,6 +258,7 @@ fn run(init: std.process.Init) !u8 {
     var provider_url: []const u8 = undefined;
     var model_key: []const u8 = undefined;
     var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_context: ?model_selection.ModelContext = null;
     try initializeProviderAndModel(
         arena,
         messages_arena,
@@ -272,6 +273,7 @@ fn run(init: std.process.Init) !u8 {
         &provider_url,
         &model_key,
         &reasoning_effort,
+        &model_context,
         session_id,
     );
     crash.setContext(.{
@@ -302,11 +304,20 @@ fn run(init: std.process.Init) !u8 {
         current_session = try core_sess.Session.initWithId(arena, base_dir, session_id, init.io);
     }
 
+    var context_budget = compact.ContextBudget.init(parsed.max_context, cfg.max_context_tokens);
+    context_budget.setStartupTier(parsed.context_tier orelse cfg.context_tier);
+    var context_window: ?usize = null;
+    if (model_context) |sizes| {
+        context_budget.rememberModel(std.meta.activeTag(prov), model_key, sizes.default, sizes.long_context);
+        if (context_budget.explicit == null) context_window = sizes.window(context_budget.tier);
+    }
+
     try welcome.print(stdout_writer, .{
         .provider_name = if (parsed.mock) "Mock" else provider.getProviderDisplayName(selected_provider),
         .provider_url = provider_url,
         .model_key = model_key,
         .reasoning_effort = reasoning_effort,
+        .context_window = context_window,
         .session_id = current_session.id,
         .oneshot = parsed.oneshot,
         .prefilled = parsed.prompt != null,
@@ -404,9 +415,6 @@ fn run(init: std.process.Init) !u8 {
     session_stats.session_id = current_session.id;
     defer session_stats.deinit();
     sigint.register() catch {};
-
-    var context_budget = compact.ContextBudget.init(parsed.max_context, cfg.max_context_tokens);
-    context_budget.setStartupTier(parsed.context_tier orelse cfg.context_tier);
 
     const ctx = session.ChatLoopContext{
         .arena = arena,
@@ -622,6 +630,7 @@ fn initializeProviderAndModel(
     provider_url: *[]const u8,
     model_key: *[]const u8,
     reasoning_effort: *?openai.ReasoningEffort,
+    model_context: *?model_selection.ModelContext,
     session_id: []const u8,
 ) !void {
     selected_provider.* = try resolver.effectiveProvider(parsed, cfg.*);
@@ -699,6 +708,7 @@ fn initializeProviderAndModel(
         };
     };
     model_key.* = init_result.model_key;
+    model_context.* = init_result.context;
     reasoning_effort.* = resolveReasoningEffort(
         parsed.effort,
         init_result.reasoning_effort,
