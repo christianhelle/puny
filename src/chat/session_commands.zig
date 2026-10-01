@@ -55,7 +55,12 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
             budget.setTier(tier);
             const name = if (tier == .long_context) "long-context" else "default";
             if (budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
-                try w.print("\nUsing the {s} tier: {d} tokens for this conversation.\n", .{ name, limit });
+                if (budget.window()) |shown| {
+                    var size_buf: [16]u8 = undefined;
+                    try w.print("\nUsing the {s} tier: a {s} window, compacted near {d} tokens.\n", .{ name, token_stats.formatContextSize(&size_buf, shown), limit });
+                } else {
+                    try w.print("\nUsing the {s} tier: {d} tokens for this conversation.\n", .{ name, limit });
+                }
             } else {
                 try w.print("\nUsing the {s} tier, but this model reports no context window.\n", .{name});
             }
@@ -1053,6 +1058,30 @@ test "handleContextCommand shows the model's whole window next to the compaction
     try handleContextCommand(&ctx, null);
 
     try std.testing.expect(std.mem.startsWith(u8, out.written(), "\nContext: ~3 of 272000 tokens (0%) in a 400K window; compacts at 80%.\n"));
+}
+
+test "handleContextCommand names the window when switching context tier" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    var budget = compact.ContextBudget{};
+    budget.setTier(.long_context);
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 872000, .window = 1000000 } });
+    budget.setTier(.default);
+    var model_key: []const u8 = "mock-model";
+    var prov = provider.Provider{ .mock = @import("../providers/mock.zig").MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    ctx.prov = &prov;
+    ctx.context_budget = &budget;
+    ctx.model_key = &model_key;
+
+    try handleContextCommand(&ctx, "long");
+
+    try std.testing.expectEqualStrings("\nUsing the long-context tier: a 1M window, compacted near 872000 tokens.\n", out.written());
 }
 
 test "handleContextCommand breaks the context down by part" {
