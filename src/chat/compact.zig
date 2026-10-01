@@ -246,7 +246,7 @@ pub const ContextTier = provider.ContextTier;
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
     const remembered_capacity = 16;
-    const RememberedWindow = struct { key_hash: u64, window: ?usize };
+    const RememberedWindow = struct { key_hash: u64, prompt: ?usize, window: ?usize };
 
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
     explicit: ?usize = null,
@@ -260,6 +260,8 @@ pub const ContextBudget = struct {
     startup_tier: ContextTier = .default,
     /// Context window the provider reports for the active model, if any.
     model_reported: ?usize = null,
+    /// Whole window (prompt and reply) of the active model, shown to the user.
+    model_window: ?usize = null,
     /// Hash of the provider and model key `model_reported` was looked up for,
     /// so switching either one triggers a new lookup.
     model_reported_key_hash: ?u64 = null,
@@ -294,6 +296,13 @@ pub const ContextBudget = struct {
     pub fn limit(self: *const ContextBudget) ?usize {
         if (self.disabled) return null;
         return self.explicit orelse self.model_reported;
+    }
+
+    /// The model's whole window, shown alongside the limit. Null when a token
+    /// limit replaces the model's own, or when the provider does not say.
+    pub fn window(self: *const ContextBudget) ?usize {
+        if (self.disabled or self.explicit != null) return null;
+        return self.model_window;
     }
 
     /// True when the limit depends on a model window not yet looked up.
@@ -335,7 +344,8 @@ pub const ContextBudget = struct {
         const key_hash = self.modelKeyHash(provider_kind, model_key);
         if (self.model_reported_key_hash != key_hash) {
             if (self.recall(key_hash)) |known| {
-                self.model_reported = known.window;
+                self.model_reported = known.prompt;
+                self.model_window = known.window;
                 self.model_reported_key_hash = key_hash;
             } else {
                 self.setModelReported(provider_kind, model_key, prov.contextLength(model_key, self.tier));
@@ -351,11 +361,15 @@ pub const ContextBudget = struct {
             .size => |size| size.prompt,
             .unreported, .not_loaded => null,
         };
+        self.model_window = switch (lookup) {
+            .size => |size| size.window,
+            .unreported, .not_loaded => null,
+        };
         self.model_reported_key_hash = switch (lookup) {
             .not_loaded => null,
             .size, .unreported => self.modelKeyHash(provider_kind, model_key),
         };
-        if (self.model_reported_key_hash) |key_hash| self.remember(key_hash, self.model_reported);
+        if (self.model_reported_key_hash) |key_hash| self.remember(key_hash, self.model_reported, self.model_window);
     }
 
     fn recall(self: *const ContextBudget, key_hash: u64) ?RememberedWindow {
@@ -365,14 +379,15 @@ pub const ContextBudget = struct {
         return null;
     }
 
-    fn remember(self: *ContextBudget, key_hash: u64, window: ?usize) void {
+    fn remember(self: *ContextBudget, key_hash: u64, prompt: ?usize, shown: ?usize) void {
         for (self.remembered[0..self.remembered_len]) |*known| {
             if (known.key_hash == key_hash) {
-                known.window = window;
+                known.prompt = prompt;
+                known.window = shown;
                 return;
             }
         }
-        self.remembered[self.remembered_next] = .{ .key_hash = key_hash, .window = window };
+        self.remembered[self.remembered_next] = .{ .key_hash = key_hash, .prompt = prompt, .window = shown };
         self.remembered_next = (self.remembered_next + 1) % remembered_capacity;
         self.remembered_len = @min(self.remembered_len + 1, remembered_capacity);
     }
@@ -708,6 +723,30 @@ test "choosing a context tier replaces a token limit and a new conversation rest
     budget.resetConversation();
     try std.testing.expectEqual(ContextTier.long_context, budget.tier);
     try std.testing.expectEqual(@as(?usize, 64000), budget.explicit);
+}
+
+test "window shows the model's whole window while compaction uses its prompt limit" {
+    var budget = ContextBudget{};
+    budget.setModelReported(.copilot, "gpt-6-luna", .{ .size = .{ .prompt = 272000, .window = 400000 } });
+    try std.testing.expectEqual(@as(?usize, 272000), budget.limit());
+    try std.testing.expectEqual(@as(?usize, 400000), budget.window());
+
+    budget.setExplicit(64000);
+    try std.testing.expectEqual(@as(?usize, null), budget.window());
+}
+
+test "resolveLimit recalls a model's window along with its limit" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var budget = ContextBudget{};
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 5000, .window = 9000 } });
+    budget.setModelReported(.mock, "mock-model-fast", .{ .size = .{ .prompt = 1000 } });
+    try std.testing.expectEqual(@as(?usize, null), budget.window());
+
+    try std.testing.expectEqual(@as(?usize, 5000), budget.resolveLimit(&prov, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, 9000), budget.window());
 }
 
 test "needsModelLookup asks again while the model is not loaded yet" {
