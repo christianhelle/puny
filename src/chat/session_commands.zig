@@ -57,7 +57,7 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
             if (budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
                 if (budget.window()) |shown| {
                     var size_buf: [16]u8 = undefined;
-                    try w.print("\nUsing the {s} tier: a {s} window, compacted near {d} tokens.\n", .{ name, token_stats.formatContextSize(&size_buf, shown), limit });
+                    try w.print("\nUsing the {s} tier: a {s} window; compacts at {d}% of {d} tokens.\n", .{ name, token_stats.formatContextSize(&size_buf, shown), compact.threshold_percent, limit });
                 } else {
                     try w.print("\nUsing the {s} tier: {d} tokens for this conversation.\n", .{ name, limit });
                 }
@@ -1105,7 +1105,7 @@ test "handleContextCommand names the window when switching context tier" {
 
     try handleContextCommand(&ctx, "long");
 
-    try std.testing.expectEqualStrings("\nUsing the long-context tier: a 1M window, compacted near 872000 tokens.\n", out.written());
+    try std.testing.expectEqualStrings("\nUsing the long-context tier: a 1M window; compacts at 80% of 872000 tokens.\n", out.written());
 }
 
 test "handleContextCommand breaks the context down by part" {
