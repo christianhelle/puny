@@ -354,6 +354,18 @@ pub const ContextBudget = struct {
         return self.limit();
     }
 
+    /// Records what a model list already said about `model_key` in each tier,
+    /// e.g. while selecting a model, so neither tier is looked up again.
+    pub fn rememberModel(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, default: provider.ContextLookup, long_context: provider.ContextLookup) void {
+        inline for (.{ .{ ContextTier.default, default }, .{ ContextTier.long_context, long_context } }) |entry| {
+            switch (entry[1]) {
+                .size => |size| self.remember(keyHashFor(provider_kind, model_key, entry[0]), size.prompt, size.window),
+                .unreported => self.remember(keyHashFor(provider_kind, model_key, entry[0]), null, null),
+                .not_loaded => {},
+            }
+        }
+    }
+
     /// Records a lookup's answer. A model that is not loaded yet is looked
     /// up again on the next request rather than remembered as unreported.
     pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, lookup: provider.ContextLookup) void {
@@ -395,7 +407,11 @@ pub const ContextBudget = struct {
     /// Identifies a lookup by provider, model, and tier, since a tier
     /// changes the window a model reports.
     fn modelKeyHash(self: *const ContextBudget, provider_kind: ProviderKind, model_key: []const u8) u64 {
-        const seed = @as(u64, @intFromEnum(provider_kind)) << 8 | @intFromEnum(self.tier);
+        return keyHashFor(provider_kind, model_key, self.tier);
+    }
+
+    fn keyHashFor(provider_kind: ProviderKind, model_key: []const u8, tier: ContextTier) u64 {
+        const seed = @as(u64, @intFromEnum(provider_kind)) << 8 | @intFromEnum(tier);
         return std.hash.Wyhash.hash(seed, model_key);
     }
 
@@ -747,6 +763,22 @@ test "resolveLimit recalls a model's window along with its limit" {
 
     try std.testing.expectEqual(@as(?usize, 5000), budget.resolveLimit(&prov, "mock-model"));
     try std.testing.expectEqual(@as(?usize, 9000), budget.window());
+}
+
+test "rememberModel records both tiers so neither is looked up again" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var budget = ContextBudget{};
+    budget.rememberModel(.mock, "mock-model", .{ .size = .{ .prompt = 272000, .window = 400000 } }, .{ .size = .{ .prompt = 872000, .window = 1000000 } });
+
+    // A fresh lookup would report the mock's own 128000.
+    try std.testing.expectEqual(@as(?usize, 272000), budget.resolveLimit(&prov, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, 400000), budget.window());
+    budget.setTier(.long_context);
+    try std.testing.expectEqual(@as(?usize, 872000), budget.resolveLimit(&prov, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, 1000000), budget.window());
 }
 
 test "needsModelLookup asks again while the model is not loaded yet" {
