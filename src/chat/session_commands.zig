@@ -14,6 +14,7 @@ const provider = @import("../providers/provider.zig");
 const provider_picker = @import("../tui/provider_picker.zig");
 const resolver = @import("../providers/resolver.zig");
 const sigint = @import("../core/sigint.zig");
+const token_stats = @import("../tui/token_stats.zig");
 const welcome = @import("../tui/welcome.zig");
 
 const ModelProvider = provider.ModelProvider;
@@ -30,7 +31,12 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
             const limit = budget.resolveLimit(ctx.prov, ctx.model_key.*);
             if (limit) |total| {
                 const percent = @divFloor(@as(u128, @intCast(@max(used, 0))) * 100, total);
-                try w.print("\nContext: ~{d} of {d} tokens ({d}%); compacts at {d}%.\n", .{ used, total, percent, compact.threshold_percent });
+                try w.print("\nContext: ~{d} of {d} tokens ({d}%)", .{ used, total, percent });
+                if (budget.window()) |shown| {
+                    var size_buf: [16]u8 = undefined;
+                    try w.print(" in a {s} window", .{token_stats.formatContextSize(&size_buf, shown)});
+                }
+                try w.print("; compacts at {d}%.\n", .{compact.threshold_percent});
             } else {
                 try w.print("\nContext: ~{d} tokens. No limit is set, so auto compaction is off.\n", .{used});
             }
@@ -1017,6 +1023,36 @@ test "handleReconfigureCommand refuses oneshot mode" {
     try handleReconfigureCommand(&ctx);
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "/config not available in oneshot mode.") != null);
+}
+
+test "handleContextCommand shows the model's whole window next to the compaction limit" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .user = "Read build.zig" });
+    var tools: std.ArrayList(openai.ToolDefinition) = .empty;
+    var mode: @import("../core/mode.zig").AgentMode = .build;
+    var budget = compact.ContextBudget{};
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 272000, .window = 400000 } });
+    var model_key: []const u8 = "mock-model";
+    var prov = provider.Provider{ .mock = @import("../providers/mock.zig").MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    ctx.prov = &prov;
+    ctx.messages = &messages;
+    ctx.full_tool_definitions = &tools;
+    ctx.mode = &mode;
+    ctx.context_budget = &budget;
+    ctx.model_key = &model_key;
+
+    try handleContextCommand(&ctx, null);
+
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\nContext: ~3 of 272000 tokens (0%) in a 400K window; compacts at 80%.\n"));
 }
 
 test "handleContextCommand breaks the context down by part" {
