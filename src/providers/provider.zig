@@ -198,12 +198,13 @@ pub const Provider = union(enum) {
 pub fn windowInList(models: []const client.Model, model_key: []const u8, tier: ContextTier) ContextLookup {
     for (models) |model| {
         if (!std.mem.eql(u8, model.id, model_key)) continue;
-        const length = if (tier == .long_context and model.long_context_length > 0)
-            model.long_context_length
-        else
-            model.context_length;
+        const long = tier == .long_context and model.long_context_length > 0;
+        const length = if (long) model.long_context_length else model.context_length;
+        const window = if (long) model.long_context_window else model.context_window;
         if (length <= 0) return .unreported;
-        return .from(std.math.cast(usize, length));
+        const prompt = std.math.cast(usize, length) orelse return .unreported;
+        const shown: ?usize = if (window > 0) std.math.cast(usize, window) else null;
+        return .{ .size = .{ .prompt = prompt, .window = shown } };
     }
     return .unreported;
 }
@@ -390,12 +391,12 @@ test "catalogProviderId names OpenCode's providers as models.dev does" {
 
 test "windowInList picks the long-context limit only when that tier is chosen" {
     const models = [_]client.Model{
-        .{ .id = "tiered", .display_name = "", .provider = "p", .context_length = 272000, .long_context_length = 872000 },
+        .{ .id = "tiered", .display_name = "", .provider = "p", .context_length = 272000, .long_context_length = 872000, .context_window = 400000, .long_context_window = 1000000 },
         .{ .id = "single", .display_name = "", .provider = "p", .context_length = 128000 },
         .{ .id = "unreported", .display_name = "", .provider = "p", .context_length = 0 },
     };
-    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 272000 } }, windowInList(&models, "tiered", .default));
-    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 872000 } }, windowInList(&models, "tiered", .long_context));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 272000, .window = 400000 } }, windowInList(&models, "tiered", .default));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 872000, .window = 1000000 } }, windowInList(&models, "tiered", .long_context));
     try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 128000 } }, windowInList(&models, "single", .long_context));
     try std.testing.expectEqual(ContextLookup.unreported, windowInList(&models, "unreported", .default));
     try std.testing.expectEqual(ContextLookup.unreported, windowInList(&models, "missing", .default));
