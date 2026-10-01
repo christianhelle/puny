@@ -14,13 +14,14 @@ const provider = @import("../providers/provider.zig");
 const provider_picker = @import("../tui/provider_picker.zig");
 const resolver = @import("../providers/resolver.zig");
 const sigint = @import("../core/sigint.zig");
+const token_stats = @import("../tui/token_stats.zig");
 const welcome = @import("../tui/welcome.zig");
 
 const ModelProvider = provider.ModelProvider;
 const ChatLoopContext = context.ChatLoopContext;
 
-/// `/context [tokens|off]`: shows how full the context is and what fills it,
-/// or changes the limit for the current conversation.
+/// `/context [tokens|off|default|long]`: shows how full the context is and
+/// what fills it, or changes the limit or tier for the current conversation.
 pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void {
     const budget = ctx.context_budget;
     const w = ctx.stdout_writer;
@@ -30,7 +31,12 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
             const limit = budget.resolveLimit(ctx.prov, ctx.model_key.*);
             if (limit) |total| {
                 const percent = @divFloor(@as(u128, @intCast(@max(used, 0))) * 100, total);
-                try w.print("\nContext: ~{d} of {d} tokens ({d}%); compacts at {d}%.\n", .{ used, total, percent, compact.threshold_percent });
+                try w.print("\nContext: ~{d} of {d} tokens ({d}%)", .{ used, total, percent });
+                if (budget.window()) |shown| {
+                    var size_buf: [16]u8 = undefined;
+                    try w.print(" in a {s} window", .{token_stats.formatContextSize(&size_buf, shown)});
+                }
+                try w.print("; compacts at {d}%.\n", .{compact.threshold_percent});
             } else {
                 try w.print("\nContext: ~{d} tokens. No limit is set, so auto compaction is off.\n", .{used});
             }
@@ -45,7 +51,21 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
             budget.disable();
             try w.print("\nAuto compaction is off for this conversation.\n", .{});
         },
-        .invalid => try w.print("\nUsage: /context [tokens|off]\n", .{}),
+        .tier => |tier| {
+            budget.setTier(tier);
+            const name = if (tier == .long_context) "long-context" else "default";
+            if (budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
+                if (budget.window()) |shown| {
+                    var size_buf: [16]u8 = undefined;
+                    try w.print("\nUsing the {s} tier: a {s} window; compacts at {d}% of {d} tokens.\n", .{ name, token_stats.formatContextSize(&size_buf, shown), compact.threshold_percent, limit });
+                } else {
+                    try w.print("\nUsing the {s} tier: {d} tokens for this conversation.\n", .{ name, limit });
+                }
+            } else {
+                try w.print("\nUsing the {s} tier, but this model reports no context window.\n", .{name});
+            }
+        },
+        .invalid => try w.print("\nUsage: /context [tokens|off|default|long]\n", .{}),
     }
     try w.flush();
 }
@@ -107,6 +127,7 @@ pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !v
         model_id,
         ctx.model_key.*,
         ctx.reasoning_effort.*,
+        ctx.context_budget.tier,
         ctx.arena,
         ctx.io,
         ctx.init,
@@ -126,7 +147,19 @@ pub fn handleSwitchModelCommand(ctx: *ChatLoopContext, model_id: ?[]const u8) !v
         if (result.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
         }
+        applySelectedContext(ctx, result);
     }
+}
+
+/// Hands a selection's context sizes and picked tier to the budget, so the
+/// new model's window is known without asking the provider again.
+fn applySelectedContext(ctx: *ChatLoopContext, result: model_selection.SelectionResult) void {
+    if (result.context) |sizes| {
+        ctx.context_budget.rememberModel(std.meta.activeTag(ctx.prov.*), result.model_key, sizes.default, sizes.long_context);
+    }
+    // The picker saves the tier as the preference, so it is the tier new
+    // conversations start on too, and a token limit or `/context off` still wins.
+    if (result.context_tier) |tier| ctx.context_budget.setStartupTier(tier);
 }
 
 pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) !void {
@@ -206,11 +239,14 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     previous_prov.deinit();
     owns_previous_prov = false;
 
+    var context_window: ?usize = null;
     if (model_selection_result) |sel| {
         ctx.model_key.* = sel.model_key;
         if (sel.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
         }
+        applySelectedContext(ctx, sel);
+        context_window = sel.contextWindow(ctx.context_budget.tier);
     }
 
     try welcome.printSummary(
@@ -220,6 +256,7 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
             .reasoning_effort = ctx.reasoning_effort.*,
+            .context_window = context_window,
         },
     );
 
@@ -313,6 +350,7 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
         return;
     }
 
+    var context_window: ?usize = null;
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         // Kept alive until the new provider answers, so an unreachable server
         // can hand the session back to it.
@@ -358,6 +396,8 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             if (sel.reasoning_effort) |effort| {
                 ctx.reasoning_effort.* = effort;
             }
+            applySelectedContext(ctx, sel);
+            context_window = sel.contextWindow(ctx.context_budget.tier);
         }
     } else {
         ctx.prov.setConfig(.{ .base_url = new_provider_url, .api_key = new_api_key });
@@ -372,6 +412,7 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
             .reasoning_effort = ctx.reasoning_effort.*,
+            .context_window = context_window,
         },
     );
 
@@ -742,6 +783,7 @@ const SwitchHarness = struct {
     model_key: []const u8 = "previous-model",
     session: @import("../core/session.zig").Session = .{ .id = "test-session", .base = "", .dir = "", .prd_path = "", .html_path = "" },
     random_source: std.Random.IoSource = .{ .io = std.testing.io },
+    context_budget: compact.ContextBudget = .{},
 
     fn init(self: *SwitchHarness) !void {
         const http_client = @import("../providers/client.zig");
@@ -757,6 +799,7 @@ const SwitchHarness = struct {
         self.model_key = "previous-model";
         self.session = .{ .id = "test-session", .base = "", .dir = "", .prd_path = "", .html_path = "" };
         self.random_source = .{ .io = std.testing.io };
+        self.context_budget = .{};
 
         var previous = http_client.Client.init(self.messages_arena.allocator(), std.testing.io, "");
         previous.withBaseUrl(self.provider_url);
@@ -794,6 +837,7 @@ const SwitchHarness = struct {
         ctx.model_key = &self.model_key;
         ctx.session = &self.session;
         ctx.random = self.random_source.interface();
+        ctx.context_budget = &self.context_budget;
         return ctx;
     }
 };
@@ -1008,6 +1052,60 @@ test "handleReconfigureCommand refuses oneshot mode" {
     try handleReconfigureCommand(&ctx);
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "/config not available in oneshot mode.") != null);
+}
+
+test "handleContextCommand shows the model's whole window next to the compaction limit" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .user = "Read build.zig" });
+    var tools: std.ArrayList(openai.ToolDefinition) = .empty;
+    var mode: @import("../core/mode.zig").AgentMode = .build;
+    var budget = compact.ContextBudget{};
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 272000, .window = 400000 } });
+    var model_key: []const u8 = "mock-model";
+    var prov = provider.Provider{ .mock = @import("../providers/mock.zig").MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    ctx.prov = &prov;
+    ctx.messages = &messages;
+    ctx.full_tool_definitions = &tools;
+    ctx.mode = &mode;
+    ctx.context_budget = &budget;
+    ctx.model_key = &model_key;
+
+    try handleContextCommand(&ctx, null);
+
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\nContext: ~3 of 272000 tokens (0%) in a 400K window; compacts at 80%.\n"));
+}
+
+test "handleContextCommand names the window when switching context tier" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var ctx = testChatLoopContext(std.testing.allocator, &out.writer, &reasoning_effort, &model_provider, &cfg);
+
+    var budget = compact.ContextBudget{};
+    budget.setTier(.long_context);
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 872000, .window = 1000000 } });
+    budget.setTier(.default);
+    var model_key: []const u8 = "mock-model";
+    var prov = provider.Provider{ .mock = @import("../providers/mock.zig").MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    ctx.prov = &prov;
+    ctx.context_budget = &budget;
+    ctx.model_key = &model_key;
+
+    try handleContextCommand(&ctx, "long");
+
+    try std.testing.expectEqualStrings("\nUsing the long-context tier: a 1M window; compacts at 80% of 872000 tokens.\n", out.written());
 }
 
 test "handleContextCommand breaks the context down by part" {

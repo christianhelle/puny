@@ -50,6 +50,7 @@ pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
 }
 
 pub const ContextLookup = client.ContextLookup;
+pub const ContextTier = client.ContextTier;
 
 pub const Provider = union(enum) {
     lmstudio: client.Client,
@@ -94,7 +95,8 @@ pub const Provider = union(enum) {
     }
 
     /// The context window `model_key` accepts, if the provider reports one.
-    pub fn contextLength(self: *Provider, model_key: []const u8) ContextLookup {
+    /// `tier` matters only for models priced in context tiers.
+    pub fn contextLength(self: *Provider, model_key: []const u8, tier: ContextTier) ContextLookup {
         switch (self.*) {
             .ollama => |*c| return ollama.psContextLength(c, model_key),
             .ollama_cloud => |*c| return .from(ollama_cloud.showContextLength(c, model_key)),
@@ -109,12 +111,7 @@ pub const Provider = union(enum) {
         }
         var models = self.listModels() catch return .unreported;
         defer models.deinit();
-        for (models.value().models) |model| {
-            if (!std.mem.eql(u8, model.id, model_key)) continue;
-            if (model.context_length <= 0) return .unreported;
-            return .from(std.math.cast(usize, model.context_length));
-        }
-        return .unreported;
+        return windowInList(models.value().models, model_key, tier);
     }
 
     fn listModelsInner(self: *Provider) !client.Owned(client.ModelsList) {
@@ -195,6 +192,22 @@ pub const Provider = union(enum) {
         }
     }
 };
+
+/// The window `model_key` has in a provider's model list. The long-context
+/// tier applies only to models that list one; others keep their one window.
+pub fn windowInList(models: []const client.Model, model_key: []const u8, tier: ContextTier) ContextLookup {
+    for (models) |model| {
+        if (!std.mem.eql(u8, model.id, model_key)) continue;
+        const long = tier == .long_context and model.long_context_length > 0;
+        const length = if (long) model.long_context_length else model.context_length;
+        const window = if (long) model.long_context_window else model.context_window;
+        if (length <= 0) return .unreported;
+        const prompt = std.math.cast(usize, length) orelse return .unreported;
+        const shown: ?usize = if (window > 0) std.math.cast(usize, window) else null;
+        return .{ .size = .{ .prompt = prompt, .window = shown } };
+    }
+    return .unreported;
+}
 
 /// The id models.dev files a provider under, for providers whose own model
 /// list carries no context windows.
@@ -336,7 +349,7 @@ test "Provider.contextLength asks Ollama Cloud's show endpoint for the model's w
     defer prov.deinit();
     prov.ollama_cloud.withBaseUrl(url);
 
-    try std.testing.expectEqual(ContextLookup{ .window = 1048576 }, prov.contextLength("deepseek-v4.1-flash"));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 1048576 } }, prov.contextLength("deepseek-v4.1-flash", .default));
     try std.testing.expectEqualStrings("/api/show", server.getRequestPath());
 }
 
@@ -352,7 +365,7 @@ test "Provider.contextLength asks local Ollama for the context a loaded model ru
     defer prov.deinit();
     prov.ollama.withBaseUrl(url);
 
-    try std.testing.expectEqual(ContextLookup{ .window = 32768 }, prov.contextLength("qwen3:8b"));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 32768 } }, prov.contextLength("qwen3:8b", .default));
     try std.testing.expectEqualStrings("/api/ps", server.getRequestPath());
 }
 
@@ -366,7 +379,7 @@ test "Provider.contextLength says a model local Ollama has not loaded is not loa
     defer prov.deinit();
     prov.ollama.withBaseUrl(url);
 
-    try std.testing.expectEqual(ContextLookup.not_loaded, prov.contextLength("qwen3:8b"));
+    try std.testing.expectEqual(ContextLookup.not_loaded, prov.contextLength("qwen3:8b", .default));
 }
 
 test "catalogProviderId names OpenCode's providers as models.dev does" {
@@ -376,12 +389,25 @@ test "catalogProviderId names OpenCode's providers as models.dev does" {
     try std.testing.expectEqual(@as(?[]const u8, null), catalogProviderId(.ollama));
 }
 
+test "windowInList picks the long-context limit only when that tier is chosen" {
+    const models = [_]client.Model{
+        .{ .id = "tiered", .display_name = "", .provider = "p", .context_length = 272000, .long_context_length = 872000, .context_window = 400000, .long_context_window = 1000000 },
+        .{ .id = "single", .display_name = "", .provider = "p", .context_length = 128000 },
+        .{ .id = "unreported", .display_name = "", .provider = "p", .context_length = 0 },
+    };
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 272000, .window = 400000 } }, windowInList(&models, "tiered", .default));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 872000, .window = 1000000 } }, windowInList(&models, "tiered", .long_context));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 128000 } }, windowInList(&models, "single", .long_context));
+    try std.testing.expectEqual(ContextLookup.unreported, windowInList(&models, "unreported", .default));
+    try std.testing.expectEqual(ContextLookup.unreported, windowInList(&models, "missing", .default));
+}
+
 test "Provider.contextLength finds the window in the model list" {
     var prov = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
     defer prov.deinit();
 
-    try std.testing.expectEqual(ContextLookup{ .window = 32000 }, prov.contextLength("mock-model-fast"));
-    try std.testing.expectEqual(ContextLookup.unreported, prov.contextLength("missing"));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 32000 } }, prov.contextLength("mock-model-fast", .default));
+    try std.testing.expectEqual(ContextLookup.unreported, prov.contextLength("missing", .default));
 }
 
 test "Provider.setConfig applies config to the copilot client" {

@@ -13,6 +13,22 @@ pub fn formatTokens(buf: []u8, n: i64) []const u8 {
     return std.fmt.bufPrint(buf, "{d:.1}k", .{value / 1000.0}) catch buf[0..0];
 }
 
+/// Formats a context window the way the GitHub Copilot app labels context
+/// sizes: whole thousands (`400K`), or millions to one decimal (`1.1M`, `1M`).
+/// Writes into `buf` (which must be large enough) and returns a slice of it.
+pub fn formatContextSize(buf: []u8, tokens: usize) []const u8 {
+    if (tokens < 1000) return std.fmt.bufPrint(buf, "{d}", .{tokens}) catch buf[0..0];
+    const thousands = (tokens + 500) / 1000;
+    if (thousands >= 1000) {
+        const tenths_of_million = (tokens + 50_000) / 100_000;
+        const whole = tenths_of_million / 10;
+        const tenth = tenths_of_million % 10;
+        if (tenth == 0) return std.fmt.bufPrint(buf, "{d}M", .{whole}) catch buf[0..0];
+        return std.fmt.bufPrint(buf, "{d}.{d}M", .{ whole, tenth }) catch buf[0..0];
+    }
+    return std.fmt.bufPrint(buf, "{d}K", .{thousands}) catch buf[0..0];
+}
+
 /// Formats a count exactly, grouping thousands with commas (`1,000,000`).
 /// Use where the precise number matters and only its readability is at stake;
 /// `formatTokens` is the compact alternative. Accepts any integer type so
@@ -169,4 +185,18 @@ test "formatTokens handles single digit and negative inputs" {
     try std.testing.expectEqualStrings("1", formatTokens(&buf, 1));
     try std.testing.expectEqualStrings("1", formatTokens(&buf, -1));
     try std.testing.expectEqualStrings("9999", formatTokens(&buf, -9999));
+}
+
+test "formatContextSize labels context windows as the Copilot app does" {
+    var buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("400K", formatContextSize(&buf, 400_000));
+    try std.testing.expectEqualStrings("328K", formatContextSize(&buf, 328_000));
+    try std.testing.expectEqualStrings("918K", formatContextSize(&buf, 917_504));
+    try std.testing.expectEqualStrings("950K", formatContextSize(&buf, 950_000));
+    try std.testing.expectEqualStrings("1M", formatContextSize(&buf, 1_000_000));
+    try std.testing.expectEqualStrings("1M", formatContextSize(&buf, 1_048_576));
+    try std.testing.expectEqualStrings("1.1M", formatContextSize(&buf, 1_064_000));
+    try std.testing.expectEqualStrings("1.1M", formatContextSize(&buf, 1_050_000));
+    try std.testing.expectEqualStrings("8K", formatContextSize(&buf, 8_192));
+    try std.testing.expectEqualStrings("512", formatContextSize(&buf, 512));
 }

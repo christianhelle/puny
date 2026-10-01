@@ -21,6 +21,9 @@ const editor_plugin_version = "copilot-chat/0.26.7";
 const user_agent = "GitHubCopilotChat/0.26.7";
 const integration_id = "vscode-chat";
 const api_version = "2025-04-01";
+/// `/models` reports context pricing tiers (`billing.token_prices`) only from
+/// this API version on. Chat requests stay on `api_version`.
+const models_api_version = "2026-06-01";
 const openai_intent = "conversation-panel";
 const max_token_file_size = 1024 * 1024;
 
@@ -293,6 +296,7 @@ fn appendCopilotHeaders(
     accept: []const u8,
     request_id: []const u8,
     initiator: ?[]const u8,
+    version: []const u8,
 ) ![]u8 {
     const auth = try std.fmt.allocPrint(allocator, "Bearer {s}", .{bearer_token});
     try headers.append(allocator, .{ .name = "authorization", .value = auth });
@@ -302,7 +306,7 @@ fn appendCopilotHeaders(
     try headers.append(allocator, .{ .name = "editor-version", .value = editor_version });
     try headers.append(allocator, .{ .name = "editor-plugin-version", .value = editor_plugin_version });
     try headers.append(allocator, .{ .name = "openai-intent", .value = openai_intent });
-    try headers.append(allocator, .{ .name = "x-github-api-version", .value = api_version });
+    try headers.append(allocator, .{ .name = "x-github-api-version", .value = version });
     try headers.append(allocator, .{ .name = "x-request-id", .value = request_id });
     if (initiator) |value| try headers.append(allocator, .{ .name = "X-Initiator", .value = value });
     return auth;
@@ -316,6 +320,13 @@ pub const ModelInfo = struct {
     name: []const u8,
     vendor: []const u8,
     context_length: i64,
+    /// Prompt limit of the long-context tier, or 0 when the model has none.
+    long_context_length: i64 = 0,
+    /// Whole window (prompt and reply) of the default tier, as the Copilot app
+    /// labels it, or 0 when unreported.
+    context_window: i64 = 0,
+    /// Whole window of the long-context tier, or 0 when the model has none.
+    long_context_window: i64 = 0,
     endpoint: Endpoint = .chat_completions,
 };
 
@@ -332,7 +343,7 @@ pub fn listModels(self: *Client) !client.Owned(ModelsList) {
 
     var headers = std.ArrayList(std.http.Header).empty;
     defer headers.deinit(allocator);
-    const auth = try appendCopilotHeaders(allocator, &headers, token, "application/json", &request_id, null);
+    const auth = try appendCopilotHeaders(allocator, &headers, token, "application/json", &request_id, null, models_api_version);
     defer allocator.free(auth);
 
     const url = try std.fmt.allocPrint(allocator, "{s}/models", .{self.inner.base_url});
@@ -373,6 +384,9 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
             .display_name = try arena_alloc.dupe(u8, m.name),
             .provider = try arena_alloc.dupe(u8, m.vendor),
             .context_length = m.context_length,
+            .long_context_length = m.long_context_length,
+            .context_window = m.context_window,
+            .long_context_window = m.long_context_window,
         };
     }
 
@@ -420,6 +434,9 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
             .name = try arena_alloc.dupe(u8, name),
             .vendor = try arena_alloc.dupe(u8, vendor),
             .context_length = modelContextLength(item),
+            .long_context_length = tierContextMax(item, "long_context"),
+            .context_window = tierWindow(item, "default"),
+            .long_context_window = tierWindow(item, "long_context"),
             .endpoint = endpoint,
         });
     }
@@ -474,10 +491,14 @@ fn modelEndpoint(item: std.json.Value) ?Endpoint {
     return if (has_responses) .responses else null;
 }
 
-/// The tokens a request to this model may carry. Copilot rejects prompts over
-/// `max_prompt_tokens`, which is often below `max_context_window_tokens`
+/// The tokens a request to this model may carry. Models priced in context
+/// tiers are budgeted by their cheaper `default` tier, as the Copilot app
+/// does unless long context is chosen. Otherwise Copilot rejects prompts
+/// over `max_prompt_tokens`, which is often below `max_context_window_tokens`
 /// because the window also holds the reply, so that limit wins when reported.
 fn modelContextLength(item: std.json.Value) i64 {
+    const default_tier = tierContextMax(item, "default");
+    if (default_tier > 0) return default_tier;
     const caps = item.object.get("capabilities") orelse return 0;
     if (caps != .object) return 0;
     const limits = caps.object.get("limits") orelse return 0;
@@ -485,6 +506,40 @@ fn modelContextLength(item: std.json.Value) i64 {
     const prompt = positiveInteger(limits.object.get("max_prompt_tokens"));
     if (prompt > 0) return prompt;
     return positiveInteger(limits.object.get("max_context_window_tokens"));
+}
+
+/// The whole window of a pricing tier: its prompt limit plus room for the
+/// reply, which is how the Copilot app labels context sizes (e.g. 272K + 128K
+/// = 400K). Models without tiers report `max_context_window_tokens`.
+fn tierWindow(item: std.json.Value, tier: []const u8) i64 {
+    const limits = modelLimits(item);
+    const context_max = tierContextMax(item, tier);
+    if (context_max > 0) {
+        const output = if (limits) |l| positiveInteger(l.get("max_output_tokens")) else 0;
+        return context_max + output;
+    }
+    if (!std.mem.eql(u8, tier, "default")) return 0;
+    const l = limits orelse return 0;
+    return positiveInteger(l.get("max_context_window_tokens"));
+}
+
+fn modelLimits(item: std.json.Value) ?std.json.ObjectMap {
+    const caps = item.object.get("capabilities") orelse return null;
+    if (caps != .object) return null;
+    const limits = caps.object.get("limits") orelse return null;
+    if (limits != .object) return null;
+    return limits.object;
+}
+
+/// `context_max` of a pricing tier in `billing.token_prices`, or 0.
+fn tierContextMax(item: std.json.Value, tier: []const u8) i64 {
+    const billing = item.object.get("billing") orelse return 0;
+    if (billing != .object) return 0;
+    const prices = billing.object.get("token_prices") orelse return 0;
+    if (prices != .object) return 0;
+    const entry = prices.object.get(tier) orelse return 0;
+    if (entry != .object) return 0;
+    return positiveInteger(entry.object.get("context_max"));
 }
 
 fn positiveInteger(value: ?std.json.Value) i64 {
@@ -506,6 +561,52 @@ test "parseModels budgets a model by its prompt limit when Copilot reports one" 
     defer owned.deinit();
 
     try std.testing.expectEqual(@as(i64, 168000), owned.value().data[0].context_length);
+}
+
+test "parseModels budgets a tiered model by its default tier and records the long one" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"data":[
+        \\{"id":"gpt-6-luna","name":"GPT-6 Luna","vendor":"OpenAI","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1000000,"max_prompt_tokens":872000,"max_output_tokens":128000}},
+        \\ "billing":{"token_prices":{"batch_size":1000000,
+        \\   "default":{"context_max":272000,"input_price":10,"output_price":50},
+        \\   "long_context":{"context_max":872000,"input_price":20,"output_price":75}}}},
+        \\{"id":"kimi-k3","name":"Kimi K3","vendor":"Moonshot","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1048576,"max_prompt_tokens":917504}},
+        \\ "billing":{"token_prices":{"default":{"context_max":917504}}}}
+        \\],"object":"list"}
+    ;
+    var owned = try parseModels(allocator, body);
+    defer owned.deinit();
+
+    const models = owned.value().data;
+    try std.testing.expectEqual(@as(i64, 272000), models[0].context_length);
+    try std.testing.expectEqual(@as(i64, 872000), models[0].long_context_length);
+    try std.testing.expectEqual(@as(i64, 917504), models[1].context_length);
+    try std.testing.expectEqual(@as(i64, 0), models[1].long_context_length);
+}
+
+test "parseModels sizes each tier's window as its prompt limit plus the reply" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"data":[
+        \\{"id":"gpt-6-luna","name":"GPT-6 Luna","vendor":"OpenAI","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1000000,"max_prompt_tokens":872000,"max_output_tokens":128000}},
+        \\ "billing":{"token_prices":{"default":{"context_max":272000},"long_context":{"context_max":872000}}}},
+        \\{"id":"kimi-k3","name":"Kimi K3","vendor":"Moonshot","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1048576,"max_prompt_tokens":917504}}}
+        \\],"object":"list"}
+    ;
+    var owned = try parseModels(allocator, body);
+    defer owned.deinit();
+
+    const models = owned.value().data;
+    // The Copilot app labels these tiers 400K and 1M.
+    try std.testing.expectEqual(@as(i64, 400000), models[0].context_window);
+    try std.testing.expectEqual(@as(i64, 1000000), models[0].long_context_window);
+    try std.testing.expectEqual(@as(i64, 1048576), models[1].context_window);
+    try std.testing.expectEqual(@as(i64, 0), models[1].long_context_window);
 }
 
 test "parseModels keeps picker-enabled chat models served on /chat/completions or /responses" {
@@ -619,6 +720,7 @@ fn streamSse(self: *Client, path: []const u8, payload: []const u8, initiator: []
         "text/event-stream",
         &request_id,
         initiator,
+        api_version,
     );
     defer allocator.free(auth);
 
@@ -1072,7 +1174,7 @@ test "appendCopilotHeaders sets the standard Copilot headers" {
     var headers = std.ArrayList(std.http.Header).empty;
     defer headers.deinit(allocator);
 
-    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "text/event-stream", "req-id-1", "agent");
+    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "text/event-stream", "req-id-1", "agent", api_version);
     defer allocator.free(auth);
 
     try std.testing.expectEqualStrings("Bearer tok-123", auth);
@@ -1093,7 +1195,7 @@ test "appendCopilotHeaders omits X-Initiator when null" {
     var headers = std.ArrayList(std.http.Header).empty;
     defer headers.deinit(allocator);
 
-    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "application/json", "req-id-1", null);
+    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "application/json", "req-id-1", null, api_version);
     defer allocator.free(auth);
 
     try std.testing.expect(findHeader(headers.items, "X-Initiator") == null);
@@ -1163,7 +1265,7 @@ test "toSharedModels copies copilot models into the shared model list" {
     const allocator = std.testing.allocator;
     const json =
         \\{"data":[
-        \\{"id":"claude-sonnet-4.5","name":"Claude Sonnet 4.5","vendor":"Anthropic","context_length":200000}
+        \\{"id":"claude-sonnet-4.5","name":"Claude Sonnet 4.5","vendor":"Anthropic","context_length":200000,"long_context_length":936000,"context_window":328000,"long_context_window":1064000}
         \\]}
     ;
 
@@ -1182,6 +1284,9 @@ test "toSharedModels copies copilot models into the shared model list" {
     try std.testing.expectEqualStrings("Claude Sonnet 4.5", shared.value().models[0].display_name);
     try std.testing.expectEqualStrings("Anthropic", shared.value().models[0].provider);
     try std.testing.expectEqual(@as(i64, 200000), shared.value().models[0].context_length);
+    try std.testing.expectEqual(@as(i64, 936000), shared.value().models[0].long_context_length);
+    try std.testing.expectEqual(@as(i64, 328000), shared.value().models[0].context_window);
+    try std.testing.expectEqual(@as(i64, 1064000), shared.value().models[0].long_context_window);
 }
 
 fn seedCopilotToken(c: *Client) !void {
@@ -2076,6 +2181,48 @@ test "listModels's http observer sees the Copilot user-agent header, not puny's"
     owned.deinit();
 
     try std.testing.expectEqualStrings(user_agent, observer_ctx.value());
+}
+
+test "listModels asks for the API version that reports context tiers" {
+    const ctx = try startUserAgentServer("{\"data\":[]}");
+    defer stopUserAgentServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var c = try clientWithSeededToken(ctx, arena_state.allocator());
+    defer c.deinit();
+
+    const ObserverCtx = struct {
+        found_value: [32]u8 = undefined,
+        found_len: usize = 0,
+
+        fn onRequest(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = body;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            for (headers) |header| {
+                if (!std.ascii.eqlIgnoreCase(header.name, "x-github-api-version")) continue;
+                const len = @min(header.value.len, self.found_value.len);
+                @memcpy(self.found_value[0..len], header.value[0..len]);
+                self.found_len = len;
+            }
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    c.inner.http_observer = .{
+        .ctx = &observer_ctx,
+        .onRequest = ObserverCtx.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    var owned = try listModels(&c);
+    owned.deinit();
+
+    try std.testing.expectEqualStrings("2026-06-01", observer_ctx.found_value[0..observer_ctx.found_len]);
 }
 
 test "chatStreaming sends exactly one Copilot user agent" {

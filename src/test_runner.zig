@@ -223,6 +223,9 @@ test "include tools.web tests" {
 test "include tui.ansi tests" {
     _ = @import("tui/ansi.zig");
 }
+test "include tui.context_tier_picker tests" {
+    _ = @import("tui/context_tier_picker.zig");
+}
 test "include tui.effort_picker tests" {
     _ = @import("tui/effort_picker.zig");
 }

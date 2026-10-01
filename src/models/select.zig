@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
+const context_tier_picker = @import("../tui/context_tier_picker.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const client = @import("../providers/client.zig");
 const model_picker = @import("../tui/model_picker.zig");
@@ -8,10 +9,47 @@ const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const retry = @import("../core/retry.zig");
 const test_support = @import("../test_support.zig");
+const welcome = @import("../tui/welcome.zig");
 
 pub const SelectionResult = struct {
     model_key: []const u8,
     reasoning_effort: ?openai.ReasoningEffort,
+    /// The chosen model's context sizes, when the provider's model list says.
+    context: ?ModelContext = null,
+    /// The context tier picked for the model, when one was picked.
+    context_tier: ?client.ContextTier = null,
+
+    /// The window the model has in the picked tier, or else in `current_tier`.
+    pub fn contextWindow(self: SelectionResult, current_tier: client.ContextTier) ?usize {
+        const sizes = self.context orelse return null;
+        return sizes.window(self.context_tier orelse current_tier);
+    }
+};
+
+/// A model's context size in each tier, read from the model list that
+/// selection already fetched, so nothing needs to ask the provider again.
+pub const ModelContext = struct {
+    default: client.ContextLookup,
+    long_context: client.ContextLookup,
+
+    /// The model's whole window in `tier`, when the model list said.
+    pub fn window(self: ModelContext, tier: client.ContextTier) ?usize {
+        const lookup = switch (tier) {
+            .default => self.default,
+            .long_context => self.long_context,
+        };
+        return switch (lookup) {
+            .size => |size| size.window,
+            .unreported, .not_loaded => null,
+        };
+    }
+
+    fn of(models: []const client.Model, key: []const u8) ModelContext {
+        return .{
+            .default = provider.windowInList(models, key, .default),
+            .long_context = provider.windowInList(models, key, .long_context),
+        };
+    }
 };
 
 pub fn select(
@@ -36,7 +74,11 @@ pub fn select(
             if (std.mem.eql(u8, m.id, id)) break true;
         } else false;
         if (found) {
-            return .{ .model_key = try arena.dupe(u8, id), .reasoning_effort = null };
+            return .{
+                .model_key = try arena.dupe(u8, id),
+                .reasoning_effort = null,
+                .context = ModelContext.of(models.value().models, id),
+            };
         }
         return null;
     }
@@ -45,12 +87,21 @@ pub fn select(
     model_picker.setModels(models.value().models);
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
     const effort = (try effort_picker.pickEffort(arena, io)) orelse return null;
+    const context = ModelContext.of(models.value().models, key);
+    const context_tier: ?client.ContextTier = if (findModel(models.value().models, key)) |model|
+        if (model.long_context_length > 0)
+            (try context_tier_picker.pickTier(arena, io, model)) orelse return null
+        else
+            null
+    else
+        null;
 
     if (cfg) |c| {
         if (client.isValidUtf8(key) and current_provider != .mock) {
             c.providerEntry(current_provider).model = key;
             const effort_str = if (effort != .default) @tagName(effort) else null;
             c.providerEntry(current_provider).reasoning_effort = if (effort_str) |e| try arena.dupe(u8, e) else null;
+            if (context_tier) |tier| c.context_tier = tier;
             config.save(arena, io, c.*, environ_map) catch |err| {
                 var stderr_buffer: [1024]u8 = undefined;
                 var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
@@ -61,7 +112,14 @@ pub fn select(
         }
     }
 
-    return .{ .model_key = key, .reasoning_effort = effort };
+    return .{ .model_key = key, .reasoning_effort = effort, .context = context, .context_tier = context_tier };
+}
+
+fn findModel(models: []const client.Model, key: []const u8) ?client.Model {
+    for (models) |model| {
+        if (std.mem.eql(u8, model.id, key)) return model;
+    }
+    return null;
 }
 
 fn selectModelInteractive(
@@ -80,6 +138,7 @@ pub fn switchModel(
     model_id: ?[]const u8,
     current_key: []const u8,
     current_effort: ?openai.ReasoningEffort,
+    current_tier: client.ContextTier,
     arena: std.mem.Allocator,
     io: std.Io,
     init: std.process.Init,
@@ -97,21 +156,18 @@ pub fn switchModel(
         }
         return null;
     };
-    const effort_suffix = if (result.reasoning_effort) |effort| if (effort != .default) @tagName(effort) else null else null;
     const same_effort = if (result.reasoning_effort) |new_effort| if (current_effort) |cur| new_effort == cur else false else current_effort == null;
-    if (std.mem.eql(u8, result.model_key, current_key) and same_effort) {
-        try stdout_writer.print("\nAlready using model {s}", .{result.model_key});
-        if (effort_suffix) |suffix| {
-            try stdout_writer.print(" - {s}{s}{s}", .{ ansi.bold_start, suffix, ansi.bold_end });
-        }
+    const same_tier = if (result.context_tier) |tier| tier == current_tier else true;
+    const window = result.contextWindow(current_tier);
+    if (std.mem.eql(u8, result.model_key, current_key) and same_effort and same_tier) {
+        try stdout_writer.print("\nAlready using model ", .{});
+        try welcome.writeModel(stdout_writer, result.model_key, result.reasoning_effort, window);
         try stdout_writer.print(".\n", .{});
         try stdout_writer.flush();
         return null;
     }
-    try stdout_writer.print("\nSwitched to model {s}", .{result.model_key});
-    if (effort_suffix) |suffix| {
-        try stdout_writer.print(" - {s}{s}{s}", .{ ansi.bold_start, suffix, ansi.bold_end });
-    }
+    try stdout_writer.print("\nSwitched to model ", .{});
+    try welcome.writeModel(stdout_writer, result.model_key, result.reasoning_effort, window);
     try stdout_writer.print(".\n", .{});
     try stdout_writer.flush();
     return result;
@@ -324,6 +380,39 @@ test "select returns the validated model id when it exists" {
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), result.?.reasoning_effort);
 }
 
+test "select reports the validated model's context sizes" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = (try select(&prov, "mock-model-fast", arena.allocator(), std.testing.io, undefined, false, null, .mock, undefined, testRandom())).?;
+    const sizes = result.context.?;
+    try std.testing.expectEqual(client.ContextLookup{ .size = .{ .prompt = 32000 } }, sizes.default);
+    try std.testing.expectEqual(client.ContextLookup{ .size = .{ .prompt = 32000 } }, sizes.long_context);
+    try std.testing.expectEqual(@as(?client.ContextTier, null), result.context_tier);
+}
+
+test "contextWindow picks the chosen tier's window and the picked tier over the current one" {
+    const result = SelectionResult{
+        .model_key = "gpt-6-luna",
+        .reasoning_effort = null,
+        .context = .{
+            .default = .{ .size = .{ .prompt = 272000, .window = 400000 } },
+            .long_context = .{ .size = .{ .prompt = 872000, .window = 1000000 } },
+        },
+    };
+    try std.testing.expectEqual(@as(?usize, 400000), result.contextWindow(.default));
+    try std.testing.expectEqual(@as(?usize, 1000000), result.contextWindow(.long_context));
+
+    var picked = result;
+    picked.context_tier = .long_context;
+    try std.testing.expectEqual(@as(?usize, 1000000), picked.contextWindow(.default));
+
+    const unknown = SelectionResult{ .model_key = "x", .reasoning_effort = null };
+    try std.testing.expectEqual(@as(?usize, null), unknown.contextWindow(.default));
+}
+
 test "select returns null when the model id is unknown" {
     var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
     defer prov.deinit();
@@ -342,7 +431,7 @@ test "switchModel reports when the requested model is not found" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "no-such-model", "mock-model", null, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "no-such-model", "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result == null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Model not found.") != null);
 }
@@ -355,7 +444,7 @@ test "switchModel returns the new selection when the model changes" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "mock-model-fast", "mock-model", null, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "mock-model-fast", "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result != null);
     try std.testing.expectEqualStrings("mock-model-fast", result.?.model_key);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Switched to model mock-model-fast") != null);
@@ -369,7 +458,7 @@ test "switchModel rejects switching to the current model and effort" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "mock-model", "mock-model", null, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "mock-model", "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result == null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Already using model mock-model") != null);
 }
@@ -382,7 +471,7 @@ test "switchModel switches when only the effort matches" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    const result = try switchModel(&prov, "mock-model", "mock-model", .medium, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
+    const result = try switchModel(&prov, "mock-model", "mock-model", .medium, .default, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result != null);
     try std.testing.expectEqualStrings("mock-model", result.?.model_key);
 }

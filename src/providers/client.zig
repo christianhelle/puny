@@ -12,22 +12,58 @@ pub const Model = struct {
     display_name: []const u8,
     provider: []const u8,
     context_length: i64,
+    /// Prompt limit of a long-context pricing tier, or 0 when there is none.
+    long_context_length: i64 = 0,
+    /// Whole window (prompt and reply) shown to the user, or 0 when unknown.
+    context_window: i64 = 0,
+    /// Whole window of the long-context tier, or 0 when there is none.
+    long_context_window: i64 = 0,
 };
 
 pub const ModelsList = struct {
     models: []const Model,
 };
 
+/// Which context window to budget for. Copilot prices some models in tiers:
+/// a cheaper `default` window and a larger, pricier `long_context` one.
+pub const ContextTier = enum {
+    default,
+    long_context,
+
+    /// Reads `default`, `long_context`, or the shorthand `long`, ignoring case.
+    pub fn parse(text: []const u8) ?ContextTier {
+        if (std.ascii.eqlIgnoreCase(text, "long")) return .long_context;
+        inline for (@typeInfo(ContextTier).@"enum".fields) |field| {
+            if (std.ascii.eqlIgnoreCase(text, field.name)) return @field(ContextTier, field.name);
+        }
+        return null;
+    }
+};
+
+test "ContextTier.parse reads tier names and rejects others" {
+    try std.testing.expectEqual(@as(?ContextTier, .long_context), ContextTier.parse("LONG"));
+    try std.testing.expectEqual(@as(?ContextTier, .long_context), ContextTier.parse("long_context"));
+    try std.testing.expectEqual(@as(?ContextTier, .default), ContextTier.parse("Default"));
+    try std.testing.expectEqual(@as(?ContextTier, null), ContextTier.parse("huge"));
+}
+
+/// How large a model's context is: the prompt limit Puny compacts against,
+/// and the whole window (prompt and reply) shown to the user, when known.
+pub const ContextSize = struct {
+    prompt: usize,
+    window: ?usize = null,
+};
+
 /// What a provider says about a model's context window.
 pub const ContextLookup = union(enum) {
-    window: usize,
+    size: ContextSize,
     /// The provider does not report one for this model.
     unreported,
     /// The provider reports it only once the model is loaded, so ask again later.
     not_loaded,
 
     pub fn from(length: ?usize) ContextLookup {
-        return if (length) |value| .{ .window = value } else .unreported;
+        return if (length) |value| .{ .size = .{ .prompt = value } } else .unreported;
     }
 };
 

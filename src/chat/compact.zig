@@ -225,25 +225,28 @@ pub const ContextArgument = union(enum) {
     show,
     set: usize,
     off,
+    tier: ContextTier,
     invalid,
 };
 
-/// Parses the argument of `/context [tokens|off]`.
+/// Parses the argument of `/context [tokens|off|default|long]`.
 pub fn parseContextArgument(text: ?[]const u8) ContextArgument {
     const trimmed = std.mem.trim(u8, text orelse "", &std.ascii.whitespace);
     if (trimmed.len == 0) return .show;
     if (std.ascii.eqlIgnoreCase(trimmed, "off")) return .off;
+    if (ContextTier.parse(trimmed)) |tier| return .{ .tier = tier };
     const tokens = std.fmt.parseInt(usize, trimmed, 10) catch return .invalid;
     if (tokens == 0) return .invalid;
     return .{ .set = tokens };
 }
 
 const ProviderKind = std.meta.Tag(provider.Provider);
+pub const ContextTier = provider.ContextTier;
 
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
     const remembered_capacity = 16;
-    const RememberedWindow = struct { key_hash: u64, window: ?usize };
+    const RememberedWindow = struct { key_hash: u64, prompt: ?usize, window: ?usize };
 
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
     explicit: ?usize = null,
@@ -251,8 +254,14 @@ pub const ContextBudget = struct {
     startup_explicit: ?usize = null,
     /// Set by `/context off`: no limit, whatever the model reports.
     disabled: bool = false,
+    /// Which window to budget for models priced in context tiers.
+    tier: ContextTier = .default,
+    /// The tier the session started with, restored for a new conversation.
+    startup_tier: ContextTier = .default,
     /// Context window the provider reports for the active model, if any.
     model_reported: ?usize = null,
+    /// Whole window (prompt and reply) of the active model, shown to the user.
+    model_window: ?usize = null,
     /// Hash of the provider and model key `model_reported` was looked up for,
     /// so switching either one triggers a new lookup.
     model_reported_key_hash: ?u64 = null,
@@ -279,6 +288,7 @@ pub const ContextBudget = struct {
     pub fn resetConversation(self: *ContextBudget) void {
         self.explicit = self.startup_explicit;
         self.disabled = false;
+        self.tier = self.startup_tier;
         self.resetUsage();
     }
 
@@ -288,15 +298,35 @@ pub const ContextBudget = struct {
         return self.explicit orelse self.model_reported;
     }
 
+    /// The model's whole window, shown alongside the limit. Null when a token
+    /// limit replaces the model's own, or when the provider does not say.
+    pub fn window(self: *const ContextBudget) ?usize {
+        if (self.disabled or self.explicit != null) return null;
+        return self.model_window;
+    }
+
     /// True when the limit depends on a model window not yet looked up.
     pub fn needsModelLookup(self: *const ContextBudget, provider_kind: ProviderKind, model_key: []const u8) bool {
         if (self.explicit != null or self.disabled) return false;
-        const key_hash = modelKeyHash(provider_kind, model_key);
+        const key_hash = self.modelKeyHash(provider_kind, model_key);
         return self.model_reported_key_hash != key_hash and self.recall(key_hash) == null;
     }
 
     pub fn setExplicit(self: *ContextBudget, tokens: usize) void {
         self.explicit = tokens;
+        self.disabled = false;
+    }
+
+    /// Sets the tier the session starts with, from `--context-tier` or config.
+    pub fn setStartupTier(self: *ContextBudget, tier: ContextTier) void {
+        self.tier = tier;
+        self.startup_tier = tier;
+    }
+
+    /// Budgets by the model's window in `tier`, replacing any token limit.
+    pub fn setTier(self: *ContextBudget, tier: ContextTier) void {
+        self.tier = tier;
+        self.explicit = null;
         self.disabled = false;
     }
 
@@ -311,30 +341,47 @@ pub const ContextBudget = struct {
     pub fn resolveLimit(self: *ContextBudget, prov: *provider.Provider, model_key: []const u8) ?usize {
         if (self.explicit != null or self.disabled) return self.limit();
         const provider_kind = std.meta.activeTag(prov.*);
-        const key_hash = modelKeyHash(provider_kind, model_key);
+        const key_hash = self.modelKeyHash(provider_kind, model_key);
         if (self.model_reported_key_hash != key_hash) {
             if (self.recall(key_hash)) |known| {
-                self.model_reported = known.window;
+                self.model_reported = known.prompt;
+                self.model_window = known.window;
                 self.model_reported_key_hash = key_hash;
             } else {
-                self.setModelReported(provider_kind, model_key, prov.contextLength(model_key));
+                self.setModelReported(provider_kind, model_key, prov.contextLength(model_key, self.tier));
             }
         }
         return self.limit();
+    }
+
+    /// Records what a model list already said about `model_key` in each tier,
+    /// e.g. while selecting a model, so neither tier is looked up again.
+    pub fn rememberModel(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, default: provider.ContextLookup, long_context: provider.ContextLookup) void {
+        inline for (.{ .{ ContextTier.default, default }, .{ ContextTier.long_context, long_context } }) |entry| {
+            switch (entry[1]) {
+                .size => |size| self.remember(keyHashFor(provider_kind, model_key, entry[0]), size.prompt, size.window),
+                .unreported => self.remember(keyHashFor(provider_kind, model_key, entry[0]), null, null),
+                .not_loaded => {},
+            }
+        }
     }
 
     /// Records a lookup's answer. A model that is not loaded yet is looked
     /// up again on the next request rather than remembered as unreported.
     pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, lookup: provider.ContextLookup) void {
         self.model_reported = switch (lookup) {
-            .window => |tokens| tokens,
+            .size => |size| size.prompt,
+            .unreported, .not_loaded => null,
+        };
+        self.model_window = switch (lookup) {
+            .size => |size| size.window,
             .unreported, .not_loaded => null,
         };
         self.model_reported_key_hash = switch (lookup) {
             .not_loaded => null,
-            .window, .unreported => modelKeyHash(provider_kind, model_key),
+            .size, .unreported => self.modelKeyHash(provider_kind, model_key),
         };
-        if (self.model_reported_key_hash) |key_hash| self.remember(key_hash, self.model_reported);
+        if (self.model_reported_key_hash) |key_hash| self.remember(key_hash, self.model_reported, self.model_window);
     }
 
     fn recall(self: *const ContextBudget, key_hash: u64) ?RememberedWindow {
@@ -344,20 +391,28 @@ pub const ContextBudget = struct {
         return null;
     }
 
-    fn remember(self: *ContextBudget, key_hash: u64, window: ?usize) void {
+    fn remember(self: *ContextBudget, key_hash: u64, prompt: ?usize, shown: ?usize) void {
         for (self.remembered[0..self.remembered_len]) |*known| {
             if (known.key_hash == key_hash) {
-                known.window = window;
+                known.prompt = prompt;
+                known.window = shown;
                 return;
             }
         }
-        self.remembered[self.remembered_next] = .{ .key_hash = key_hash, .window = window };
+        self.remembered[self.remembered_next] = .{ .key_hash = key_hash, .prompt = prompt, .window = shown };
         self.remembered_next = (self.remembered_next + 1) % remembered_capacity;
         self.remembered_len = @min(self.remembered_len + 1, remembered_capacity);
     }
 
-    fn modelKeyHash(provider_kind: ProviderKind, model_key: []const u8) u64 {
-        return std.hash.Wyhash.hash(@intFromEnum(provider_kind), model_key);
+    /// Identifies a lookup by provider, model, and tier, since a tier
+    /// changes the window a model reports.
+    fn modelKeyHash(self: *const ContextBudget, provider_kind: ProviderKind, model_key: []const u8) u64 {
+        return keyHashFor(provider_kind, model_key, self.tier);
+    }
+
+    fn keyHashFor(provider_kind: ProviderKind, model_key: []const u8, tier: ContextTier) u64 {
+        const seed = @as(u64, @intFromEnum(provider_kind)) << 8 | @intFromEnum(tier);
+        return std.hash.Wyhash.hash(seed, model_key);
     }
 
     /// Records the provider-reported size of a request of `message_count` messages.
@@ -655,8 +710,88 @@ test "needsModelLookup asks once per model and never with an explicit budget" {
 
 test "needsModelLookup asks again after switching provider with the same model id" {
     var budget = ContextBudget{};
-    budget.setModelReported(.lmstudio, "shared-model", .{ .window = 32768 });
+    budget.setModelReported(.lmstudio, "shared-model", .{ .size = .{ .prompt = 32768 } });
     try std.testing.expect(budget.needsModelLookup(.copilot, "shared-model"));
+}
+
+test "choosing a context tier looks the model up again and remembers both tiers" {
+    var budget = ContextBudget{};
+    budget.setModelReported(.copilot, "gpt-6-luna", .{ .size = .{ .prompt = 272000 } });
+
+    budget.setTier(.long_context);
+    try std.testing.expect(budget.needsModelLookup(.copilot, "gpt-6-luna"));
+    budget.setModelReported(.copilot, "gpt-6-luna", .{ .size = .{ .prompt = 872000 } });
+    try std.testing.expectEqual(@as(?usize, 872000), budget.limit());
+
+    budget.setTier(.default);
+    try std.testing.expect(!budget.needsModelLookup(.copilot, "gpt-6-luna"));
+}
+
+test "choosing a context tier replaces a token limit and a new conversation restores the startup tier" {
+    var budget = ContextBudget.init(64000, null);
+    budget.setStartupTier(.long_context);
+    budget.setExplicit(32000);
+
+    budget.setTier(.default);
+    try std.testing.expectEqual(@as(?usize, null), budget.explicit);
+    try std.testing.expectEqual(ContextTier.default, budget.tier);
+
+    budget.resetConversation();
+    try std.testing.expectEqual(ContextTier.long_context, budget.tier);
+    try std.testing.expectEqual(@as(?usize, 64000), budget.explicit);
+}
+
+test "window shows the model's whole window while compaction uses its prompt limit" {
+    var budget = ContextBudget{};
+    budget.setModelReported(.copilot, "gpt-6-luna", .{ .size = .{ .prompt = 272000, .window = 400000 } });
+    try std.testing.expectEqual(@as(?usize, 272000), budget.limit());
+    try std.testing.expectEqual(@as(?usize, 400000), budget.window());
+
+    budget.setExplicit(64000);
+    try std.testing.expectEqual(@as(?usize, null), budget.window());
+}
+
+test "resolveLimit recalls a model's window along with its limit" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var budget = ContextBudget{};
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 5000, .window = 9000 } });
+    budget.setModelReported(.mock, "mock-model-fast", .{ .size = .{ .prompt = 1000 } });
+    try std.testing.expectEqual(@as(?usize, null), budget.window());
+
+    try std.testing.expectEqual(@as(?usize, 5000), budget.resolveLimit(&prov, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, 9000), budget.window());
+}
+
+test "rememberModel records both tiers so neither is looked up again" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var budget = ContextBudget{};
+    budget.rememberModel(.mock, "mock-model", .{ .size = .{ .prompt = 272000, .window = 400000 } }, .{ .size = .{ .prompt = 872000, .window = 1000000 } });
+
+    // A fresh lookup would report the mock's own 128000.
+    try std.testing.expectEqual(@as(?usize, 272000), budget.resolveLimit(&prov, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, 400000), budget.window());
+    budget.setTier(.long_context);
+    try std.testing.expectEqual(@as(?usize, 872000), budget.resolveLimit(&prov, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, 1000000), budget.window());
+}
+
+test "setStartupTier keeps a token limit and an off switch, and survives a new conversation" {
+    var limited = ContextBudget.init(64000, null);
+    limited.setStartupTier(.long_context);
+    try std.testing.expectEqual(@as(?usize, 64000), limited.explicit);
+    limited.resetConversation();
+    try std.testing.expectEqual(ContextTier.long_context, limited.tier);
+
+    var off = ContextBudget{};
+    off.disable();
+    off.setStartupTier(.long_context);
+    try std.testing.expect(off.disabled);
 }
 
 test "needsModelLookup asks again while the model is not loaded yet" {
@@ -665,7 +800,7 @@ test "needsModelLookup asks again while the model is not loaded yet" {
     try std.testing.expect(budget.needsModelLookup(.ollama, "qwen3:8b"));
     try std.testing.expectEqual(@as(?usize, null), budget.limit());
 
-    budget.setModelReported(.ollama, "qwen3:8b", .{ .window = 32768 });
+    budget.setModelReported(.ollama, "qwen3:8b", .{ .size = .{ .prompt = 32768 } });
     try std.testing.expect(!budget.needsModelLookup(.ollama, "qwen3:8b"));
     try std.testing.expectEqual(@as(?usize, 32768), budget.limit());
 }
@@ -720,7 +855,7 @@ test "resolveLimit remembers each model's window when switching back to it" {
 
     var budget = ContextBudget{};
     // A remembered window differs from what a fresh lookup (128000) would say.
-    budget.setModelReported(.mock, "mock-model", .{ .window = 5000 });
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 5000 } });
     try std.testing.expectEqual(@as(?usize, 32000), budget.resolveLimit(&prov, "mock-model-fast"));
     try std.testing.expect(!budget.needsModelLookup(.mock, "mock-model"));
     try std.testing.expectEqual(@as(?usize, 5000), budget.resolveLimit(&prov, "mock-model"));
@@ -733,6 +868,11 @@ test "parseContextArgument reads a limit, off, or nothing" {
     try std.testing.expectEqual(ContextArgument.off, parseContextArgument("OFF"));
     try std.testing.expectEqual(ContextArgument.invalid, parseContextArgument("0"));
     try std.testing.expectEqual(ContextArgument.invalid, parseContextArgument("lots"));
+}
+
+test "parseContextArgument reads a context tier" {
+    try std.testing.expectEqual(ContextArgument{ .tier = .long_context }, parseContextArgument("long"));
+    try std.testing.expectEqual(ContextArgument{ .tier = .default }, parseContextArgument(" default "));
 }
 
 test "disable turns auto compaction off even when the model reports a window" {
