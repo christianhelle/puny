@@ -385,6 +385,8 @@ pub fn toSharedModels(owned: *client.Owned(ModelsList)) !client.Owned(client.Mod
             .provider = try arena_alloc.dupe(u8, m.vendor),
             .context_length = m.context_length,
             .long_context_length = m.long_context_length,
+            .context_window = m.context_window,
+            .long_context_window = m.long_context_window,
         };
     }
 
@@ -1263,7 +1265,7 @@ test "toSharedModels copies copilot models into the shared model list" {
     const allocator = std.testing.allocator;
     const json =
         \\{"data":[
-        \\{"id":"claude-sonnet-4.5","name":"Claude Sonnet 4.5","vendor":"Anthropic","context_length":200000,"long_context_length":936000}
+        \\{"id":"claude-sonnet-4.5","name":"Claude Sonnet 4.5","vendor":"Anthropic","context_length":200000,"long_context_length":936000,"context_window":328000,"long_context_window":1064000}
         \\]}
     ;
 
@@ -1283,6 +1285,8 @@ test "toSharedModels copies copilot models into the shared model list" {
     try std.testing.expectEqualStrings("Anthropic", shared.value().models[0].provider);
     try std.testing.expectEqual(@as(i64, 200000), shared.value().models[0].context_length);
     try std.testing.expectEqual(@as(i64, 936000), shared.value().models[0].long_context_length);
+    try std.testing.expectEqual(@as(i64, 328000), shared.value().models[0].context_window);
+    try std.testing.expectEqual(@as(i64, 1064000), shared.value().models[0].long_context_window);
 }
 
 fn seedCopilotToken(c: *Client) !void {

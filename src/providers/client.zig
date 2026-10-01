@@ -14,6 +14,10 @@ pub const Model = struct {
     context_length: i64,
     /// Prompt limit of a long-context pricing tier, or 0 when there is none.
     long_context_length: i64 = 0,
+    /// Whole window (prompt and reply) shown to the user, or 0 when unknown.
+    context_window: i64 = 0,
+    /// Whole window of the long-context tier, or 0 when there is none.
+    long_context_window: i64 = 0,
 };
 
 pub const ModelsList = struct {
