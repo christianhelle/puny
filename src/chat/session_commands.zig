@@ -237,11 +237,14 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
     previous_prov.deinit();
     owns_previous_prov = false;
 
+    var context_window: ?usize = null;
     if (model_selection_result) |sel| {
         ctx.model_key.* = sel.model_key;
         if (sel.reasoning_effort) |effort| {
             ctx.reasoning_effort.* = effort;
         }
+        applySelectedContext(ctx, sel);
+        context_window = sel.contextWindow(ctx.context_budget.tier);
     }
 
     try welcome.printSummary(
@@ -251,6 +254,7 @@ fn switchProvider(ctx: *ChatLoopContext, picked_provider: ModelProvider) !void {
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
             .reasoning_effort = ctx.reasoning_effort.*,
+            .context_window = context_window,
         },
     );
 
@@ -344,6 +348,7 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
         return;
     }
 
+    var context_window: ?usize = null;
     if (!ctx.parsed.mock and old_provider_name != new_provider_name) {
         // Kept alive until the new provider answers, so an unreachable server
         // can hand the session back to it.
@@ -389,6 +394,8 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             if (sel.reasoning_effort) |effort| {
                 ctx.reasoning_effort.* = effort;
             }
+            applySelectedContext(ctx, sel);
+            context_window = sel.contextWindow(ctx.context_budget.tier);
         }
     } else {
         ctx.prov.setConfig(.{ .base_url = new_provider_url, .api_key = new_api_key });
@@ -403,6 +410,7 @@ fn applyReconfiguredProvider(ctx: *ChatLoopContext, old_provider_name: ModelProv
             .provider_url = ctx.provider_url.*,
             .model_key = ctx.model_key.*,
             .reasoning_effort = ctx.reasoning_effort.*,
+            .context_window = context_window,
         },
     );
 
