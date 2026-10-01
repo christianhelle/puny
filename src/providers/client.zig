@@ -22,7 +22,26 @@ pub const ModelsList = struct {
 
 /// Which context window to budget for. Copilot prices some models in tiers:
 /// a cheaper `default` window and a larger, pricier `long_context` one.
-pub const ContextTier = enum { default, long_context };
+pub const ContextTier = enum {
+    default,
+    long_context,
+
+    /// Reads `default`, `long_context`, or the shorthand `long`, ignoring case.
+    pub fn parse(text: []const u8) ?ContextTier {
+        if (std.ascii.eqlIgnoreCase(text, "long")) return .long_context;
+        inline for (@typeInfo(ContextTier).@"enum".fields) |field| {
+            if (std.ascii.eqlIgnoreCase(text, field.name)) return @field(ContextTier, field.name);
+        }
+        return null;
+    }
+};
+
+test "ContextTier.parse reads tier names and rejects others" {
+    try std.testing.expectEqual(@as(?ContextTier, .long_context), ContextTier.parse("LONG"));
+    try std.testing.expectEqual(@as(?ContextTier, .long_context), ContextTier.parse("long_context"));
+    try std.testing.expectEqual(@as(?ContextTier, .default), ContextTier.parse("Default"));
+    try std.testing.expectEqual(@as(?ContextTier, null), ContextTier.parse("huge"));
+}
 
 /// What a provider says about a model's context window.
 pub const ContextLookup = union(enum) {
