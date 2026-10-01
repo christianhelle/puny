@@ -656,7 +656,7 @@ The context limit comes from the first of these that is set:
 1. `/context <tokens>` for the current conversation
 2. `--max-context <tokens>`
 3. `max_context_tokens` in `config.json`
-4. The context window the provider reports for the selected model: LM Studio, GitHub Copilot (its prompt limit, which leaves room for the reply), and Ollama Cloud report one. For OpenCode Zen and OpenCode Go it comes from the [models.dev](https://models.dev) catalog, downloaded without your API key. Local Ollama reports the context a model was loaded with, so the limit applies from the first reply onwards. Unsloth does not report one
+4. The context window the provider reports for the selected model: LM Studio, GitHub Copilot (its prompt limit, which leaves room for the reply, in the chosen context tier), and Ollama Cloud report one. For OpenCode Zen and OpenCode Go it comes from the [models.dev](https://models.dev) catalog, downloaded without your API key. Local Ollama reports the context a model was loaded with, so the limit applies from the first reply onwards. Unsloth does not report one
 
 When none is set, auto compaction is off, but `/compact` still works.
 
@@ -677,6 +677,30 @@ loaded into the conversation.
 ```json
 {
   "max_context_tokens": 64000
+}
+```
+
+#### Context tiers
+
+GitHub Copilot prices many models in two context tiers, the same choice the
+Copilot app offers as a smaller and a larger context window. Puny budgets the
+cheaper `default` tier unless you choose `long_context`:
+
+| Model (example) | `default` | `long_context` |
+|---|---|---|
+| GPT-6 Luna | 272,000 tokens | 872,000 tokens |
+| Claude Sonnet 5.5 | 200,000 tokens | 936,000 tokens |
+
+The long tier lets a conversation grow far longer before it is compacted, but
+GitHub Copilot charges more per token for it. Models with a single window,
+such as Kimi K3, keep it in either tier, and other providers ignore the tier.
+
+Choose the tier with `--context-tier long`, with `/context long` (or
+`/context default`) for the current conversation, or for every session:
+
+```json
+{
+  "context_tier": "long_context"
 }
 ```
 
@@ -874,6 +898,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--orchestrate`                 | Implement, review, and fix the current branch until merge worthy, then exit (requires `--prompt` or `--prompt-file`)                                                        |
 | `--max-iterations <n>`          | Maximum review iterations for `--orchestrate`; a fix runs between reviews, not after the last one (default `5`)                                                             |
 | `--max-context <tokens>`        | Context window budget; the conversation is compacted near it (overrides `max_context_tokens` in config, which overrides the model's reported window)                        |
+| `--context-tier <tier>`         | `default` or `long`: budget the larger, pricier long-context window of GitHub Copilot models priced in tiers (overrides `context_tier` in config)                         |
 | `-M`, `--mock`                  | Use mock provider (no backend required)                                                                                                                                     |
 | `--reconfigure`                 | Re-run first-run setup and update config                                                                                                                                    |
 | `--show-thinking`               | Show reasoning/thinking output from the model                                                                                                                               |
@@ -910,7 +935,7 @@ While in a chat session:
 - `/new` or `/reset` — clear the conversation, start a new session, and unload all skills
 - `/stats` — show session statistics (turns, requests, and tokens summed over every request) and memory usage
 - `/compact` — summarize the conversation so far into one message to free context
-- `/context [tokens|off]` — show how full the context is and a breakdown of what fills it (system prompt, tools, skills, messages), set the context limit for this conversation, or turn auto compaction off
+- `/context [tokens|off|default|long]` — show how full the context is and a breakdown of what fills it (system prompt, tools, skills, messages), set the context limit for this conversation, pick a [context tier](#context-tiers), or turn auto compaction off
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`
 - `/build [task]` — switch to build mode (optionally with a task description)
