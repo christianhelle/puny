@@ -17,6 +17,19 @@ pub const SelectionResult = struct {
     context: ?ModelContext = null,
     /// The context tier picked for the model, when one was picked.
     context_tier: ?client.ContextTier = null,
+
+    /// The window the model has in the picked tier, or else in `current_tier`.
+    pub fn contextWindow(self: SelectionResult, current_tier: client.ContextTier) ?usize {
+        const sizes = self.context orelse return null;
+        const lookup = switch (self.context_tier orelse current_tier) {
+            .default => sizes.default,
+            .long_context => sizes.long_context,
+        };
+        return switch (lookup) {
+            .size => |size| size.window,
+            .unreported, .not_loaded => null,
+        };
+    }
 };
 
 /// A model's context size in each tier, read from the model list that
@@ -374,6 +387,26 @@ test "select reports the validated model's context sizes" {
     try std.testing.expectEqual(client.ContextLookup{ .size = .{ .prompt = 32000 } }, sizes.default);
     try std.testing.expectEqual(client.ContextLookup{ .size = .{ .prompt = 32000 } }, sizes.long_context);
     try std.testing.expectEqual(@as(?client.ContextTier, null), result.context_tier);
+}
+
+test "contextWindow picks the chosen tier's window and the picked tier over the current one" {
+    const result = SelectionResult{
+        .model_key = "gpt-6-luna",
+        .reasoning_effort = null,
+        .context = .{
+            .default = .{ .size = .{ .prompt = 272000, .window = 400000 } },
+            .long_context = .{ .size = .{ .prompt = 872000, .window = 1000000 } },
+        },
+    };
+    try std.testing.expectEqual(@as(?usize, 400000), result.contextWindow(.default));
+    try std.testing.expectEqual(@as(?usize, 1000000), result.contextWindow(.long_context));
+
+    var picked = result;
+    picked.context_tier = .long_context;
+    try std.testing.expectEqual(@as(?usize, 1000000), picked.contextWindow(.default));
+
+    const unknown = SelectionResult{ .model_key = "x", .reasoning_effort = null };
+    try std.testing.expectEqual(@as(?usize, null), unknown.contextWindow(.default));
 }
 
 test "select returns null when the model id is unknown" {
