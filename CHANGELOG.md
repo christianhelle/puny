@@ -6,6 +6,7 @@
 - Replace minimal reasoning effort with max ([#219](https://github.com/christianhelle/puny/pull/219)) ([@christianhelle](https://github.com/christianhelle/))
 
 ### Features
+- Choose and show GitHub Copilot context sizes during model selection ([#223](https://github.com/christianhelle/puny/pull/223)) ([@christianhelle](https://github.com/christianhelle/))
 - Set the context budget from each provider's reported window ([#221](https://github.com/christianhelle/puny/pull/221)) ([@christianhelle](https://github.com/christianhelle/))
 - Show a context breakdown in /context ([#220](https://github.com/christianhelle/puny/pull/220)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix MissingGithubToken after resetting a Copilot conversation ([#218](https://github.com/christianhelle/puny/pull/218)) ([@christianhelle](https://github.com/christianhelle/))
