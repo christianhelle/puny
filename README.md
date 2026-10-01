@@ -683,20 +683,33 @@ loaded into the conversation.
 #### Context tiers
 
 GitHub Copilot prices many models in two context tiers, the same choice the
-Copilot app offers as a smaller and a larger context window. Puny budgets the
-cheaper `default` tier unless you choose `long_context`:
+Copilot app offers as a smaller and a larger context size. Puny budgets the
+cheaper `default` tier unless you choose `long_context`.
 
-| Model (example) | `default` | `long_context` |
+Puny shows each size as the Copilot app does: the whole window, holding the
+prompt and the reply. Auto compaction works against the smaller prompt limit
+inside it, since Copilot rejects longer prompts:
+
+| Model (example) | `default` window (prompt limit) | `long_context` window (prompt limit) |
 |---|---|---|
-| GPT-6 Luna | 272,000 tokens | 872,000 tokens |
-| Claude Sonnet 5.5 | 200,000 tokens | 936,000 tokens |
+| GPT-6 Luna | 400K (272,000 tokens) | 1M (872,000 tokens) |
+| Claude Sonnet 5.5 | 328K (200,000 tokens) | 1.1M (936,000 tokens) |
 
 The long tier lets a conversation grow far longer before it is compacted, but
 GitHub Copilot charges more per token for it. Models with a single window,
 such as Kimi K3, keep it in either tier, and other providers ignore the tier.
 
-Choose the tier with `--context-tier long`, with `/context long` (or
-`/context default`) for the current conversation, or for every session:
+Picking a model with `/model` asks for the context size after the reasoning
+effort when the model has both, and remembers the choice. The model line then
+shows it, e.g. `gpt-6-luna - max - 400K`, and `/context` reports usage within
+it:
+
+```text
+Context: ~3751 of 272000 tokens (1%) in a 400K window; compacts at 80%.
+```
+
+You can also choose the tier with `--context-tier long`, with `/context long`
+(or `/context default`) for the current conversation, or for every session:
 
 ```json
 {
