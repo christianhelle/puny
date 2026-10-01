@@ -22,6 +22,7 @@ pub const Options = struct {
     orchestrate: bool = false,
     max_iterations: usize = default_max_iterations,
     max_context: ?usize = null,
+    context_tier: ?provider.ContextTier = null,
     mock: bool = false,
     reconfigure: bool = false,
     debug: bool = false,
@@ -141,6 +142,11 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
             opts.max_context = std.fmt.parseInt(usize, args[i], 10) catch
                 fatal(io, "Invalid value for --max-context: {s}\n\n", .{args[i]});
+        } else if (std.mem.eql(u8, arg, "--context-tier")) {
+            i += 1;
+            if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
+            opts.context_tier = provider.ContextTier.parse(args[i]) orelse
+                fatal(io, "Invalid value for --context-tier: {s}. Expected default or long\n\n", .{args[i]});
         } else if (std.mem.eql(u8, arg, "--prompt") or std.mem.eql(u8, arg, "-p")) {
             i += 1;
             if (i >= args.len) fatal(io, "Missing value for {s}\n\n", .{arg});
@@ -280,6 +286,7 @@ pub fn printHelp(io: std.Io) void {
         \\      --orchestrate            Implement, review, and fix the current branch until merge worthy
         \\      --max-iterations <n>     Maximum review iterations for --orchestrate; a fix runs between reviews (default 5)
         \\      --max-context <tokens>   Context window budget; the conversation is compacted near it (CLI > config > model)
+        \\      --context-tier <tier>    default or long: budget a model's larger, pricier long-context window (GitHub Copilot)
         \\  -M, --mock                   Use mock provider (no network calls, for testing)
         \\      --reconfigure            Re-run first-run setup and update config
         \\      --show-thinking          Show reasoning/thinking output from the model
@@ -740,6 +747,23 @@ test "parseArgs sets max_context from flag" {
     defer env.deinit();
     const opts = parseArgs(std.testing.io, &env, &argv);
     try std.testing.expectEqual(@as(?usize, 64000), opts.max_context);
+}
+
+test "parseArgs sets context_tier from flag" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    const long = [_][:0]const u8{ "puny", "--context-tier", "long" };
+    try std.testing.expectEqual(@as(?provider.ContextTier, .long_context), parseArgs(std.testing.io, &env, &long).context_tier);
+
+    const long_context = [_][:0]const u8{ "puny", "--context-tier", "long_context" };
+    try std.testing.expectEqual(@as(?provider.ContextTier, .long_context), parseArgs(std.testing.io, &env, &long_context).context_tier);
+
+    const default = [_][:0]const u8{ "puny", "--context-tier", "default" };
+    try std.testing.expectEqual(@as(?provider.ContextTier, .default), parseArgs(std.testing.io, &env, &default).context_tier);
+
+    const unset = [_][:0]const u8{"puny"};
+    try std.testing.expectEqual(@as(?provider.ContextTier, null), parseArgs(std.testing.io, &env, &unset).context_tier);
 }
 
 test "validate rejects a zero max context" {
