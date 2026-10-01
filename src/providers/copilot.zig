@@ -21,6 +21,9 @@ const editor_plugin_version = "copilot-chat/0.26.7";
 const user_agent = "GitHubCopilotChat/0.26.7";
 const integration_id = "vscode-chat";
 const api_version = "2025-04-01";
+/// `/models` reports context pricing tiers (`billing.token_prices`) only from
+/// this API version on. Chat requests stay on `api_version`.
+const models_api_version = "2026-06-01";
 const openai_intent = "conversation-panel";
 const max_token_file_size = 1024 * 1024;
 
@@ -293,6 +296,7 @@ fn appendCopilotHeaders(
     accept: []const u8,
     request_id: []const u8,
     initiator: ?[]const u8,
+    version: []const u8,
 ) ![]u8 {
     const auth = try std.fmt.allocPrint(allocator, "Bearer {s}", .{bearer_token});
     try headers.append(allocator, .{ .name = "authorization", .value = auth });
@@ -302,7 +306,7 @@ fn appendCopilotHeaders(
     try headers.append(allocator, .{ .name = "editor-version", .value = editor_version });
     try headers.append(allocator, .{ .name = "editor-plugin-version", .value = editor_plugin_version });
     try headers.append(allocator, .{ .name = "openai-intent", .value = openai_intent });
-    try headers.append(allocator, .{ .name = "x-github-api-version", .value = api_version });
+    try headers.append(allocator, .{ .name = "x-github-api-version", .value = version });
     try headers.append(allocator, .{ .name = "x-request-id", .value = request_id });
     if (initiator) |value| try headers.append(allocator, .{ .name = "X-Initiator", .value = value });
     return auth;
@@ -334,7 +338,7 @@ pub fn listModels(self: *Client) !client.Owned(ModelsList) {
 
     var headers = std.ArrayList(std.http.Header).empty;
     defer headers.deinit(allocator);
-    const auth = try appendCopilotHeaders(allocator, &headers, token, "application/json", &request_id, null);
+    const auth = try appendCopilotHeaders(allocator, &headers, token, "application/json", &request_id, null, models_api_version);
     defer allocator.free(auth);
 
     const url = try std.fmt.allocPrint(allocator, "{s}/models", .{self.inner.base_url});
@@ -661,6 +665,7 @@ fn streamSse(self: *Client, path: []const u8, payload: []const u8, initiator: []
         "text/event-stream",
         &request_id,
         initiator,
+        api_version,
     );
     defer allocator.free(auth);
 
@@ -1114,7 +1119,7 @@ test "appendCopilotHeaders sets the standard Copilot headers" {
     var headers = std.ArrayList(std.http.Header).empty;
     defer headers.deinit(allocator);
 
-    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "text/event-stream", "req-id-1", "agent");
+    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "text/event-stream", "req-id-1", "agent", api_version);
     defer allocator.free(auth);
 
     try std.testing.expectEqualStrings("Bearer tok-123", auth);
@@ -1135,7 +1140,7 @@ test "appendCopilotHeaders omits X-Initiator when null" {
     var headers = std.ArrayList(std.http.Header).empty;
     defer headers.deinit(allocator);
 
-    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "application/json", "req-id-1", null);
+    const auth = try appendCopilotHeaders(allocator, &headers, "tok-123", "application/json", "req-id-1", null, api_version);
     defer allocator.free(auth);
 
     try std.testing.expect(findHeader(headers.items, "X-Initiator") == null);
@@ -2118,6 +2123,48 @@ test "listModels's http observer sees the Copilot user-agent header, not puny's"
     owned.deinit();
 
     try std.testing.expectEqualStrings(user_agent, observer_ctx.value());
+}
+
+test "listModels asks for the API version that reports context tiers" {
+    const ctx = try startUserAgentServer("{\"data\":[]}");
+    defer stopUserAgentServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var c = try clientWithSeededToken(ctx, arena_state.allocator());
+    defer c.deinit();
+
+    const ObserverCtx = struct {
+        found_value: [32]u8 = undefined,
+        found_len: usize = 0,
+
+        fn onRequest(user_ctx: ?*anyopaque, method: std.http.Method, request_url: []const u8, headers: []const std.http.Header, body: ?[]const u8) void {
+            _ = method;
+            _ = request_url;
+            _ = body;
+            const self: *@This() = @ptrCast(@alignCast(user_ctx.?));
+            for (headers) |header| {
+                if (!std.ascii.eqlIgnoreCase(header.name, "x-github-api-version")) continue;
+                const len = @min(header.value.len, self.found_value.len);
+                @memcpy(self.found_value[0..len], header.value[0..len]);
+                self.found_len = len;
+            }
+        }
+    };
+
+    var observer_ctx = ObserverCtx{};
+    c.inner.http_observer = .{
+        .ctx = &observer_ctx,
+        .onRequest = ObserverCtx.onRequest,
+        .onResponse = null,
+        .onError = null,
+    };
+
+    var owned = try listModels(&c);
+    owned.deinit();
+
+    try std.testing.expectEqualStrings("2026-06-01", observer_ctx.found_value[0..observer_ctx.found_len]);
 }
 
 test "chatStreaming sends exactly one Copilot user agent" {
