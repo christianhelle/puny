@@ -12,6 +12,8 @@ pub const Model = struct {
     display_name: []const u8,
     provider: []const u8,
     context_length: i64,
+    /// Prompt limit of a long-context pricing tier, or 0 when there is none.
+    long_context_length: i64 = 0,
 };
 
 pub const ModelsList = struct {
