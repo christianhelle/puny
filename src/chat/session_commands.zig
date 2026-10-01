@@ -49,9 +49,9 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
             budget.setTier(tier);
             const name = if (tier == .long_context) "long-context" else "default";
             if (budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
-                try w.print("\nUsing the {s} context tier: {d} tokens for this conversation.\n", .{ name, limit });
+                try w.print("\nUsing the {s} tier: {d} tokens for this conversation.\n", .{ name, limit });
             } else {
-                try w.print("\nUsing the {s} context tier, but this model reports no context window.\n", .{name});
+                try w.print("\nUsing the {s} tier, but this model reports no context window.\n", .{name});
             }
         },
         .invalid => try w.print("\nUsage: /context [tokens|off|default|long]\n", .{}),
