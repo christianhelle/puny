@@ -3,16 +3,34 @@ const ansi = @import("ansi.zig");
 const openai = @import("../providers/openai.zig");
 const version = @import("../version.zig");
 const help = @import("help.zig");
+const token_stats = @import("token_stats.zig");
 
 pub const Info = struct {
     provider_name: []const u8,
     provider_url: []const u8,
     model_key: []const u8,
     reasoning_effort: ?openai.ReasoningEffort = null,
+    /// The model's whole context window, shown after the effort when known.
+    context_window: ?usize = null,
     session_id: []const u8 = "",
     oneshot: bool = false,
     prefilled: bool = false,
 };
+
+/// Writes a model as `id - effort - window`, leaving out a default effort
+/// and an unknown window, e.g. `gpt-6-luna - max - 400K`.
+pub fn writeModel(writer: *std.Io.Writer, model_key: []const u8, reasoning_effort: ?openai.ReasoningEffort, context_window: ?usize) !void {
+    try writer.print("{s}", .{model_key});
+    if (reasoning_effort) |effort| {
+        if (effort != .default) {
+            try writer.print(" - {s}{s}{s}", .{ ansi.bold_start, @tagName(effort), ansi.bold_end });
+        }
+    }
+    if (context_window) |tokens| {
+        var buf: [16]u8 = undefined;
+        try writer.print(" - {s}", .{token_stats.formatContextSize(&buf, tokens)});
+    }
+}
 
 pub fn print(writer: *std.Io.Writer, info: Info) !void {
     var buf: [256]u8 = undefined;
@@ -27,12 +45,8 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("\n", .{});
 
     try writer.print("  {s}Provider:{s} {s} ({s})\n", .{ ansi.bright, ansi.reset, info.provider_name, info.provider_url });
-    try writer.print("  {s}Model:{s}    {s}", .{ ansi.bright, ansi.reset, info.model_key });
-    if (info.reasoning_effort) |effort| {
-        if (effort != .default) {
-            try writer.print(" - {s}{s}{s}", .{ ansi.bold_start, @tagName(effort), ansi.bold_end });
-        }
-    }
+    try writer.print("  {s}Model:{s}    ", .{ ansi.bright, ansi.reset });
+    try writeModel(writer, info.model_key, info.reasoning_effort, info.context_window);
 
     if (!info.oneshot and !info.prefilled) {
         // End the model line before the list and leave a blank line after it.
@@ -53,12 +67,8 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
 pub fn printSummary(writer: *std.Io.Writer, info: Info) !void {
     try writer.print("\n", .{});
     try writer.print("  {s}Provider:{s} {s} ({s})\n", .{ ansi.bright, ansi.reset, info.provider_name, info.provider_url });
-    try writer.print("  {s}Model:{s}    {s}", .{ ansi.bright, ansi.reset, info.model_key });
-    if (info.reasoning_effort) |effort| {
-        if (effort != .default) {
-            try writer.print(" - {s}{s}{s}", .{ ansi.bold_start, @tagName(effort), ansi.bold_end });
-        }
-    }
+    try writer.print("  {s}Model:{s}    ", .{ ansi.bright, ansi.reset });
+    try writeModel(writer, info.model_key, info.reasoning_effort, info.context_window);
     try writer.print("\n", .{});
     try writer.print("\n", .{});
     try writer.flush();
@@ -208,6 +218,34 @@ test "print shows reasoning effort when non-default" {
         });
         try std.testing.expect(std.mem.containsAtLeast(u8, out.written(), 1, " - \x1b[1mxhigh\x1b[22m"));
     }
+}
+
+test "print and printSummary show the context window after the effort" {
+    const allocator = std.testing.allocator;
+    const info = Info{
+        .provider_name = "GitHub Copilot",
+        .provider_url = "https://api.githubcopilot.com",
+        .model_key = "gpt-6-luna",
+        .reasoning_effort = .max,
+        .context_window = 400000,
+    };
+
+    var banner = std.Io.Writer.Allocating.init(allocator);
+    defer banner.deinit();
+    try print(&banner.writer, info);
+    try std.testing.expect(std.mem.containsAtLeast(u8, banner.written(), 1, "gpt-6-luna - \x1b[1mmax\x1b[22m - 400K\n"));
+
+    var summary = std.Io.Writer.Allocating.init(allocator);
+    defer summary.deinit();
+    try printSummary(&summary.writer, info);
+    try std.testing.expect(std.mem.containsAtLeast(u8, summary.written(), 1, "gpt-6-luna - \x1b[1mmax\x1b[22m - 400K\n"));
+}
+
+test "writeModel shows the window even with the default effort" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeModel(&out.writer, "gpt-6-luna", .default, 1000000);
+    try std.testing.expectEqualStrings("gpt-6-luna - 1M", out.written());
 }
 
 test "print omits reasoning effort when default" {
