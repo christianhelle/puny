@@ -55,14 +55,14 @@ test "parsePsContextLength reads the context a loaded model runs with" {
         \\{"name":"gemma4:latest","model":"gemma4:latest","context_length":4096}
         \\]}
     ;
-    try std.testing.expectEqual(ContextLookup{ .window = 32768 }, parsePsContextLength(std.testing.allocator, body, "qwen3:8b"));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 32768 } }, parsePsContextLength(std.testing.allocator, body, "qwen3:8b"));
 }
 
 test "parsePsContextLength matches a model named without its latest tag" {
     const body =
         \\{"models":[{"name":"gemma4:latest","model":"gemma4:latest","context_length":4096}]}
     ;
-    try std.testing.expectEqual(ContextLookup{ .window = 4096 }, parsePsContextLength(std.testing.allocator, body, "gemma4"));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 4096 } }, parsePsContextLength(std.testing.allocator, body, "gemma4"));
 }
 
 test "parsePsContextLength says a model missing from the list is not loaded yet" {

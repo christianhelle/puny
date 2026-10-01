@@ -348,7 +348,7 @@ test "Provider.contextLength asks Ollama Cloud's show endpoint for the model's w
     defer prov.deinit();
     prov.ollama_cloud.withBaseUrl(url);
 
-    try std.testing.expectEqual(ContextLookup{ .window = 1048576 }, prov.contextLength("deepseek-v4.1-flash", .default));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 1048576 } }, prov.contextLength("deepseek-v4.1-flash", .default));
     try std.testing.expectEqualStrings("/api/show", server.getRequestPath());
 }
 
@@ -364,7 +364,7 @@ test "Provider.contextLength asks local Ollama for the context a loaded model ru
     defer prov.deinit();
     prov.ollama.withBaseUrl(url);
 
-    try std.testing.expectEqual(ContextLookup{ .window = 32768 }, prov.contextLength("qwen3:8b", .default));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 32768 } }, prov.contextLength("qwen3:8b", .default));
     try std.testing.expectEqualStrings("/api/ps", server.getRequestPath());
 }
 
@@ -394,9 +394,9 @@ test "windowInList picks the long-context limit only when that tier is chosen" {
         .{ .id = "single", .display_name = "", .provider = "p", .context_length = 128000 },
         .{ .id = "unreported", .display_name = "", .provider = "p", .context_length = 0 },
     };
-    try std.testing.expectEqual(ContextLookup{ .window = 272000 }, windowInList(&models, "tiered", .default));
-    try std.testing.expectEqual(ContextLookup{ .window = 872000 }, windowInList(&models, "tiered", .long_context));
-    try std.testing.expectEqual(ContextLookup{ .window = 128000 }, windowInList(&models, "single", .long_context));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 272000 } }, windowInList(&models, "tiered", .default));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 872000 } }, windowInList(&models, "tiered", .long_context));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 128000 } }, windowInList(&models, "single", .long_context));
     try std.testing.expectEqual(ContextLookup.unreported, windowInList(&models, "unreported", .default));
     try std.testing.expectEqual(ContextLookup.unreported, windowInList(&models, "missing", .default));
 }
@@ -405,7 +405,7 @@ test "Provider.contextLength finds the window in the model list" {
     var prov = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
     defer prov.deinit();
 
-    try std.testing.expectEqual(ContextLookup{ .window = 32000 }, prov.contextLength("mock-model-fast", .default));
+    try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 32000 } }, prov.contextLength("mock-model-fast", .default));
     try std.testing.expectEqual(ContextLookup.unreported, prov.contextLength("missing", .default));
 }
 

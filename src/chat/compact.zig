@@ -348,12 +348,12 @@ pub const ContextBudget = struct {
     /// up again on the next request rather than remembered as unreported.
     pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, lookup: provider.ContextLookup) void {
         self.model_reported = switch (lookup) {
-            .window => |tokens| tokens,
+            .size => |size| size.prompt,
             .unreported, .not_loaded => null,
         };
         self.model_reported_key_hash = switch (lookup) {
             .not_loaded => null,
-            .window, .unreported => self.modelKeyHash(provider_kind, model_key),
+            .size, .unreported => self.modelKeyHash(provider_kind, model_key),
         };
         if (self.model_reported_key_hash) |key_hash| self.remember(key_hash, self.model_reported);
     }
@@ -679,17 +679,17 @@ test "needsModelLookup asks once per model and never with an explicit budget" {
 
 test "needsModelLookup asks again after switching provider with the same model id" {
     var budget = ContextBudget{};
-    budget.setModelReported(.lmstudio, "shared-model", .{ .window = 32768 });
+    budget.setModelReported(.lmstudio, "shared-model", .{ .size = .{ .prompt = 32768 } });
     try std.testing.expect(budget.needsModelLookup(.copilot, "shared-model"));
 }
 
 test "choosing a context tier looks the model up again and remembers both tiers" {
     var budget = ContextBudget{};
-    budget.setModelReported(.copilot, "gpt-6-luna", .{ .window = 272000 });
+    budget.setModelReported(.copilot, "gpt-6-luna", .{ .size = .{ .prompt = 272000 } });
 
     budget.setTier(.long_context);
     try std.testing.expect(budget.needsModelLookup(.copilot, "gpt-6-luna"));
-    budget.setModelReported(.copilot, "gpt-6-luna", .{ .window = 872000 });
+    budget.setModelReported(.copilot, "gpt-6-luna", .{ .size = .{ .prompt = 872000 } });
     try std.testing.expectEqual(@as(?usize, 872000), budget.limit());
 
     budget.setTier(.default);
@@ -716,7 +716,7 @@ test "needsModelLookup asks again while the model is not loaded yet" {
     try std.testing.expect(budget.needsModelLookup(.ollama, "qwen3:8b"));
     try std.testing.expectEqual(@as(?usize, null), budget.limit());
 
-    budget.setModelReported(.ollama, "qwen3:8b", .{ .window = 32768 });
+    budget.setModelReported(.ollama, "qwen3:8b", .{ .size = .{ .prompt = 32768 } });
     try std.testing.expect(!budget.needsModelLookup(.ollama, "qwen3:8b"));
     try std.testing.expectEqual(@as(?usize, 32768), budget.limit());
 }
@@ -771,7 +771,7 @@ test "resolveLimit remembers each model's window when switching back to it" {
 
     var budget = ContextBudget{};
     // A remembered window differs from what a fresh lookup (128000) would say.
-    budget.setModelReported(.mock, "mock-model", .{ .window = 5000 });
+    budget.setModelReported(.mock, "mock-model", .{ .size = .{ .prompt = 5000 } });
     try std.testing.expectEqual(@as(?usize, 32000), budget.resolveLimit(&prov, "mock-model-fast"));
     try std.testing.expect(!budget.needsModelLookup(.mock, "mock-model"));
     try std.testing.expectEqual(@as(?usize, 5000), budget.resolveLimit(&prov, "mock-model"));

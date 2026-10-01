@@ -47,16 +47,23 @@ test "ContextTier.parse reads tier names and rejects others" {
     try std.testing.expectEqual(@as(?ContextTier, null), ContextTier.parse("huge"));
 }
 
+/// How large a model's context is: the prompt limit Puny compacts against,
+/// and the whole window (prompt and reply) shown to the user, when known.
+pub const ContextSize = struct {
+    prompt: usize,
+    window: ?usize = null,
+};
+
 /// What a provider says about a model's context window.
 pub const ContextLookup = union(enum) {
-    window: usize,
+    size: ContextSize,
     /// The provider does not report one for this model.
     unreported,
     /// The provider reports it only once the model is loaded, so ask again later.
     not_loaded,
 
     pub fn from(length: ?usize) ContextLookup {
-        return if (length) |value| .{ .window = value } else .unreported;
+        return if (length) |value| .{ .size = .{ .prompt = value } } else .unreported;
     }
 };
 
