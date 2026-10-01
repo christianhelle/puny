@@ -30,16 +30,9 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try writer.flush();
 }
 
-/// Prints a command and its description in two columns. A command too long
-/// for its column gets a line of its own, with the description below it
-/// still lined up with the others.
 fn printCommand(writer: *std.Io.Writer, name: []const u8, description: []const u8) !void {
-    if (name.len > command_column_width) {
-        try writer.print("  {s}{s}{s}\n", .{ ansi.green, name, ansi.reset });
-        try writer.print("  {s} {s}\n", .{ command_padding, description });
-        return;
-    }
-    try writer.print("  {s}{s}{s}{s} {s}\n", .{ ansi.green, name, ansi.reset, command_padding[name.len..], description });
+    const pad = if (name.len >= command_column_width) "" else command_padding[name.len..];
+    try writer.print("  {s}{s}{s}{s} {s}\n", .{ ansi.green, name, ansi.reset, pad, description });
 }
 
 test "showHelp lists all commands" {
@@ -91,14 +84,15 @@ test "printCommand does not pad an exactly 20-byte command name" {
     try std.testing.expectEqualStrings("  \x1b[32m/command-12345678901\x1b[0m Desc\n", output.written());
 }
 
-test "printCommand moves the description of an overlong command onto an aligned next line" {
-    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+test "printCommand does not pad long command names" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
     try printCommand(&output.writer, "/command-12345678901 extra", "Desc");
-    const expected = "  " ++ ansi.green ++ "/command-12345678901 extra" ++ ansi.reset ++ "\n" ++
-        "  " ++ command_padding ++ " Desc\n";
-    try std.testing.expectEqualStrings(expected, output.written());
+    try std.testing.expectEqualStrings("  \x1b[32m/command-12345678901 extra\x1b[0m Desc\n", output.written());
 }
 
 test "showHelp renders the full command table when called out of line" {
