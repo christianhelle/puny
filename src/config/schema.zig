@@ -204,6 +204,9 @@ pub const Config = struct {
     /// Context window budget, in tokens, for every conversation. When unset,
     /// the model's reported context length is used when the provider has one.
     max_context_tokens: ?u64 = null,
+    /// Context tier to budget for models priced in tiers (GitHub Copilot):
+    /// `default`, or the larger and pricier `long_context`.
+    context_tier: provider.ContextTier = .default,
     providers: [provider_count]Provider = [provider_count]Provider{
         .{ .name = .lmstudio, .url = default_lm_studio_url, .apiKey = null, .model = "" },
         .{ .name = .opencode_zen, .url = opencode_zen.default_base_url, .apiKey = null, .model = "" },
@@ -241,6 +244,12 @@ pub const Config = struct {
             // whole config load over one field.
             const tokens = try std.json.parseFromValueLeaky(?u64, allocator, value, options);
             result.max_context_tokens = if (tokens == 0) null else tokens;
+        }
+        if (source.object.get("context_tier")) |value| {
+            // An unknown tier keeps the default rather than failing the load.
+            if (value == .string) {
+                result.context_tier = std.meta.stringToEnum(provider.ContextTier, value.string) orelse .default;
+            }
         }
         if (source.object.get("providers")) |value| {
             if (value != .array) return error.UnexpectedToken;
@@ -280,6 +289,7 @@ pub const Config = struct {
             .provider = self.provider,
             .prompts = try self.prompts.clone(allocator),
             .max_context_tokens = self.max_context_tokens,
+            .context_tier = self.context_tier,
             .providers = providers,
         };
     }
@@ -699,6 +709,38 @@ test "Config clone copies max_context_tokens" {
     var cloned = try src.clone(std.testing.allocator);
     defer cloned.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(?u64, 32000), cloned.max_context_tokens);
+}
+
+test "Config jsonParse reads context_tier" {
+    const parsed = try parseConfigForTest(
+        \\{"context_tier":"long_context"}
+    );
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(provider.ContextTier.long_context, parsed.value.context_tier);
+}
+
+test "Config jsonParse keeps the default context_tier for older configs and unknown values" {
+    const older = try parseConfigForTest(
+        \\{"provider":"lmstudio"}
+    );
+    defer older.deinit();
+    try std.testing.expectEqual(provider.ContextTier.default, older.value.context_tier);
+
+    const unknown = try parseConfigForTest(
+        \\{"context_tier":"huge"}
+    );
+    defer unknown.deinit();
+    try std.testing.expectEqual(provider.ContextTier.default, unknown.value.context_tier);
+}
+
+test "Config clone copies context_tier" {
+    var src = Config.default();
+    src.context_tier = .long_context;
+
+    var cloned = try src.clone(std.testing.allocator);
+    defer cloned.deinit(std.testing.allocator);
+    try std.testing.expectEqual(provider.ContextTier.long_context, cloned.context_tier);
 }
 
 test "Config jsonParse treats a zero max_context_tokens as unset" {
