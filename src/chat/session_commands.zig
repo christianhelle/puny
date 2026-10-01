@@ -19,8 +19,8 @@ const welcome = @import("../tui/welcome.zig");
 const ModelProvider = provider.ModelProvider;
 const ChatLoopContext = context.ChatLoopContext;
 
-/// `/context [tokens|off]`: shows how full the context is and what fills it,
-/// or changes the limit for the current conversation.
+/// `/context [tokens|off|default|long]`: shows how full the context is and
+/// what fills it, or changes the limit or tier for the current conversation.
 pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void {
     const budget = ctx.context_budget;
     const w = ctx.stdout_writer;
@@ -45,7 +45,16 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
             budget.disable();
             try w.print("\nAuto compaction is off for this conversation.\n", .{});
         },
-        .invalid => try w.print("\nUsage: /context [tokens|off]\n", .{}),
+        .tier => |tier| {
+            budget.setTier(tier);
+            const name = if (tier == .long_context) "long-context" else "default";
+            if (budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
+                try w.print("\nUsing the {s} context tier: {d} tokens for this conversation.\n", .{ name, limit });
+            } else {
+                try w.print("\nUsing the {s} context tier, but this model reports no context window.\n", .{name});
+            }
+        },
+        .invalid => try w.print("\nUsage: /context [tokens|off|default|long]\n", .{}),
     }
     try w.flush();
 }

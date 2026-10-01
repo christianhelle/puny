@@ -225,14 +225,16 @@ pub const ContextArgument = union(enum) {
     show,
     set: usize,
     off,
+    tier: ContextTier,
     invalid,
 };
 
-/// Parses the argument of `/context [tokens|off]`.
+/// Parses the argument of `/context [tokens|off|default|long]`.
 pub fn parseContextArgument(text: ?[]const u8) ContextArgument {
     const trimmed = std.mem.trim(u8, text orelse "", &std.ascii.whitespace);
     if (trimmed.len == 0) return .show;
     if (std.ascii.eqlIgnoreCase(trimmed, "off")) return .off;
+    if (ContextTier.parse(trimmed)) |tier| return .{ .tier = tier };
     const tokens = std.fmt.parseInt(usize, trimmed, 10) catch return .invalid;
     if (tokens == 0) return .invalid;
     return .{ .set = tokens };
@@ -782,6 +784,11 @@ test "parseContextArgument reads a limit, off, or nothing" {
     try std.testing.expectEqual(ContextArgument.off, parseContextArgument("OFF"));
     try std.testing.expectEqual(ContextArgument.invalid, parseContextArgument("0"));
     try std.testing.expectEqual(ContextArgument.invalid, parseContextArgument("lots"));
+}
+
+test "parseContextArgument reads a context tier" {
+    try std.testing.expectEqual(ContextArgument{ .tier = .long_context }, parseContextArgument("long"));
+    try std.testing.expectEqual(ContextArgument{ .tier = .default }, parseContextArgument(" default "));
 }
 
 test "disable turns auto compaction off even when the model reports a window" {
