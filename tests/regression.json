@@ -481,8 +481,14 @@
   {
     "name": "Context command rejects an invalid limit",
     "args": ["--mock", "--model", "mock-model", "--prompt", "/context lots", "--oneshot"],
-    "expect": ["Usage: /context [tokens|off]"],
+    "expect": ["Usage: /context [tokens|off|default|long]"],
     "not_expect": ["mock response"]
+  },
+  {
+    "name": "Context command switches to the long-context tier",
+    "args": ["--mock", "--model", "mock-model", "--prompt", "/context long", "--oneshot"],
+    "expect": ["Using the long-context tier: 128000 tokens for this conversation."],
+    "not_expect": ["mock response", "Usage: /context"]
   },
   {
     "name": "Max context flag sets the limit /context reports",
