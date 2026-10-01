@@ -10,7 +10,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/new, /reset", "New session");
     try printCommand(writer, "/stats", "Show session statistics");
     try printCommand(writer, "/compact", "Summarize the conversation to free context");
-    try printCommand(writer, "/context [n|off]", "Show context usage or set its token limit");
+    try printCommand(writer, "/context [n|off|long]", "Show context usage, set its token limit, or pick a context tier");
     try printCommand(writer, "/config", "Reconfigure URL and API key");
     try printCommand(writer, "/plan [task]", "Enter planning mode");
     try printCommand(writer, "/build [task]", "Switch to build mode");
@@ -49,7 +49,7 @@ test "showHelp lists all commands" {
         "/quit, /exit",        "/new, /reset", "/stats",      "/config",   "/plan [task]",
         "/build [task]",       "/review",      "/model [id]", "/provider", "/thinking [level]",
         "/sessions",           "/resume [id]", "/prune",      "/skills",   "/file [path|url]",
-        "/orchestrate [task]", "/help",        "@path",       "/compact",  "/context [n|off]",
+        "/orchestrate [task]", "/help",        "@path",       "/compact",  "/context [n|off|long]",
     };
     for (commands) |command| {
         try std.testing.expect(std.mem.indexOf(u8, text, command) != null);
