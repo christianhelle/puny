@@ -316,6 +316,8 @@ pub const ModelInfo = struct {
     name: []const u8,
     vendor: []const u8,
     context_length: i64,
+    /// Prompt limit of the long-context tier, or 0 when the model has none.
+    long_context_length: i64 = 0,
     endpoint: Endpoint = .chat_completions,
 };
 
@@ -420,6 +422,7 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
             .name = try arena_alloc.dupe(u8, name),
             .vendor = try arena_alloc.dupe(u8, vendor),
             .context_length = modelContextLength(item),
+            .long_context_length = tierContextMax(item, "long_context"),
             .endpoint = endpoint,
         });
     }
@@ -474,10 +477,14 @@ fn modelEndpoint(item: std.json.Value) ?Endpoint {
     return if (has_responses) .responses else null;
 }
 
-/// The tokens a request to this model may carry. Copilot rejects prompts over
-/// `max_prompt_tokens`, which is often below `max_context_window_tokens`
+/// The tokens a request to this model may carry. Models priced in context
+/// tiers are budgeted by their cheaper `default` tier, as the Copilot app
+/// does unless long context is chosen. Otherwise Copilot rejects prompts
+/// over `max_prompt_tokens`, which is often below `max_context_window_tokens`
 /// because the window also holds the reply, so that limit wins when reported.
 fn modelContextLength(item: std.json.Value) i64 {
+    const default_tier = tierContextMax(item, "default");
+    if (default_tier > 0) return default_tier;
     const caps = item.object.get("capabilities") orelse return 0;
     if (caps != .object) return 0;
     const limits = caps.object.get("limits") orelse return 0;
@@ -485,6 +492,17 @@ fn modelContextLength(item: std.json.Value) i64 {
     const prompt = positiveInteger(limits.object.get("max_prompt_tokens"));
     if (prompt > 0) return prompt;
     return positiveInteger(limits.object.get("max_context_window_tokens"));
+}
+
+/// `context_max` of a pricing tier in `billing.token_prices`, or 0.
+fn tierContextMax(item: std.json.Value, tier: []const u8) i64 {
+    const billing = item.object.get("billing") orelse return 0;
+    if (billing != .object) return 0;
+    const prices = billing.object.get("token_prices") orelse return 0;
+    if (prices != .object) return 0;
+    const entry = prices.object.get(tier) orelse return 0;
+    if (entry != .object) return 0;
+    return positiveInteger(entry.object.get("context_max"));
 }
 
 fn positiveInteger(value: ?std.json.Value) i64 {
@@ -506,6 +524,30 @@ test "parseModels budgets a model by its prompt limit when Copilot reports one" 
     defer owned.deinit();
 
     try std.testing.expectEqual(@as(i64, 168000), owned.value().data[0].context_length);
+}
+
+test "parseModels budgets a tiered model by its default tier and records the long one" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"data":[
+        \\{"id":"gpt-6-luna","name":"GPT-6 Luna","vendor":"OpenAI","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1000000,"max_prompt_tokens":872000,"max_output_tokens":128000}},
+        \\ "billing":{"token_prices":{"batch_size":1000000,
+        \\   "default":{"context_max":272000,"input_price":10,"output_price":50},
+        \\   "long_context":{"context_max":872000,"input_price":20,"output_price":75}}}},
+        \\{"id":"kimi-k3","name":"Kimi K3","vendor":"Moonshot","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1048576,"max_prompt_tokens":917504}},
+        \\ "billing":{"token_prices":{"default":{"context_max":917504}}}}
+        \\],"object":"list"}
+    ;
+    var owned = try parseModels(allocator, body);
+    defer owned.deinit();
+
+    const models = owned.value().data;
+    try std.testing.expectEqual(@as(i64, 272000), models[0].context_length);
+    try std.testing.expectEqual(@as(i64, 872000), models[0].long_context_length);
+    try std.testing.expectEqual(@as(i64, 917504), models[1].context_length);
+    try std.testing.expectEqual(@as(i64, 0), models[1].long_context_length);
 }
 
 test "parseModels keeps picker-enabled chat models served on /chat/completions or /responses" {
