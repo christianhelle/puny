@@ -406,6 +406,7 @@ fn run(init: std.process.Init) !u8 {
     sigint.register() catch {};
 
     var context_budget = compact.ContextBudget.init(parsed.max_context, cfg.max_context_tokens);
+    context_budget.setStartupTier(parsed.context_tier orelse cfg.context_tier);
 
     const ctx = session.ChatLoopContext{
         .arena = arena,
