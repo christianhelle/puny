@@ -22,14 +22,7 @@ pub const SelectionResult = struct {
     /// The window the model has in the picked tier, or else in `current_tier`.
     pub fn contextWindow(self: SelectionResult, current_tier: client.ContextTier) ?usize {
         const sizes = self.context orelse return null;
-        const lookup = switch (self.context_tier orelse current_tier) {
-            .default => sizes.default,
-            .long_context => sizes.long_context,
-        };
-        return switch (lookup) {
-            .size => |size| size.window,
-            .unreported, .not_loaded => null,
-        };
+        return sizes.window(self.context_tier orelse current_tier);
     }
 };
 
@@ -38,6 +31,18 @@ pub const SelectionResult = struct {
 pub const ModelContext = struct {
     default: client.ContextLookup,
     long_context: client.ContextLookup,
+
+    /// The model's whole window in `tier`, when the model list said.
+    pub fn window(self: ModelContext, tier: client.ContextTier) ?usize {
+        const lookup = switch (tier) {
+            .default => self.default,
+            .long_context => self.long_context,
+        };
+        return switch (lookup) {
+            .size => |size| size.window,
+            .unreported, .not_loaded => null,
+        };
+    }
 
     fn of(models: []const client.Model, key: []const u8) ModelContext {
         return .{
