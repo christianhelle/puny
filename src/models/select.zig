@@ -12,6 +12,24 @@ const test_support = @import("../test_support.zig");
 pub const SelectionResult = struct {
     model_key: []const u8,
     reasoning_effort: ?openai.ReasoningEffort,
+    /// The chosen model's context sizes, when the provider's model list says.
+    context: ?ModelContext = null,
+    /// The context tier picked for the model, when one was picked.
+    context_tier: ?client.ContextTier = null,
+};
+
+/// A model's context size in each tier, read from the model list that
+/// selection already fetched, so nothing needs to ask the provider again.
+pub const ModelContext = struct {
+    default: client.ContextLookup,
+    long_context: client.ContextLookup,
+
+    fn of(models: []const client.Model, key: []const u8) ModelContext {
+        return .{
+            .default = provider.windowInList(models, key, .default),
+            .long_context = provider.windowInList(models, key, .long_context),
+        };
+    }
 };
 
 pub fn select(
@@ -36,7 +54,11 @@ pub fn select(
             if (std.mem.eql(u8, m.id, id)) break true;
         } else false;
         if (found) {
-            return .{ .model_key = try arena.dupe(u8, id), .reasoning_effort = null };
+            return .{
+                .model_key = try arena.dupe(u8, id),
+                .reasoning_effort = null,
+                .context = ModelContext.of(models.value().models, id),
+            };
         }
         return null;
     }
@@ -322,6 +344,19 @@ test "select returns the validated model id when it exists" {
     try std.testing.expect(result != null);
     try std.testing.expectEqualStrings("mock-model", result.?.model_key);
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), result.?.reasoning_effort);
+}
+
+test "select reports the validated model's context sizes" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = (try select(&prov, "mock-model-fast", arena.allocator(), std.testing.io, undefined, false, null, .mock, undefined, testRandom())).?;
+    const sizes = result.context.?;
+    try std.testing.expectEqual(client.ContextLookup{ .size = .{ .prompt = 32000 } }, sizes.default);
+    try std.testing.expectEqual(client.ContextLookup{ .size = .{ .prompt = 32000 } }, sizes.long_context);
+    try std.testing.expectEqual(@as(?client.ContextTier, null), result.context_tier);
 }
 
 test "select returns null when the model id is unknown" {
