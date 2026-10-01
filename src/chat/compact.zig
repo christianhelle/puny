@@ -781,6 +781,19 @@ test "rememberModel records both tiers so neither is looked up again" {
     try std.testing.expectEqual(@as(?usize, 1000000), budget.window());
 }
 
+test "setStartupTier keeps a token limit and an off switch, and survives a new conversation" {
+    var limited = ContextBudget.init(64000, null);
+    limited.setStartupTier(.long_context);
+    try std.testing.expectEqual(@as(?usize, 64000), limited.explicit);
+    limited.resetConversation();
+    try std.testing.expectEqual(ContextTier.long_context, limited.tier);
+
+    var off = ContextBudget{};
+    off.disable();
+    off.setStartupTier(.long_context);
+    try std.testing.expect(off.disabled);
+}
+
 test "needsModelLookup asks again while the model is not loaded yet" {
     var budget = ContextBudget{};
     budget.setModelReported(.ollama, "qwen3:8b", .not_loaded);

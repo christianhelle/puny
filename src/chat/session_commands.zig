@@ -157,7 +157,9 @@ fn applySelectedContext(ctx: *ChatLoopContext, result: model_selection.Selection
     if (result.context) |sizes| {
         ctx.context_budget.rememberModel(std.meta.activeTag(ctx.prov.*), result.model_key, sizes.default, sizes.long_context);
     }
-    if (result.context_tier) |tier| ctx.context_budget.setTier(tier);
+    // The picker saves the tier as the preference, so it is the tier new
+    // conversations start on too, and a token limit or `/context off` still wins.
+    if (result.context_tier) |tier| ctx.context_budget.setStartupTier(tier);
 }
 
 pub fn handleSwitchProviderCommand(ctx: *ChatLoopContext, provider_id: ?[]const u8) !void {
