@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
+const context_tier_picker = @import("../tui/context_tier_picker.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const client = @import("../providers/client.zig");
 const model_picker = @import("../tui/model_picker.zig");
@@ -67,12 +68,21 @@ pub fn select(
     model_picker.setModels(models.value().models);
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
     const effort = (try effort_picker.pickEffort(arena, io)) orelse return null;
+    const context = ModelContext.of(models.value().models, key);
+    const context_tier: ?client.ContextTier = if (findModel(models.value().models, key)) |model|
+        if (model.long_context_length > 0)
+            (try context_tier_picker.pickTier(arena, io, model)) orelse return null
+        else
+            null
+    else
+        null;
 
     if (cfg) |c| {
         if (client.isValidUtf8(key) and current_provider != .mock) {
             c.providerEntry(current_provider).model = key;
             const effort_str = if (effort != .default) @tagName(effort) else null;
             c.providerEntry(current_provider).reasoning_effort = if (effort_str) |e| try arena.dupe(u8, e) else null;
+            if (context_tier) |tier| c.context_tier = tier;
             config.save(arena, io, c.*, environ_map) catch |err| {
                 var stderr_buffer: [1024]u8 = undefined;
                 var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
@@ -83,7 +93,14 @@ pub fn select(
         }
     }
 
-    return .{ .model_key = key, .reasoning_effort = effort };
+    return .{ .model_key = key, .reasoning_effort = effort, .context = context, .context_tier = context_tier };
+}
+
+fn findModel(models: []const client.Model, key: []const u8) ?client.Model {
+    for (models) |model| {
+        if (std.mem.eql(u8, model.id, key)) return model;
+    }
+    return null;
 }
 
 fn selectModelInteractive(
