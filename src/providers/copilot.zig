@@ -322,6 +322,11 @@ pub const ModelInfo = struct {
     context_length: i64,
     /// Prompt limit of the long-context tier, or 0 when the model has none.
     long_context_length: i64 = 0,
+    /// Whole window (prompt and reply) of the default tier, as the Copilot app
+    /// labels it, or 0 when unreported.
+    context_window: i64 = 0,
+    /// Whole window of the long-context tier, or 0 when the model has none.
+    long_context_window: i64 = 0,
     endpoint: Endpoint = .chat_completions,
 };
 
@@ -428,6 +433,8 @@ pub fn parseModels(allocator: std.mem.Allocator, response_json: []const u8) !cli
             .vendor = try arena_alloc.dupe(u8, vendor),
             .context_length = modelContextLength(item),
             .long_context_length = tierContextMax(item, "long_context"),
+            .context_window = tierWindow(item, "default"),
+            .long_context_window = tierWindow(item, "long_context"),
             .endpoint = endpoint,
         });
     }
@@ -499,6 +506,29 @@ fn modelContextLength(item: std.json.Value) i64 {
     return positiveInteger(limits.object.get("max_context_window_tokens"));
 }
 
+/// The whole window of a pricing tier: its prompt limit plus room for the
+/// reply, which is how the Copilot app labels context sizes (e.g. 272K + 128K
+/// = 400K). Models without tiers report `max_context_window_tokens`.
+fn tierWindow(item: std.json.Value, tier: []const u8) i64 {
+    const limits = modelLimits(item);
+    const context_max = tierContextMax(item, tier);
+    if (context_max > 0) {
+        const output = if (limits) |l| positiveInteger(l.get("max_output_tokens")) else 0;
+        return context_max + output;
+    }
+    if (!std.mem.eql(u8, tier, "default")) return 0;
+    const l = limits orelse return 0;
+    return positiveInteger(l.get("max_context_window_tokens"));
+}
+
+fn modelLimits(item: std.json.Value) ?std.json.ObjectMap {
+    const caps = item.object.get("capabilities") orelse return null;
+    if (caps != .object) return null;
+    const limits = caps.object.get("limits") orelse return null;
+    if (limits != .object) return null;
+    return limits.object;
+}
+
 /// `context_max` of a pricing tier in `billing.token_prices`, or 0.
 fn tierContextMax(item: std.json.Value, tier: []const u8) i64 {
     const billing = item.object.get("billing") orelse return 0;
@@ -553,6 +583,28 @@ test "parseModels budgets a tiered model by its default tier and records the lon
     try std.testing.expectEqual(@as(i64, 872000), models[0].long_context_length);
     try std.testing.expectEqual(@as(i64, 917504), models[1].context_length);
     try std.testing.expectEqual(@as(i64, 0), models[1].long_context_length);
+}
+
+test "parseModels sizes each tier's window as its prompt limit plus the reply" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"data":[
+        \\{"id":"gpt-6-luna","name":"GPT-6 Luna","vendor":"OpenAI","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1000000,"max_prompt_tokens":872000,"max_output_tokens":128000}},
+        \\ "billing":{"token_prices":{"default":{"context_max":272000},"long_context":{"context_max":872000}}}},
+        \\{"id":"kimi-k3","name":"Kimi K3","vendor":"Moonshot","model_picker_enabled":true,
+        \\ "capabilities":{"type":"chat","limits":{"max_context_window_tokens":1048576,"max_prompt_tokens":917504}}}
+        \\],"object":"list"}
+    ;
+    var owned = try parseModels(allocator, body);
+    defer owned.deinit();
+
+    const models = owned.value().data;
+    // The Copilot app labels these tiers 400K and 1M.
+    try std.testing.expectEqual(@as(i64, 400000), models[0].context_window);
+    try std.testing.expectEqual(@as(i64, 1000000), models[0].long_context_window);
+    try std.testing.expectEqual(@as(i64, 1048576), models[1].context_window);
+    try std.testing.expectEqual(@as(i64, 0), models[1].long_context_window);
 }
 
 test "parseModels keeps picker-enabled chat models served on /chat/completions or /responses" {
