@@ -317,7 +317,7 @@ pub const ContextBudget = struct {
                 self.model_reported = known.window;
                 self.model_reported_key_hash = key_hash;
             } else {
-                self.setModelReported(provider_kind, model_key, prov.contextLength(model_key));
+                self.setModelReported(provider_kind, model_key, prov.contextLength(model_key, .default));
             }
         }
         return self.limit();

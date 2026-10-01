@@ -20,6 +20,10 @@ pub const ModelsList = struct {
     models: []const Model,
 };
 
+/// Which context window to budget for. Copilot prices some models in tiers:
+/// a cheaper `default` window and a larger, pricier `long_context` one.
+pub const ContextTier = enum { default, long_context };
+
 /// What a provider says about a model's context window.
 pub const ContextLookup = union(enum) {
     window: usize,
