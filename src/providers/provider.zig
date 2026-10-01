@@ -11,6 +11,9 @@ const unsloth = @import("unsloth.zig");
 const lmstudio_shim = @import("lmstudio_shim.zig");
 const openai_shim = @import("openai_shim.zig");
 const responses = @import("responses.zig");
+const ollama = @import("ollama.zig");
+const ollama_cloud = @import("ollama_cloud.zig");
+const models_dev = @import("models_dev.zig");
 const cancel = @import("../core/cancel.zig");
 
 pub const ModelProvider = enum {
@@ -45,6 +48,8 @@ pub fn getProviderDisplayName(selected_provider: ModelProvider) []const u8 {
         .mock => "Mock",
     };
 }
+
+pub const ContextLookup = client.ContextLookup;
 
 pub const Provider = union(enum) {
     lmstudio: client.Client,
@@ -86,6 +91,30 @@ pub const Provider = union(enum) {
         };
         try capture.commit(c);
         return result;
+    }
+
+    /// The context window `model_key` accepts, if the provider reports one.
+    pub fn contextLength(self: *Provider, model_key: []const u8) ContextLookup {
+        switch (self.*) {
+            .ollama => |*c| return ollama.psContextLength(c, model_key),
+            .ollama_cloud => |*c| return .from(ollama_cloud.showContextLength(c, model_key)),
+            .opencode, .opencode_go => |*c| return .from(models_dev.fetchContextLength(
+                c.allocator,
+                c.io,
+                models_dev.catalog_url,
+                catalogProviderId(std.meta.activeTag(self.*)).?,
+                model_key,
+            )),
+            else => {},
+        }
+        var models = self.listModels() catch return .unreported;
+        defer models.deinit();
+        for (models.value().models) |model| {
+            if (!std.mem.eql(u8, model.id, model_key)) continue;
+            if (model.context_length <= 0) return .unreported;
+            return .from(std.math.cast(usize, model.context_length));
+        }
+        return .unreported;
     }
 
     fn listModelsInner(self: *Provider) !client.Owned(client.ModelsList) {
@@ -166,6 +195,16 @@ pub const Provider = union(enum) {
         }
     }
 };
+
+/// The id models.dev files a provider under, for providers whose own model
+/// list carries no context windows.
+pub fn catalogProviderId(kind: std.meta.Tag(Provider)) ?[]const u8 {
+    return switch (kind) {
+        .opencode => "opencode",
+        .opencode_go => "opencode-go",
+        else => null,
+    };
+}
 
 fn chatStreamingCaptured(
     c: *client.Client,
@@ -283,6 +322,66 @@ test "Provider.listModels dispatches to the mock provider" {
     try std.testing.expectEqualStrings("mock-model-fast", model_list[1].id);
     try std.testing.expectEqualStrings("mock", model_list[0].provider);
     try std.testing.expectEqual(@as(i64, 128000), model_list[0].context_length);
+}
+
+test "Provider.contextLength asks Ollama Cloud's show endpoint for the model's window" {
+    const server = try startProviderTestServer(.ok,
+        \\{"model_info":{"deepseek_v41.context_length":1048576,"general.architecture":"deepseek_v41"}}
+    );
+    defer stopProviderTestServer(server);
+    const url = try providerTestUrl(server);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama_cloud = client.Client.init(std.testing.allocator, std.testing.io, "key") };
+    defer prov.deinit();
+    prov.ollama_cloud.withBaseUrl(url);
+
+    try std.testing.expectEqual(ContextLookup{ .window = 1048576 }, prov.contextLength("deepseek-v4.1-flash"));
+    try std.testing.expectEqualStrings("/api/show", server.getRequestPath());
+}
+
+test "Provider.contextLength asks local Ollama for the context a loaded model runs with" {
+    const server = try startProviderTestServer(.ok,
+        \\{"models":[{"name":"qwen3:8b","model":"qwen3:8b","context_length":32768}]}
+    );
+    defer stopProviderTestServer(server);
+    const url = try providerTestUrl(server);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.ollama.withBaseUrl(url);
+
+    try std.testing.expectEqual(ContextLookup{ .window = 32768 }, prov.contextLength("qwen3:8b"));
+    try std.testing.expectEqualStrings("/api/ps", server.getRequestPath());
+}
+
+test "Provider.contextLength says a model local Ollama has not loaded is not loaded yet" {
+    const server = try startProviderTestServer(.ok, "{\"models\":[]}");
+    defer stopProviderTestServer(server);
+    const url = try providerTestUrl(server);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .ollama = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.ollama.withBaseUrl(url);
+
+    try std.testing.expectEqual(ContextLookup.not_loaded, prov.contextLength("qwen3:8b"));
+}
+
+test "catalogProviderId names OpenCode's providers as models.dev does" {
+    try std.testing.expectEqualStrings("opencode", catalogProviderId(.opencode).?);
+    try std.testing.expectEqualStrings("opencode-go", catalogProviderId(.opencode_go).?);
+    try std.testing.expectEqual(@as(?[]const u8, null), catalogProviderId(.copilot));
+    try std.testing.expectEqual(@as(?[]const u8, null), catalogProviderId(.ollama));
+}
+
+test "Provider.contextLength finds the window in the model list" {
+    var prov = Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    try std.testing.expectEqual(ContextLookup{ .window = 32000 }, prov.contextLength("mock-model-fast"));
+    try std.testing.expectEqual(ContextLookup.unreported, prov.contextLength("missing"));
 }
 
 test "Provider.setConfig applies config to the copilot client" {

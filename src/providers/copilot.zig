@@ -474,16 +474,38 @@ fn modelEndpoint(item: std.json.Value) ?Endpoint {
     return if (has_responses) .responses else null;
 }
 
+/// The tokens a request to this model may carry. Copilot rejects prompts over
+/// `max_prompt_tokens`, which is often below `max_context_window_tokens`
+/// because the window also holds the reply, so that limit wins when reported.
 fn modelContextLength(item: std.json.Value) i64 {
     const caps = item.object.get("capabilities") orelse return 0;
     if (caps != .object) return 0;
     const limits = caps.object.get("limits") orelse return 0;
     if (limits != .object) return 0;
-    const value = limits.object.get("max_context_window_tokens") orelse return 0;
-    return switch (value) {
-        .integer => |i| i,
+    const prompt = positiveInteger(limits.object.get("max_prompt_tokens"));
+    if (prompt > 0) return prompt;
+    return positiveInteger(limits.object.get("max_context_window_tokens"));
+}
+
+fn positiveInteger(value: ?std.json.Value) i64 {
+    const v = value orelse return 0;
+    return switch (v) {
+        .integer => |i| @max(i, 0),
         else => 0,
     };
+}
+
+test "parseModels budgets a model by its prompt limit when Copilot reports one" {
+    const allocator = std.testing.allocator;
+    const body =
+        \\{"data":[
+        \\{"id":"claude-opus-4.8","name":"Claude Opus 4.8","vendor":"Anthropic","model_picker_enabled":true,"capabilities":{"type":"chat","limits":{"max_context_window_tokens":200000,"max_prompt_tokens":168000,"max_output_tokens":64000}}}
+        \\],"object":"list"}
+    ;
+    var owned = try parseModels(allocator, body);
+    defer owned.deinit();
+
+    try std.testing.expectEqual(@as(i64, 168000), owned.value().data[0].context_length);
 }
 
 test "parseModels keeps picker-enabled chat models served on /chat/completions or /responses" {

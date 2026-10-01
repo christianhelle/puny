@@ -6,7 +6,6 @@ const provider = @import("../providers/provider.zig");
 const stats = @import("stats.zig");
 const accumulator = @import("accumulator.zig");
 const chat_retry = @import("retry.zig");
-const client = @import("../providers/client.zig");
 const context_breakdown = @import("context_breakdown.zig");
 
 /// Share of the limit a request may reach before it is compacted.
@@ -222,16 +221,6 @@ pub fn summarize(
     };
 }
 
-/// The context window a provider reports for `model_key`, if it reports one.
-pub fn contextLengthFor(models: []const client.Model, model_key: []const u8) ?usize {
-    for (models) |model| {
-        if (!std.mem.eql(u8, model.id, model_key)) continue;
-        if (model.context_length <= 0) return null;
-        return @intCast(model.context_length);
-    }
-    return null;
-}
-
 pub const ContextArgument = union(enum) {
     show,
     set: usize,
@@ -253,6 +242,9 @@ const ProviderKind = std.meta.Tag(provider.Provider);
 
 /// Tracks how large the conversation may grow before it is compacted.
 pub const ContextBudget = struct {
+    const remembered_capacity = 16;
+    const RememberedWindow = struct { key_hash: u64, window: ?usize };
+
     /// Budget set by `/context`, `--max-context`, or `max_context_tokens`.
     explicit: ?usize = null,
     /// The explicit budget the session started with, restored for a new conversation.
@@ -264,6 +256,11 @@ pub const ContextBudget = struct {
     /// Hash of the provider and model key `model_reported` was looked up for,
     /// so switching either one triggers a new lookup.
     model_reported_key_hash: ?u64 = null,
+    /// Windows already looked up this session, so switching back to a model
+    /// does not ask the provider again (for OpenCode, a catalog download).
+    remembered: [remembered_capacity]RememberedWindow = undefined,
+    remembered_len: usize = 0,
+    remembered_next: usize = 0,
     /// Input tokens the provider reported for the most recent request, and
     /// how many messages that request carried.
     last_prompt_tokens: ?i64 = null,
@@ -294,7 +291,8 @@ pub const ContextBudget = struct {
     /// True when the limit depends on a model window not yet looked up.
     pub fn needsModelLookup(self: *const ContextBudget, provider_kind: ProviderKind, model_key: []const u8) bool {
         if (self.explicit != null or self.disabled) return false;
-        return self.model_reported_key_hash != modelKeyHash(provider_kind, model_key);
+        const key_hash = modelKeyHash(provider_kind, model_key);
+        return self.model_reported_key_hash != key_hash and self.recall(key_hash) == null;
     }
 
     pub fn setExplicit(self: *ContextBudget, tokens: usize) void {
@@ -308,24 +306,54 @@ pub const ContextBudget = struct {
     }
 
     /// The context limit for `model_key`. Without an explicit budget, the
-    /// provider's model list is consulted once per model; a failed lookup
+    /// provider is asked once per model; a failed lookup
     /// leaves auto compaction off for that model.
     pub fn resolveLimit(self: *ContextBudget, prov: *provider.Provider, model_key: []const u8) ?usize {
+        if (self.explicit != null or self.disabled) return self.limit();
         const provider_kind = std.meta.activeTag(prov.*);
-        if (self.needsModelLookup(provider_kind, model_key)) {
-            const length: ?usize = blk: {
-                var models = prov.listModels() catch break :blk null;
-                defer models.deinit();
-                break :blk contextLengthFor(models.value().models, model_key);
-            };
-            self.setModelReported(provider_kind, model_key, length);
+        const key_hash = modelKeyHash(provider_kind, model_key);
+        if (self.model_reported_key_hash != key_hash) {
+            if (self.recall(key_hash)) |known| {
+                self.model_reported = known.window;
+                self.model_reported_key_hash = key_hash;
+            } else {
+                self.setModelReported(provider_kind, model_key, prov.contextLength(model_key));
+            }
         }
         return self.limit();
     }
 
-    pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, context_length: ?usize) void {
-        self.model_reported = context_length;
-        self.model_reported_key_hash = modelKeyHash(provider_kind, model_key);
+    /// Records a lookup's answer. A model that is not loaded yet is looked
+    /// up again on the next request rather than remembered as unreported.
+    pub fn setModelReported(self: *ContextBudget, provider_kind: ProviderKind, model_key: []const u8, lookup: provider.ContextLookup) void {
+        self.model_reported = switch (lookup) {
+            .window => |tokens| tokens,
+            .unreported, .not_loaded => null,
+        };
+        self.model_reported_key_hash = switch (lookup) {
+            .not_loaded => null,
+            .window, .unreported => modelKeyHash(provider_kind, model_key),
+        };
+        if (self.model_reported_key_hash) |key_hash| self.remember(key_hash, self.model_reported);
+    }
+
+    fn recall(self: *const ContextBudget, key_hash: u64) ?RememberedWindow {
+        for (self.remembered[0..self.remembered_len]) |known| {
+            if (known.key_hash == key_hash) return known;
+        }
+        return null;
+    }
+
+    fn remember(self: *ContextBudget, key_hash: u64, window: ?usize) void {
+        for (self.remembered[0..self.remembered_len]) |*known| {
+            if (known.key_hash == key_hash) {
+                known.window = window;
+                return;
+            }
+        }
+        self.remembered[self.remembered_next] = .{ .key_hash = key_hash, .window = window };
+        self.remembered_next = (self.remembered_next + 1) % remembered_capacity;
+        self.remembered_len = @min(self.remembered_len + 1, remembered_capacity);
     }
 
     fn modelKeyHash(provider_kind: ProviderKind, model_key: []const u8) u64 {
@@ -614,26 +642,10 @@ test "estimate never drops below the character estimate when usage is under-repo
     try std.testing.expectEqual(@as(i64, 102), budget.estimate(&messages, &.{}));
 }
 
-test "contextLengthFor finds the active model's reported window" {
-    const models = [_]client.Model{
-        .{ .id = "small", .display_name = "Small", .provider = "p", .context_length = 8192 },
-        .{ .id = "large", .display_name = "Large", .provider = "p", .context_length = 131072 },
-    };
-    try std.testing.expectEqual(@as(?usize, 131072), contextLengthFor(&models, "large"));
-}
-
-test "contextLengthFor ignores unknown models and unreported windows" {
-    const models = [_]client.Model{
-        .{ .id = "unreported", .display_name = "", .provider = "p", .context_length = 0 },
-    };
-    try std.testing.expectEqual(@as(?usize, null), contextLengthFor(&models, "unreported"));
-    try std.testing.expectEqual(@as(?usize, null), contextLengthFor(&models, "missing"));
-}
-
 test "needsModelLookup asks once per model and never with an explicit budget" {
     var budget = ContextBudget{};
     try std.testing.expect(budget.needsModelLookup(.lmstudio, "model-a"));
-    budget.setModelReported(.lmstudio, "model-a", null);
+    budget.setModelReported(.lmstudio, "model-a", .unreported);
     try std.testing.expect(!budget.needsModelLookup(.lmstudio, "model-a"));
     try std.testing.expect(budget.needsModelLookup(.lmstudio, "model-b"));
 
@@ -643,8 +655,19 @@ test "needsModelLookup asks once per model and never with an explicit budget" {
 
 test "needsModelLookup asks again after switching provider with the same model id" {
     var budget = ContextBudget{};
-    budget.setModelReported(.lmstudio, "shared-model", 32768);
+    budget.setModelReported(.lmstudio, "shared-model", .{ .window = 32768 });
     try std.testing.expect(budget.needsModelLookup(.copilot, "shared-model"));
+}
+
+test "needsModelLookup asks again while the model is not loaded yet" {
+    var budget = ContextBudget{};
+    budget.setModelReported(.ollama, "qwen3:8b", .not_loaded);
+    try std.testing.expect(budget.needsModelLookup(.ollama, "qwen3:8b"));
+    try std.testing.expectEqual(@as(?usize, null), budget.limit());
+
+    budget.setModelReported(.ollama, "qwen3:8b", .{ .window = 32768 });
+    try std.testing.expect(!budget.needsModelLookup(.ollama, "qwen3:8b"));
+    try std.testing.expectEqual(@as(?usize, 32768), budget.limit());
 }
 
 test "a second compaction folds the earlier summary into the new one" {
@@ -688,6 +711,19 @@ test "resolveLimit looks up the model's window from the provider" {
     var budget = ContextBudget{};
     try std.testing.expectEqual(@as(?usize, 128000), budget.resolveLimit(&prov, "mock-model"));
     try std.testing.expectEqual(@as(?usize, null), budget.resolveLimit(&prov, "not-a-mock-model"));
+}
+
+test "resolveLimit remembers each model's window when switching back to it" {
+    const mock = @import("../providers/mock.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+
+    var budget = ContextBudget{};
+    // A remembered window differs from what a fresh lookup (128000) would say.
+    budget.setModelReported(.mock, "mock-model", .{ .window = 5000 });
+    try std.testing.expectEqual(@as(?usize, 32000), budget.resolveLimit(&prov, "mock-model-fast"));
+    try std.testing.expect(!budget.needsModelLookup(.mock, "mock-model"));
+    try std.testing.expectEqual(@as(?usize, 5000), budget.resolveLimit(&prov, "mock-model"));
 }
 
 test "parseContextArgument reads a limit, off, or nothing" {
