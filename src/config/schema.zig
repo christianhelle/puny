@@ -183,7 +183,7 @@ pub const Provider = struct {
 };
 
 /// Number of persisted provider slots: every provider except mock.
-pub const provider_count = @typeInfo(provider.ModelProvider).@"enum".fields.len - 1;
+pub const provider_count = @typeInfo(provider.ModelProvider).@"enum".field_names.len - 1;
 
 pub fn providerSlot(kind: provider.ModelProvider) usize {
     return switch (kind) {
