@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) !void {
         b.graph.zig_exe,
         "build",
         "-Ddocker",
-        "-Doptimize=ReleaseSmall",
+        "-Doptimize=small",
         "-Dtarget=x86_64-linux",
     });
 
@@ -97,14 +97,14 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/install_release.zig"),
             .target = b.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
 
-    addInstallStep(b, target, build_options, install_release, "install-release", "Build ReleaseSmall and install to $HOME/.local/bin", .ReleaseSmall);
-    addInstallStep(b, target, build_options, install_release, "install-release-safe", "Build ReleaseSafe and install to $HOME/.local/bin", .ReleaseSafe);
-    addInstallStep(b, target, build_options, install_release, "install-release-fast", "Build ReleaseFast and install to $HOME/.local/bin", .ReleaseFast);
-    addInstallStep(b, target, build_options, install_release, "install-debug", "Build Debug and install to $HOME/.local/bin", .Debug);
+    addInstallStep(b, target, build_options, install_release, "install-release", "Build ReleaseSmall and install to $HOME/.local/bin", .small);
+    addInstallStep(b, target, build_options, install_release, "install-release-safe", "Build ReleaseSafe and install to $HOME/.local/bin", .safe);
+    addInstallStep(b, target, build_options, install_release, "install-release-fast", "Build ReleaseFast and install to $HOME/.local/bin", .fast);
+    addInstallStep(b, target, build_options, install_release, "install-debug", "Build Debug and install to $HOME/.local/bin", .debug);
 
     const test_regression_step = b.step("test-regression", "Run cross-platform builds, unit tests, and regression tests");
 
@@ -152,7 +152,7 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/regression_checker.zig"),
             .target = b.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
 
@@ -166,7 +166,7 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/integration_checker.zig"),
             .target = b.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
 
@@ -191,14 +191,14 @@ pub fn build(b: *std.Build) !void {
     if (regenerate_providers) {
         if (b.lazyDependency("openapi2zig", .{
             .target = b.graph.host,
-            .optimize = .ReleaseSafe,
+            .optimize = .safe,
         })) |openapi2zig| {
             const generate_providers = b.addExecutable(.{
                 .name = "generate_providers",
                 .root_module = b.createModule(.{
                     .root_source_file = b.path("tools/generate_providers.zig"),
                     .target = b.graph.host,
-                    .optimize = .ReleaseSafe,
+                    .optimize = .safe,
                 }),
             });
             generate_providers.root_module.addImport("openapi2zig", openapi2zig.module("openapi2zig"));
