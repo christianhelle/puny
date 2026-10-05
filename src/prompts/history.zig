@@ -78,7 +78,7 @@ pub const History = struct {
                         "prompt history file {s} is readable or writable by other users; tightening to owner-only.",
                         .{self.path},
                     );
-                    cwd.setFilePermissions(io, self.path, @fromBackingInt(@intCast(0o600)), .{}) catch {};
+                    cwd.setFilePermissions(io, self.path, @fromBackingInt(0o600), .{}) catch {};
                 }
             } else |_| {}
         }
@@ -101,7 +101,7 @@ pub const History = struct {
         // A freshly created file can inherit a permissive umask, and truncating
         // an existing file keeps its previous mode; force owner-only either way.
         if (comptime builtin.os.tag != .windows) {
-            cwd.setFilePermissions(io, self.path, @fromBackingInt(@intCast(0o600)), .{}) catch {};
+            cwd.setFilePermissions(io, self.path, @fromBackingInt(0o600), .{}) catch {};
         }
         file.writeStreamingAll(io, buffer) catch |err| {
             std.log.warn("failed to write prompt history to {s}: {s}.", .{ self.path, @errorName(err) });
