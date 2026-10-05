@@ -33,8 +33,8 @@ pub const ContextTier = enum {
     /// Reads `default`, `long_context`, or the shorthand `long`, ignoring case.
     pub fn parse(text: []const u8) ?ContextTier {
         if (std.ascii.eqlIgnoreCase(text, "long")) return .long_context;
-        inline for (@typeInfo(ContextTier).@"enum".fields) |field| {
-            if (std.ascii.eqlIgnoreCase(text, field.name)) return @field(ContextTier, field.name);
+        inline for (@typeInfo(ContextTier).@"enum".field_names) |name| {
+            if (std.ascii.eqlIgnoreCase(text, name)) return @field(ContextTier, name);
         }
         return null;
     }
