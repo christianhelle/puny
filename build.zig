@@ -265,6 +265,9 @@ fn addInstallStep(
 fn createBuildInfoOptions(b: *std.Build) *std.Build.Step.Options {
     const options = b.addOptions();
     const io = b.graph.io;
+    // The version, commit and dirty flag come from Git state the build cache
+    // cannot track, so rerun configuration on every build to keep them fresh.
+    b.graph.poisonCache();
     const package_version = getPackageVersion(b.allocator, io) orelse "unknown";
     const git_tag = getGitOutput(b.allocator, io, &.{ "git", "describe", "--tags", "--abbrev=0" }) orelse b.fmt("v{s}", .{package_version});
     const git_commit = getGitOutput(b.allocator, io, &.{ "git", "rev-parse", "--short", "HEAD" }) orelse "unknown";
