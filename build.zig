@@ -219,7 +219,7 @@ fn addPunyExecutable(
     b: *std.Build,
     name: []const u8,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     build_options: *std.Build.Step.Options,
 ) *std.Build.Step.Compile {
     const exe = b.addExecutable(.{
@@ -248,7 +248,7 @@ fn addInstallStep(
     install_release: *std.Build.Step.Compile,
     step_name: []const u8,
     description: []const u8,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 ) void {
     const exe = addPunyExecutable(b, "puny", target, optimize, build_options);
     const install_step = b.step(step_name, description);
