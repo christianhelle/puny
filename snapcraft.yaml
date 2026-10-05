@@ -65,7 +65,7 @@ parts:
       - xz-utils
     override-build: |
       set -eu
-      ZIG_VERSION=0.16.0
+      ZIG_VERSION=0.17.0
       curl -fsSLo zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
       mkdir -p "$SNAPCRAFT_PART_INSTALL/zig"
       tar -xJf zig.tar.xz --strip-components=1 -C "$SNAPCRAFT_PART_INSTALL/zig"
