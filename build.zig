@@ -101,9 +101,9 @@ pub fn build(b: *std.Build) !void {
         }),
     });
 
-    addInstallStep(b, target, build_options, install_release, "install-release", "Build ReleaseSmall and install to $HOME/.local/bin", .small);
-    addInstallStep(b, target, build_options, install_release, "install-release-safe", "Build ReleaseSafe and install to $HOME/.local/bin", .safe);
-    addInstallStep(b, target, build_options, install_release, "install-release-fast", "Build ReleaseFast and install to $HOME/.local/bin", .fast);
+    addInstallStep(b, target, build_options, install_release, "install-release", "Build small and install to $HOME/.local/bin", .small);
+    addInstallStep(b, target, build_options, install_release, "install-release-safe", "Build safe and install to $HOME/.local/bin", .safe);
+    addInstallStep(b, target, build_options, install_release, "install-release-fast", "Build fast and install to $HOME/.local/bin", .fast);
     addInstallStep(b, target, build_options, install_release, "install-debug", "Build Debug and install to $HOME/.local/bin", .debug);
 
     const test_regression_step = b.step("test-regression", "Run cross-platform builds, unit tests, and regression tests");
