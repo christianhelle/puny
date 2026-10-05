@@ -507,7 +507,7 @@ test "shouldCompact triggers at 80 percent of the limit" {
     try std.testing.expect(shouldCompact(1500, 1000));
 }
 
-const long_text = "x" ** 400; // 100 estimated tokens
+const long_text = &@as([400]u8, @splat('x')); // 100 estimated tokens
 
 test "planSplit forced summarizes every exchange between turns" {
     const messages = [_]openai.Message{
@@ -584,12 +584,12 @@ test "buildSummaryRequest truncates long tool results" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const messages = [_]openai.Message{
-        .{ .tool = .{ .tool_call_id = "call_1", .content = "y" ** 3000 } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = &@as([3000]u8, @splat('y')) } },
     };
 
     const request = try buildSummaryRequest(arena_state.allocator(), &messages);
 
-    const expected = "Tool result:\n" ++ "y" ** 2000 ++ "\n[truncated]\n\n";
+    const expected = "Tool result:\n" ++ &@as([2000]u8, @splat('y')) ++ "\n[truncated]\n\n";
     try std.testing.expectEqualStrings(expected, request[1].user);
 }
 
@@ -597,12 +597,12 @@ test "buildSummaryRequest truncates tool results on a character boundary" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const messages = [_]openai.Message{
-        .{ .tool = .{ .tool_call_id = "call_1", .content = "y" ** 1999 ++ "é" ++ "z" ** 100 } },
+        .{ .tool = .{ .tool_call_id = "call_1", .content = &@as([1999]u8, @splat('y')) ++ "é" ++ &@as([100]u8, @splat('z')) } },
     };
 
     const request = try buildSummaryRequest(arena_state.allocator(), &messages);
 
-    const expected = "Tool result:\n" ++ "y" ** 1999 ++ "\n[truncated]\n\n";
+    const expected = "Tool result:\n" ++ &@as([1999]u8, @splat('y')) ++ "\n[truncated]\n\n";
     try std.testing.expectEqualStrings(expected, request[1].user);
 }
 
