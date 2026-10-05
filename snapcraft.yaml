@@ -77,6 +77,6 @@ parts:
     override-build: |
       export PATH="$SNAPCRAFT_STAGE/zig:$PATH"
       zig version
-      zig build -Doptimize=ReleaseSmall
+      zig build -Doptimize=small
       mkdir -p $SNAPCRAFT_PART_INSTALL/bin
       cp zig-out/bin/puny $SNAPCRAFT_PART_INSTALL/bin/
