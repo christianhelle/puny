@@ -546,7 +546,7 @@ test "listSessions stores a 1024-char preview for first prompts longer than 1024
     const meta_path = try core_session.sessionMetaPath(std.testing.allocator, sessions_dir, "big-meta");
     defer std.testing.allocator.free(meta_path);
 
-    const long_prompt = [_]u8{'x'} ** 2048;
+    const long_prompt: [2048]u8 = @splat('x');
     var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
     defer meta_file.close(std.testing.io);
     try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
@@ -595,7 +595,7 @@ test "listSessions survives a session meta larger than the read limit" {
     var meta_file = try std.Io.Dir.cwd().createFile(std.testing.io, meta_path, .{});
     defer meta_file.close(std.testing.io);
     try meta_file.writeStreamingAll(std.testing.io, "{\"planning_mode\":false,\"first_prompt\":\"");
-    const chunk = [_]u8{'x'} ** 4096;
+    const chunk: [4096]u8 = @splat('x');
     var written: usize = 0;
     while (written < 10 * 1024 * 1024) : (written += chunk.len) {
         try meta_file.writeStreamingAll(std.testing.io, &chunk);
@@ -624,7 +624,7 @@ test "listSessions does not retain every session's metadata in the shared arena"
     }
 
     const prompt_len = 512 * 1024;
-    const chunk = [_]u8{'x'} ** (64 * 1024);
+    const chunk: [64 * 1024]u8 = @splat('x');
     var i: usize = 0;
     while (i < 4) : (i += 1) {
         const id = try std.fmt.allocPrint(std.testing.allocator, "big-{d}", .{i});
@@ -771,7 +771,7 @@ test "listSessions rebuilds from scan on an oversized index" {
     defer std.testing.allocator.free(index_path);
     var big = try std.Io.Dir.cwd().createFile(std.testing.io, index_path, .{});
     defer big.close(std.testing.io);
-    const chunk = [_]u8{'x'} ** 1024;
+    const chunk: [1024]u8 = @splat('x');
     var written: usize = 0;
     while (written < index_read_limit + 64) : (written += chunk.len) {
         try big.writeStreamingAll(std.testing.io, &chunk);
@@ -1094,7 +1094,7 @@ test "upsertSessionInfo truncates first_prompt beyond 1024 chars and preserves n
     try f.createTestSessionDir(std.testing.io, test_dir, "long-1", false);
     try f.createTestSessionDir(std.testing.io, test_dir, "null-2", false);
 
-    const long_prompt = [_]u8{'x'} ** 2048;
+    const long_prompt: [2048]u8 = @splat('x');
     try upsertSessionInfo(std.testing.allocator, std.testing.io, test_dir, .{
         .id = "long-1",
         .has_prd = false,
@@ -1514,7 +1514,7 @@ test "pruneSessions leaves non-directory entries in the sessions directory" {
 
 test "listSessions propagates a stat failure for an overlong base dir" {
     if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
-    const long = [_]u8{'a'} ** 5000;
+    const long: [5000]u8 = @splat('a');
     try std.testing.expectError(error.NameTooLong, listSessions(std.testing.allocator, std.testing.io, long[0..]));
 }
 
