@@ -102,7 +102,7 @@ test "isEncrypted treats enc:v1-prefixed plaintext as plaintext" {
 test "encrypt produces an enc:v1 blob" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x42} ** key_length;
+    const key: [key_length]u8 = @splat(0x42);
 
     const blob = try encrypt(std.testing.allocator, key, random, "secret-key");
     defer std.testing.allocator.free(blob);
@@ -114,7 +114,7 @@ test "encrypt produces an enc:v1 blob" {
 test "encrypt then decrypt round-trips the plaintext" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x24} ** key_length;
+    const key: [key_length]u8 = @splat(0x24);
     const plaintext = "sk-live-9f8a7b6c";
 
     const blob = try encrypt(std.testing.allocator, key, random, plaintext);
@@ -129,8 +129,8 @@ test "encrypt then decrypt round-trips the plaintext" {
 test "decrypt with the wrong key fails" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x11} ** key_length;
-    const wrong_key = [_]u8{0x22} ** key_length;
+    const key: [key_length]u8 = @splat(0x11);
+    const wrong_key: [key_length]u8 = @splat(0x22);
 
     const blob = try encrypt(std.testing.allocator, key, random, "opencode-token");
     defer std.testing.allocator.free(blob);
@@ -141,7 +141,7 @@ test "decrypt with the wrong key fails" {
 test "decrypt fails on a tampered blob" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x33} ** key_length;
+    const key: [key_length]u8 = @splat(0x33);
 
     const blob = try encrypt(std.testing.allocator, key, random, "copilot-token");
     defer std.testing.allocator.free(blob);
@@ -155,18 +155,18 @@ test "decrypt fails on a tampered blob" {
 }
 
 test "decrypt rejects a non-encrypted value" {
-    const key = [_]u8{0x44} ** key_length;
+    const key: [key_length]u8 = @splat(0x44);
     try std.testing.expectError(error.DecryptFailed, decrypt(std.testing.allocator, key, "sk-plaintext"));
 }
 
 test "decrypt rejects a malformed blob" {
-    const key = [_]u8{0x55} ** key_length;
+    const key: [key_length]u8 = @splat(0x55);
     try std.testing.expectError(error.DecryptFailed, decrypt(std.testing.allocator, key, "enc:v1:!!!not-base64!!!"));
 }
 
 test "encryptWithNonce produces a stable deterministic blob" {
-    const key = [_]u8{0x01} ** key_length;
-    const nonce = [_]u8{0x02} ** nonce_length;
+    const key: [key_length]u8 = @splat(0x01);
+    const nonce: [nonce_length]u8 = @splat(0x02);
 
     const blob = try encryptWithNonce(std.testing.allocator, key, nonce, "fixed");
     defer std.testing.allocator.free(blob);
@@ -362,7 +362,7 @@ test "loadKey returns MalformedKeyFile for an oversized key file" {
     const path = try keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x42} ** 65) });
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &@as([65]u8, @splat(0x42)) });
 
     try std.testing.expectError(error.MalformedKeyFile, loadKey(std.testing.allocator, std.testing.io, &fixture.env));
 }
@@ -377,11 +377,11 @@ test "loadKey reads a 32-byte key file" {
     const path = try keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x77} ** 32) });
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &@as([32]u8, @splat(0x77)) });
 
     const key = try loadKey(std.testing.allocator, std.testing.io, &fixture.env);
     try std.testing.expect(key != null);
-    try std.testing.expectEqual([_]u8{0x77} ** 32, key.?);
+    try std.testing.expectEqual(@as([32]u8, @splat(0x77)), key.?);
 }
 
 test "ensureKeyFile creates a 32-byte key file with 0600 permissions" {
@@ -439,10 +439,10 @@ test "ensureKeyFile returns the existing key without overwriting" {
     const path = try keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x11} ** 32) });
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &@as([32]u8, @splat(0x11)) });
 
     const key = (try ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random)).?;
-    try std.testing.expectEqual([_]u8{0x11} ** 32, key);
+    try std.testing.expectEqual(@as([32]u8, @splat(0x11)), key);
 }
 
 test "ensureKeyFile does not overwrite a malformed existing key file" {
@@ -496,14 +496,14 @@ test "ensureKeyFile stages the key and never leaves the final path on a staging 
 test "isEncrypted requires at least nonce plus tag bytes after the prefix" {
     var buf: [1024]u8 = undefined;
 
-    const raw = [_]u8{0x41} ** (nonce_length + tag_length);
+    const raw: [nonce_length + tag_length]u8 = @splat(0x41);
     const encoded = std.base64.standard.Encoder.encode(&buf, &raw);
     const full = try std.fmt.allocPrint(std.testing.allocator, "enc:v1:{s}", .{encoded});
     defer std.testing.allocator.free(full);
     try std.testing.expect(isEncrypted(full));
 
     // Valid base64, but the decoded bytes are shorter than nonce + tag.
-    const short_raw = [_]u8{0x42} ** 4;
+    const short_raw: [4]u8 = @splat(0x42);
     const short_encoded = std.base64.standard.Encoder.encode(&buf, &short_raw);
     const short = try std.fmt.allocPrint(std.testing.allocator, "enc:v1:{s}", .{short_encoded});
     defer std.testing.allocator.free(short);
@@ -513,7 +513,7 @@ test "isEncrypted requires at least nonce plus tag bytes after the prefix" {
 test "encrypt and decrypt round-trip an empty plaintext" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x51} ** key_length;
+    const key: [key_length]u8 = @splat(0x51);
 
     const blob = try encrypt(std.testing.allocator, key, random, "");
     defer std.testing.allocator.free(blob);
@@ -527,7 +527,7 @@ test "encrypt and decrypt round-trip an empty plaintext" {
 test "encrypt produces distinct blobs for the same plaintext" {
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x66} ** key_length;
+    const key: [key_length]u8 = @splat(0x66);
 
     const a = try encrypt(std.testing.allocator, key, random, "same-plaintext");
     defer std.testing.allocator.free(a);
@@ -553,7 +553,7 @@ test "loadKey rejects a 64-byte key file at the read limit" {
     const path = try keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &([_]u8{0x42} ** 64) });
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = &@as([64]u8, @splat(0x42)) });
 
     try std.testing.expectError(error.MalformedKeyFile, loadKey(std.testing.allocator, std.testing.io, &fixture.env));
 }
@@ -562,7 +562,7 @@ test "decrypt fails when the base64 payload is invalid after the length check" {
     // The blob passes isEncrypted (its length decodes to at least nonce + tag
     // bytes) but contains a character outside the base64 alphabet, so the
     // decode step itself must fail with DecryptFailed.
-    const key = [_]u8{0x6a} ** key_length;
+    const key: [key_length]u8 = @splat(0x6a);
     const bad = "enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!";
     try std.testing.expect(isEncrypted(bad));
     try std.testing.expectError(error.DecryptFailed, decrypt(std.testing.allocator, key, bad));
