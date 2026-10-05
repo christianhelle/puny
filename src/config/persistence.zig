@@ -234,7 +234,7 @@ pub fn save(
     }
 
     if (comptime builtin.os.tag != .windows) {
-        try cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{});
+        try cwd.setFilePermissions(io, tmp_path, @fromBackingInt(@intCast(0o600)), .{});
     }
 
     try file.writeStreamingAll(io, buffer);

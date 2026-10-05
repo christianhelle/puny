@@ -411,7 +411,7 @@ pub const ContextBudget = struct {
     }
 
     fn keyHashFor(provider_kind: ProviderKind, model_key: []const u8, tier: ContextTier) u64 {
-        const seed = @as(u64, @intFromEnum(provider_kind)) << 8 | @intFromEnum(tier);
+        const seed = @as(u64, @backingInt(provider_kind)) << 8 | @backingInt(tier);
         return std.hash.Wyhash.hash(seed, model_key);
     }
 

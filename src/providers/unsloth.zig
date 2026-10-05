@@ -123,7 +123,7 @@ fn checkLoadBody(self: *Client, url: []const u8, body: []const u8) !void {
         if (obs.onResponse) |on_response| {
             const failure_body = try std.json.Stringify.valueAlloc(allocator, .{ .@"error" = .{ .message = detail } }, .{});
             defer allocator.free(failure_body);
-            on_response(obs.ctx, .POST, url, @enumFromInt(status_code), &.{}, failure_body, 0);
+            on_response(obs.ctx, .POST, url, @fromBackingInt(@intCast(status_code)), &.{}, failure_body, 0);
         }
     }
     return error.ResponseError;
@@ -208,7 +208,7 @@ test "chatStreaming reports a load failure that arrives inside a 200 response" {
     try capture.commit(&c.inner);
 
     const failure = c.inner.lastHttpFailure() orelse return error.ExpectedHttpFailure;
-    try std.testing.expectEqual(@as(u10, 507), @intFromEnum(failure.status));
+    try std.testing.expectEqual(@as(u10, 507), @backingInt(failure.status));
     try std.testing.expect(std.mem.indexOf(u8, failure.body, "Not enough GPU memory") != null);
     try std.testing.expectEqual(@as(usize, 1), ctx.request_count);
 }

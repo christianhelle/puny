@@ -892,7 +892,7 @@ test "Provider.chatStreaming loads the unsloth model and reports a late load fai
 
     try std.testing.expectEqualStrings("/api/inference/load", ctx.getRequestPath());
     const failure = prov.lastHttpFailure() orelse return error.ExpectedHttpFailure;
-    try std.testing.expectEqual(@as(u10, 507), @intFromEnum(failure.status));
+    try std.testing.expectEqual(@as(u10, 507), @backingInt(failure.status));
     try std.testing.expect(std.mem.indexOf(u8, failure.body, "Not enough GPU memory") != null);
 }
 

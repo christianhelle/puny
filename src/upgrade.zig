@@ -242,7 +242,7 @@ pub fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.
     const tmp_dir_path = try std.fs.path.join(arena, &.{ tmp_parent, tmp_rel_name });
     defer arena.free(tmp_dir_path);
 
-    try std.Io.Dir.createDirAbsolute(io, tmp_dir_path, @enumFromInt(0o755));
+    try std.Io.Dir.createDirAbsolute(io, tmp_dir_path, @fromBackingInt(@intCast(0o755)));
     var tmp_dir = try std.Io.Dir.cwd().openDir(io, tmp_dir_path, .{ .iterate = true });
     errdefer {
         tmp_dir.close(io);
@@ -326,7 +326,7 @@ pub fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.
         defer arena.free(old_name);
 
         try std.Io.Dir.copyFile(tmp_dir, extracted_path, exe_dir, new_name, io, .{});
-        std.Io.Dir.setFilePermissions(exe_dir, io, new_name, @enumFromInt(0o755), .{}) catch {};
+        std.Io.Dir.setFilePermissions(exe_dir, io, new_name, @fromBackingInt(@intCast(0o755)), .{}) catch {};
 
         try std.Io.Dir.rename(exe_dir, exe_name, exe_dir, old_name, io);
         errdefer std.Io.Dir.rename(exe_dir, old_name, exe_dir, exe_name, io) catch {};
@@ -452,7 +452,7 @@ test "clearDirContents removes files and subdirectories" {
     defer file.close(std.testing.io);
     try file.writeStreamingAll(std.testing.io, "partial download");
 
-    _ = try dir.createDir(std.testing.io, "nested", @enumFromInt(0o755));
+    _ = try dir.createDir(std.testing.io, "nested", @fromBackingInt(@intCast(0o755)));
 
     try clearDirContents(std.testing.io, dir);
 

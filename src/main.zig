@@ -161,7 +161,7 @@ fn run(init: std.process.Init) !u8 {
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
         const file = try std.Io.Dir.cwd().createFile(init.io, "puny_http.log", .{});
         if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_http.log", @enumFromInt(0o600), .{}) catch {};
+            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_http.log", @fromBackingInt(@intCast(0o600)), .{}) catch {};
         }
         debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
@@ -180,7 +180,7 @@ fn run(init: std.process.Init) !u8 {
     var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
         const file = try std.Io.Dir.cwd().createFile(init.io, "puny_chat.log", .{});
         if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_chat.log", @enumFromInt(0o600), .{}) catch {};
+            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_chat.log", @fromBackingInt(@intCast(0o600)), .{}) catch {};
         }
         chat_file_writer = .init(file, init.io, &chat_buffer);
         break :blk ChatLog{

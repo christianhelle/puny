@@ -216,7 +216,7 @@ fn doFetch(allocator: std.mem.Allocator, io: std.Io, url_str: []const u8, user_a
     };
 
     if (response.head.status.class() != .success) {
-        return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "HTTP {d} {s}", .{ @intFromEnum(response.head.status), @tagName(response.head.status) }) };
+        return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "HTTP {d} {s}", .{ @backingInt(response.head.status), @tagName(response.head.status) }) };
     }
 
     var transfer_buffer: [4096]u8 = undefined;

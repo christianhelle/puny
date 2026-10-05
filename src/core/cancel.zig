@@ -100,8 +100,8 @@ fn setRawModePosix(enable: bool) !void {
         raw.lflag.IEXTEN = false;
         raw.cflag.CSIZE = .CS8;
         raw.cflag.PARENB = false;
-        raw.cc[@intFromEnum(posix.V.MIN)] = 1;
-        raw.cc[@intFromEnum(posix.V.TIME)] = 0;
+        raw.cc[@backingInt(posix.V.MIN)] = 1;
+        raw.cc[@backingInt(posix.V.TIME)] = 0;
         try posix.tcsetattr(0, .NOW, raw);
     } else {
         posix.tcsetattr(0, .NOW, saved_termios) catch {};
@@ -122,7 +122,7 @@ pub fn suspendJob() void {
 /// Ctrl+Backspace.
 pub fn eraseIsCtrlH() bool {
     if (is_windows) return false;
-    return saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] == 0x08;
+    return saved_termios.cc[@backingInt(std.posix.V.ERASE)] == 0x08;
 }
 
 fn setRawModeWindows(enable: bool) !void {
@@ -398,9 +398,9 @@ test "eraseIsCtrlH reports whether the saved erase character is ^H" {
     defer saved_termios = original;
     saved_termios = std.mem.zeroes(std.posix.termios);
 
-    saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] = 0x08;
+    saved_termios.cc[@backingInt(std.posix.V.ERASE)] = 0x08;
     try std.testing.expect(eraseIsCtrlH());
-    saved_termios.cc[@intFromEnum(std.posix.V.ERASE)] = 0x7f;
+    saved_termios.cc[@backingInt(std.posix.V.ERASE)] = 0x7f;
     try std.testing.expect(!eraseIsCtrlH());
 }
 

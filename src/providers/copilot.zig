@@ -778,13 +778,13 @@ fn streamSse(self: *Client, path: []const u8, payload: []const u8, initiator: []
         if (builtin.mode == .debug) {
             client.emitDiagnostic("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n  Response: {s}\n", .{
                 url,
-                @intFromEnum(response.head.status),
+                @backingInt(response.head.status),
                 body_alloc.written(),
             });
         } else {
             client.emitDiagnostic("Copilot chat request failed\n  URL: {s}\n  Status: {d}\n", .{
                 url,
-                @intFromEnum(response.head.status),
+                @backingInt(response.head.status),
             });
         }
         return error.ResponseError;

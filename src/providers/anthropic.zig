@@ -355,7 +355,7 @@ pub fn chatStreaming(client: *http_client.Client, request: openai.ChatRequest, c
 
         http_client.emitDiagnostic("Anthropic chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
             url,
-            @intFromEnum(response.head.status),
+            @backingInt(response.head.status),
             payload,
             body_alloc.written(),
         });

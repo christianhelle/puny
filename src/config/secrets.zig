@@ -254,7 +254,7 @@ pub fn ensureKeyFile(
         // The key file is 0600; hardening the directory to 0700 stops other
         // local users from even listing the key's presence in a shared data
         // tree (e.g. ~/.local/share with a default 0755 umask).
-        try cwd.setFilePermissions(io, dir, @enumFromInt(0o700), .{});
+        try cwd.setFilePermissions(io, dir, @fromBackingInt(@intCast(0o700)), .{});
     }
 
     var key: [key_length]u8 = undefined;
@@ -275,7 +275,7 @@ pub fn ensureKeyFile(
     }
 
     if (comptime builtin.os.tag != .windows) {
-        try cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{});
+        try cwd.setFilePermissions(io, tmp_path, @fromBackingInt(@intCast(0o600)), .{});
     }
 
     try file.writeStreamingAll(io, &key);
