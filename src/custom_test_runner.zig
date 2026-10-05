@@ -1,7 +1,7 @@
 //! Test runner that keeps passing tests quiet.
 //!
 //! The stock Zig test runner logs `std.log.warn` output while running unit
-//! tests. Zig 0.16's build runner then treats that stderr output as diagnostic
+//! tests. Zig's build runner then treats that stderr output as diagnostic
 //! output for the otherwise-successful `run test` step and prints a misleading
 //! `failed command: ...` line. We intentionally set `std.testing.log_level` to
 //! `.err` so expected, self-healing warnings produced by the session-index
