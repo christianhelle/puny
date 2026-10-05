@@ -40,32 +40,33 @@ pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u
                 S.append(&buf, &pos, description);
                 S.append(&buf, &pos, "\",\"parameters\":{\"type\":\"object\",\"properties\":{");
 
-                for (std.meta.fields(Params), 0..) |field, i| {
+                const info = @typeInfo(Params).@"struct";
+                for (info.field_names, info.field_types, 0..) |field_name, field_type, i| {
                     if (i > 0) S.append(&buf, &pos, ",");
                     S.append(&buf, &pos, "\"");
-                    S.append(&buf, &pos, field.name);
+                    S.append(&buf, &pos, field_name);
                     S.append(&buf, &pos, "\":{\"type\":\"");
-                    S.append(&buf, &pos, comptimeJsonType(field.type));
+                    S.append(&buf, &pos, comptimeJsonType(field_type));
                     S.append(&buf, &pos, "\",\"description\":\"");
-                    S.append(&buf, &pos, field.name);
+                    S.append(&buf, &pos, field_name);
                     S.append(&buf, &pos, "\"}");
                 }
 
                 S.append(&buf, &pos, "}");
 
                 var has_required = false;
-                for (std.meta.fields(Params)) |field| {
-                    if (@typeInfo(field.type) != .optional) has_required = true;
+                for (info.field_types) |field_type| {
+                    if (@typeInfo(field_type) != .optional) has_required = true;
                 }
 
                 if (has_required) {
                     S.append(&buf, &pos, ",\"required\":[");
                     var first = true;
-                    for (std.meta.fields(Params)) |field| {
-                        if (@typeInfo(field.type) != .optional) {
+                    for (info.field_names, info.field_types) |field_name, field_type| {
+                        if (@typeInfo(field_type) != .optional) {
                             if (!first) S.append(&buf, &pos, ",");
                             S.append(&buf, &pos, "\"");
-                            S.append(&buf, &pos, field.name);
+                            S.append(&buf, &pos, field_name);
                             S.append(&buf, &pos, "\"");
                             first = false;
                         }
