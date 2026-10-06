@@ -114,12 +114,12 @@ fn tempParentDir(allocator: std.mem.Allocator, environ_map: *const std.process.E
 
 /// Ensures `dir` exists, creating it and any missing ancestors.
 fn ensureDirExists(io: std.Io, dir: []const u8) !void {
-    std.Io.Dir.createDirAbsolute(io, dir, @enumFromInt(0o755)) catch |err| switch (err) {
+    std.Io.Dir.createDirAbsolute(io, dir, @fromBackingInt(0o755)) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         error.FileNotFound => {
             if (std.fs.path.dirname(dir)) |parent| {
                 try ensureDirExists(io, parent);
-                std.Io.Dir.createDirAbsolute(io, dir, @enumFromInt(0o755)) catch |e| switch (e) {
+                std.Io.Dir.createDirAbsolute(io, dir, @fromBackingInt(0o755)) catch |e| switch (e) {
                     error.PathAlreadyExists => {},
                     else => return e,
                 };
@@ -147,7 +147,7 @@ fn makeTempDir(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std
         defer allocator.free(name);
 
         const path = try std.fs.path.join(allocator, &.{ parent, name });
-        std.Io.Dir.createDirAbsolute(io, path, @enumFromInt(0o755)) catch |err| switch (err) {
+        std.Io.Dir.createDirAbsolute(io, path, @fromBackingInt(0o755)) catch |err| switch (err) {
             error.PathAlreadyExists => {
                 allocator.free(path);
                 continue;

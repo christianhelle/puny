@@ -12,7 +12,7 @@ on:
         type: string
 
 env:
-  ZIG_VERSION: "0.16.0"
+  ZIG_VERSION: "0.17.0"
 
 jobs:
   build:
@@ -71,7 +71,7 @@ jobs:
 
       - name: Build release binary
         run: |
-          zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.target }}
+          zig build -Doptimize=small -Dtarget=${{ matrix.target }}
 
       - name: Create archive (Linux/macOS)
         if: matrix.os != 'windows-latest'

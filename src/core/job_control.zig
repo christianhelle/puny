@@ -96,7 +96,7 @@ test "stop holds a background thread until the job is continued" {
     _ = linux.close(fds[1]);
 
     var status: u32 = 0;
-    _ = linux.waitpid(pid, &status, linux.W.UNTRACED);
+    _ = linux.waitpid(pid, @ptrCast(&status), linux.W.UNTRACED);
     try std.testing.expect(linux.W.IFSTOPPED(status));
 
     // Nothing after stop() may run while the job is stopped.
@@ -104,7 +104,7 @@ test "stop holds a background thread until the job is continued" {
     const ready = try std.posix.poll(&pfd, 0);
 
     _ = linux.kill(pid, .CONT);
-    _ = linux.waitpid(pid, &status, 0);
+    _ = linux.waitpid(pid, @ptrCast(&status), 0);
     try std.testing.expectEqual(@as(usize, 0), ready);
     try std.testing.expect(linux.W.IFEXITED(status));
     try std.testing.expectEqual(@as(u8, 0), linux.W.EXITSTATUS(status));
@@ -124,7 +124,7 @@ test "stop suspends tracked command groups and continues them with the job" {
     defer {
         _ = linux.kill(command, .KILL);
         var reaped: u32 = 0;
-        _ = linux.waitpid(command, &reaped, 0);
+        _ = linux.waitpid(command, @ptrCast(&reaped), 0);
     }
     _ = linux.setpgid(command, command);
     trackGroup(command);
@@ -142,12 +142,12 @@ test "stop suspends tracked command groups and continues them with the job" {
     }
 
     var status: u32 = 0;
-    _ = linux.waitpid(job, &status, linux.W.UNTRACED);
+    _ = linux.waitpid(job, @ptrCast(&status), linux.W.UNTRACED);
     try std.testing.expect(linux.W.IFSTOPPED(status));
     try std.testing.expect(waitForChange(command, linux.W.UNTRACED, linux.W.IFSTOPPED, 1000));
 
     _ = linux.kill(job, .CONT);
-    _ = linux.waitpid(job, &status, 0);
+    _ = linux.waitpid(job, @ptrCast(&status), 0);
     try std.testing.expect(linux.W.IFEXITED(status));
     try std.testing.expect(waitForChange(command, linux.W.CONTINUED, isContinued, 1000));
 }
@@ -159,7 +159,7 @@ fn waitForChange(pid: i32, flags: u32, comptime matches: fn (u32) bool, max_ms: 
     var nothing = [1]std.posix.pollfd{.{ .fd = -1, .events = 0, .revents = 0 }};
     for (0..max_ms) |_| {
         var status: u32 = 0;
-        if (linux.waitpid(pid, &status, flags | linux.W.NOHANG) == pid) return matches(status);
+        if (linux.waitpid(pid, @ptrCast(&status), flags | linux.W.NOHANG) == pid) return matches(status);
         _ = std.posix.poll(&nothing, 1) catch return false;
     }
     return false;

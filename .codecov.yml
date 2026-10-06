@@ -11,3 +11,6 @@ comment:
   layout: "reach,diff,flags,files"
   behavior: default
   require_changes: false
+ignore:
+  # The test runner drives the tests; its server path never runs under coverage.
+  - "src/custom_test_runner.zig"

@@ -38,7 +38,7 @@ test "truncateFirstPrompt stays within the limit and on a UTF-8 boundary" {
     try std.testing.expectEqualStrings(short, short_out);
 
     // A plain truncation keeps exactly first_prompt_limit bytes.
-    const ascii = try std.fmt.allocPrint(arena, "{s}", .{"a" ** (first_prompt_limit + 10)});
+    const ascii = try std.fmt.allocPrint(arena, "{s}", .{&@as([first_prompt_limit + 10]u8, @splat('a'))});
     defer arena.free(ascii);
     const ascii_out = try truncateFirstPrompt(arena, ascii);
     defer arena.free(ascii_out);
@@ -46,7 +46,7 @@ test "truncateFirstPrompt stays within the limit and on a UTF-8 boundary" {
 
     // When the limit lands inside a multi-byte code point, back up to the
     // preceding boundary. The euro sign is 3 bytes (E2 82 AC).
-    const long = try std.fmt.allocPrint(arena, "{s}\xE2\x82\xAC{s}", .{ "b" ** (first_prompt_limit - 1), "ccc" });
+    const long = try std.fmt.allocPrint(arena, "{s}\xE2\x82\xAC{s}", .{ &@as([first_prompt_limit - 1]u8, @splat('b')), "ccc" });
     defer arena.free(long);
     const long_out = try truncateFirstPrompt(arena, long);
     defer arena.free(long_out);
@@ -71,7 +71,7 @@ test "isValidSessionId rejects empty, dot, and path components" {
 
 test "truncateFirstPrompt returns a prompt ending exactly at the limit unchanged" {
     const arena = std.testing.allocator;
-    const prompt = try std.fmt.allocPrint(arena, "{s}", .{"c" ** first_prompt_limit});
+    const prompt = try std.fmt.allocPrint(arena, "{s}", .{&@as([first_prompt_limit]u8, @splat('c'))});
     defer arena.free(prompt);
     const out = try truncateFirstPrompt(arena, prompt);
     defer arena.free(out);
@@ -88,7 +88,7 @@ test "truncateFirstPrompt returns an empty prompt unchanged" {
 
 test "truncateFirstPrompt keeps a multi-byte code point ending exactly at the limit" {
     const arena = std.testing.allocator;
-    const prompt = try std.fmt.allocPrint(arena, "{s}\xE2\x82\xAC", .{"d" ** (first_prompt_limit - 3)});
+    const prompt = try std.fmt.allocPrint(arena, "{s}\xE2\x82\xAC", .{&@as([first_prompt_limit - 3]u8, @splat('d'))});
     defer arena.free(prompt);
     const out = try truncateFirstPrompt(arena, prompt);
     defer arena.free(out);

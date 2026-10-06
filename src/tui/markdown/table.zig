@@ -344,7 +344,7 @@ test "renderTable shrinks column widths to fit a narrow terminal" {
 }
 
 test "renderTable keeps shrinking when proportional shares do not cover the excess" {
-    const wide = "a" ** 100;
+    const wide = &@as([100]u8, @splat('a'));
     const lines = [_][]const u8{
         "| " ++ wide ++ " | bbbb |",
         "|------|------|",
