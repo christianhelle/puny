@@ -8,8 +8,8 @@
         // only `zig build regenerate-providers` needs it; building, testing
         // and releasing puny never fetches it.
         .openapi2zig = .{
-            .url = "https://github.com/christianhelle/openapi2zig/archive/refs/tags/v0.5.5.tar.gz",
-            .hash = "openapi2zig-0.5.5-ykENAm1sqADagDkLvb-Zf4595K-VteB1X5KjVDXk83Hk",
+            .url = "https://github.com/christianhelle/openapi2zig/archive/refs/tags/v0.6.0.tar.gz",
+            .hash = "openapi2zig-0.6.0-ykENAnehcwEl4CAHB4lFGlrwpooKcoJvLwoKEZBm63Q_",
             .lazy = true,
         },
     },
