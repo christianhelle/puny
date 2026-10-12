@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Merged Pull Requests
+- Upgrade to Zig 0.17.0 ([#224](https://github.com/christianhelle/puny/pull/224)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.4.2](https://github.com/christianhelle/puny/releases/tag/v0.4.2) (2026-10-06)
 
 ### Merged Pull Requests
