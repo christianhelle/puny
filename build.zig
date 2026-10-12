@@ -17,9 +17,7 @@ pub fn build(b: *std.Build) !void {
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
@@ -44,7 +42,7 @@ pub fn build(b: *std.Build) !void {
         b.graph.zig_exe,
         "build",
         "-Ddocker",
-        "-Doptimize=ReleaseSmall",
+        "-Doptimize=small",
         "-Dtarget=x86_64-linux",
     });
 
@@ -94,10 +92,19 @@ pub fn build(b: *std.Build) !void {
     docker_build_image.step.dependOn(dockerfile_step);
     docker_step.dependOn(&docker_build_image.step);
 
-    addInstallStep(b, target, build_options, "install-release", "Build ReleaseSmall and install to $HOME/.local/bin", .ReleaseSmall);
-    addInstallStep(b, target, build_options, "install-release-safe", "Build ReleaseSafe and install to $HOME/.local/bin", .ReleaseSafe);
-    addInstallStep(b, target, build_options, "install-release-fast", "Build ReleaseFast and install to $HOME/.local/bin", .ReleaseFast);
-    addInstallStep(b, target, build_options, "install-debug", "Build Debug and install to $HOME/.local/bin", .Debug);
+    const install_release = b.addExecutable(.{
+        .name = "install_release",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/install_release.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+
+    addInstallStep(b, target, build_options, install_release, "install-release", "Build small and install to $HOME/.local/bin", .small);
+    addInstallStep(b, target, build_options, install_release, "install-release-safe", "Build safe and install to $HOME/.local/bin", .safe);
+    addInstallStep(b, target, build_options, install_release, "install-release-fast", "Build fast and install to $HOME/.local/bin", .fast);
+    addInstallStep(b, target, build_options, install_release, "install-debug", "Build Debug and install to $HOME/.local/bin", .debug);
 
     const test_regression_step = b.step("test-regression", "Run cross-platform builds, unit tests, and regression tests");
 
@@ -145,7 +152,7 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/regression_checker.zig"),
             .target = b.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
 
@@ -159,7 +166,7 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/integration_checker.zig"),
             .target = b.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
 
@@ -184,14 +191,14 @@ pub fn build(b: *std.Build) !void {
     if (regenerate_providers) {
         if (b.lazyDependency("openapi2zig", .{
             .target = b.graph.host,
-            .optimize = .ReleaseSafe,
+            .optimize = .safe,
         })) |openapi2zig| {
             const generate_providers = b.addExecutable(.{
                 .name = "generate_providers",
                 .root_module = b.createModule(.{
                     .root_source_file = b.path("tools/generate_providers.zig"),
                     .target = b.graph.host,
-                    .optimize = .ReleaseSafe,
+                    .optimize = .safe,
                 }),
             });
             generate_providers.root_module.addImport("openapi2zig", openapi2zig.module("openapi2zig"));
@@ -212,7 +219,7 @@ fn addPunyExecutable(
     b: *std.Build,
     name: []const u8,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     build_options: *std.Build.Step.Options,
 ) *std.Build.Step.Compile {
     const exe = b.addExecutable(.{
@@ -238,19 +245,29 @@ fn addInstallStep(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     build_options: *std.Build.Step.Options,
+    install_release: *std.Build.Step.Compile,
     step_name: []const u8,
     description: []const u8,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 ) void {
     const exe = addPunyExecutable(b, "puny", target, optimize, build_options);
     const install_step = b.step(step_name, description);
-    const install = InstallReleaseStep.create(b, @tagName(optimize), exe.getEmittedBin(), getInstallPrefix(b), exe.out_filename);
+    const install = b.addRunArtifact(install_release);
+    install.setName(b.fmt("install puny ({s})", .{@tagName(optimize)}));
+    install.addFileArg(exe.getEmittedBin());
+    install.addDirectoryArg2(.{ .relative = .{ .base = .install_prefix } }, .{ .make_absolute = true });
+    install.addDirectoryArg2(b.path("zig-out"), .{ .make_absolute = true });
+    install.addArg(exe.out_filename);
+    install.has_side_effects = true;
     install_step.dependOn(&install.step);
 }
 
 fn createBuildInfoOptions(b: *std.Build) *std.Build.Step.Options {
     const options = b.addOptions();
     const io = b.graph.io;
+    // The version, commit and dirty flag come from Git state the build cache
+    // cannot track, so rerun configuration on every build to keep them fresh.
+    b.graph.poisonCache();
     const package_version = getPackageVersion(b.allocator, io) orelse "unknown";
     const git_tag = getGitOutput(b.allocator, io, &.{ "git", "describe", "--tags", "--abbrev=0" }) orelse b.fmt("v{s}", .{package_version});
     const git_commit = getGitOutput(b.allocator, io, &.{ "git", "rev-parse", "--short", "HEAD" }) orelse "unknown";
@@ -277,68 +294,6 @@ fn isGitDirty(allocator: std.mem.Allocator, io: std.Io) bool {
     const output = getGitOutput(allocator, io, &.{ "git", "status", "--porcelain" }) orelse return false;
     return output.len > 0;
 }
-
-fn getInstallPrefix(b: *std.Build) []const u8 {
-    // Honor an explicit `--prefix` flag.
-    const default_prefix = b.build_root.join(b.allocator, &.{"zig-out"}) catch @panic("OOM");
-    if (!std.mem.eql(u8, b.install_prefix, default_prefix)) {
-        return b.install_prefix;
-    }
-
-    // Honor the INSTALL_DIR environment variable used by the install scripts.
-    if (b.graph.environ_map.get("INSTALL_DIR")) |install_dir| {
-        if (install_dir.len > 0) return install_dir;
-    }
-
-    // Default to $HOME/.local/bin, falling back to %USERPROFILE% on Windows.
-    if (b.graph.environ_map.get("HOME")) |home| {
-        if (home.len > 0) return b.pathJoin(&.{ home, ".local", "bin" });
-    }
-    if (b.graph.environ_map.get("USERPROFILE")) |home| {
-        if (home.len > 0) return b.pathJoin(&.{ home, ".local", "bin" });
-    }
-
-    @panic("unable to determine install directory: set HOME, USERPROFILE, or INSTALL_DIR");
-}
-
-const InstallReleaseStep = struct {
-    step: std.Build.Step,
-    source: std.Build.LazyPath,
-    dest_dir: []const u8,
-    dest_name: []const u8,
-
-    fn create(
-        b: *std.Build,
-        label: []const u8,
-        source: std.Build.LazyPath,
-        dest_dir: []const u8,
-        dest_name: []const u8,
-    ) *InstallReleaseStep {
-        const self = b.allocator.create(InstallReleaseStep) catch @panic("OOM");
-        self.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = b.fmt("install {s} ({s}) to {s}", .{ dest_name, label, dest_dir }),
-                .owner = b,
-                .makeFn = make,
-            }),
-            .source = source.dupe(b),
-            .dest_dir = b.dupePath(dest_dir),
-            .dest_name = b.dupePath(dest_name),
-        };
-        source.addStepDependencies(&self.step);
-        return self;
-    }
-
-    fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
-        _ = options;
-        const b = step.owner;
-        const self: *InstallReleaseStep = @fieldParentPtr("step", step);
-        const dest_path = b.pathResolve(&.{ self.dest_dir, self.dest_name });
-        const p = try step.installFile(self.source, dest_path);
-        step.result_cached = p == .fresh;
-    }
-};
 
 fn getGitOutput(allocator: std.mem.Allocator, io: std.Io, argv: []const []const u8) ?[]const u8 {
     const result = std.process.run(allocator, io, .{

@@ -105,7 +105,7 @@ fn formatHttpFailure(allocator: std.mem.Allocator, failure: *const http_client.H
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
 
-    try output.writer.print("HTTP {d} ", .{@intFromEnum(failure.status)});
+    try output.writer.print("HTTP {d} ", .{@backingInt(failure.status)});
     try writeStatusName(&output.writer, @tagName(failure.status));
 
     if (try responseMessage(allocator, failure.body)) |message| {

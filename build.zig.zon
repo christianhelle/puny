@@ -2,14 +2,14 @@
     .name = .puny,
     .version = "0.3.5",
     .fingerprint = 0xcae65a8a91984534, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         // The provider clients are generated with this. It is lazy because
         // only `zig build regenerate-providers` needs it; building, testing
         // and releasing puny never fetches it.
         .openapi2zig = .{
-            .url = "https://github.com/christianhelle/openapi2zig/archive/refs/tags/v0.5.5.tar.gz",
-            .hash = "openapi2zig-0.5.5-ykENAm1sqADagDkLvb-Zf4595K-VteB1X5KjVDXk83Hk",
+            .url = "https://github.com/christianhelle/openapi2zig/archive/refs/tags/v0.6.0.tar.gz",
+            .hash = "openapi2zig-0.6.0-ykENAnehcwEl4CAHB4lFGlrwpooKcoJvLwoKEZBm63Q_",
             .lazy = true,
         },
     },

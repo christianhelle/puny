@@ -216,7 +216,7 @@ fn doFetch(allocator: std.mem.Allocator, io: std.Io, url_str: []const u8, user_a
     };
 
     if (response.head.status.class() != .success) {
-        return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "HTTP {d} {s}", .{ @intFromEnum(response.head.status), @tagName(response.head.status) }) };
+        return .{ .err = allocPrintOr(allocator, "Failed to load prompt", "HTTP {d} {s}", .{ @backingInt(response.head.status), @tagName(response.head.status) }) };
     }
 
     var transfer_buffer: [4096]u8 = undefined;
@@ -279,13 +279,13 @@ test "allocPrintOr returns an owned freeable message on success" {
 }
 
 test "allocPrintOr never returns an owned message under allocation failure" {
-    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     const allocator = failing.allocator();
 
-    // allocPrint's growth allocation fails; the fallback allocation would also
-    // fail (a failed attempt does not advance the failing allocator), so the
-    // error must report itself as unowned rather than asking the caller to
-    // free a static string.
+    // allocPrint's allocation fails; the fallback allocation would also fail
+    // (a failed attempt does not advance the failing allocator), so the error
+    // must report itself as unowned rather than asking the caller to free a
+    // static string.
     const err = allocPrintOr(allocator, "Failed to load prompt", "Failed to read prompt file: {s}", .{"OutOfMemory"});
     try std.testing.expectEqualStrings("Failed to load prompt", err.message);
     try std.testing.expect(!err.owned);

@@ -451,7 +451,7 @@ pub fn chatStreamingGoogle(client: *http_client.Client, request: openai.ChatRequ
 
         http_client.emitDiagnostic("Google chat request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
             url,
-            @intFromEnum(response.head.status),
+            @backingInt(response.head.status),
             payload,
             body_alloc.written(),
         });

@@ -143,7 +143,7 @@ pub fn writeAtomically(
 
     if (options.restrict_permissions) {
         if (comptime builtin.os.tag != .windows) {
-            cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{}) catch {};
+            cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{}) catch {};
         }
     }
 

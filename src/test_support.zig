@@ -61,12 +61,12 @@ pub fn expectSuspends(comptime suspendFn: fn () void) !void {
     }
 
     var status: u32 = 0;
-    _ = linux.waitpid(pid, &status, linux.W.UNTRACED);
+    _ = linux.waitpid(pid, @ptrCast(&status), linux.W.UNTRACED);
     try std.testing.expect(linux.W.IFSTOPPED(status));
     try std.testing.expectEqual(linux.SIG.TSTP, linux.W.STOPSIG(status));
 
     _ = linux.kill(pid, .CONT);
-    _ = linux.waitpid(pid, &status, 0);
+    _ = linux.waitpid(pid, @ptrCast(&status), 0);
     try std.testing.expect(linux.W.IFEXITED(status));
     try std.testing.expectEqual(@as(u8, 0), linux.W.EXITSTATUS(status));
 }

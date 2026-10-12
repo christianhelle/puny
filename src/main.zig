@@ -68,7 +68,7 @@ fn run(init: std.process.Init) !u8 {
 
     const args_slice = try init.minimal.args.toSlice(arena);
     var parsed = cli.parseArgs(init.io, init.environ_map, args_slice);
-    if (comptime @import("builtin").mode == .Debug) {
+    if (comptime @import("builtin").mode == .debug) {
         parsed.debug = true;
     }
 
@@ -161,7 +161,7 @@ fn run(init: std.process.Init) !u8 {
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
         const file = try std.Io.Dir.cwd().createFile(init.io, "puny_http.log", .{});
         if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_http.log", @enumFromInt(0o600), .{}) catch {};
+            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_http.log", @fromBackingInt(0o600), .{}) catch {};
         }
         debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
@@ -180,7 +180,7 @@ fn run(init: std.process.Init) !u8 {
     var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
         const file = try std.Io.Dir.cwd().createFile(init.io, "puny_chat.log", .{});
         if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_chat.log", @enumFromInt(0o600), .{}) catch {};
+            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_chat.log", @fromBackingInt(0o600), .{}) catch {};
         }
         chat_file_writer = .init(file, init.io, &chat_buffer);
         break :blk ChatLog{
@@ -927,13 +927,13 @@ test "http log file is hardened with 0600 permissions on posix" {
     try std.testing.expect(std.mem.indexOf(u8, data, "setFilePermissions") != null);
     try std.testing.expect(std.mem.indexOf(u8, data, "0o600") != null);
     // ensure the http log path specifically is covered, not just chat log
-    try std.testing.expect(std.mem.indexOf(u8, data, "\"puny_http.log\", @enumFromInt(0o600)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "\"puny_http.log\", @fromBackingInt(0o600)") != null);
 }
 
 test "debug logging is always enabled for debug builds" {
     const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(128 * 1024));
     defer std.testing.allocator.free(data);
-    const needle_mode = "comptime @import(\"builtin\").mode" ++ " == .Debug";
+    const needle_mode = "comptime @import(\"builtin\").mode" ++ " == .debug";
     const needle_assign = "parsed.debug" ++ " = true";
     try std.testing.expect(std.mem.indexOf(u8, data, needle_mode) != null);
     try std.testing.expect(std.mem.indexOf(u8, data, needle_assign) != null);

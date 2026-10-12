@@ -53,7 +53,7 @@ fn logHttpResponse(ctx: ?*anyopaque, method: std.http.Method, url: []const u8, s
     const ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
     log.print("=== RESPONSE ===\n", .{});
     logRequestLine(log, method, url);
-    log.print("Status: {d} ({s})\n", .{ @intFromEnum(status), @tagName(status) });
+    log.print("Status: {d} ({s})\n", .{ @backingInt(status), @tagName(status) });
     log.print("Duration: {d:.2}ms\n", .{ms});
     log.print("Headers:\n", .{});
     for (headers) |h| {

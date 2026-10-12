@@ -178,7 +178,7 @@ The Dockerfile is generated on demand and not checked into the repo. Use `zig bu
 zig build docker
 ```
 
-This is equivalent to `zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-linux -Ddocker` and sets the default LM Studio URL to `http://host.docker.internal:1234`.
+This is equivalent to `zig build -Doptimize=small -Dtarget=x86_64-linux -Ddocker` and sets the default LM Studio URL to `http://host.docker.internal:1234`.
 
 Run the locally built image the same way as the published one:
 

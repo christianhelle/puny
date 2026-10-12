@@ -234,7 +234,7 @@ pub fn save(
     }
 
     if (comptime builtin.os.tag != .windows) {
-        try cwd.setFilePermissions(io, tmp_path, @enumFromInt(0o600), .{});
+        try cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{});
     }
 
     try file.writeStreamingAll(io, buffer);
@@ -277,7 +277,7 @@ test "decryptStoredApiKeys decrypts encrypted provider keys" {
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
-    const key = [_]u8{0x42} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x42);
     const path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
@@ -316,7 +316,7 @@ test "decryptStoredApiKeys preserves undecryptable blobs when no key exists" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x11} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x11);
     const plaintext = "sk-live-undecryptable";
     const blob = try secrets.encrypt(std.testing.allocator, key, random, plaintext);
     defer std.testing.allocator.free(blob);
@@ -340,7 +340,7 @@ test "save preserves a stored blob when the key is unchanged" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x77} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x77);
     const plaintext = "sk-live-unchanged";
     const blob = try secrets.encrypt(std.testing.allocator, key, random, plaintext);
     defer std.testing.allocator.free(blob);
@@ -370,7 +370,7 @@ test "save re-encrypts keys when the typed value changes" {
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
-    const key = [_]u8{0x88} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x88);
     const path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
@@ -489,7 +489,7 @@ test "load decrypts an encrypted API key via the key file" {
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
-    const key = [_]u8{0x12} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x12);
     const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(key_path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
@@ -523,7 +523,7 @@ test "load keeps an encrypted blob when the key file is missing" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x21} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x21);
     const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-undecryptable");
     defer std.testing.allocator.free(blob);
 
@@ -548,7 +548,7 @@ test "load clears an API key it cannot decrypt" {
     defer fixture.env.deinit();
     defer std.testing.allocator.free(fixture.home);
 
-    const wrong_key = [_]u8{0x33} ** secrets.key_length;
+    const wrong_key: [secrets.key_length]u8 = @splat(0x33);
     const key_path = try secrets.keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(key_path);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(key_path).?);
@@ -556,7 +556,7 @@ test "load clears an API key it cannot decrypt" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const real_key = [_]u8{0x44} ** secrets.key_length;
+    const real_key: [secrets.key_length]u8 = @splat(0x44);
     const blob = try secrets.encrypt(std.testing.allocator, real_key, random, "sk-mismatched");
     defer std.testing.allocator.free(blob);
 
@@ -587,7 +587,7 @@ test "load keeps an encrypted blob when the key file is malformed" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x26} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x26);
     const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-malformed-key-file");
     defer std.testing.allocator.free(blob);
 
@@ -614,7 +614,7 @@ test "save writes an already-encrypted API key verbatim" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x55} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x55);
     const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-live-secret");
     defer std.testing.allocator.free(blob);
 
@@ -637,7 +637,7 @@ test "save preserves an undecryptable stored blob when apiKey is null" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x61} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x61);
     const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-retained");
     defer std.testing.allocator.free(blob);
 
@@ -683,7 +683,7 @@ test "save re-encrypts an unchanged key when another provider forces a missing k
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const old_key = [_]u8{0x71} ** secrets.key_length;
+    const old_key: [secrets.key_length]u8 = @splat(0x71);
     const blob = try secrets.encrypt(std.testing.allocator, old_key, random, "sk-lm-unchanged");
     defer std.testing.allocator.free(blob);
 
@@ -739,7 +739,7 @@ test "decryptStoredApiKeys warns once and nulls keys for multiple undecryptable 
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x31} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x31);
     const blob_a = try secrets.encrypt(std.testing.allocator, key, random, "sk-live-a");
     defer std.testing.allocator.free(blob_a);
     const blob_b = try secrets.encrypt(std.testing.allocator, key, random, "sk-live-b");
@@ -766,7 +766,7 @@ test "decryptStoredApiKeys warns when the key file cannot be read" {
 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
-    const key = [_]u8{0x47} ** secrets.key_length;
+    const key: [secrets.key_length]u8 = @splat(0x47);
     const blob = try secrets.encrypt(std.testing.allocator, key, random, "sk-unreadable-key-file");
     defer std.testing.allocator.free(blob);
 

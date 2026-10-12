@@ -509,7 +509,7 @@ pub fn chatStreamingResponses(chat_client: *client.Client, request: ChatRequest,
 
         client.emitDiagnostic("OpenAI responses request failed\n  URL: {s}\n  Status: {d}\n  Payload: {s}\n  Response: {s}\n", .{
             url,
-            @intFromEnum(response.head.status),
+            @backingInt(response.head.status),
             payload,
             body_alloc.written(),
         });
