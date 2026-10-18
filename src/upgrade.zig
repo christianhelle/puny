@@ -3,6 +3,7 @@ const helpers = @import("tools/helpers.zig");
 const retry = @import("core/retry.zig");
 const version = @import("version.zig");
 const release = @import("upgrade/release.zig");
+const install_source = @import("upgrade/install_source.zig");
 
 pub const latest_release_url = release.latest_release_url;
 pub const LatestRelease = release.LatestRelease;
@@ -206,6 +207,14 @@ pub fn runUpgrade(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.
     var stderr_buffer: [1024]u8 = undefined;
     var stderr_file_writer: std.Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
     const stderr_writer = &stderr_file_writer.interface;
+
+    const self_path = try std.process.executablePathAlloc(io, arena);
+    defer arena.free(self_path);
+    if (install_source.detect(io, arena, self_path, environ_map).upgradeHint()) |hint| {
+        try stderr_writer.writeAll(hint);
+        try stderr_writer.flush();
+        return error.PackageManagedInstall;
+    }
 
     try stderr_writer.print("\nChecking for updates...\n", .{});
     try stderr_writer.flush();

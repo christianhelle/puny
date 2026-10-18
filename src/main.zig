@@ -73,7 +73,10 @@ fn run(init: std.process.Init) !u8 {
     }
 
     if (parsed.upgrade) {
-        try upgrade.runUpgrade(arena, init.io, init.environ_map, parsed.force_upgrade);
+        upgrade.runUpgrade(arena, init.io, init.environ_map, parsed.force_upgrade) catch |err| switch (err) {
+            error.PackageManagedInstall => return 1,
+            else => return err,
+        };
         update_check.clearFlag(init.io, arena, init.environ_map) catch {};
         return 0;
     }
