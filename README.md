@@ -110,6 +110,17 @@ $install = irm https://christianhelle.com/puny/install.ps1
 & ([scriptblock]::Create($install)) -Version "v0.1.0"
 ```
 
+### Arch Linux / Omarchy (AUR)
+
+Puny is published to the AUR as [`puny-bin`](https://aur.archlinux.org/packages/puny-bin):
+
+```bash
+yay -S puny-bin
+```
+
+On Omarchy you can also use **Install → AUR** in the Omarchy menu and search for `puny-bin`.
+Upgrade it with `yay -Syu` rather than `puny --upgrade`.
+
 ### Upgrade
 
 If Puny is already installed, upgrade to the latest version:
