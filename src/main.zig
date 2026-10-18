@@ -2,6 +2,7 @@ const std = @import("std");
 const chat = @import("chat/chat.zig");
 const stats = @import("chat/stats.zig");
 const upgrade = @import("upgrade.zig");
+const install_source = @import("upgrade/install_source.zig");
 const cli = @import("cli/args.zig");
 const config = @import("config/config.zig");
 const http_client = @import("providers/client.zig");
@@ -458,7 +459,11 @@ fn run(init: std.process.Init) !u8 {
     // that no longer represent a newer version.
     if (update_check.availableUpdateIfNewer(init.io, arena, init.environ_map)) |maybe_latest| {
         if (maybe_latest) |latest| {
-            update_check.printUpdateNotice(stdout_writer, latest) catch {};
+            const source = if (std.process.executablePathAlloc(init.io, arena)) |exe_path|
+                install_source.detect(init.io, arena, exe_path, init.environ_map)
+            else |_|
+                .standalone;
+            update_check.printUpdateNotice(stdout_writer, latest, source) catch {};
             stdout_writer.flush() catch {};
         }
     } else |_| {}

@@ -1,6 +1,7 @@
 const std = @import("std");
 const core_session = @import("core/session.zig");
 const release = @import("upgrade/release.zig");
+const install_source = @import("upgrade/install_source.zig");
 const version = @import("version.zig");
 
 pub const flag_file_name = "update-available";
@@ -114,12 +115,11 @@ pub fn availableUpdateIfNewer(
     return availableUpdateIfNewerInstalled(io, allocator, environ_map, version.version);
 }
 
-/// Prints the exit notice pointing at the upgrade command.
-pub fn printUpdateNotice(writer: *std.Io.Writer, latest_ver: []const u8) !void {
-    try writer.print(
-        "A new version of puny is available: v{s}. Run `puny --upgrade` to update.\n",
-        .{latest_ver},
-    );
+/// Prints the exit notice pointing at the upgrade command, or at the package
+/// manager when `source` is a package-managed install.
+pub fn printUpdateNotice(writer: *std.Io.Writer, latest_ver: []const u8, source: install_source.InstallSource) !void {
+    try writer.print("A new version of puny is available: v{s}. ", .{latest_ver});
+    try writer.writeAll(source.upgradeHint() orelse "Run `puny --upgrade` to update.\n");
 }
 
 /// Result of an update check.
@@ -376,7 +376,7 @@ test "printUpdateNotice announces the new version and the upgrade command" {
     var output = std.Io.Writer.Allocating.init(arena_state.allocator());
     defer output.deinit();
 
-    try printUpdateNotice(&output.writer, "2.1.0");
+    try printUpdateNotice(&output.writer, "2.1.0", .standalone);
     const text = output.written();
 
     try std.testing.expect(std.mem.indexOf(u8, text, "2.1.0") != null);
@@ -389,8 +389,22 @@ test "printUpdateNotice mentions a new version is available" {
     var output = std.Io.Writer.Allocating.init(arena_state.allocator());
     defer output.deinit();
 
-    try printUpdateNotice(&output.writer, "1.2.3");
+    try printUpdateNotice(&output.writer, "1.2.3", .standalone);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "new version") != null);
+}
+
+test "printUpdateNotice points package-managed installs at their package manager" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var output = std.Io.Writer.Allocating.init(arena_state.allocator());
+    defer output.deinit();
+
+    try printUpdateNotice(&output.writer, "2.1.0", .pacman);
+    const text = output.written();
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "2.1.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "yay -Syu") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "puny --upgrade") == null);
 }
 
 test "runCheckWithLatest writes the flag when the latest is newer" {
