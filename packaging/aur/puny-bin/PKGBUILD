@@ -1,0 +1,21 @@
+# Maintainer: Christian Helle <christian.helle@outlook.com>
+pkgname=puny-bin
+pkgver=0.4.2
+pkgrel=1
+pkgdesc='Minimal natively compiled single-binary coding agent'
+arch=('x86_64' 'aarch64')
+url='https://github.com/christianhelle/puny'
+license=('MIT')
+provides=('puny')
+conflicts=('puny')
+options=('!strip' '!debug')
+source_x86_64=("puny-${pkgver}-x86_64.tar.gz::${url}/releases/download/v${pkgver}/puny-linux-x86_64.tar.gz")
+source_aarch64=("puny-${pkgver}-aarch64.tar.gz::${url}/releases/download/v${pkgver}/puny-linux-aarch64.tar.gz")
+sha256sums_x86_64=('10bfcea0f03e4086a31d41fafa02e7b6a53a7aee0e83f2d31ee805e600416ded')
+sha256sums_aarch64=('e58cec1c5f0e3fcf7d12f57364a9081ba8de3a2cca4d8810323ba12017fd1375')
+
+package() {
+  install -Dm755 puny "${pkgdir}/usr/bin/puny"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

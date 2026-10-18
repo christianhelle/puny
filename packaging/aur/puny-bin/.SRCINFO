@@ -1,0 +1,18 @@
+pkgbase = puny-bin
+	pkgdesc = Minimal natively compiled single-binary coding agent
+	pkgver = 0.4.2
+	pkgrel = 1
+	url = https://github.com/christianhelle/puny
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	provides = puny
+	conflicts = puny
+	options = !strip
+	options = !debug
+	source_x86_64 = puny-0.4.2-x86_64.tar.gz::https://github.com/christianhelle/puny/releases/download/v0.4.2/puny-linux-x86_64.tar.gz
+	sha256sums_x86_64 = 10bfcea0f03e4086a31d41fafa02e7b6a53a7aee0e83f2d31ee805e600416ded
+	source_aarch64 = puny-0.4.2-aarch64.tar.gz::https://github.com/christianhelle/puny/releases/download/v0.4.2/puny-linux-aarch64.tar.gz
+	sha256sums_aarch64 = e58cec1c5f0e3fcf7d12f57364a9081ba8de3a2cca4d8810323ba12017fd1375
+
+pkgname = puny-bin
