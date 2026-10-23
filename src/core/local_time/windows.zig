@@ -1,0 +1,49 @@
+const std = @import("std");
+const local_time = @import("../local_time.zig");
+
+const windows = struct {
+    pub const DWORD = u32;
+    pub const WCHAR = u16;
+
+    pub const DATE_SHORTDATE: DWORD = 0x00000001;
+
+    // A null locale name is LOCALE_NAME_USER_DEFAULT and a null date or time
+    // is the current local time.
+    pub extern "kernel32" fn GetDateFormatEx(
+        lpLocaleName: ?[*:0]const WCHAR,
+        dwFlags: DWORD,
+        lpDate: ?*const anyopaque,
+        lpFormat: ?[*:0]const WCHAR,
+        lpDateStr: [*]WCHAR,
+        cchDate: c_int,
+        lpCalendar: ?[*:0]const WCHAR,
+    ) callconv(.winapi) c_int;
+    pub extern "kernel32" fn GetTimeFormatEx(
+        lpLocaleName: ?[*:0]const WCHAR,
+        dwFlags: DWORD,
+        lpTime: ?*const anyopaque,
+        lpFormat: ?[*:0]const WCHAR,
+        lpTimeStr: [*]WCHAR,
+        cchTime: c_int,
+    ) callconv(.winapi) c_int;
+};
+
+/// Formats the current local time with the user's short date and time
+/// formats from the Region settings.
+pub fn format(buf: *local_time.Buffer) []const u8 {
+    var wide: [128]windows.WCHAR = undefined;
+
+    // Both calls count the null terminator in their return value.
+    const date_len = windows.GetDateFormatEx(null, windows.DATE_SHORTDATE, null, null, &wide, wide.len, null);
+    if (date_len <= 0) return "";
+    var len: usize = @intCast(date_len - 1);
+
+    wide[len] = ' ';
+    len += 1;
+    const time_len = windows.GetTimeFormatEx(null, 0, null, null, wide[len..].ptr, @intCast(wide.len - len));
+    if (time_len <= 0) return "";
+    len += @intCast(time_len - 1);
+
+    const written = std.unicode.utf16LeToUtf8(buf, wide[0..len]) catch return "";
+    return buf[0..written];
+}
