@@ -836,6 +836,22 @@ test "help examples combine at least two documented flags and fit 100 columns" {
     }
 }
 
+test "help examples parse and validate once placeholders are filled" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    for (examples) |example| {
+        const argv = try exampleArgv(allocator, example.cmd);
+        try std.testing.expectEqualStrings("puny", argv[0]);
+        const opts = parseArgs(std.testing.io, &env, argv);
+        try validate(opts);
+    }
+}
+
 test "printVersion prints the puny version line" {
     // printVersion writes to real stdout which is not drainable in test context.
     return error.SkipZigTest;
