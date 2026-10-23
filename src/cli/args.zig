@@ -3,6 +3,7 @@ const version = @import("../version.zig");
 const provider = @import("../providers/provider.zig");
 const openai = @import("../providers/openai.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
+const brand = @import("../tui/brand.zig");
 
 pub const default_max_iterations: usize = 5;
 
@@ -264,10 +265,19 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
 }
 
 pub fn printHelp(io: std.Io) void {
+    var buf: [4096]u8 = undefined;
+    var w: std.Io.File.Writer = .init(.stdout(), io, &buf);
+    writeHelp(&w.interface) catch {};
+    w.interface.flush() catch {};
+}
+
+/// Writes the full `--help` text as plain text (no ANSI codes).
+pub fn writeHelp(writer: *std.Io.Writer) !void {
     var buf: [256]u8 = undefined;
     const version_line = version.format(&buf);
-    writeErr(io,
-        \\puny {s}
+    try writer.print(
+        \\Puny {s} - {s}
+        \\{s}
         \\
         \\Usage: puny [options]
         \\
@@ -301,8 +311,25 @@ pub fn printHelp(io: std.Io) void {
         \\  -h, --help                   Show this help text
         \\  -V, --version                Print version
         \\
-    , .{version_line});
+        \\Examples:
+        \\
+    , .{ version_line, brand.tagline, brand.warning });
+    for (examples) |example| {
+        try writer.print("  {s}\n      {s}\n", .{ example.cmd, example.desc });
+    }
 }
+
+const Example = struct { cmd: []const u8, desc: []const u8 };
+
+/// Each example combines several flags; single-flag usage is covered by Options.
+const examples = [_]Example{
+    .{ .cmd = "puny --provider ollama --url http://gpu-box:11434 -m <model>", .desc = "Use Ollama running on another machine" },
+    .{ .cmd = "puny -m <model> --prompt-file spec.md --oneshot", .desc = "Run a spec file as one scripted, non-interactive task" },
+    .{ .cmd = "puny --orchestrate --prompt-file spec.md --max-iterations 3", .desc = "Implement a spec, with up to 3 review/fix rounds" },
+    .{ .cmd = "puny --chat-log --effort low --oneshot -p \"summarise README.md\"", .desc = "Quick, cheap one-off question with the conversation logged" },
+    .{ .cmd = "puny --provider copilot --context-tier long --effort high", .desc = "Use Copilot's large context window with deeper reasoning" },
+    .{ .cmd = "puny --prune --session <id>", .desc = "Delete old sessions but keep one" },
+};
 
 pub fn printVersion(io: std.Io) void {
     var buf: [256]u8 = undefined;
@@ -681,9 +708,148 @@ test "writeErr prints the formatted message" {
     return error.SkipZigTest;
 }
 
-test "printHelp prints the version and usage" {
-    // printHelp writes to real stdout which is not drainable in test context.
-    return error.SkipZigTest;
+test "writeHelp starts with the brand header before usage" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+
+    const tagline_at = std.mem.indexOf(u8, text, brand.tagline) orelse return error.MissingTagline;
+    const warning_at = std.mem.indexOf(u8, text, brand.warning) orelse return error.MissingWarning;
+    const usage_at = std.mem.indexOf(u8, text, "Usage: puny") orelse return error.MissingUsage;
+    try std.testing.expect(std.mem.startsWith(u8, text, "Puny "));
+    try std.testing.expect(tagline_at < warning_at and warning_at < usage_at);
+}
+
+test "writeHelp is plain text with a header no wider than 100 columns" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+
+    try std.testing.expect(std.mem.indexOfScalar(u8, text, 0x1b) == null);
+    // The Options list predates this check and is out of scope, so only the
+    // header is measured here; the Examples section gets its own check.
+    const header_end = std.mem.indexOf(u8, text, "Usage:") orelse return error.MissingUsage;
+    var lines = std.mem.splitScalar(u8, text[0..header_end], '\n');
+    while (lines.next()) |line| {
+        if (line.len > 100) {
+            std.debug.print("help line too wide ({d}): {s}\n", .{ line.len, line });
+            return error.HelpLineTooWide;
+        }
+    }
+}
+
+test "writeHelp ends with the combined-flag examples after options" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+
+    const options_at = std.mem.indexOf(u8, text, "Options:") orelse return error.MissingOptions;
+    const examples_at = std.mem.indexOf(u8, text, "\nExamples:\n") orelse return error.MissingExamples;
+    try std.testing.expect(options_at < examples_at);
+    try std.testing.expect(std.mem.endsWith(u8, text,
+        \\Examples:
+        \\  puny --provider ollama --url http://gpu-box:11434 -m <model>
+        \\      Use Ollama running on another machine
+        \\  puny -m <model> --prompt-file spec.md --oneshot
+        \\      Run a spec file as one scripted, non-interactive task
+        \\  puny --orchestrate --prompt-file spec.md --max-iterations 3
+        \\      Implement a spec, with up to 3 review/fix rounds
+        \\  puny --chat-log --effort low --oneshot -p "summarise README.md"
+        \\      Quick, cheap one-off question with the conversation logged
+        \\  puny --provider copilot --context-tier long --effort high
+        \\      Use Copilot's large context window with deeper reasoning
+        \\  puny --prune --session <id>
+        \\      Delete old sessions but keep one
+        \\
+    ));
+}
+
+/// Splits an example command into argv tokens, honouring double quotes and
+/// filling in the `<model>` and `<id>` placeholders with dummy values.
+fn exampleArgv(allocator: std.mem.Allocator, cmd: []const u8) ![]const [:0]const u8 {
+    var argv: std.ArrayList([:0]const u8) = .empty;
+    var i: usize = 0;
+    while (i < cmd.len) {
+        if (cmd[i] == ' ') {
+            i += 1;
+            continue;
+        }
+        const quoted = cmd[i] == '"';
+        const start = if (quoted) i + 1 else i;
+        const stop: u8 = if (quoted) '"' else ' ';
+        const end = std.mem.indexOfScalarPos(u8, cmd, start, stop) orelse cmd.len;
+        var token = cmd[start..end];
+        if (std.mem.eql(u8, token, "<model>")) token = "test-model";
+        if (std.mem.eql(u8, token, "<id>")) token = "abc-123";
+        try argv.append(allocator, try allocator.dupeSentinel(u8, token, 0));
+        i = end + 1;
+    }
+    return argv.items;
+}
+
+fn isFlag(token: []const u8) bool {
+    return token.len > 1 and token[0] == '-';
+}
+
+test "help examples combine at least two documented flags and fit 100 columns" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+    const options_at = std.mem.indexOf(u8, text, "Options:").?;
+    const examples_at = std.mem.indexOf(u8, text, "Examples:").?;
+    const options = text[options_at..examples_at];
+
+    try std.testing.expectEqual(@as(usize, 6), examples.len);
+    for (examples) |example| {
+        try std.testing.expect(example.cmd.len + 2 <= 100);
+        try std.testing.expect(example.desc.len + 6 <= 100);
+
+        var flags: usize = 0;
+        for (try exampleArgv(allocator, example.cmd)) |token| {
+            if (!isFlag(token)) continue;
+            flags += 1;
+            // Match the flag as a whole word in the Options list.
+            const needle = try std.fmt.allocPrint(allocator, " {s}", .{token});
+            var found = false;
+            var pos: usize = 0;
+            while (std.mem.indexOfPos(u8, options, pos, needle)) |at| : (pos = at + 1) {
+                const after = at + needle.len;
+                if (after == options.len or options[after] == ' ' or options[after] == ',') {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                std.debug.print("example flag not in Options: {s}\n", .{token});
+                return error.UndocumentedFlag;
+            }
+        }
+        try std.testing.expect(flags >= 2);
+    }
+}
+
+test "help examples parse and validate once placeholders are filled" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+
+    for (examples) |example| {
+        const argv = try exampleArgv(allocator, example.cmd);
+        try std.testing.expectEqualStrings("puny", argv[0]);
+        const opts = parseArgs(std.testing.io, &env, argv);
+        try validate(opts);
+    }
 }
 
 test "printVersion prints the puny version line" {
