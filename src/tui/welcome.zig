@@ -3,6 +3,7 @@ const ansi = @import("ansi.zig");
 const openai = @import("../providers/openai.zig");
 const version = @import("../version.zig");
 const help = @import("help.zig");
+const brand = @import("brand.zig");
 const token_stats = @import("token_stats.zig");
 
 pub const Info = struct {
@@ -38,10 +39,10 @@ pub fn print(writer: *std.Io.Writer, info: Info) !void {
 
     try writer.print("\n", .{});
     try writer.print(
-        "{s}Welcome to Puny {s}{s} - {s}Your tiny AI coding assistant{s}\n",
-        .{ ansi.cyan, version_line, ansi.reset, ansi.dim, ansi.reset },
+        "{s}Welcome to Puny {s}{s} - {s}{s}{s}\n",
+        .{ ansi.cyan, version_line, ansi.reset, ansi.dim, brand.tagline, ansi.reset },
     );
-    try writer.print("{s}AI makes mistakes - read the fucking code{s}\n", .{ ansi.dim, ansi.reset });
+    try writer.print("{s}{s}{s}\n", .{ ansi.dim, brand.warning, ansi.reset });
     try writer.print("\n", .{});
 
     try writer.print("  {s}Provider:{s} {s} ({s})\n", .{ ansi.bright, ansi.reset, info.provider_name, info.provider_url });
@@ -96,6 +97,21 @@ test "print writes banner, provider, model and commands" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/config"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/plan"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "/provider"));
+}
+
+test "print shows the shared brand tagline and warning" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try print(&out.writer, .{
+        .provider_name = "Mock",
+        .provider_url = "-",
+        .model_key = "m",
+    });
+
+    const text = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, brand.tagline) != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, brand.warning) != null);
 }
 
 test "banner lists every registered command" {
