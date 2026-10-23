@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
 const terminal = @import("terminal.zig");
+const local_time = @import("../core/local_time.zig");
 
 pub const Status = enum {
     done,
@@ -11,6 +12,9 @@ pub const Status = enum {
 
 pub const ThinkingIndicator = struct {
     start_time: std.Io.Clock.Timestamp,
+    /// Formats the wall-clock time shown after the thought duration. Tests
+    /// swap it for a fixed clock.
+    local_time: *const fn (std.Io, *local_time.Buffer) []const u8 = local_time.format,
 
     pub fn init(io: std.Io) @This() {
         return .{
@@ -44,12 +48,10 @@ pub const ThinkingIndicator = struct {
             break :blk @as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s;
         };
 
-        var buf: [64]u8 = undefined;
+        var time_buf: local_time.Buffer = undefined;
+        var buf: [64 + time_buf.len]u8 = undefined;
         const message = switch (status) {
-            .done => if (elapsed_seconds < 0.01)
-                "Thought for <0.01s"
-            else
-                try std.fmt.bufPrint(&buf, "Thought for {d:.2}s", .{elapsed_seconds}),
+            .done => try formatThought(&buf, elapsed_seconds, self.local_time(io, &time_buf)),
             .cancelled => "Cancelled.",
             .interrupted => "Interrupted.",
             .error_ => "Error.",
@@ -88,6 +90,31 @@ pub const ThinkingIndicator = struct {
     }
 };
 
+fn formatThought(buf: []u8, elapsed_seconds: f64, time_of_day: []const u8) ![]const u8 {
+    var writer = std.Io.Writer.fixed(buf);
+    if (elapsed_seconds < 0.01) {
+        try writer.writeAll("Thought for <0.01s");
+    } else {
+        try writer.print("Thought for {d:.2}s", .{elapsed_seconds});
+    }
+    if (time_of_day.len > 0) try writer.print(" ({s})", .{time_of_day});
+    return writer.buffered();
+}
+
+fn fixedLocalTime(_: std.Io, _: *local_time.Buffer) []const u8 {
+    return "2026-10-23 10:15:00";
+}
+
+fn noLocalTime(_: std.Io, _: *local_time.Buffer) []const u8 {
+    return "";
+}
+
+fn testIndicator() ThinkingIndicator {
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    indicator.local_time = fixedLocalTime;
+    return indicator;
+}
+
 test "show writes a thinking hint" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -95,7 +122,7 @@ test "show writes a thinking hint" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.show(&output.writer);
     try std.testing.expectEqualStrings("\n\x1b[2mThinking...\x1b[0m", output.written());
 }
@@ -107,9 +134,9 @@ test "finish prints done message with provider ttft" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.finish(std.testing.io, &output.writer, 0, false, false, .done, 1.5);
-    try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for 1.50s\x1b[0m\n", output.written());
+    try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for 1.50s (2026-10-23 10:15:00)\x1b[0m\n", output.written());
 }
 
 test "finish with streamed content deletes the indicator row" {
@@ -119,10 +146,10 @@ test "finish with streamed content deletes the indicator row" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.finish(std.testing.io, &output.writer, 2, true, true, .done, 0.5);
     try std.testing.expectEqualStrings(
-        "\x1b[2A\x1b[G\x1b[M\x1b[1B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        "\x1b[2A\x1b[G\x1b[M\x1b[1B\x1b[G\n\x1b[2mThought for 0.50s (2026-10-23 10:15:00)\x1b[0m\n",
         output.written(),
     );
 }
@@ -134,10 +161,10 @@ test "finish deletes the indicator row when output streamed right below it" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.finish(std.testing.io, &output.writer, 1, false, true, .done, 2.0);
     try std.testing.expectEqualStrings(
-        "\x1b[1A\x1b[G\x1b[M\x1b[G\n\n\x1b[2mThought for 2.00s\x1b[0m\n",
+        "\x1b[1A\x1b[G\x1b[M\x1b[G\n\n\x1b[2mThought for 2.00s (2026-10-23 10:15:00)\x1b[0m\n",
         output.written(),
     );
 }
@@ -149,7 +176,7 @@ test "finish suppresses the message when cancelled with streamed content" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.finish(std.testing.io, &output.writer, 0, false, true, .cancelled, null);
     try std.testing.expectEqualStrings("", output.written());
 }
@@ -164,7 +191,7 @@ test "finish reports cancelled, interrupted, and error statuses" {
         var output = std.Io.Writer.Allocating.init(arena);
         defer output.deinit();
 
-        var indicator = ThinkingIndicator.init(std.testing.io);
+        var indicator = testIndicator();
         try indicator.finish(std.testing.io, &output.writer, 0, false, false, status, null);
         try std.testing.expectEqualStrings(
             try std.fmt.allocPrint(arena, "\x1b[G\x1b[K\x1b[2m{s}\x1b[0m\n", .{msg}),
@@ -180,9 +207,9 @@ test "finish reports sub-10ms thinking as a rounded message" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.finish(std.testing.io, &output.writer, 0, false, false, .done, 0.001);
-    try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for <0.01s\x1b[0m\n", output.written());
+    try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for <0.01s (2026-10-23 10:15:00)\x1b[0m\n", output.written());
 }
 
 test "finish deletes the indicator row when called out of line" {
@@ -192,10 +219,10 @@ test "finish deletes the indicator row when called out of line" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try @call(.never_inline, ThinkingIndicator.finish, .{ &indicator, std.testing.io, &output.writer, 2, true, true, .done, 0.5 });
     try std.testing.expectEqualStrings(
-        "\x1b[2A\x1b[G\x1b[M\x1b[1B\x1b[G\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        "\x1b[2A\x1b[G\x1b[M\x1b[1B\x1b[G\n\x1b[2mThought for 0.50s (2026-10-23 10:15:00)\x1b[0m\n",
         output.written(),
     );
 }
@@ -207,10 +234,10 @@ test "finish with streamed content but no row offset does not rewind" {
     var output = std.Io.Writer.Allocating.init(arena);
     defer output.deinit();
 
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.finish(std.testing.io, &output.writer, 0, true, true, .done, 0.5);
     try std.testing.expectEqualStrings(
-        "\n\x1b[2mThought for 0.50s\x1b[0m\n",
+        "\n\x1b[2mThought for 0.50s (2026-10-23 10:15:00)\x1b[0m\n",
         output.written(),
     );
 }
@@ -224,14 +251,27 @@ test "finished indicator leaves a single blank line above the thought message" {
     defer output.deinit();
 
     try output.writer.writeAll("> prompt\r\n\nThinking...\n🔧 one\n🔧 two");
-    var indicator = ThinkingIndicator.init(std.testing.io);
+    var indicator = testIndicator();
     try indicator.finish(std.testing.io, &output.writer, 2, false, true, .done, 0.5);
 
     var screen = FakeScreen{};
     defer screen.deinit(arena);
     try screen.feed(arena, output.written());
     try std.testing.expectEqualStrings(
-        "> prompt\n\n🔧 one\n🔧 two\n\nThought for 0.50s",
+        "> prompt\n\n🔧 one\n🔧 two\n\nThought for 0.50s (2026-10-23 10:15:00)",
         try screen.toText(arena),
     );
+}
+
+test "finish leaves out the brackets when the local time is unavailable" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+
+    var indicator = ThinkingIndicator.init(std.testing.io);
+    indicator.local_time = noLocalTime;
+    try indicator.finish(std.testing.io, &output.writer, 0, false, false, .done, 1.5);
+    try std.testing.expectEqualStrings("\x1b[G\x1b[K\x1b[2mThought for 1.50s\x1b[0m\n", output.written());
 }
