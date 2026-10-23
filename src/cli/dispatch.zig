@@ -9,6 +9,8 @@ const AgentMode = @import("../core/mode.zig").AgentMode;
 
 const Command = parser.Command;
 const default_cfg = config.Config.default();
+const prd_hint_prefix = "Session PRD path: ";
+const build_notice = "Planning mode has ended and you are now in build mode. Earlier instructions not to write files or make changes no longer apply: implement the plan.";
 
 pub const Action = union(enum) {
     exit,
@@ -71,7 +73,7 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
             const planning_prompt = try ctx.cfg.resolvePrompt(ctx.messages_alloc, "planning", prompts.planning);
             try ctx.messages.append(ctx.messages_alloc, .{ .system = planning_prompt });
             if (ctx.session_prd_path.len > 0) {
-                const prd_hint = try std.fmt.allocPrint(ctx.messages_alloc, "Session PRD path: {s}. Use the save_prd tool when ready to write the final PRD.", .{ctx.session_prd_path});
+                const prd_hint = try std.fmt.allocPrint(ctx.messages_alloc, prd_hint_prefix ++ "{s}. Use the save_prd tool when ready to write the final PRD.", .{ctx.session_prd_path});
                 try ctx.messages.append(ctx.messages_alloc, .{ .system = prd_hint });
             }
             if (text) |t| {
@@ -87,6 +89,8 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
 
         .build => |text| {
             ctx.mode.* = .build;
+            try dropPlanningInstructions(ctx);
+            try ctx.messages.append(ctx.messages_alloc, .{ .system = build_notice });
             try ctx.messages.append(ctx.messages_alloc, .{ .user = "Now implement the plan. Write all necessary code." });
             if (text) |t| {
                 try ctx.messages.append(ctx.messages_alloc, .{ .user = try ctx.messages_alloc.dupe(u8, t) });
@@ -163,6 +167,34 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
         },
     }
 }
+
+/// Removes the system messages `/plan` installed. Providers such as Anthropic
+/// fold every system message into one prompt, so a lingering "MUST NOT write
+/// files" instruction would keep the model planning after `/build`. A resumed
+/// session replays the prompt it was saved with, so the built-in prompt is
+/// matched inside any prefix or suffix. A custom override from an older config
+/// cannot be recognized; the build notice appended afterwards overrides it.
+fn dropPlanningInstructions(ctx: Context) !void {
+    const planning_prompt = try ctx.cfg.resolvePrompt(ctx.arena, "planning", prompts.planning);
+    defer ctx.arena.free(planning_prompt);
+    var i: usize = 0;
+    while (i < ctx.messages.items.len) {
+        const msg = ctx.messages.items[i];
+        if (msg == .system and isStaleModeInstruction(msg.system, planning_prompt)) {
+            _ = ctx.messages.orderedRemove(i);
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn isStaleModeInstruction(content: []const u8, planning_prompt: []const u8) bool {
+    return std.mem.eql(u8, content, planning_prompt) or
+        std.mem.indexOf(u8, content, prompts.planning) != null or
+        std.mem.startsWith(u8, content, prd_hint_prefix) or
+        std.mem.eql(u8, content, build_notice);
+}
+
 test "dispatch quit returns exit" {
     var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer messages_arena_state.deinit();
@@ -336,8 +368,9 @@ test "dispatch build without text switches to build mode and continues" {
 
     try std.testing.expectEqual(Action.continue_, action);
     try std.testing.expectEqual(.build, mode);
-    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
-    try std.testing.expectEqualDeep(openai.Message{ .user = "Now implement the plan. Write all necessary code." }, messages.items[0]);
+    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .system = build_notice }, messages.items[0]);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "Now implement the plan. Write all necessary code." }, messages.items[1]);
 }
 
 test "dispatch build with text switches to build mode and runs chat turn" {
@@ -363,9 +396,127 @@ test "dispatch build with text switches to build mode and runs chat turn" {
 
     try std.testing.expectEqual(Action.run_chat_turn, action);
     try std.testing.expectEqual(.build, mode);
-    try std.testing.expectEqual(@as(usize, 2), messages.items.len);
-    try std.testing.expectEqualDeep(openai.Message{ .user = "Now implement the plan. Write all necessary code." }, messages.items[0]);
-    try std.testing.expectEqualDeep(openai.Message{ .user = "now" }, messages.items[1]);
+    try std.testing.expectEqual(@as(usize, 3), messages.items.len);
+    try std.testing.expectEqualDeep(openai.Message{ .system = build_notice }, messages.items[0]);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "Now implement the plan. Write all necessary code." }, messages.items[1]);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "now" }, messages.items[2]);
+}
+
+test "dispatch build drops the planning instructions from the conversation" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+    const ctx: Context = .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &default_cfg,
+        .session_prd_path = "plan.md",
+    };
+    try messages.append(messages_arena_state.allocator(), .{ .system = "base prompt" });
+
+    _ = try dispatch(Command{ .plan = "design it" }, ctx);
+    try messages.append(messages_arena_state.allocator(), .{ .assistant = .{ .content = "PRD saved. Run /build implement" } });
+    _ = try dispatch(Command{ .build = "implement" }, ctx);
+
+    try std.testing.expectEqual(.build, mode);
+    var system_count: usize = 0;
+    for (messages.items) |msg| {
+        if (msg != .system) continue;
+        system_count += 1;
+        try std.testing.expect(std.mem.indexOf(u8, msg.system, "PLANNING MODE") == null);
+        try std.testing.expect(std.mem.indexOf(u8, msg.system, "Session PRD path") == null);
+    }
+    try std.testing.expectEqual(@as(usize, 2), system_count);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "design it" }, messages.items[1]);
+    try std.testing.expectEqualDeep(openai.Message{ .user = "implement" }, messages.items[messages.items.len - 1]);
+}
+
+fn expectBuildNoticeAfterPlanning(messages: []const openai.Message, planning_text: []const u8) !void {
+    var planning_at: ?usize = null;
+    var notice_at: ?usize = null;
+    var notice_count: usize = 0;
+    for (messages, 0..) |msg, i| {
+        if (msg != .system) continue;
+        if (std.mem.indexOf(u8, msg.system, planning_text) != null) planning_at = i;
+        if (std.mem.eql(u8, msg.system, build_notice)) {
+            notice_at = i;
+            notice_count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), notice_count);
+    if (planning_at) |p| try std.testing.expect(p < notice_at.?);
+}
+
+test "dispatch build drops a planning prompt saved with a different prefix" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+    var saved_cfg = config.Config.default();
+    saved_cfg.prompts.planning.prefix = "[old] ";
+    var ctx: Context = .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &saved_cfg,
+    };
+
+    _ = try dispatch(Command{ .plan = "design it" }, ctx);
+    // A resumed session replays the saved prompt under the current config.
+    ctx.cfg = &default_cfg;
+    _ = try dispatch(Command{ .build = "implement" }, ctx);
+
+    for (messages.items) |msg| {
+        if (msg == .system) try std.testing.expect(std.mem.indexOf(u8, msg.system, "PLANNING MODE") == null);
+    }
+}
+
+test "dispatch build overrides a planning prompt it cannot recognize" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+    var saved_cfg = config.Config.default();
+    saved_cfg.prompts.planning.override = "Custom planning rules: never write files.";
+    var ctx: Context = .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &saved_cfg,
+    };
+
+    _ = try dispatch(Command{ .plan = "design it" }, ctx);
+    ctx.cfg = &default_cfg;
+    _ = try dispatch(Command{ .build = "implement" }, ctx);
+    _ = try dispatch(Command{ .build = "keep going" }, ctx);
+
+    try expectBuildNoticeAfterPlanning(messages.items, "Custom planning rules");
 }
 
 test "dispatch model in oneshot mode rejects" {
