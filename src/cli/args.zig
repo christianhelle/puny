@@ -311,8 +311,25 @@ pub fn writeHelp(writer: *std.Io.Writer) !void {
         \\  -h, --help                   Show this help text
         \\  -V, --version                Print version
         \\
+        \\Examples:
+        \\
     , .{ version_line, brand.tagline, brand.warning });
+    for (examples) |example| {
+        try writer.print("  {s}\n      {s}\n", .{ example.cmd, example.desc });
+    }
 }
+
+const Example = struct { cmd: []const u8, desc: []const u8 };
+
+/// Each example combines several flags; single-flag usage is covered by Options.
+const examples = [_]Example{
+    .{ .cmd = "puny --provider ollama --url http://gpu-box:11434 -m <model>", .desc = "Use Ollama running on another machine" },
+    .{ .cmd = "puny -m <model> --prompt-file spec.md --oneshot", .desc = "Run a spec file as one scripted, non-interactive task" },
+    .{ .cmd = "puny --orchestrate --prompt-file spec.md --max-iterations 3", .desc = "Implement a spec, with up to 3 review/fix rounds" },
+    .{ .cmd = "puny --chat-log --effort low --oneshot -p \"summarise README.md\"", .desc = "Quick, cheap one-off question with the conversation logged" },
+    .{ .cmd = "puny --provider copilot --context-tier long --effort high", .desc = "Use Copilot's large context window with deeper reasoning" },
+    .{ .cmd = "puny --prune --session <id>", .desc = "Delete old sessions but keep one" },
+};
 
 pub fn printVersion(io: std.Io) void {
     var buf: [256]u8 = undefined;
@@ -721,6 +738,33 @@ test "writeHelp is plain text with a header no wider than 100 columns" {
             return error.HelpLineTooWide;
         }
     }
+}
+
+test "writeHelp ends with the combined-flag examples after options" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+
+    const options_at = std.mem.indexOf(u8, text, "Options:") orelse return error.MissingOptions;
+    const examples_at = std.mem.indexOf(u8, text, "\nExamples:\n") orelse return error.MissingExamples;
+    try std.testing.expect(options_at < examples_at);
+    try std.testing.expect(std.mem.endsWith(u8, text,
+        \\Examples:
+        \\  puny --provider ollama --url http://gpu-box:11434 -m <model>
+        \\      Use Ollama running on another machine
+        \\  puny -m <model> --prompt-file spec.md --oneshot
+        \\      Run a spec file as one scripted, non-interactive task
+        \\  puny --orchestrate --prompt-file spec.md --max-iterations 3
+        \\      Implement a spec, with up to 3 review/fix rounds
+        \\  puny --chat-log --effort low --oneshot -p "summarise README.md"
+        \\      Quick, cheap one-off question with the conversation logged
+        \\  puny --provider copilot --context-tier long --effort high
+        \\      Use Copilot's large context window with deeper reasoning
+        \\  puny --prune --session <id>
+        \\      Delete old sessions but keep one
+        \\
+    ));
 }
 
 test "printVersion prints the puny version line" {
