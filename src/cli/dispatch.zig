@@ -168,19 +168,27 @@ pub fn dispatch(command: Command, ctx: Context) !Action {
 
 /// Removes the system messages `/plan` installed. Providers such as Anthropic
 /// fold every system message into one prompt, so a lingering "MUST NOT write
-/// files" instruction would keep the model planning after `/build`.
+/// files" instruction would keep the model planning after `/build`. A resumed
+/// session replays the prompt it was saved with, so the built-in prompt is
+/// matched inside any prefix or suffix.
 fn dropPlanningInstructions(ctx: Context) !void {
     const planning_prompt = try ctx.cfg.resolvePrompt(ctx.arena, "planning", prompts.planning);
     defer ctx.arena.free(planning_prompt);
     var i: usize = 0;
     while (i < ctx.messages.items.len) {
         const msg = ctx.messages.items[i];
-        if (msg == .system and (std.mem.eql(u8, msg.system, planning_prompt) or std.mem.startsWith(u8, msg.system, prd_hint_prefix))) {
+        if (msg == .system and isStaleModeInstruction(msg.system, planning_prompt)) {
             _ = ctx.messages.orderedRemove(i);
         } else {
             i += 1;
         }
     }
+}
+
+fn isStaleModeInstruction(content: []const u8, planning_prompt: []const u8) bool {
+    return std.mem.eql(u8, content, planning_prompt) or
+        std.mem.indexOf(u8, content, prompts.planning) != null or
+        std.mem.startsWith(u8, content, prd_hint_prefix);
 }
 
 test "dispatch quit returns exit" {
@@ -425,6 +433,38 @@ test "dispatch build drops the planning instructions from the conversation" {
     try std.testing.expectEqual(@as(usize, 1), system_count);
     try std.testing.expectEqualDeep(openai.Message{ .user = "design it" }, messages.items[1]);
     try std.testing.expectEqualDeep(openai.Message{ .user = "implement" }, messages.items[messages.items.len - 1]);
+}
+
+test "dispatch build drops a planning prompt saved with a different prefix" {
+    var messages_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer messages_arena_state.deinit();
+    var messages = std.ArrayList(openai.Message).empty;
+    defer messages.deinit(messages_arena_state.allocator());
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var mode: AgentMode = .build;
+    var saved_cfg = config.Config.default();
+    saved_cfg.prompts.planning.prefix = "[old] ";
+    var ctx: Context = .{
+        .arena = std.testing.allocator,
+        .messages_alloc = messages_arena_state.allocator(),
+        .messages_arena = &messages_arena_state,
+        .stdout_writer = &out.writer,
+        .io = std.testing.io,
+        .messages = &messages,
+        .mode = &mode,
+        .oneshot = false,
+        .cfg = &saved_cfg,
+    };
+
+    _ = try dispatch(Command{ .plan = "design it" }, ctx);
+    // A resumed session replays the saved prompt under the current config.
+    ctx.cfg = &default_cfg;
+    _ = try dispatch(Command{ .build = "implement" }, ctx);
+
+    for (messages.items) |msg| {
+        if (msg == .system) try std.testing.expect(std.mem.indexOf(u8, msg.system, "PLANNING MODE") == null);
+    }
 }
 
 test "dispatch model in oneshot mode rejects" {
