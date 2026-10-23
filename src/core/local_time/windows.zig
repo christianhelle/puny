@@ -31,17 +31,23 @@ const windows = struct {
 /// Formats the current local time with the user's short date and time
 /// formats from the Region settings.
 pub fn format(buf: *local_time.Buffer) []const u8 {
-    var wide: [128]windows.WCHAR = undefined;
+    // A UTF-16 code unit takes at most 3 bytes in UTF-8, so this many units
+    // always fit in `buf` once converted.
+    var wide: [buf.len / 3]windows.WCHAR = undefined;
 
     // Both calls count the null terminator in their return value.
     const date_len = windows.GetDateFormatEx(null, windows.DATE_SHORTDATE, null, null, &wide, wide.len, null);
     if (date_len <= 0) return "";
     var len: usize = @intCast(date_len - 1);
 
+    // Leave room for the space and at least one character of the time;
+    // a zero-length buffer would make GetTimeFormatEx return the size it
+    // needs instead of writing.
+    if (len + 2 >= wide.len) return "";
     wide[len] = ' ';
     len += 1;
     const time_len = windows.GetTimeFormatEx(null, 0, null, null, wide[len..].ptr, @intCast(wide.len - len));
-    if (time_len <= 0) return "";
+    if (time_len <= 0 or time_len > wide.len - len) return "";
     len += @intCast(time_len - 1);
 
     const written = std.unicode.utf16LeToUtf8(buf, wide[0..len]) catch return "";
