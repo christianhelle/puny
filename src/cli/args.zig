@@ -767,6 +767,75 @@ test "writeHelp ends with the combined-flag examples after options" {
     ));
 }
 
+/// Splits an example command into argv tokens, honouring double quotes and
+/// filling in the `<model>` and `<id>` placeholders with dummy values.
+fn exampleArgv(allocator: std.mem.Allocator, cmd: []const u8) ![]const [:0]const u8 {
+    var argv: std.ArrayList([:0]const u8) = .empty;
+    var i: usize = 0;
+    while (i < cmd.len) {
+        if (cmd[i] == ' ') {
+            i += 1;
+            continue;
+        }
+        const quoted = cmd[i] == '"';
+        const start = if (quoted) i + 1 else i;
+        const stop: u8 = if (quoted) '"' else ' ';
+        const end = std.mem.indexOfScalarPos(u8, cmd, start, stop) orelse cmd.len;
+        var token = cmd[start..end];
+        if (std.mem.eql(u8, token, "<model>")) token = "test-model";
+        if (std.mem.eql(u8, token, "<id>")) token = "abc-123";
+        try argv.append(allocator, try allocator.dupeSentinel(u8, token, 0));
+        i = end + 1;
+    }
+    return argv.items;
+}
+
+fn isFlag(token: []const u8) bool {
+    return token.len > 1 and token[0] == '-';
+}
+
+test "help examples combine at least two documented flags and fit 100 columns" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+    const options_at = std.mem.indexOf(u8, text, "Options:").?;
+    const examples_at = std.mem.indexOf(u8, text, "Examples:").?;
+    const options = text[options_at..examples_at];
+
+    try std.testing.expectEqual(@as(usize, 6), examples.len);
+    for (examples) |example| {
+        try std.testing.expect(example.cmd.len + 2 <= 100);
+        try std.testing.expect(example.desc.len + 6 <= 100);
+
+        var flags: usize = 0;
+        for (try exampleArgv(allocator, example.cmd)) |token| {
+            if (!isFlag(token)) continue;
+            flags += 1;
+            // Match the flag as a whole word in the Options list.
+            const needle = try std.fmt.allocPrint(allocator, " {s}", .{token});
+            var found = false;
+            var pos: usize = 0;
+            while (std.mem.indexOfPos(u8, options, pos, needle)) |at| : (pos = at + 1) {
+                const after = at + needle.len;
+                if (after == options.len or options[after] == ' ' or options[after] == ',') {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                std.debug.print("example flag not in Options: {s}\n", .{token});
+                return error.UndocumentedFlag;
+            }
+        }
+        try std.testing.expect(flags >= 2);
+    }
+}
+
 test "printVersion prints the puny version line" {
     // printVersion writes to real stdout which is not drainable in test context.
     return error.SkipZigTest;
