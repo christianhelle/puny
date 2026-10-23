@@ -115,6 +115,9 @@ test "include config.secrets tests" {
 test "include core.cancel tests" {
     _ = @import("core/cancel.zig");
 }
+test "include core.local_time tests" {
+    _ = @import("core/local_time.zig");
+}
 test "include core.memory tests" {
     _ = @import("core/memory.zig");
 }
