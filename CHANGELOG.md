@@ -2,19 +2,15 @@
 
 ## [Unreleased Changes]
 
-### Merged Pull Requests
-- Upgrade to Zig 0.17.0 ([#224](https://github.com/christianhelle/puny/pull/224)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Upgrade to Zig 0.17.0 ([#224](https://github.com/christianhelle/puny/pull/224)) ([@christianhelle](https://github.com/christianhelle/))
 - Show the local time after the thought duration ([#225](https://github.com/christianhelle/puny/pull/225)) ([@christianhelle](https://github.com/christianhelle/))
 
 
 ## [v0.4.2](https://github.com/christianhelle/puny/releases/tag/v0.4.2) (2026-10-06)
 
-### Merged Pull Requests
-- Replace minimal reasoning effort with max ([#219](https://github.com/christianhelle/puny/pull/219)) ([@christianhelle](https://github.com/christianhelle/))
-
 ### Features
+- Replace minimal reasoning effort with max ([#219](https://github.com/christianhelle/puny/pull/219)) ([@christianhelle](https://github.com/christianhelle/))
 - Choose and show GitHub Copilot context sizes during model selection ([#223](https://github.com/christianhelle/puny/pull/223)) ([@christianhelle](https://github.com/christianhelle/))
 - Set the context budget from each provider's reported window ([#221](https://github.com/christianhelle/puny/pull/221)) ([@christianhelle](https://github.com/christianhelle/))
 - Show a context breakdown in /context ([#220](https://github.com/christianhelle/puny/pull/220)) ([@christianhelle](https://github.com/christianhelle/))
