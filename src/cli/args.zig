@@ -704,6 +704,25 @@ test "writeHelp starts with the brand header before usage" {
     try std.testing.expect(tagline_at < warning_at and warning_at < usage_at);
 }
 
+test "writeHelp is plain text with a header no wider than 100 columns" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+
+    try std.testing.expect(std.mem.indexOfScalar(u8, text, 0x1b) == null);
+    // The Options list predates this check and is out of scope, so only the
+    // header is measured here; the Examples section gets its own check.
+    const header_end = std.mem.indexOf(u8, text, "Usage:") orelse return error.MissingUsage;
+    var lines = std.mem.splitScalar(u8, text[0..header_end], '\n');
+    while (lines.next()) |line| {
+        if (line.len > 100) {
+            std.debug.print("help line too wide ({d}): {s}\n", .{ line.len, line });
+            return error.HelpLineTooWide;
+        }
+    }
+}
+
 test "printVersion prints the puny version line" {
     // printVersion writes to real stdout which is not drainable in test context.
     return error.SkipZigTest;
