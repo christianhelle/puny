@@ -3,6 +3,7 @@ const version = @import("../version.zig");
 const provider = @import("../providers/provider.zig");
 const openai = @import("../providers/openai.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
+const brand = @import("../tui/brand.zig");
 
 pub const default_max_iterations: usize = 5;
 
@@ -264,10 +265,19 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
 }
 
 pub fn printHelp(io: std.Io) void {
+    var buf: [4096]u8 = undefined;
+    var w: std.Io.File.Writer = .init(.stdout(), io, &buf);
+    writeHelp(&w.interface) catch {};
+    w.interface.flush() catch {};
+}
+
+/// Writes the full `--help` text as plain text (no ANSI codes).
+pub fn writeHelp(writer: *std.Io.Writer) !void {
     var buf: [256]u8 = undefined;
     const version_line = version.format(&buf);
-    writeErr(io,
-        \\puny {s}
+    try writer.print(
+        \\Puny {s} - {s}
+        \\{s}
         \\
         \\Usage: puny [options]
         \\
@@ -301,7 +311,7 @@ pub fn printHelp(io: std.Io) void {
         \\  -h, --help                   Show this help text
         \\  -V, --version                Print version
         \\
-    , .{version_line});
+    , .{ version_line, brand.tagline, brand.warning });
 }
 
 pub fn printVersion(io: std.Io) void {
@@ -681,9 +691,17 @@ test "writeErr prints the formatted message" {
     return error.SkipZigTest;
 }
 
-test "printHelp prints the version and usage" {
-    // printHelp writes to real stdout which is not drainable in test context.
-    return error.SkipZigTest;
+test "writeHelp starts with the brand header before usage" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    const text = out.written();
+
+    const tagline_at = std.mem.indexOf(u8, text, brand.tagline) orelse return error.MissingTagline;
+    const warning_at = std.mem.indexOf(u8, text, brand.warning) orelse return error.MissingWarning;
+    const usage_at = std.mem.indexOf(u8, text, "Usage: puny") orelse return error.MissingUsage;
+    try std.testing.expect(std.mem.startsWith(u8, text, "Puny "));
+    try std.testing.expect(tagline_at < warning_at and warning_at < usage_at);
 }
 
 test "printVersion prints the puny version line" {
