@@ -135,7 +135,7 @@ fn askOn(
     // one blank row below the tool call line. The echo takes that blank row.
     const title_rows = rowsFor(one_line_question, width) + rowsFor(hint, width);
     try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start ++ terminal.erase_display, .{title_rows});
-    try stdout_writer.print("{s}↳ {s}{s}", .{ ansi.dim, echoText(answer, width -| 4), ansi.reset });
+    try stdout_writer.print("{s}↳ {s}{s}", .{ ansi.dim, try oneLine(arena, echoText(answer, width -| 4)), ansi.reset });
     try stdout_writer.flush();
     return answer;
 }
@@ -425,6 +425,17 @@ test "ask clears a question and a typed answer that wrap on a narrow terminal" {
     // The echo is cut to fit its row, leaving room for the "↳ " prefix.
     try std.testing.expectEqualStrings("🔧 Asking\n↳ a much longer answer than fi", asked.text);
     try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask echoes a picked option with its control characters as spaces" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.picked = "Post\x1b[2Jgres";
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expectEqualStrings("Post\x1b[2Jgres", asked.answer.picked);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ Post [2Jgres", asked.text);
 }
 
 test "ask clears a question that contains a carriage return" {
