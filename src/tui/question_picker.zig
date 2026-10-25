@@ -38,15 +38,19 @@ pub fn toolResult(arena: std.mem.Allocator, answer: Answer) ![]const u8 {
     };
 }
 
-const title = "Choose an answer (Use arrow keys to navigate, Enter to select, 'q' to dismiss):";
+const hint = "Arrow keys to move, Enter to select, 'q' to dismiss";
 const typed_prompt = "Your answer: ";
 
-/// Asks the user to pick one of `options` or type their own answer, then
-/// replaces the picker with one `↳ answer` row under the tool call line.
-/// Without a terminal to ask on, reports the question as dismissed.
-pub fn ask(arena: std.mem.Allocator, io: std.Io, options: []const []const u8, recommended: ?[]const u8) !Answer {
+/// Asks `question` and lets the user pick one of `options` or type their
+/// own answer, then replaces the picker with one `↳ answer` row under the
+/// tool call line. Without a terminal to ask on, reports it as dismissed.
+pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: []const []const u8, recommended: ?[]const u8) !Answer {
     if (!(std.Io.File.stdin().isTty(io) catch false)) return .cancelled;
 
+    // The picker draws in raw mode, where a bare newline doesn't return the
+    // carriage, so the question goes on one (possibly wrapping) line.
+    const one_line_question = try std.mem.replaceOwned(u8, arena, question, "\n", " ");
+    const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
     const items = try answerItems(arena, options, recommended);
     const selected = try list_picker.selectFromList(arena, io, title, items);
 
@@ -60,18 +64,19 @@ pub fn ask(arena: std.mem.Allocator, io: std.Io, options: []const []const u8, re
     else
         .cancelled;
 
-    // The picker leaves the cursor on its title row, one blank row below the
-    // tool call line. The echo takes that blank row.
-    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start ++ terminal.erase_display, .{1});
+    // The picker leaves the cursor on the last row of its title, which sits
+    // one blank row below the tool call line. The echo takes that blank row.
+    const title_rows = rowsFor(one_line_question, width) + rowsFor(hint, width);
+    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start ++ terminal.erase_display, .{title_rows});
     try stdout_writer.print("{s}↳ {s}{s}", .{ ansi.dim, echoText(answer, width -| 4), ansi.reset });
     try stdout_writer.flush();
     return answer;
 }
 
-/// Reads one line typed on the picker's title row and returns the cursor to
-/// the start of that row. An empty line counts as dismissing the question.
+/// Reads one line typed on the picker's last title row and returns the
+/// cursor to the start of that row. An empty line dismisses the question.
 fn readTypedAnswer(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, width: usize) !Answer {
-    try stdout_writer.writeAll(typed_prompt);
+    try stdout_writer.print(terminal.clear_line ++ "{s}", .{typed_prompt});
     try stdout_writer.flush();
 
     var line: std.Io.Writer.Allocating = .init(arena);
@@ -81,13 +86,20 @@ fn readTypedAnswer(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.
         error.StreamTooLong => {},
         else => return err,
     };
-    const text = std.mem.trim(u8, line.written(), &std.ascii.whitespace);
 
     // The terminal echoed the prompt, the text and the Enter that ended it.
-    const rows = std.math.divCeil(usize, typed_prompt.len + line.written().len, @max(width, 1)) catch 1;
-    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start, .{@max(rows, 1)});
+    const echoed = try std.fmt.allocPrint(arena, "{s}{s}", .{ typed_prompt, line.written() });
+    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start, .{rowsFor(echoed, width)});
 
+    const text = std.mem.trim(u8, line.written(), &std.ascii.whitespace);
     return if (text.len == 0) .cancelled else .{ .typed = text };
+}
+
+/// Terminal rows that one line of `text` occupies at `width` columns,
+/// treating each character as one column.
+pub fn rowsFor(text: []const u8, width: usize) usize {
+    const columns = std.unicode.utf8CountCodepoints(text) catch text.len;
+    return @max(std.math.divCeil(usize, columns, @max(width, 1)) catch 1, 1);
 }
 
 /// The answer as echoed under the question, cut to at most `max_bytes` so
@@ -136,4 +148,15 @@ test "echoText shows the answer and fits it on one terminal row" {
     try std.testing.expectEqualStrings("cancelled", echoText(.cancelled, 80));
     // Never splits a multi-byte character.
     try std.testing.expectEqualStrings("caf", echoText(.{ .typed = "café" }, 4));
+}
+
+test "rowsFor counts the terminal rows a line of text wraps onto" {
+    try std.testing.expectEqual(@as(usize, 1), rowsFor("", 80));
+    try std.testing.expectEqual(@as(usize, 1), rowsFor("Which database?", 80));
+    const full_row: [80]u8 = @splat('x');
+    const one_over: [81]u8 = @splat('x');
+    try std.testing.expectEqual(@as(usize, 1), rowsFor(&full_row, 80));
+    try std.testing.expectEqual(@as(usize, 2), rowsFor(&one_over, 80));
+    // Counts characters, not bytes: four two-byte characters fit four columns.
+    try std.testing.expectEqual(@as(usize, 1), rowsFor("éééé", 4));
 }

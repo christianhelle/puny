@@ -11,7 +11,7 @@ const AskUserParams = struct {
 fn askUser(allocator: std.mem.Allocator, io: std.Io, params: AskUserParams) ![]const u8 {
     if (params.options.len == 0) return error.MissingOptions;
     // toolResult copies the answer before the parsed params are freed.
-    const answer = try question_picker.ask(allocator, io, params.options, params.recommended);
+    const answer = try question_picker.ask(allocator, io, params.question, params.options, params.recommended);
     return question_picker.toolResult(allocator, answer);
 }
 
