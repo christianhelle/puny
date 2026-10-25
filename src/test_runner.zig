@@ -203,6 +203,9 @@ test "include skills.skills tests" {
     _ = @import("skills/triggers.zig");
     _ = @import("skills/skills.zig");
 }
+test "include tools.ask_user tests" {
+    _ = @import("tools/ask_user.zig");
+}
 test "include tools.filesystem tests" {
     _ = @import("tools/filesystem.zig");
 }
