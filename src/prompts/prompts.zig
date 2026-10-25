@@ -19,6 +19,8 @@ pub const planning =
     \\For each question, provide your recommended answer. Always provide a recommended answer and include a rationale for your recommendation.
     \\Ask the questions one at a time, waiting for feedback on each question before continuing.
     \\If possible provide a list of options for the user to choose from, and explain the pros and cons of each option.
+    \\When a question has options, explain them in your message, then call the ask_user tool with the question,
+    \\short option labels and your recommended option, so the user can pick their answer from a list.
     \\Asking multiple questions at once is bewildering.
     \\If a fact can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking the user.
     \\The decisions, though, are the users' — put each one to the user and wait for their answer.
@@ -119,3 +121,8 @@ pub const compact =
 ;
 
 pub const prompt_text = ">";
+
+test "planning prompt asks multiple choice questions with the ask_user tool" {
+    const std = @import("std");
+    try std.testing.expect(std.mem.indexOf(u8, planning, "ask_user") != null);
+}

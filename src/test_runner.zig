@@ -78,6 +78,10 @@ test "include prompt file tests" {
 test "include prompt history tests" {
     _ = @import("prompts/history.zig");
 }
+
+test "include prompts tests" {
+    _ = @import("prompts/prompts.zig");
+}
 test "include agents.instructions tests" {
     _ = @import("agents/instructions.zig");
 }
