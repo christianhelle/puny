@@ -20,7 +20,7 @@ fn askUser(allocator: std.mem.Allocator, io: std.Io, params: AskUserParams) ![]c
 
 pub const ask_user = tools.defineTool(
     "ask_user",
-    "Ask the user a multiple choice question and wait for their answer. The user picks one of the options from a list, or types their own answer. question is the question to ask. options are short answers of a few words each, without numbering. recommended is the option you recommend, copied exactly. Explain the options and their trade-offs in your message before calling this tool.",
+    "Ask the user a multiple choice question and wait for their answer. The user picks one of the options from a list, or types their own answer. question is the question to ask, in one short sentence. options are short answers of a few words each, without numbering. recommended is the option you recommend, copied exactly. Explain the options and their trade-offs in your message before calling this tool.",
     AskUserParams,
     askUser,
 );
