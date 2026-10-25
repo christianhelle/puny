@@ -2,6 +2,7 @@ const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");
+const question_picker = @import("../tui/question_picker.zig");
 
 const max_value_length = 120;
 
@@ -26,9 +27,11 @@ pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) 
 }
 
 /// Terminal rows a tool call leaves on screen: its own line, plus the
-/// `↳ answer` row ask_user prints below it once the user has answered.
-pub fn toolCallRows(name: []const u8) usize {
-    return if (std.mem.eql(u8, name, "ask_user")) 2 else 1;
+/// `↳ answer` row ask_user prints below it when it ran and got an answer.
+/// An ask_user call that failed before reaching the picker prints no row.
+pub fn toolCallRows(name: []const u8, result: []const u8) usize {
+    const answered = std.mem.eql(u8, name, "ask_user") and question_picker.isAnswerResult(result);
+    return if (answered) 2 else 1;
 }
 
 /// Prints the conversation history, prefixing user messages with the prompt
@@ -439,9 +442,17 @@ test "renders an ask_user question with line breaks on one row" {
 }
 
 test "toolCallRows counts the answer row ask_user leaves under its line" {
-    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user"));
-    try std.testing.expectEqual(@as(usize, 1), toolCallRows("read_file"));
-    try std.testing.expectEqual(@as(usize, 1), toolCallRows("save_prd"));
+    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user", "The user chose: Postgres"));
+    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user", "The user answered: DuckDB"));
+    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user", "The user dismissed the choices and will answer in their next message. End your turn now."));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("read_file", "file contents"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("save_prd", "PRD saved"));
+}
+
+test "toolCallRows counts no answer row when ask_user never reached the picker" {
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("ask_user", "Tool ask_user failed: invalid arguments: error.SyntaxError"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("ask_user", "Tool ask_user failed: error.MissingField"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("ask_user", "Unknown tool: ask_user"));
 }
 
 test "renderKnown falls back to generic for unknown args shapes" {

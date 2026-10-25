@@ -31,13 +31,25 @@ pub const Answer = union(enum) {
     cancelled,
 };
 
+const chose_prefix = "The user chose: ";
+const answered_prefix = "The user answered: ";
+const dismissed_result = "The user dismissed the choices and will answer in their next message. End your turn now.";
+
 /// The ask_user tool result that reports `answer` back to the model.
 pub fn toolResult(arena: std.mem.Allocator, answer: Answer) ![]const u8 {
     return switch (answer) {
-        .picked => |text| std.fmt.allocPrint(arena, "The user chose: {s}", .{text}),
-        .typed => |text| std.fmt.allocPrint(arena, "The user answered: {s}", .{text}),
-        .cancelled => "The user dismissed the choices and will answer in their next message. End your turn now.",
+        .picked => |text| std.fmt.allocPrint(arena, chose_prefix ++ "{s}", .{text}),
+        .typed => |text| std.fmt.allocPrint(arena, answered_prefix ++ "{s}", .{text}),
+        .cancelled => dismissed_result,
     };
+}
+
+/// Whether `result` came from `toolResult`, meaning ask_user reached the
+/// picker and printed its answer row, rather than failing before it.
+pub fn isAnswerResult(result: []const u8) bool {
+    return std.mem.startsWith(u8, result, chose_prefix) or
+        std.mem.startsWith(u8, result, answered_prefix) or
+        std.mem.eql(u8, result, dismissed_result);
 }
 
 const hint = "Arrow keys to move, Enter to select, 'q' to dismiss";
