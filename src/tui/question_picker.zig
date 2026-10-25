@@ -1,5 +1,7 @@
 const std = @import("std");
 const list_picker = @import("list_picker.zig");
+const terminal = @import("terminal.zig");
+const ansi = @import("ansi.zig");
 
 /// Value of the trailing item that lets the user type an answer the
 /// options don't cover.
@@ -34,6 +36,58 @@ pub fn toolResult(arena: std.mem.Allocator, answer: Answer) ![]const u8 {
         .typed => |text| std.fmt.allocPrint(arena, "The user answered: {s}", .{text}),
         .cancelled => "The user dismissed the choices and will answer in their next message. End your turn now.",
     };
+}
+
+const title = "Choose an answer (Use arrow keys to navigate, Enter to select, 'q' to dismiss):";
+const typed_prompt = "Your answer: ";
+
+/// Asks the user to pick one of `options` or type their own answer, then
+/// replaces the picker with one `↳ answer` row under the tool call line.
+/// Without a terminal to ask on, reports the question as dismissed.
+pub fn ask(arena: std.mem.Allocator, io: std.Io, options: []const []const u8, recommended: ?[]const u8) !Answer {
+    if (!(std.Io.File.stdin().isTty(io) catch false)) return .cancelled;
+
+    const items = try answerItems(arena, options, recommended);
+    const selected = try list_picker.selectFromList(arena, io, title, items);
+
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    const stdout_writer = &stdout_file_writer.interface;
+    const width = terminal.terminalWidth() orelse 80;
+
+    const answer: Answer = if (selected) |value|
+        if (std.mem.eql(u8, value, other_value)) try readTypedAnswer(arena, io, stdout_writer, width) else .{ .picked = value }
+    else
+        .cancelled;
+
+    // The picker leaves the cursor on its title row, one blank row below the
+    // tool call line. The echo takes that blank row.
+    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start ++ terminal.erase_display, .{1});
+    try stdout_writer.print("{s}↳ {s}{s}", .{ ansi.dim, echoText(answer, width -| 4), ansi.reset });
+    try stdout_writer.flush();
+    return answer;
+}
+
+/// Reads one line typed on the picker's title row and returns the cursor to
+/// the start of that row. An empty line counts as dismissing the question.
+fn readTypedAnswer(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, width: usize) !Answer {
+    try stdout_writer.writeAll(typed_prompt);
+    try stdout_writer.flush();
+
+    var line: std.Io.Writer.Allocating = .init(arena);
+    var stdin_buffer: [4096]u8 = undefined;
+    var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
+    _ = stdin_file_reader.interface.streamDelimiterLimit(&line.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
+        error.StreamTooLong => {},
+        else => return err,
+    };
+    const text = std.mem.trim(u8, line.written(), &std.ascii.whitespace);
+
+    // The terminal echoed the prompt, the text and the Enter that ended it.
+    const rows = std.math.divCeil(usize, typed_prompt.len + line.written().len, @max(width, 1)) catch 1;
+    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start, .{@max(rows, 1)});
+
+    return if (text.len == 0) .cancelled else .{ .typed = text };
 }
 
 /// The answer as echoed under the question, cut to at most `max_bytes` so

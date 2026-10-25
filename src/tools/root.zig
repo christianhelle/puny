@@ -50,6 +50,7 @@ const web = @import("web.zig");
 const review = @import("review.zig");
 const core_session = @import("../core/session.zig");
 const skill_loader = @import("skill_loader.zig");
+const ask_user = @import("ask_user.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
 
 pub const registry = blk: {
@@ -65,6 +66,7 @@ pub const registry = blk: {
         git.git_diff,
         web.web_fetch,
         skill_loader.load_skill,
+        ask_user.ask_user,
     };
 };
 
@@ -79,6 +81,7 @@ pub const planning_registry = blk: {
         git.git_diff,
         core_session.save_prd_tool,
         skill_loader.load_skill,
+        ask_user.ask_user,
     };
 };
 
@@ -229,6 +232,11 @@ test "dispatchForMode isolates tool allowlist per mode" {
     try std.testing.expect(dispatchForMode("execute_shell", .build) != null);
     try std.testing.expect(dispatchForMode("execute_shell", .review) != null);
     try std.testing.expect(dispatchForMode("execute_shell", .planning) == null);
+
+    // ask_user needs someone at the terminal, so review never gets it.
+    try std.testing.expect(dispatchForMode("ask_user", .planning) != null);
+    try std.testing.expect(dispatchForMode("ask_user", .build) != null);
+    try std.testing.expect(dispatchForMode("ask_user", .review) == null);
 
     try std.testing.expect(dispatchForMode("unknown_tool", .build) == null);
     try std.testing.expect(dispatchForMode("unknown_tool", .review) == null);
