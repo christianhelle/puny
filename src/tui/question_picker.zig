@@ -3,6 +3,7 @@ const list_picker = @import("list_picker.zig");
 const terminal = @import("terminal.zig");
 const ansi = @import("ansi.zig");
 const text_width = @import("markdown/width.zig");
+const input = @import("input.zig");
 
 /// Value of the trailing item that lets the user type an answer the
 /// options don't cover.
@@ -88,17 +89,16 @@ fn readTypedAnswer(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.
 
     var line: std.Io.Writer.Allocating = .init(arena);
     var stdin_buffer: [4096]u8 = undefined;
-    var stdin_file_reader: std.Io.File.Reader = .init(.stdin(), io, &stdin_buffer);
-    _ = stdin_file_reader.interface.streamDelimiterLimit(&line.writer, '\n', .limited(stdin_buffer.len)) catch |err| switch (err) {
-        error.StreamTooLong => {},
-        else => return err,
-    };
+    const submitted = try input.readLineSimple(arena, io, stdout_writer, &line, &stdin_buffer);
 
-    // The terminal echoed the prompt, the text and the Enter that ended it.
+    // The prompt and the text are on screen. Submitting also moved the
+    // cursor below them; Esc left it on their last row.
     const echoed = try std.fmt.allocPrint(arena, "{s}{s}", .{ typed_prompt, line.written() });
-    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start, .{rowsFor(echoed, width)});
+    const rows_up = if (submitted != null) rowsFor(echoed, width) else rowsFor(echoed, width) - 1;
+    if (rows_up > 0) try stdout_writer.print(terminal.cursor_up, .{rows_up});
+    try stdout_writer.writeAll(terminal.move_to_line_start);
 
-    const text = std.mem.trim(u8, line.written(), &std.ascii.whitespace);
+    const text = std.mem.trim(u8, submitted orelse "", &std.ascii.whitespace);
     return if (text.len == 0) .cancelled else .{ .typed = text };
 }
 
