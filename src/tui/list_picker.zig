@@ -138,13 +138,20 @@ test "computeColumnWidth accounts for the longest label" {
     try std.testing.expectEqual(@as(usize, "a much longer label".len + column_padding), computeColumnWidth(&items));
 }
 
-/// Lines the picker prints above the list: two blank lines plus the title.
-const header_rows = 3;
+/// Lines the picker prints above the list besides the title: the end of the
+/// cursor's row and a blank line.
+const header_rows = 2;
 
-/// Rows actually available to the list once the picker's header is
-/// accounted for, never less than one.
+/// Rows actually available to the list once the picker's header and a
+/// one-row title are accounted for, never less than one.
 pub fn usableRows(terminal_height: usize) usize {
-    return @max(terminal_height -| header_rows, 1);
+    return usableRowsUnder(terminal_height, 1);
+}
+
+/// Rows available to the list under a title that takes `title_rows` rows,
+/// never less than one.
+pub fn usableRowsUnder(terminal_height: usize, title_rows: usize) usize {
+    return @max(terminal_height -| (header_rows + title_rows), 1);
 }
 
 test "usableRows subtracts the header the picker prints above the list" {
@@ -155,6 +162,12 @@ test "usableRows never drops below one row" {
     try std.testing.expectEqual(@as(usize, 1), usableRows(3));
     try std.testing.expectEqual(@as(usize, 1), usableRows(1));
     try std.testing.expectEqual(@as(usize, 1), usableRows(0));
+}
+
+test "usableRowsUnder leaves room for a title that takes several rows" {
+    try std.testing.expectEqual(@as(usize, 21), usableRowsUnder(24, 1));
+    try std.testing.expectEqual(@as(usize, 18), usableRowsUnder(24, 4));
+    try std.testing.expectEqual(@as(usize, 1), usableRowsUnder(5, 4));
 }
 
 /// Default rows/columns assumed when the terminal size can't be determined,
