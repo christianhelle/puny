@@ -56,6 +56,10 @@ pub const MockKeyword = enum {
     reasoning,
 };
 
+/// Id of the mock's ask_user call, so its result can be told apart from
+/// other tool results.
+const choice_call_id = "mock_choice_call";
+
 pub const MockClient = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -150,6 +154,10 @@ pub const MockClient = struct {
         // If the last message is a tool result, respond with a plain completion
         // to avoid re-triggering tool call keywords from the original user message.
         if (isToolResultMessage(request.messages)) {
+            const result = request.messages[request.messages.len - 1].tool;
+            if (std.mem.eql(u8, result.tool_call_id, choice_call_id)) {
+                return respondWithAnswer(callback, result.content);
+            }
             return respondWithCompletion(callback);
         }
 
@@ -170,7 +178,7 @@ pub const MockClient = struct {
         }
 
         if (isKeyword(last_content, .choice)) {
-            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_choice_call", .name = "ask_user" } });
+            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = choice_call_id, .name = "ask_user" } });
             try callback.emit(.{ .tool_call_delta = .{
                 .index = 0,
                 .arguments = "{\"question\":\"Which database should the app use?\",\"options\":[\"SQLite\",\"Postgres\",\"DuckDB\"],\"recommended\":\"Postgres\"}",
@@ -635,6 +643,13 @@ fn respondWithCompletion(callback: openai.StreamCallback) !void {
     try callback.emit(.{ .finish = "stop" });
 }
 
+fn respondWithAnswer(callback: openai.StreamCallback, answer: []const u8) !void {
+    try callback.emit(.{ .content = "Got your answer. " });
+    try callback.emit(.{ .content = answer });
+    try callback.emit(.{ .content = "\n" });
+    try callback.emit(.{ .finish = "stop" });
+}
+
 /// Emit a delay based on mock speed.
 fn emitDelay(speed: MockSpeed, io: std.Io) !void {
     switch (speed) {
@@ -995,6 +1010,29 @@ test "chatStreaming asks a multiple choice question in choice mode" {
     try std.testing.expectEqual(@as(usize, 3), args.options.len);
     try std.testing.expectEqualStrings("Postgres", args.recommended);
     try expectFinish(rec.events.items, "tool_calls");
+}
+
+test "chatStreaming repeats the user's answer after a choice" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{
+            .{ .user = "give me a choice" },
+            .{ .tool = .{ .tool_call_id = "mock_choice_call", .content = "The user chose: Postgres" } },
+        },
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "The user chose: Postgres") != null);
+    try expectFinish(rec.events.items, "stop");
 }
 
 test "chatStreaming responds with a completion after a tool result" {
