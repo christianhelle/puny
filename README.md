@@ -1104,8 +1104,9 @@ The mock provider returns canned responses and simulates tool calls based on key
 | `read`, `file`, `code`     | Calls `read_file` tool                        |
 | `search`, `grep`, `find`   | Calls `grep_search` tool                      |
 | `shell`, `run`, `execute`  | Calls `execute_shell` tool                    |
+| `choice`                   | Calls `ask_user` tool with a database question |
 | `error`, `timeout`, `fail` | Simulates a network error                     |
-| _(after a tool result)_    | Returns a completion acknowledging the result |
+| _(after a tool result)_    | Returns a completion acknowledging the result (repeating your answer after `ask_user`) |
 | _(anything else)_          | Returns a canned text response                |
 
 Use `--model` to skip the model picker in mock mode:
