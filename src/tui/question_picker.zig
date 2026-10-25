@@ -58,7 +58,8 @@ const typed_prompt = "Your answer: ";
 
 /// Asks `question` and lets the user pick one of `options` or type their
 /// own answer, then replaces the picker with one `↳ answer` row under the
-/// tool call line. Without a terminal to ask on, reports it as dismissed.
+/// tool call line. Without a terminal to ask on (stdin or stdout
+/// redirected), reports it as dismissed.
 pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: []const []const u8, recommended: ?[]const u8) !Answer {
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -67,8 +68,11 @@ pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: 
 
 /// Terminal access behind `askOn`; tests substitute a fake.
 const Console = struct {
+    /// The picker needs a keyboard to read and a screen to draw on.
     fn isTty(io: std.Io) bool {
-        return std.Io.File.stdin().isTty(io) catch false;
+        const stdin_tty = std.Io.File.stdin().isTty(io) catch false;
+        const stdout_tty = std.Io.File.stdout().isTty(io) catch false;
+        return stdin_tty and stdout_tty;
     }
 
     fn width() usize {
