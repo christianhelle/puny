@@ -164,14 +164,13 @@ fn renderKnown(
         const question = getString(args, "question") orelse return false;
         const max_question_bytes = 60;
         try output.appendSlice(allocator, "Asking: ");
-        if (question.len <= max_question_bytes) {
-            try output.appendSlice(allocator, question);
-        } else {
-            var end: usize = max_question_bytes;
-            while (end > 0 and (question[end] & 0xC0) == 0x80) end -= 1;
-            try output.appendSlice(allocator, question[0..end]);
-            try output.appendSlice(allocator, "…");
+        var end: usize = @min(question.len, max_question_bytes);
+        while (end < question.len and end > 0 and (question[end] & 0xC0) == 0x80) end -= 1;
+        // Line breaks and other control characters would start new rows.
+        for (question[0..end]) |byte| {
+            try output.append(allocator, if (std.ascii.isControl(byte)) ' ' else byte);
         }
+        if (end < question.len) try output.appendSlice(allocator, "…");
         return true;
     }
 
@@ -433,6 +432,10 @@ test "renders ask_user as the question, cut to fit one row" {
         "{\"question\":\"Which storage engine should the session history use when the user has no network?\"}",
         "Asking: Which storage engine should the session history use when the…",
     );
+}
+
+test "renders an ask_user question with line breaks on one row" {
+    try expectRendered("ask_user", "{\"question\":\"Which database?\\nPick one.\\r\\tThanks\"}", "Asking: Which database? Pick one.  Thanks");
 }
 
 test "toolCallRows counts the answer row ask_user leaves under its line" {
