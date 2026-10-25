@@ -178,12 +178,11 @@ pub fn prefixFitting(text: []const u8, max_cells: usize) []const u8 {
     var cells: usize = 0;
     var i: usize = 0;
     while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const end = @min(i + seq_len, text.len);
-        const width = if (std.unicode.utf8Decode(text[i..end])) |cp| codePointWidth(cp) else |_| 1;
+        const decoded = decodeAt(text, i);
+        const width = if (decoded.cp) |cp| codePointWidth(cp) else 1;
         if (cells + width > max_cells) break;
         cells += width;
-        i = end;
+        i += decoded.len;
     }
     return text[0..i];
 }
@@ -265,6 +264,11 @@ test "prefixFitting keeps the longest prefix that fits the cells" {
     try std.testing.expectEqualStrings("e\u{301}", prefixFitting("e\u{301}x", 1));
     // Never splits a cut-off sequence or reads past the end.
     try std.testing.expectEqualStrings("a\xe2", prefixFitting("a\xe2", 2));
+}
+
+test "prefixFitting keeps a character cut off at the end as one cell" {
+    try std.testing.expectEqualStrings("a\xf0\x9f", prefixFitting("a\xf0\x9f", 2));
+    try std.testing.expectEqualStrings("a", prefixFitting("a\xf0\x9f", 1));
 }
 
 test "displayWidth treats combining marks as zero-width" {
