@@ -1,4 +1,5 @@
 const std = @import("std");
+const text_width = @import("markdown/width.zig");
 
 pub const reset = "\x1b[0m";
 pub const dim = "\x1b[2m";
@@ -15,18 +16,12 @@ pub const bold_end = "\x1b[22m";
 pub fn scrubControls(text: []u8) void {
     var i: usize = 0;
     while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const end = @min(i + seq_len, text.len);
-        const cp = std.unicode.utf8Decode(text[i..end]) catch {
-            // A byte that starts no valid sequence: 8-bit terminals may read
-            // it as a C1 control. Step one byte so what follows still gets
-            // checked.
-            text[i] = ' ';
-            i += 1;
-            continue;
-        };
-        if (isUnsafeCodePoint(cp)) @memset(text[i..end], ' ');
-        i = end;
+        const decoded = text_width.decodeAt(text, i);
+        // Bytes that aren't valid UTF-8 go too: 8-bit terminals may read
+        // them as C1 controls.
+        const unsafe = if (decoded.cp) |cp| isUnsafeCodePoint(cp) else true;
+        if (unsafe) @memset(text[i..][0..decoded.len], ' ');
+        i += decoded.len;
     }
 }
 
@@ -60,6 +55,15 @@ test "scrubControls turns bytes that aren't valid UTF-8 into spaces" {
     var text = "a\x9b2Jb\xe2\x1b[2J".*;
     scrubControls(&text);
     try std.testing.expectEqualStrings("a 2Jb  [2J", &text);
+}
+
+test "scrubControls turns a character cut off at the end into spaces" {
+    var four_byte = "a\xf0\x9f".*;
+    scrubControls(&four_byte);
+    try std.testing.expectEqualStrings("a  ", &four_byte);
+    var three_byte = "a\xe2".*;
+    scrubControls(&three_byte);
+    try std.testing.expectEqualStrings("a ", &three_byte);
 }
 
 test "scrubControls turns bidirectional text controls into spaces" {
