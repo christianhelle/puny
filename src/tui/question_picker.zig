@@ -36,6 +36,19 @@ pub fn toolResult(arena: std.mem.Allocator, answer: Answer) ![]const u8 {
     };
 }
 
+/// The answer as echoed under the question, cut to at most `max_bytes` so
+/// it never wraps: the indicator rewinds a counted number of rows.
+pub fn echoText(answer: Answer, max_bytes: usize) []const u8 {
+    const text = switch (answer) {
+        .picked, .typed => |t| t,
+        .cancelled => "cancelled",
+    };
+    if (text.len <= max_bytes) return text;
+    var end = max_bytes;
+    while (end > 0 and (text[end] & 0xC0) == 0x80) end -= 1;
+    return text[0..end];
+}
+
 test "answerItems lists the options, marks the recommended one and offers Other last" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -61,4 +74,12 @@ test "toolResult tells the model which answer the user gave" {
         "The user dismissed the choices and will answer in their next message. End your turn now.",
         try toolResult(arena, .cancelled),
     );
+}
+
+test "echoText shows the answer and fits it on one terminal row" {
+    try std.testing.expectEqualStrings("Postgres", echoText(.{ .picked = "Postgres" }, 80));
+    try std.testing.expectEqualStrings("use Duck", echoText(.{ .typed = "use DuckDB" }, 8));
+    try std.testing.expectEqualStrings("cancelled", echoText(.cancelled, 80));
+    // Never splits a multi-byte character.
+    try std.testing.expectEqualStrings("caf", echoText(.{ .typed = "café" }, 4));
 }
