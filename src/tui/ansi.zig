@@ -17,10 +17,17 @@ pub fn scrubControls(text: []u8) void {
     while (i < text.len) {
         const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
         const end = @min(i + seq_len, text.len);
-        const cp: ?u21 = std.unicode.utf8Decode(text[i..end]) catch null;
+        const cp = std.unicode.utf8Decode(text[i..end]) catch {
+            // A byte that starts no valid sequence: 8-bit terminals may read
+            // it as a C1 control. Step one byte so what follows still gets
+            // checked.
+            text[i] = ' ';
+            i += 1;
+            continue;
+        };
         // C0 controls and DEL, plus C1 controls, which some terminals read
         // as escape sequences (U+009B is CSI).
-        if (cp) |c| if (c < 0x20 or (c >= 0x7f and c <= 0x9f)) @memset(text[i..end], ' ');
+        if (cp < 0x20 or (cp >= 0x7f and cp <= 0x9f)) @memset(text[i..end], ' ');
         i = end;
     }
 }
@@ -36,6 +43,14 @@ test "scrubControls turns UTF-8 encoded C1 controls into spaces" {
     var text = "a\xc2\x9b2Jb\xc2\x85c é".*;
     scrubControls(&text);
     try std.testing.expectEqualStrings("a  2Jb  c é", &text);
+}
+
+test "scrubControls turns bytes that aren't valid UTF-8 into spaces" {
+    // A raw 0x9B is CSI on 8-bit terminals, and a cut-off sequence must not
+    // hide the escape that follows it.
+    var text = "a\x9b2Jb\xe2\x1b[2J".*;
+    scrubControls(&text);
+    try std.testing.expectEqualStrings("a 2Jb  [2J", &text);
 }
 
 test "ansi constants are well-formed escape sequences" {
