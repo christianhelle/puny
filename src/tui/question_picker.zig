@@ -61,9 +61,38 @@ const typed_prompt = "Your answer: ";
 pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: []const []const u8, recommended: ?[]const u8) !Answer {
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
+    return askOn(Console, arena, io, &stdout_file_writer.interface, question, options, recommended);
+}
 
-    if (!(std.Io.File.stdin().isTty(io) catch false)) {
+/// Terminal access behind `askOn`; tests substitute a fake.
+const Console = struct {
+    fn isTty(io: std.Io) bool {
+        return std.Io.File.stdin().isTty(io) catch false;
+    }
+
+    fn width() usize {
+        return terminal.terminalWidth() orelse 80;
+    }
+
+    fn select(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, title: []const u8, items: []const list_picker.Item) !?[]const u8 {
+        // The picker writes through its own stdout writer.
+        try stdout_writer.flush();
+        return list_picker.selectFromList(arena, io, title, items);
+    }
+
+    const readLine = input.readLineSimple;
+};
+
+fn askOn(
+    comptime C: type,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    question: []const u8,
+    options: []const []const u8,
+    recommended: ?[]const u8,
+) !Answer {
+    if (!C.isTty(io)) {
         // Still leave the one answer row the chat loop counts on.
         try stdout_writer.print("\n{s}↳ {s}{s}", .{ ansi.dim, echoText(.cancelled, 80), ansi.reset });
         try stdout_writer.flush();
@@ -75,12 +104,12 @@ pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: 
     const one_line_question = try std.mem.replaceOwned(u8, arena, question, "\n", " ");
     const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
     const items = try answerItems(arena, options, recommended);
-    const selected = try list_picker.selectFromList(arena, io, title, items);
+    const selected = try C.select(arena, io, stdout_writer, title, items);
 
-    const width = terminal.terminalWidth() orelse 80;
+    const width = C.width();
 
     const answer: Answer = if (selected) |value|
-        if (std.mem.eql(u8, value, other_value)) try readTypedAnswer(arena, io, stdout_writer, width) else .{ .picked = value }
+        if (std.mem.eql(u8, value, other_value)) try readTypedAnswer(C, arena, io, stdout_writer, width) else .{ .picked = value }
     else
         .cancelled;
 
@@ -95,13 +124,13 @@ pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: 
 
 /// Reads one line typed on the picker's last title row and returns the
 /// cursor to the start of that row. An empty line dismisses the question.
-fn readTypedAnswer(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, width: usize) !Answer {
+fn readTypedAnswer(comptime C: type, arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, width: usize) !Answer {
     try stdout_writer.print(terminal.clear_line ++ "{s}", .{typed_prompt});
     try stdout_writer.flush();
 
     var line: std.Io.Writer.Allocating = .init(arena);
     var stdin_buffer: [4096]u8 = undefined;
-    const submitted = try input.readLineSimple(arena, io, stdout_writer, &line, &stdin_buffer);
+    const submitted = try C.readLine(arena, io, stdout_writer, &line, &stdin_buffer);
 
     // The prompt and the text are on screen. Submitting also moved the
     // cursor below them; Esc left it on their last row.
