@@ -104,9 +104,13 @@ fn askOn(
         return .cancelled;
     }
 
-    // The picker draws in raw mode, where a bare newline doesn't return the
-    // carriage, so the question goes on one (possibly wrapping) line.
-    const one_line_question = try std.mem.replaceOwned(u8, arena, question, "\n", " ");
+    // Line breaks and other control characters would move the cursor in ways
+    // the row count can't follow, so the question goes on one (possibly
+    // wrapping) line.
+    const one_line_question = try arena.dupe(u8, question);
+    for (one_line_question) |*byte| {
+        if (std.ascii.isControl(byte.*)) byte.* = ' ';
+    }
     const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
     const items = try answerItems(arena, options, recommended);
     const selected = try C.select(arena, io, stdout_writer, title, items);
@@ -388,5 +392,19 @@ test "ask clears a question and a typed answer that wrap on a narrow terminal" {
     try std.testing.expectEqualStrings("a much longer answer than fits", asked.answer.typed);
     // The echo is cut to fit its row, leaving room for the "↳ " prefix.
     try std.testing.expectEqualStrings("🔧 Asking\n↳ a much longer answer than fi", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask clears a question that contains a carriage return" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.picked = "Postgres";
+
+    // 60 characters, CRLF, then 30 more: one row at 80 columns once the
+    // line break becomes spaces.
+    const question = "Which storage engine should the session history use for this" ++ "\r\n" ++ "when the user has no network?";
+    const asked = try askOnFakeScreen(arena_state.allocator(), question);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ Postgres", asked.text);
     try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
 }
