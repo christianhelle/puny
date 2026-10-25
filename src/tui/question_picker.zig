@@ -20,6 +20,21 @@ pub fn answerItems(arena: std.mem.Allocator, options: []const []const u8, recomm
     return items;
 }
 
+/// How the user responded to a multiple choice question.
+pub const Answer = union(enum) {
+    picked: []const u8,
+    typed: []const u8,
+    cancelled,
+};
+
+/// The ask_user tool result that reports `answer` back to the model.
+pub fn toolResult(arena: std.mem.Allocator, answer: Answer) ![]const u8 {
+    return switch (answer) {
+        .picked => |text| std.fmt.allocPrint(arena, "The user chose: {s}", .{text}),
+        .typed => |text| std.fmt.allocPrint(arena, "The user answered: {s}", .{text}),
+        .cancelled => "The user dismissed the choices and will answer in their next message. End your turn now.",
+    };
+}
 
 test "answerItems lists the options, marks the recommended one and offers Other last" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -33,4 +48,17 @@ test "answerItems lists the options, marks the recommended one and offers Other 
     try std.testing.expectEqualStrings("Postgres (recommended)", items[1].label);
     try std.testing.expectEqualStrings(other_value, items[2].value);
     try std.testing.expectEqualStrings("Other (type your own answer)", items[2].label);
+}
+
+test "toolResult tells the model which answer the user gave" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try std.testing.expectEqualStrings("The user chose: Postgres", try toolResult(arena, .{ .picked = "Postgres" }));
+    try std.testing.expectEqualStrings("The user answered: use DuckDB", try toolResult(arena, .{ .typed = "use DuckDB" }));
+    try std.testing.expectEqualStrings(
+        "The user dismissed the choices and will answer in their next message. End your turn now.",
+        try toolResult(arena, .cancelled),
+    );
 }
