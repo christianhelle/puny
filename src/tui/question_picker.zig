@@ -11,15 +11,28 @@ const line_editor = @import("input/line_editor.zig");
 /// options don't cover.
 pub const other_value = "\x00other";
 
+/// A copy of `text` with every control character turned into a space, so
+/// model-written text can't move the cursor or emit escape sequences: line
+/// breaks would throw off the row count, and escapes could overwrite the
+/// chat around the picker.
+fn oneLine(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
+    const copy = try arena.dupe(u8, text);
+    for (copy) |*byte| {
+        if (std.ascii.isControl(byte.*)) byte.* = ' ';
+    }
+    return copy;
+}
+
 /// Picker items for a multiple choice question: each option in the order
 /// given, the one matching `recommended` labelled as such, then "Other".
 pub fn answerItems(arena: std.mem.Allocator, options: []const []const u8, recommended: ?[]const u8) ![]const list_picker.Item {
     const items = try arena.alloc(list_picker.Item, options.len + 1);
     for (options, 0..) |option, i| {
         const is_recommended = if (recommended) |r| std.mem.eql(u8, r, option) else false;
+        const label = try oneLine(arena, option);
         items[i] = .{
             .value = option,
-            .label = if (is_recommended) try std.fmt.allocPrint(arena, "{s} (recommended)", .{option}) else option,
+            .label = if (is_recommended) try std.fmt.allocPrint(arena, "{s} (recommended)", .{label}) else label,
         };
     }
     items[options.len] = .{ .value = other_value, .label = "Other (type your own answer)" };
@@ -105,13 +118,8 @@ fn askOn(
         return .cancelled;
     }
 
-    // Line breaks and other control characters would move the cursor in ways
-    // the row count can't follow, so the question goes on one (possibly
-    // wrapping) line.
-    const one_line_question = try arena.dupe(u8, question);
-    for (one_line_question) |*byte| {
-        if (std.ascii.isControl(byte.*)) byte.* = ' ';
-    }
+    // The question goes on one (possibly wrapping) line.
+    const one_line_question = try oneLine(arena, question);
     const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
     const items = try answerItems(arena, options, recommended);
     const selected = try C.select(arena, io, stdout_writer, title, items);
@@ -202,6 +210,17 @@ test "answerItems lists the options, marks the recommended one and offers Other 
     try std.testing.expectEqualStrings("Postgres (recommended)", items[1].label);
     try std.testing.expectEqualStrings(other_value, items[2].value);
     try std.testing.expectEqualStrings("Other (type your own answer)", items[2].label);
+}
+
+test "answerItems turns control characters in the labels into spaces" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const items = try answerItems(arena_state.allocator(), &.{ "SQLite\x1b[2J", "Post\r\ngres" }, "Post\r\ngres");
+    try std.testing.expectEqualStrings("SQLite [2J", items[0].label);
+    try std.testing.expectEqualStrings("Post  gres (recommended)", items[1].label);
+    // The value still matches the option the model gave.
+    try std.testing.expectEqualStrings("SQLite\x1b[2J", items[0].value);
 }
 
 test "toolResult tells the model which answer the user gave" {
