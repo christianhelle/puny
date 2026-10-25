@@ -3,10 +3,18 @@ const ansi = @import("../tui/ansi.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");
 const question_picker = @import("../tui/question_picker.zig");
+const text_width = @import("../tui/markdown/width.zig");
 
 const max_value_length = 120;
 
 pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8 {
+    return renderToolCallFitting(allocator, tool_call, std.math.maxInt(usize));
+}
+
+/// Renders `tool_call` for a terminal `columns` wide. Lines the chat loop
+/// counts as one row, like ask_user's question, are cut to fit after the
+/// tool icon.
+pub fn renderToolCallFitting(allocator: std.mem.Allocator, tool_call: openai.ToolCall, columns: usize) ![]const u8 {
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(allocator);
 
@@ -20,7 +28,7 @@ pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) 
     };
     defer parsed.deinit();
 
-    if (!try renderKnown(&output, allocator, tool_call.function.name, parsed.value)) {
+    if (!try renderKnown(&output, allocator, tool_call.function.name, parsed.value, columns)) {
         try appendGeneric(&output, allocator, tool_call.function.name, parsed.value);
     }
     return output.toOwnedSlice(allocator);
@@ -59,6 +67,7 @@ fn renderKnown(
     allocator: std.mem.Allocator,
     name: []const u8,
     args: std.json.Value,
+    columns: usize,
 ) !bool {
     if (std.mem.eql(u8, name, "read_file")) {
         const path = getString(args, "path") orelse return false;
@@ -165,15 +174,12 @@ fn renderKnown(
         // The full question shows in the picker. Cut here so this line
         // stays one row: the indicator rewinds a counted number of rows.
         const question = getString(args, "question") orelse return false;
-        const max_question_bytes = 60;
-        try output.appendSlice(allocator, "Asking: ");
-        var end: usize = @min(question.len, max_question_bytes);
-        while (end < question.len and end > 0 and (question[end] & 0xC0) == 0x80) end -= 1;
-        // Line breaks and other control characters would start new rows.
-        for (question[0..end]) |byte| {
-            try output.append(allocator, if (std.ascii.isControl(byte)) ' ' else byte);
-        }
-        if (end < question.len) try output.appendSlice(allocator, "…");
+        const label = "Asking: ";
+        // "🔧 " comes before the line, and the ellipsis takes one cell.
+        const reserved_cells = 3 + label.len + 1;
+        const max_question_cells = 60;
+        try output.appendSlice(allocator, label);
+        try appendCut(output, allocator, question, @min(max_question_cells, columns -| reserved_cells));
         return true;
     }
 
@@ -185,6 +191,28 @@ fn renderKnown(
     }
 
     return false;
+}
+
+/// Appends `text` on one row: control characters, which would start new
+/// rows, become spaces, and text wider than `max_cells` display cells is cut
+/// with an ellipsis.
+fn appendCut(output: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8, max_cells: usize) !void {
+    var cells: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        const end = @min(i + seq_len, text.len);
+        const width = if (std.unicode.utf8Decode(text[i..end])) |cp| text_width.codePointWidth(cp) else |_| 1;
+        if (cells + width > max_cells) {
+            try output.appendSlice(allocator, "…");
+            return;
+        }
+        for (text[i..end]) |byte| {
+            try output.append(allocator, if (std.ascii.isControl(byte)) ' ' else byte);
+        }
+        cells += width;
+        i = end;
+    }
 }
 
 fn appendGeneric(
@@ -439,6 +467,23 @@ test "renders ask_user as the question, cut to fit one row" {
 
 test "renders an ask_user question with line breaks on one row" {
     try expectRendered("ask_user", "{\"question\":\"Which database?\\nPick one.\\r\\tThanks\"}", "Asking: Which database? Pick one.  Thanks");
+}
+
+fn expectRenderedFitting(arguments: []const u8, columns: usize, expected: []const u8) !void {
+    const rendered = try renderToolCallFitting(std.testing.allocator, makeToolCall("ask_user", arguments), columns);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings(expected, rendered);
+}
+
+test "renders an ask_user question cut to fit the terminal row after the tool icon" {
+    // 30 columns leave 18 cells for the question: 3 for "🔧 ", 8 for
+    // "Asking: " and 1 for the ellipsis.
+    try expectRenderedFitting("{\"question\":\"Which storage engine should we use?\"}", 30, "Asking: Which storage engi…");
+    try expectRenderedFitting("{\"question\":\"Which database?\"}", 30, "Asking: Which database?");
+}
+
+test "renders an ask_user question cut by display cells, not bytes" {
+    try expectRenderedFitting("{\"question\":\"数数数数数数数数数数数数\"}", 30, "Asking: 数数数数数数数数数…");
 }
 
 test "toolCallRows counts the answer row ask_user leaves under its line" {
