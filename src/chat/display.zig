@@ -200,20 +200,9 @@ fn appendCut(output: *std.ArrayList(u8), allocator: std.mem.Allocator, untrusted
     const text = try allocator.dupe(u8, untrusted);
     defer allocator.free(text);
     ansi.scrubControls(text);
-    var cells: usize = 0;
-    var i: usize = 0;
-    while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const end = @min(i + seq_len, text.len);
-        const width = if (std.unicode.utf8Decode(text[i..end])) |cp| text_width.codePointWidth(cp) else |_| 1;
-        if (cells + width > max_cells) {
-            try output.appendSlice(allocator, "…");
-            return;
-        }
-        try output.appendSlice(allocator, text[i..end]);
-        cells += width;
-        i = end;
-    }
+    const fitting = text_width.prefixFitting(text, max_cells);
+    try output.appendSlice(allocator, fitting);
+    if (fitting.len < text.len) try output.appendSlice(allocator, "…");
 }
 
 fn appendGeneric(
