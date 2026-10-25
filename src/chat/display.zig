@@ -459,6 +459,11 @@ test "renders an ask_user question with line breaks on one row" {
     try expectRendered("ask_user", "{\"question\":\"Which database?\\nPick one.\\r\\tThanks\"}", "Asking: Which database? Pick one.  Thanks");
 }
 
+test "renders an ask_user question with escape sequences as spaces" {
+    // ESC and the C1 CSI (U+009B), as the model's JSON would encode them.
+    try expectRendered("ask_user", "{\"question\":\"a\\u001b[2Jb\\u009b2Jc\"}", "Asking: a [2Jb  2Jc");
+}
+
 fn expectRenderedFitting(arguments: []const u8, columns: usize, expected: []const u8) !void {
     const rendered = try renderToolCallFitting(std.testing.allocator, makeToolCall("ask_user", arguments), columns);
     defer std.testing.allocator.free(rendered);
