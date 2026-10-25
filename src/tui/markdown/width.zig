@@ -204,14 +204,9 @@ pub fn ansiVisibleWidth(text: []const u8) usize {
             }
             continue;
         }
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch {
-            i += seq_len;
-            width += 1;
-            continue;
-        };
-        width += codePointWidth(cp);
-        i += seq_len;
+        const decoded = decodeAt(text, i);
+        width += if (decoded.cp) |cp| codePointWidth(cp) else 1;
+        i += decoded.len;
     }
     return width;
 }
@@ -285,6 +280,11 @@ test "displayWidth counts invalid UTF-8 bytes as one column each" {
 test "displayWidth counts a character cut off at the end as one column" {
     try std.testing.expectEqual(@as(usize, 2), displayWidth("a\xe2"));
     try std.testing.expectEqual(@as(usize, 2), displayWidth("a\xf0\x9f"));
+}
+
+test "ansiVisibleWidth counts a character cut off at the end as one column" {
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("a\xe2"));
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("\x1b[2ma\xf0\x9f"));
 }
 
 test "ansiVisibleWidth ignores dangling and truncated escapes" {
