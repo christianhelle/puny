@@ -181,6 +181,18 @@ pub fn selectFromList(
     title: []const u8,
     items: []const Item,
 ) !?[]const u8 {
+    return selectFromListUnder(arena, io, title, 1, items);
+}
+
+/// `selectFromList` for a title that takes `title_rows` terminal rows, so
+/// the list is sized to keep the whole title on screen.
+pub fn selectFromListUnder(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    title: []const u8,
+    title_rows: usize,
+    items: []const Item,
+) !?[]const u8 {
     if (items.len == 0) return null;
 
     cancel.setRawMode(true) catch {
@@ -196,7 +208,7 @@ pub fn selectFromList(
 
     var selected: usize = 0;
 
-    const available_rows = if (terminal.terminalHeight()) |height| usableRows(height) else default_available_rows;
+    const available_rows = if (terminal.terminalHeight()) |height| usableRowsUnder(height, title_rows) else default_available_rows;
     const terminal_width = terminal.terminalWidth() orelse default_terminal_width;
     const column_width = computeColumnWidth(items);
     const grid = computeGrid(items.len, available_rows, terminal_width, column_width);
