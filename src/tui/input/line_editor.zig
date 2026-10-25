@@ -27,9 +27,12 @@ pub const LineEditor = struct {
     /// When false, `@` is inserted literally instead of opening the file
     /// picker, for plain prompts such as a URL or an API key.
     mentions_enabled: bool = true,
-    /// False for plain prompts such as a URL or an API key, which have no
-    /// prompt text in front of the input.
-    shows_prompt: bool = true,
+    /// Text in front of the input, redrawn with it. Empty for plain prompts
+    /// such as a URL or an API key.
+    prompt: []const u8,
+
+    /// The chat prompt's text in front of the input.
+    pub const chat_prompt = prompts.prompt_text ++ " ";
 
     pub fn init(
         line_alloc: *std.Io.Writer.Allocating,
@@ -37,9 +40,21 @@ pub const LineEditor = struct {
         history: ?*prompt_history.History,
         width: ?usize,
     ) LineEditor {
+        return initWithPrompt(line_alloc, stdout_writer, history, width, chat_prompt);
+    }
+
+    /// An editor whose input follows `prompt`, which the caller has already
+    /// printed on the cursor's row.
+    pub fn initWithPrompt(
+        line_alloc: *std.Io.Writer.Allocating,
+        stdout_writer: *std.Io.Writer,
+        history: ?*prompt_history.History,
+        width: ?usize,
+        prompt: []const u8,
+    ) LineEditor {
         // Terminals narrower than the prompt column cannot host a redraw
         // cursor model; fall back to legacy echo like an unknown width.
-        const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
+        const start_col = markdown.displayWidth(prompt);
         const usable_width = if (width) |w| if (w < start_col) null else w else null;
         return .{
             .line_alloc = line_alloc,
@@ -47,6 +62,7 @@ pub const LineEditor = struct {
             .history = history,
             .width = usable_width,
             .cursor_rows = 1,
+            .prompt = prompt,
         };
     }
 
@@ -256,7 +272,7 @@ pub const LineEditor = struct {
         if (self.width == null) {
             try self.stdout_writer.writeAll(terminal.move_to_line_start);
             try self.stdout_writer.writeAll(terminal.clear_to_end_of_line);
-            try self.stdout_writer.print("{s} {s}", .{ prompts.prompt_text, text });
+            try self.stdout_writer.print("{s}{s}", .{ self.prompt, text });
             try self.stdout_writer.flush();
             return;
         }
@@ -268,7 +284,7 @@ pub const LineEditor = struct {
     /// (like the file picker) clears the whole wrapped prompt.
     pub fn parkAtInputEnd(self: *LineEditor) !void {
         const width = self.width orelse return;
-        const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
+        const start_col = markdown.displayWidth(self.prompt);
         const info = rowsNeeded(start_col, width, self.line_alloc.written());
         const end_rows = info.rows + @intFromBool(info.ends_at_edge);
         if (end_rows <= self.cursor_rows) return;
@@ -293,7 +309,7 @@ pub const LineEditor = struct {
             return self.redraw();
         }
         const text = self.line_alloc.written();
-        if (self.shows_prompt) try self.stdout_writer.print("{s} ", .{prompts.prompt_text});
+        try self.stdout_writer.writeAll(self.prompt);
         try self.stdout_writer.writeAll(text);
         const tail_width = textWidth(text[self.cursor..]);
         if (tail_width > 0) try self.stdout_writer.print(terminal.cursor_left, .{tail_width});
@@ -310,11 +326,11 @@ pub const LineEditor = struct {
             try self.stdout_writer.print(terminal.cursor_up, .{self.cursor_rows - 1});
         }
         try self.stdout_writer.writeAll(terminal.erase_display);
-        try self.stdout_writer.print("{s} ", .{prompts.prompt_text});
+        try self.stdout_writer.writeAll(self.prompt);
         try writeMentionHighlighted(self.stdout_writer, self.line_alloc.written());
 
         const text = self.line_alloc.written();
-        const start_col = markdown.displayWidth(prompts.prompt_text) + 1;
+        const start_col = markdown.displayWidth(self.prompt);
         const info = rowsNeeded(start_col, width, text);
         if (info.ends_at_edge) {
             // Force the auto-wrap with a space so the cursor never rests in
@@ -601,6 +617,24 @@ test "editor backspace keeps deleting across the wrap boundary" {
 
     try std.testing.expectEqualStrings("abcdefg", line_alloc.written());
     try std.testing.expectEqualStrings("\r\x1b[1A\x1b[J> abcdefg", out.written());
+}
+
+test "editor with its own prompt redraws it when backspacing back onto one row" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+
+    // "Your answer: " takes 13 of 20 columns, so 8 characters wrap.
+    var editor = LineEditor.initWithPrompt(&line_alloc, &out.writer, null, 20, "Your answer: ");
+    for ("abcdefgh") |ch| try editor.append(ch);
+    try editor.backspace();
+    out.clearRetainingCapacity();
+    try editor.backspace();
+
+    try std.testing.expectEqualStrings("abcdef", line_alloc.written());
+    try std.testing.expectEqualStrings("\r\x1b[1A\x1b[JYour answer: abcdef", out.written());
 }
 
 test "editor backspace is a no-op on an empty buffer" {

@@ -15,6 +15,7 @@ fail
 read
 search
 shell
+choice
 review
 table
 markdown

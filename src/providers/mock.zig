@@ -43,6 +43,8 @@ pub const MockKeyword = enum {
     search,
     /// Trigger a tool call for shell execution.
     shell,
+    /// Ask a multiple choice question with the ask_user tool.
+    choice,
     /// Save a deterministic merge-worthy branch review.
     review,
     /// Generate a markdown table with realistic data.
@@ -53,6 +55,10 @@ pub const MockKeyword = enum {
     /// verify --show-thinking rendering.
     reasoning,
 };
+
+/// Id of the mock's ask_user call, so its result can be told apart from
+/// other tool results.
+const choice_call_id = "mock_choice_call";
 
 pub const MockClient = struct {
     allocator: std.mem.Allocator,
@@ -148,6 +154,10 @@ pub const MockClient = struct {
         // If the last message is a tool result, respond with a plain completion
         // to avoid re-triggering tool call keywords from the original user message.
         if (isToolResultMessage(request.messages)) {
+            const result = request.messages[request.messages.len - 1].tool;
+            if (std.mem.eql(u8, result.tool_call_id, choice_call_id)) {
+                return respondWithAnswer(callback, result.content);
+            }
             return respondWithCompletion(callback);
         }
 
@@ -162,6 +172,16 @@ pub const MockClient = struct {
             try callback.emit(.{ .tool_call_delta = .{
                 .index = 0,
                 .arguments = "{\"analysis_markdown\":\"## Change Summary\\nMock branch changes reviewed.\\n\\n## Quality and Regression Assessment\\nNo degradation or regression found.\\n\\n## Validation Performed\\nMock validation completed.\\n\\n## Findings\\nNo material findings.\",\"conclusion\":\"The mock branch is safe to merge.\",\"evidence_complete\":true,\"merge_worthy\":true}",
+            } });
+            try callback.emit(.{ .finish = "tool_calls" });
+            return;
+        }
+
+        if (isKeyword(last_content, .choice)) {
+            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = choice_call_id, .name = "ask_user" } });
+            try callback.emit(.{ .tool_call_delta = .{
+                .index = 0,
+                .arguments = "{\"question\":\"Which database should the app use?\",\"options\":[\"SQLite\",\"Postgres\",\"DuckDB\"],\"recommended\":\"Postgres\"}",
             } });
             try callback.emit(.{ .finish = "tool_calls" });
             return;
@@ -316,6 +336,7 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .read => "read",
         .search => "search",
         .shell => "shell",
+        .choice => "choice",
         .review => "review",
         .table => "table",
         .markdown => "markdown",
@@ -619,6 +640,13 @@ fn respondWithMarkdown(callback: openai.StreamCallback, speed: MockSpeed, io: st
 fn respondWithCompletion(callback: openai.StreamCallback) !void {
     try callback.emit(.{ .content = "Tool executed successfully. Here's the result:\n\n" });
     try callback.emit(.{ .content = "The operation completed. I'm running in mock mode, so the result is simulated.\n" });
+    try callback.emit(.{ .finish = "stop" });
+}
+
+fn respondWithAnswer(callback: openai.StreamCallback, answer: []const u8) !void {
+    try callback.emit(.{ .content = "Got your answer. " });
+    try callback.emit(.{ .content = answer });
+    try callback.emit(.{ .content = "\n" });
     try callback.emit(.{ .finish = "stop" });
 }
 
@@ -950,6 +978,58 @@ test "chatStreaming emits tool call events in read mode" {
         else => return error.ExpectedToolCallStart,
     }
     try expectFinish(rec.events.items, "tool_calls");
+}
+
+test "chatStreaming asks a multiple choice question in choice mode" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "give me a choice" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 1), countTag(rec.events.items, .tool_call_start));
+    try std.testing.expectEqualStrings("ask_user", rec.events.items[0].tool_call_start.name);
+    var arguments: std.ArrayList(u8) = .empty;
+    for (rec.events.items) |ev| switch (ev) {
+        .tool_call_delta => |d| try arguments.appendSlice(arena_state.allocator(), d.arguments),
+        else => {},
+    };
+    const Args = struct { question: []const u8, options: []const []const u8, recommended: []const u8 };
+    const args = try std.json.parseFromSliceLeaky(Args, arena_state.allocator(), arguments.items, .{});
+    try std.testing.expectEqualStrings("Which database should the app use?", args.question);
+    try std.testing.expectEqual(@as(usize, 3), args.options.len);
+    try std.testing.expectEqualStrings("Postgres", args.recommended);
+    try expectFinish(rec.events.items, "tool_calls");
+}
+
+test "chatStreaming repeats the user's answer after a choice" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{
+            .{ .user = "give me a choice" },
+            .{ .tool = .{ .tool_call_id = "mock_choice_call", .content = "The user chose: Postgres" } },
+        },
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "The user chose: Postgres") != null);
+    try expectFinish(rec.events.items, "stop");
 }
 
 test "chatStreaming responds with a completion after a tool result" {

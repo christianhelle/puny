@@ -2,10 +2,19 @@ const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");
+const question_picker = @import("../tui/question_picker.zig");
+const text_width = @import("../tui/markdown/width.zig");
 
 const max_value_length = 120;
 
 pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) ![]const u8 {
+    return renderToolCallFitting(allocator, tool_call, std.math.maxInt(usize));
+}
+
+/// Renders `tool_call` for a terminal `columns` wide. Lines the chat loop
+/// counts as one row, like ask_user's question, are cut to fit after the
+/// tool icon.
+pub fn renderToolCallFitting(allocator: std.mem.Allocator, tool_call: openai.ToolCall, columns: usize) ![]const u8 {
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(allocator);
 
@@ -19,10 +28,18 @@ pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) 
     };
     defer parsed.deinit();
 
-    if (!try renderKnown(&output, allocator, tool_call.function.name, parsed.value)) {
+    if (!try renderKnown(&output, allocator, tool_call.function.name, parsed.value, columns)) {
         try appendGeneric(&output, allocator, tool_call.function.name, parsed.value);
     }
     return output.toOwnedSlice(allocator);
+}
+
+/// Terminal rows a tool call leaves on screen: its own line, plus the
+/// `↳ answer` row ask_user prints below it when it ran and got an answer.
+/// An ask_user call that failed before reaching the picker prints no row.
+pub fn toolCallRows(name: []const u8, result: []const u8) usize {
+    const answered = std.mem.eql(u8, name, "ask_user") and question_picker.isAnswerResult(result);
+    return if (answered) 2 else 1;
 }
 
 /// Prints the conversation history, prefixing user messages with the prompt
@@ -50,6 +67,7 @@ fn renderKnown(
     allocator: std.mem.Allocator,
     name: []const u8,
     args: std.json.Value,
+    columns: usize,
 ) !bool {
     if (std.mem.eql(u8, name, "read_file")) {
         const path = getString(args, "path") orelse return false;
@@ -152,6 +170,19 @@ fn renderKnown(
         return true;
     }
 
+    if (std.mem.eql(u8, name, "ask_user")) {
+        // The full question shows in the picker. Cut here so this line
+        // stays one row: the indicator rewinds a counted number of rows.
+        const question = getString(args, "question") orelse return false;
+        const label = "Asking: ";
+        // "🔧 " comes before the line, and the ellipsis takes one cell.
+        const reserved_cells = 3 + label.len + 1;
+        const max_question_cells = 60;
+        try output.appendSlice(allocator, label);
+        try appendCut(output, allocator, question, @min(max_question_cells, columns -| reserved_cells));
+        return true;
+    }
+
     if (std.mem.eql(u8, name, "load_skill")) {
         const skill_name = getString(args, "skill_name") orelse return false;
         try output.appendSlice(allocator, "Loading skill ");
@@ -160,6 +191,18 @@ fn renderKnown(
     }
 
     return false;
+}
+
+/// Appends `text` on one row: control characters, which would start new
+/// rows, become spaces, and text wider than `max_cells` display cells is cut
+/// with an ellipsis.
+fn appendCut(output: *std.ArrayList(u8), allocator: std.mem.Allocator, untrusted: []const u8, max_cells: usize) !void {
+    const text = try allocator.dupe(u8, untrusted);
+    defer allocator.free(text);
+    ansi.scrubControls(text);
+    const fitting = text_width.prefixFitting(text, max_cells);
+    try output.appendSlice(allocator, fitting);
+    if (fitting.len < text.len) try output.appendSlice(allocator, "…");
 }
 
 fn appendGeneric(
@@ -401,6 +444,55 @@ test "renders remaining tool call variants" {
     try expectRendered("execute_shell", "{\"command\":\"zig test\"}", "Running \"zig test\"");
     try expectRendered("list_directory", "{\"path\":\"src\"}", "Listing \"src\"");
     try expectRendered("write_file", "{\"path\":\"a.txt\"}", "Calling \"write_file\" with path=\"a.txt\"");
+}
+
+test "renders ask_user as the question, cut to fit one row" {
+    try expectRendered("ask_user", "{\"question\":\"Which database?\",\"options\":[\"a\",\"b\"]}", "Asking: Which database?");
+    try expectRendered(
+        "ask_user",
+        "{\"question\":\"Which storage engine should the session history use when the user has no network?\"}",
+        "Asking: Which storage engine should the session history use when the…",
+    );
+}
+
+test "renders an ask_user question with line breaks on one row" {
+    try expectRendered("ask_user", "{\"question\":\"Which database?\\nPick one.\\r\\tThanks\"}", "Asking: Which database? Pick one.  Thanks");
+}
+
+test "renders an ask_user question with escape sequences as spaces" {
+    // ESC and the C1 CSI (U+009B), as the model's JSON would encode them.
+    try expectRendered("ask_user", "{\"question\":\"a\\u001b[2Jb\\u009b2Jc\"}", "Asking: a [2Jb  2Jc");
+}
+
+fn expectRenderedFitting(arguments: []const u8, columns: usize, expected: []const u8) !void {
+    const rendered = try renderToolCallFitting(std.testing.allocator, makeToolCall("ask_user", arguments), columns);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings(expected, rendered);
+}
+
+test "renders an ask_user question cut to fit the terminal row after the tool icon" {
+    // 30 columns leave 18 cells for the question: 3 for "🔧 ", 8 for
+    // "Asking: " and 1 for the ellipsis.
+    try expectRenderedFitting("{\"question\":\"Which storage engine should we use?\"}", 30, "Asking: Which storage engi…");
+    try expectRenderedFitting("{\"question\":\"Which database?\"}", 30, "Asking: Which database?");
+}
+
+test "renders an ask_user question cut by display cells, not bytes" {
+    try expectRenderedFitting("{\"question\":\"数数数数数数数数数数数数\"}", 30, "Asking: 数数数数数数数数数…");
+}
+
+test "toolCallRows counts the answer row ask_user leaves under its line" {
+    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user", "The user chose: Postgres"));
+    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user", "The user answered: DuckDB"));
+    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user", "The user dismissed the choices and will answer in their next message. End your turn now."));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("read_file", "file contents"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("save_prd", "PRD saved"));
+}
+
+test "toolCallRows counts no answer row when ask_user never reached the picker" {
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("ask_user", "Tool ask_user failed: invalid arguments: error.SyntaxError"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("ask_user", "Tool ask_user failed: error.MissingField"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("ask_user", "Unknown tool: ask_user"));
 }
 
 test "renderKnown falls back to generic for unknown args shapes" {

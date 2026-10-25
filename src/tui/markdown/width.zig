@@ -157,6 +157,22 @@ pub fn displayWidth(text: []const u8) usize {
     return width;
 }
 
+/// The longest prefix of `text` that takes at most `max_cells` display
+/// cells. Invalid UTF-8 bytes count as one cell each.
+pub fn prefixFitting(text: []const u8, max_cells: usize) []const u8 {
+    var cells: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        const end = @min(i + seq_len, text.len);
+        const width = if (std.unicode.utf8Decode(text[i..end])) |cp| codePointWidth(cp) else |_| 1;
+        if (cells + width > max_cells) break;
+        cells += width;
+        i = end;
+    }
+    return text[0..i];
+}
+
 /// Visible display width of a rendered line, ignoring ANSI escape sequences.
 /// CSI sequences are skipped to their final byte (0x40-0x7E), so escape
 /// sequences like cursor movement cannot consume the remaining text.
@@ -215,6 +231,17 @@ test "codePointWidth classifies zero-width and wide code points" {
     try std.testing.expectEqual(@as(usize, 2), codePointWidth(0xFF01)); // fullwidth
     try std.testing.expectEqual(@as(usize, 1), codePointWidth('a'));
     try std.testing.expectEqual(@as(usize, 1), codePointWidth(0x00E9)); // é
+}
+
+test "prefixFitting keeps the longest prefix that fits the cells" {
+    try std.testing.expectEqualStrings("Which", prefixFitting("Which database?", 5));
+    try std.testing.expectEqualStrings("Which database?", prefixFitting("Which database?", 80));
+    // A wide character that doesn't fit whole is left out.
+    try std.testing.expectEqualStrings("数数", prefixFitting("数数数", 5));
+    // Combining marks stay with the character they follow.
+    try std.testing.expectEqualStrings("e\u{301}", prefixFitting("e\u{301}x", 1));
+    // Never splits a cut-off sequence or reads past the end.
+    try std.testing.expectEqualStrings("a\xe2", prefixFitting("a\xe2", 2));
 }
 
 test "displayWidth treats combining marks as zero-width" {

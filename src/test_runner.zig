@@ -78,6 +78,10 @@ test "include prompt file tests" {
 test "include prompt history tests" {
     _ = @import("prompts/history.zig");
 }
+
+test "include prompts tests" {
+    _ = @import("prompts/prompts.zig");
+}
 test "include agents.instructions tests" {
     _ = @import("agents/instructions.zig");
 }
@@ -199,6 +203,9 @@ test "include skills.skills tests" {
     _ = @import("skills/triggers.zig");
     _ = @import("skills/skills.zig");
 }
+test "include tools.ask_user tests" {
+    _ = @import("tools/ask_user.zig");
+}
 test "include tools.filesystem tests" {
     _ = @import("tools/filesystem.zig");
 }
@@ -231,6 +238,9 @@ test "include tui.context_tier_picker tests" {
 }
 test "include tui.effort_picker tests" {
     _ = @import("tui/effort_picker.zig");
+}
+test "include tui.question_picker tests" {
+    _ = @import("tui/question_picker.zig");
 }
 test "include tui.file_picker tests" {
     _ = @import("tui/file_picker.zig");

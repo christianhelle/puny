@@ -3,6 +3,7 @@ const ansi = @import("../tui/ansi.zig");
 const chat_retry = @import("retry.zig");
 const stats = @import("stats.zig");
 const indicator = @import("../tui/indicator.zig");
+const terminal = @import("../tui/terminal.zig");
 const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const tools = @import("../tools/root.zig");
@@ -168,8 +169,8 @@ pub fn runTurnWithMode(
         for (assistant_content.tool_calls.?) |tc| {
             try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
-            tool_output_lines += 1;
             const result = try executeTool(arena, io, tc, mode);
+            tool_output_lines += tool_display.toolCallRows(tc.function.name, result);
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
                 log.print("[TOOL_CALL]\n{s}\n{s}\n\n", .{ tc.function.name, tc.function.arguments }) catch {};
@@ -205,7 +206,8 @@ fn printToolCall(
     stdout_writer: *std.Io.Writer,
     tool_call: openai.ToolCall,
 ) !void {
-    const rendered_tool_call = try tool_display.renderToolCall(arena, tool_call);
+    const columns = terminal.terminalWidth() orelse std.math.maxInt(usize);
+    const rendered_tool_call = try tool_display.renderToolCallFitting(arena, tool_call, columns);
     try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
 }
 
@@ -713,7 +715,6 @@ test "effectiveEffort leaves the level unset when nothing asks for reasoning" {
 test "agent loop output never leaves consecutive blank lines" {
     const mock = @import("../providers/mock.zig");
     const token_stats = @import("../tui/token_stats.zig");
-    const terminal = @import("../tui/terminal.zig");
     const FakeScreen = @import("../tui/fake_screen.zig").FakeScreen;
     var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
     defer prov.deinit();
