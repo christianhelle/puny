@@ -25,6 +25,12 @@ pub fn renderToolCall(allocator: std.mem.Allocator, tool_call: openai.ToolCall) 
     return output.toOwnedSlice(allocator);
 }
 
+/// Terminal rows a tool call leaves on screen: its own line, plus the
+/// `↳ answer` row ask_user prints below it once the user has answered.
+pub fn toolCallRows(name: []const u8) usize {
+    return if (std.mem.eql(u8, name, "ask_user")) 2 else 1;
+}
+
 /// Prints the conversation history, prefixing user messages with the prompt
 /// marker and skipping system/tool messages. Shared by the restore flow and
 /// the one-shot startup path.
@@ -427,6 +433,12 @@ test "renders ask_user as the question, cut to fit one row" {
         "{\"question\":\"Which storage engine should the session history use when the user has no network?\"}",
         "Asking: Which storage engine should the session history use when the…",
     );
+}
+
+test "toolCallRows counts the answer row ask_user leaves under its line" {
+    try std.testing.expectEqual(@as(usize, 2), toolCallRows("ask_user"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("read_file"));
+    try std.testing.expectEqual(@as(usize, 1), toolCallRows("save_prd"));
 }
 
 test "renderKnown falls back to generic for unknown args shapes" {

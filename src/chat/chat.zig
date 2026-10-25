@@ -168,7 +168,7 @@ pub fn runTurnWithMode(
         for (assistant_content.tool_calls.?) |tc| {
             try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
-            tool_output_lines += 1;
+            tool_output_lines += tool_display.toolCallRows(tc.function.name);
             const result = try executeTool(arena, io, tc, mode);
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
