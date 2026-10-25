@@ -152,6 +152,23 @@ fn renderKnown(
         return true;
     }
 
+    if (std.mem.eql(u8, name, "ask_user")) {
+        // The full question shows in the picker. Cut here so this line
+        // stays one row: the indicator rewinds a counted number of rows.
+        const question = getString(args, "question") orelse return false;
+        const max_question_bytes = 60;
+        try output.appendSlice(allocator, "Asking: ");
+        if (question.len <= max_question_bytes) {
+            try output.appendSlice(allocator, question);
+        } else {
+            var end: usize = max_question_bytes;
+            while (end > 0 and (question[end] & 0xC0) == 0x80) end -= 1;
+            try output.appendSlice(allocator, question[0..end]);
+            try output.appendSlice(allocator, "…");
+        }
+        return true;
+    }
+
     if (std.mem.eql(u8, name, "load_skill")) {
         const skill_name = getString(args, "skill_name") orelse return false;
         try output.appendSlice(allocator, "Loading skill ");
@@ -401,6 +418,15 @@ test "renders remaining tool call variants" {
     try expectRendered("execute_shell", "{\"command\":\"zig test\"}", "Running \"zig test\"");
     try expectRendered("list_directory", "{\"path\":\"src\"}", "Listing \"src\"");
     try expectRendered("write_file", "{\"path\":\"a.txt\"}", "Calling \"write_file\" with path=\"a.txt\"");
+}
+
+test "renders ask_user as the question, cut to fit one row" {
+    try expectRendered("ask_user", "{\"question\":\"Which database?\",\"options\":[\"a\",\"b\"]}", "Asking: Which database?");
+    try expectRendered(
+        "ask_user",
+        "{\"question\":\"Which storage engine should the session history use when the user has no network?\"}",
+        "Asking: Which storage engine should the session history use when the…",
+    );
 }
 
 test "renderKnown falls back to generic for unknown args shapes" {
