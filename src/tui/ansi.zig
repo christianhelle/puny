@@ -9,6 +9,21 @@ pub const cyan = "\x1b[36m";
 pub const bold_start = "\x1b[1m";
 pub const bold_end = "\x1b[22m";
 
+/// Turns every control character in `text` into a space, in place, so
+/// untrusted text (anything the model wrote) can't move the cursor or send
+/// escape sequences to the terminal. The length never changes.
+pub fn scrubControls(text: []u8) void {
+    for (text) |*byte| {
+        if (std.ascii.isControl(byte.*)) byte.* = ' ';
+    }
+}
+
+test "scrubControls turns control characters into spaces" {
+    var text = "a\x1b[2Jb\r\nc\td\x7f".*;
+    scrubControls(&text);
+    try std.testing.expectEqualStrings("a [2Jb  c d ", &text);
+}
+
 test "ansi constants are well-formed escape sequences" {
     try std.testing.expectEqualStrings("\x1b[0m", reset);
     try std.testing.expectEqualStrings("\x1b[2m", dim);

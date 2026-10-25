@@ -17,9 +17,7 @@ pub const other_value = "\x00other";
 /// chat around the picker.
 fn oneLine(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
     const copy = try arena.dupe(u8, text);
-    for (copy) |*byte| {
-        if (std.ascii.isControl(byte.*)) byte.* = ' ';
-    }
+    ansi.scrubControls(copy);
     return copy;
 }
 

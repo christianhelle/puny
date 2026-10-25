@@ -196,7 +196,10 @@ fn renderKnown(
 /// Appends `text` on one row: control characters, which would start new
 /// rows, become spaces, and text wider than `max_cells` display cells is cut
 /// with an ellipsis.
-fn appendCut(output: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8, max_cells: usize) !void {
+fn appendCut(output: *std.ArrayList(u8), allocator: std.mem.Allocator, untrusted: []const u8, max_cells: usize) !void {
+    const text = try allocator.dupe(u8, untrusted);
+    defer allocator.free(text);
+    ansi.scrubControls(text);
     var cells: usize = 0;
     var i: usize = 0;
     while (i < text.len) {
@@ -207,9 +210,7 @@ fn appendCut(output: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []c
             try output.appendSlice(allocator, "…");
             return;
         }
-        for (text[i..end]) |byte| {
-            try output.append(allocator, if (std.ascii.isControl(byte)) ' ' else byte);
-        }
+        try output.appendSlice(allocator, text[i..end]);
         cells += width;
         i = end;
     }
