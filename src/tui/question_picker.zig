@@ -45,7 +45,16 @@ const typed_prompt = "Your answer: ";
 /// own answer, then replaces the picker with one `↳ answer` row under the
 /// tool call line. Without a terminal to ask on, reports it as dismissed.
 pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: []const []const u8, recommended: ?[]const u8) !Answer {
-    if (!(std.Io.File.stdin().isTty(io) catch false)) return .cancelled;
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    const stdout_writer = &stdout_file_writer.interface;
+
+    if (!(std.Io.File.stdin().isTty(io) catch false)) {
+        // Still leave the one answer row the chat loop counts on.
+        try stdout_writer.print("\n{s}↳ {s}{s}", .{ ansi.dim, echoText(.cancelled, 80), ansi.reset });
+        try stdout_writer.flush();
+        return .cancelled;
+    }
 
     // The picker draws in raw mode, where a bare newline doesn't return the
     // carriage, so the question goes on one (possibly wrapping) line.
@@ -54,9 +63,6 @@ pub fn ask(arena: std.mem.Allocator, io: std.Io, question: []const u8, options: 
     const items = try answerItems(arena, options, recommended);
     const selected = try list_picker.selectFromList(arena, io, title, items);
 
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
     const width = terminal.terminalWidth() orelse 80;
 
     const answer: Answer = if (selected) |value|
