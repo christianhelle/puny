@@ -139,18 +139,36 @@ pub const Decoded = struct { len: usize, cp: ?u21 };
 
 /// Decodes the character starting at `text[i]` without reading past the
 /// end of `text`. A character cut off at the end, or by a byte that doesn't
-/// continue it, takes the bytes it has, which terminals draw as one
-/// replacement character. Any other invalid byte takes one byte.
+/// continue it, takes the bytes it has when they could start a valid
+/// character; terminals draw those as one replacement character. Any other
+/// invalid byte takes one byte.
 pub fn decodeAt(text: []const u8, i: usize) Decoded {
-    const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch return .{ .len = 1, .cp = null };
-    if (seq_len == 1) return .{ .len = 1, .cp = text[i] };
+    const lead = text[i];
+    const seq_len = std.unicode.utf8ByteSequenceLength(lead) catch return .{ .len = 1, .cp = null };
+    if (seq_len == 1) return .{ .len = 1, .cp = lead };
     var have: usize = 1;
-    while (have < seq_len and i + have < text.len and text[i + have] & 0xc0 == 0x80) have += 1;
+    while (have < seq_len and i + have < text.len and continues(lead, have, text[i + have])) have += 1;
     if (have < seq_len) return .{ .len = have, .cp = null };
     // utf8Decode picks its decoder by slice length, so it gets exactly the
     // bytes the lead byte announces.
     const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch return .{ .len = 1, .cp = null };
     return .{ .len = seq_len, .cp = cp };
+}
+
+/// Whether `byte` can follow at `position` (1 or later) in a character that
+/// starts with `lead`. The second byte's range depends on the lead byte, so
+/// overlong forms, surrogates and code points past U+10FFFF never start a
+/// group (Unicode Table 3-7). C0, C1 and F5..FF start no valid character.
+fn continues(lead: u8, position: usize, byte: u8) bool {
+    if (position > 1) return byte >= 0x80 and byte <= 0xbf;
+    return switch (lead) {
+        0xc2...0xdf, 0xe1...0xec, 0xee...0xef, 0xf1...0xf3 => byte >= 0x80 and byte <= 0xbf,
+        0xe0 => byte >= 0xa0 and byte <= 0xbf,
+        0xed => byte >= 0x80 and byte <= 0x9f,
+        0xf0 => byte >= 0x90 and byte <= 0xbf,
+        0xf4 => byte >= 0x80 and byte <= 0x8f,
+        else => false,
+    };
 }
 
 /// Display width of a single code point: 0 for combining/format marks, 2 for
@@ -221,6 +239,26 @@ test "decodeAt reads one character, or marks bytes that aren't one" {
     // A stray continuation byte, and an overlong encoding of '/'.
     try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\x9b", 0));
     try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xc0\xaf", 0));
+}
+
+test "decodeAt groups only bytes that could start a valid character" {
+    // Cut-off prefixes that a valid character could start with.
+    try std.testing.expectEqual(Decoded{ .len = 2, .cp = null }, decodeAt("\xe0\xa0", 0));
+    try std.testing.expectEqual(Decoded{ .len = 3, .cp = null }, decodeAt("\xf0\x90\x80", 0));
+    // Prefixes no valid character starts with: overlong (E0 80, F0 80),
+    // surrogate (ED A0), past U+10FFFF (F4 90, F5), and the never-valid
+    // lead bytes C0 and C1. Each byte is its own replacement character.
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xe0\x80", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xf0\x80\x80", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xed\xa0", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xf4\x90", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xf5\x80", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xc1\xbf", 0));
+}
+
+test "prefixFitting and displayWidth give each invalid prefix byte its own cell" {
+    try std.testing.expectEqual(@as(usize, 2), displayWidth("\xe0\x80"));
+    try std.testing.expectEqualStrings("\xe0", prefixFitting("\xe0\x80", 1));
 }
 
 test "displayWidth counts code points not bytes" {
