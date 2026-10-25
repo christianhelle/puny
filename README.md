@@ -1032,6 +1032,13 @@ write the final PRD. When the user confirms readiness, the model calls
 `plan.html` to the session folder. Planning mode state is persisted in
 `session.json` and restored when the session is resumed.
 
+When the model asks a multiple choice question it calls the `ask_user` tool,
+which opens a picker like the provider, model, and reasoning effort pickers.
+Use the arrow keys and Enter to pick an answer (the model's recommendation is
+marked), choose "Other" to type your own, or press `q`/Esc to dismiss the
+picker and reply in the chat prompt instead. `ask_user` is also available in
+build mode, but not in review mode.
+
 #### Review mode
 
 Run `/review` inside a chat to perform the same branch review as `--review`
