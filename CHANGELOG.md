@@ -9,6 +9,9 @@
 - Upgrade to Zig 0.17.0 ([#224](https://github.com/christianhelle/puny/pull/224)) ([@christianhelle](https://github.com/christianhelle/))
 - Show the local time after the thought duration ([#225](https://github.com/christianhelle/puny/pull/225)) ([@christianhelle](https://github.com/christianhelle/))
 
+### Bug Fixes
+- Stop width and scrub functions from crashing on a cut-off UTF-8 character ([#230](https://github.com/christianhelle/puny/pull/230)) ([@christianhelle](https://github.com/christianhelle/))
+
 
 ## [v0.4.2](https://github.com/christianhelle/puny/releases/tag/v0.4.2) (2026-10-06)
 
