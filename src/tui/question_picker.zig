@@ -80,6 +80,7 @@ pub fn isAnswerResult(result: []const u8) bool {
         std.mem.eql(u8, result, dismissed_result);
 }
 
+const max_question_rows = 3;
 const hint = "Arrow keys to move, Enter to select, 'q' to dismiss";
 const typed_prompt = "Your answer: ";
 
@@ -131,10 +132,13 @@ fn askOn(
         return .cancelled;
     }
 
-    // The question goes on one (possibly wrapping) line.
-    const one_line_question = try oneLine(arena, question);
-    const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
+    // The question goes on one line, wrapping onto at most
+    // `max_question_rows` rows so the list fits on screen under it. The
+    // model's message above has room for detail. A row may lose a cell to a
+    // wide character that wraps whole, so count `width - 1` cells per row.
     const width = C.width();
+    const one_line_question = try cutLabel(arena, try oneLine(arena, question), max_question_rows * (width -| 1));
+    const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
     const title_rows = rowsFor(one_line_question, width) + rowsFor(hint, width);
     const items = try answerItems(arena, options, recommended, width);
     const selected = try C.select(arena, io, stdout_writer, title, title_rows, items);
@@ -498,6 +502,21 @@ test "ask tells the picker how many rows the question and hint take" {
     // One row of question, and the hint wraps onto two rows at 32 columns.
     _ = try askOnFakeScreen(arena_state.allocator(), "Which database?");
     try std.testing.expectEqual(@as(usize, 3), FakeConsole.title_rows);
+}
+
+test "ask cuts a long question to three rows so the list stays on screen" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.columns = 32;
+    FakeConsole.picked = "Postgres";
+
+    // 200 characters would take 7 rows at 32 columns.
+    const question: [200]u8 = @splat('q');
+    const asked = try askOnFakeScreen(arena_state.allocator(), &question);
+    try std.testing.expectEqual(@as(usize, 5), FakeConsole.title_rows);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ Postgres", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
 }
 
 test "ask clears a question that contains a carriage return" {
