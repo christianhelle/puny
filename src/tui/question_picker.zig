@@ -2,6 +2,7 @@ const std = @import("std");
 const list_picker = @import("list_picker.zig");
 const terminal = @import("terminal.zig");
 const ansi = @import("ansi.zig");
+const text_width = @import("markdown/width.zig");
 
 /// Value of the trailing item that lets the user type an answer the
 /// options don't cover.
@@ -102,10 +103,25 @@ fn readTypedAnswer(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.
 }
 
 /// Terminal rows that one line of `text` occupies at `width` columns,
-/// treating each character as one column.
+/// counted in display cells. A wide character that doesn't fit the cell left
+/// on a row wraps whole onto the next one, as terminals do.
 pub fn rowsFor(text: []const u8, width: usize) usize {
-    const columns = std.unicode.utf8CountCodepoints(text) catch text.len;
-    return @max(std.math.divCeil(usize, columns, @max(width, 1)) catch 1, 1);
+    const columns = @max(width, 1);
+    var rows: usize = 1;
+    var column: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        const end = @min(i + seq_len, text.len);
+        const cells = if (std.unicode.utf8Decode(text[i..end])) |cp| text_width.codePointWidth(cp) else |_| 1;
+        i = end;
+        if (column + cells > columns) {
+            rows += 1;
+            column = 0;
+        }
+        column += cells;
+    }
+    return rows;
 }
 
 /// The answer as echoed under the question, cut to at most `max_bytes` so
@@ -165,4 +181,14 @@ test "rowsFor counts the terminal rows a line of text wraps onto" {
     try std.testing.expectEqual(@as(usize, 2), rowsFor(&one_over, 80));
     // Counts characters, not bytes: four two-byte characters fit four columns.
     try std.testing.expectEqual(@as(usize, 1), rowsFor("éééé", 4));
+}
+
+test "rowsFor counts wide characters as two cells" {
+    // 41 CJK characters take 82 cells, so they wrap at 80 columns.
+    const question = "数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数数";
+    try std.testing.expectEqual(@as(usize, 2), rowsFor(question, 80));
+    // A wide character that doesn't fit the cell left on a row wraps whole.
+    try std.testing.expectEqual(@as(usize, 2), rowsFor("a数", 2));
+    // Combining marks take no cell of their own.
+    try std.testing.expectEqual(@as(usize, 1), rowsFor("e\u{0301}e\u{0301}", 2));
 }
