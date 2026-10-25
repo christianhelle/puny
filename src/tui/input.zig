@@ -78,7 +78,23 @@ pub fn readLineSimple(
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: []u8,
 ) !?[]const u8 {
-    return readPlainLine(Console, allocator, io, stdout_writer, line_alloc, stdin_buffer);
+    return readPlainLine(Console, allocator, io, stdout_writer, line_alloc, stdin_buffer, "", null);
+}
+
+/// Reads a single line typed after `prompt`, which the caller has already
+/// printed on the cursor's row. Knowing the prompt and the terminal width,
+/// the editor redraws every wrapped row on each edit, so the screen always
+/// matches the text. Returns with the cursor below the input when a line is
+/// submitted, or on its last row otherwise.
+pub fn readPromptedLine(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    line_alloc: *std.Io.Writer.Allocating,
+    stdin_buffer: []u8,
+    prompt: []const u8,
+) !?[]const u8 {
+    return readPlainLine(Console, allocator, io, stdout_writer, line_alloc, stdin_buffer, prompt, terminal.terminalWidth());
 }
 
 /// Terminal access behind `readPlainLine`; tests substitute a fake.
@@ -98,6 +114,8 @@ fn readPlainLine(
     stdout_writer: *std.Io.Writer,
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: []u8,
+    prompt: []const u8,
+    width: ?usize,
 ) !?[]const u8 {
     line_alloc.clearRetainingCapacity();
 
@@ -106,7 +124,7 @@ fn readPlainLine(
     };
     defer C.setRawMode(false) catch {};
 
-    var editor = line_editor.LineEditor.initWithPrompt(line_alloc, stdout_writer, null, null, "");
+    var editor = line_editor.LineEditor.initWithPrompt(line_alloc, stdout_writer, null, width, prompt);
     editor.mentions_enabled = false;
 
     return switch (try C.readRaw(allocator, io, &editor)) {
@@ -115,7 +133,10 @@ fn readPlainLine(
             try stdout_writer.flush();
             return text;
         },
-        .cancelled, .interrupted, .eof => null,
+        .cancelled, .interrupted, .eof => {
+            try editor.parkAtInputEnd();
+            return null;
+        },
     };
 }
 
@@ -150,6 +171,11 @@ const FakeConsole = struct {
     var raw_result: ReadLineResult = .eof;
     var typed: []const u8 = "";
     var saw_mentions_enabled = true;
+    var saw_prompt: []const u8 = "";
+    var saw_width: ?usize = null;
+    /// Types through the editor and then moves to the start of the input,
+    /// as a user editing a wrapped line would.
+    var edit_then_home = false;
 
     fn reset(result: ReadLineResult) void {
         raw_available = true;
@@ -157,6 +183,9 @@ const FakeConsole = struct {
         raw_result = result;
         typed = "";
         saw_mentions_enabled = true;
+        saw_prompt = "";
+        saw_width = null;
+        edit_then_home = false;
     }
 
     fn setRawMode(enable: bool) !void {
@@ -172,7 +201,14 @@ const FakeConsole = struct {
     fn readRaw(_: std.mem.Allocator, _: std.Io, editor: *line_editor.LineEditor) !ReadLineResult {
         try std.testing.expect(raw_enabled);
         saw_mentions_enabled = editor.mentions_enabled;
-        try editor.line_alloc.writer.writeAll(typed);
+        saw_prompt = editor.prompt;
+        saw_width = editor.width;
+        if (edit_then_home) {
+            try editor.appendSlice(typed);
+            try editor.moveHome();
+        } else {
+            try editor.line_alloc.writer.writeAll(typed);
+        }
         return switch (raw_result) {
             .submitted => .{ .submitted = editor.line_alloc.written() },
             else => raw_result,
@@ -190,7 +226,7 @@ test "readPlainLine returns the raw line, ends it with a newline, and restores t
     defer out.deinit();
     var stdin_buffer: [16]u8 = undefined;
 
-    const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer);
+    const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer, "", null);
 
     try std.testing.expectEqualStrings("sk-test@key", line.?);
     try std.testing.expectEqualStrings("\r\n", out.written());
@@ -208,12 +244,43 @@ test "readPlainLine returns null when the raw read is cancelled, interrupted, or
         defer out.deinit();
         var stdin_buffer: [16]u8 = undefined;
 
-        const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer);
+        const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer, "", null);
 
         try std.testing.expect(line == null);
         try std.testing.expectEqualStrings("", out.written());
         try std.testing.expect(!FakeConsole.raw_enabled);
     }
+}
+
+test "readPlainLine gives the editor the prompt and the terminal width" {
+    FakeConsole.reset(.{ .submitted = "" });
+    var line_alloc = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var stdin_buffer: [16]u8 = undefined;
+
+    _ = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer, "Your answer: ", 40);
+
+    try std.testing.expectEqualStrings("Your answer: ", FakeConsole.saw_prompt);
+    try std.testing.expectEqual(@as(?usize, 40), FakeConsole.saw_width);
+}
+
+test "readPlainLine leaves the cursor on the last row of a cancelled wrapped line" {
+    FakeConsole.reset(.cancelled);
+    FakeConsole.typed = "abcdefghij";
+    FakeConsole.edit_then_home = true;
+    var line_alloc = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var stdin_buffer: [16]u8 = undefined;
+
+    // "Your answer: " and ten characters wrap onto a second row at 20 columns.
+    const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer, "Your answer: ", 20);
+
+    try std.testing.expect(line == null);
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "\x1b[1B"));
 }
 
 test "readPlainLine falls back to canonical input when raw mode is unavailable" {
@@ -226,7 +293,7 @@ test "readPlainLine falls back to canonical input when raw mode is unavailable" 
     defer out.deinit();
     var stdin_buffer: [16]u8 = undefined;
 
-    const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer);
+    const line = try readPlainLine(FakeConsole, std.testing.allocator, std.testing.io, &out.writer, &line_alloc, &stdin_buffer, "", null);
 
     try std.testing.expectEqualStrings("canonical", line.?);
     try std.testing.expectEqualStrings("", out.written());
