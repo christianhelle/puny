@@ -25,11 +25,20 @@ pub fn scrubControls(text: []u8) void {
             i += 1;
             continue;
         };
-        // C0 controls and DEL, plus C1 controls, which some terminals read
-        // as escape sequences (U+009B is CSI).
-        if (cp < 0x20 or (cp >= 0x7f and cp <= 0x9f)) @memset(text[i..end], ' ');
+        if (isUnsafeCodePoint(cp)) @memset(text[i..end], ' ');
         i = end;
     }
+}
+
+fn isUnsafeCodePoint(cp: u21) bool {
+    return switch (cp) {
+        // C0 controls and DEL, plus C1 controls, which some terminals read
+        // as escape sequences (U+009B is CSI).
+        0x00...0x1f, 0x7f...0x9f => true,
+        // Bidirectional text controls, which reorder the text around them.
+        0x061c, 0x200e, 0x200f, 0x202a...0x202e, 0x2066...0x2069 => true,
+        else => false,
+    };
 }
 
 test "scrubControls turns control characters into spaces" {
@@ -51,6 +60,14 @@ test "scrubControls turns bytes that aren't valid UTF-8 into spaces" {
     var text = "a\x9b2Jb\xe2\x1b[2J".*;
     scrubControls(&text);
     try std.testing.expectEqualStrings("a 2Jb  [2J", &text);
+}
+
+test "scrubControls turns bidirectional text controls into spaces" {
+    // U+202E (right-to-left override) and U+2066 (left-to-right isolate)
+    // can make text display in a different order than it reads.
+    var text = "a\u{202e}b\u{2066}c\u{200f}d\u{061c}e".*;
+    scrubControls(&text);
+    try std.testing.expectEqualStrings("a   b   c   d  e", &text);
 }
 
 test "ansi constants are well-formed escape sequences" {
