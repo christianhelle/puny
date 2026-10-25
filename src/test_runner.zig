@@ -232,6 +232,9 @@ test "include tui.context_tier_picker tests" {
 test "include tui.effort_picker tests" {
     _ = @import("tui/effort_picker.zig");
 }
+test "include tui.question_picker tests" {
+    _ = @import("tui/question_picker.zig");
+}
 test "include tui.file_picker tests" {
     _ = @import("tui/file_picker.zig");
 }
