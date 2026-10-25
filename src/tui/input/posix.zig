@@ -351,9 +351,8 @@ test "readLineFrom reshows only the text after Ctrl+Z on a plain prompt" {
     var out: std.Io.Writer.Allocating = .init(allocator);
     defer out.deinit();
 
-    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, null);
+    var editor = line_editor.LineEditor.initWithPrompt(&line_alloc, &out.writer, null, null, "");
     editor.mentions_enabled = false;
-    editor.shows_prompt = false;
     var source: TestSource = .{ .events = &input("ab\x1ac\r") };
     const result = try readLineFrom(allocator, std.testing.io, &editor, &source, false);
 
