@@ -995,10 +995,7 @@ test "chatStreaming asks a multiple choice question in choice mode" {
     };
     try mock_client.chatStreaming(request, rec.callback());
     try std.testing.expectEqual(@as(usize, 1), countTag(rec.events.items, .tool_call_start));
-    switch (rec.events.items[0]) {
-        .tool_call_start => |tc| try std.testing.expectEqualStrings("ask_user", tc.name),
-        else => return error.ExpectedToolCallStart,
-    }
+    try std.testing.expectEqualStrings("ask_user", rec.events.items[0].tool_call_start.name);
     var arguments: std.ArrayList(u8) = .empty;
     for (rec.events.items) |ev| switch (ev) {
         .tool_call_delta => |d| try arguments.appendSlice(arena_state.allocator(), d.arguments),
