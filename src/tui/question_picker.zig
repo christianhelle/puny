@@ -188,10 +188,9 @@ pub fn rowsFor(text: []const u8, width: usize) usize {
     var column: usize = 0;
     var i: usize = 0;
     while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const end = @min(i + seq_len, text.len);
-        const cells = if (std.unicode.utf8Decode(text[i..end])) |cp| text_width.codePointWidth(cp) else |_| 1;
-        i = end;
+        const decoded = text_width.decodeAt(text, i);
+        const cells = if (decoded.cp) |cp| text_width.codePointWidth(cp) else 1;
+        i += decoded.len;
         if (column + cells > columns) {
             rows += 1;
             column = 0;
@@ -284,6 +283,11 @@ test "rowsFor counts the terminal rows a line of text wraps onto" {
     try std.testing.expectEqual(@as(usize, 2), rowsFor(&one_over, 80));
     // Counts characters, not bytes: four two-byte characters fit four columns.
     try std.testing.expectEqual(@as(usize, 1), rowsFor("éééé", 4));
+}
+
+test "rowsFor counts a character cut off at the end as one cell" {
+    try std.testing.expectEqual(@as(usize, 1), rowsFor("a\xf0\x9f", 2));
+    try std.testing.expectEqual(@as(usize, 2), rowsFor("ab\xf0\x9f", 2));
 }
 
 test "rowsFor counts wide characters as two cells" {

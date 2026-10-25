@@ -133,6 +133,44 @@ fn isZeroWidthCodePoint(cp: u21) bool {
     };
 }
 
+/// The character at the start of some text: its byte length, and its code
+/// point, or null when the bytes aren't valid UTF-8.
+pub const Decoded = struct { len: usize, cp: ?u21 };
+
+/// Decodes the character starting at `text[i]` without reading past the
+/// end of `text`. A character cut off at the end, or by a byte that doesn't
+/// continue it, takes the bytes it has when they could start a valid
+/// character; terminals draw those as one replacement character. Any other
+/// invalid byte takes one byte.
+pub fn decodeAt(text: []const u8, i: usize) Decoded {
+    const lead = text[i];
+    const seq_len = std.unicode.utf8ByteSequenceLength(lead) catch return .{ .len = 1, .cp = null };
+    if (seq_len == 1) return .{ .len = 1, .cp = lead };
+    var have: usize = 1;
+    while (have < seq_len and i + have < text.len and continues(lead, have, text[i + have])) have += 1;
+    if (have < seq_len) return .{ .len = have, .cp = null };
+    // utf8Decode picks its decoder by slice length, so it gets exactly the
+    // bytes the lead byte announces.
+    const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch return .{ .len = 1, .cp = null };
+    return .{ .len = seq_len, .cp = cp };
+}
+
+/// Whether `byte` can follow at `position` (1 or later) in a character that
+/// starts with `lead`. The second byte's range depends on the lead byte, so
+/// overlong forms, surrogates and code points past U+10FFFF never start a
+/// group (Unicode Table 3-7). C0, C1 and F5..FF start no valid character.
+fn continues(lead: u8, position: usize, byte: u8) bool {
+    if (position > 1) return byte >= 0x80 and byte <= 0xbf;
+    return switch (lead) {
+        0xc2...0xdf, 0xe1...0xec, 0xee...0xef, 0xf1...0xf3 => byte >= 0x80 and byte <= 0xbf,
+        0xe0 => byte >= 0xa0 and byte <= 0xbf,
+        0xed => byte >= 0x80 and byte <= 0x9f,
+        0xf0 => byte >= 0x90 and byte <= 0xbf,
+        0xf4 => byte >= 0x80 and byte <= 0x8f,
+        else => false,
+    };
+}
+
 /// Display width of a single code point: 0 for combining/format marks, 2 for
 /// wide (CJK/emoji) code points, otherwise 1.
 pub fn codePointWidth(cp: u21) usize {
@@ -145,14 +183,9 @@ pub fn displayWidth(text: []const u8) usize {
     var width: usize = 0;
     var i: usize = 0;
     while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch {
-            i += seq_len;
-            width += 1;
-            continue;
-        };
-        width += codePointWidth(cp);
-        i += seq_len;
+        const decoded = decodeAt(text, i);
+        width += if (decoded.cp) |cp| codePointWidth(cp) else 1;
+        i += decoded.len;
     }
     return width;
 }
@@ -163,12 +196,11 @@ pub fn prefixFitting(text: []const u8, max_cells: usize) []const u8 {
     var cells: usize = 0;
     var i: usize = 0;
     while (i < text.len) {
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const end = @min(i + seq_len, text.len);
-        const width = if (std.unicode.utf8Decode(text[i..end])) |cp| codePointWidth(cp) else |_| 1;
+        const decoded = decodeAt(text, i);
+        const width = if (decoded.cp) |cp| codePointWidth(cp) else 1;
         if (cells + width > max_cells) break;
         cells += width;
-        i = end;
+        i += decoded.len;
     }
     return text[0..i];
 }
@@ -189,16 +221,44 @@ pub fn ansiVisibleWidth(text: []const u8) usize {
             }
             continue;
         }
-        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch {
-            i += seq_len;
-            width += 1;
-            continue;
-        };
-        width += codePointWidth(cp);
-        i += seq_len;
+        const decoded = decodeAt(text, i);
+        width += if (decoded.cp) |cp| codePointWidth(cp) else 1;
+        i += decoded.len;
     }
     return width;
+}
+
+test "decodeAt reads one character, or marks bytes that aren't one" {
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = 'a' }, decodeAt("ab", 0));
+    try std.testing.expectEqual(Decoded{ .len = 3, .cp = 0x6570 }, decodeAt("a数", 1));
+    // A character cut off at the end, or by a byte that doesn't continue it,
+    // shows as one replacement character.
+    try std.testing.expectEqual(Decoded{ .len = 2, .cp = null }, decodeAt("a\xf0\x9f", 1));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("a\xe2", 1));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xe2\x1b[", 0));
+    // A stray continuation byte, and an overlong encoding of '/'.
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\x9b", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xc0\xaf", 0));
+}
+
+test "decodeAt groups only bytes that could start a valid character" {
+    // Cut-off prefixes that a valid character could start with.
+    try std.testing.expectEqual(Decoded{ .len = 2, .cp = null }, decodeAt("\xe0\xa0", 0));
+    try std.testing.expectEqual(Decoded{ .len = 3, .cp = null }, decodeAt("\xf0\x90\x80", 0));
+    // Prefixes no valid character starts with: overlong (E0 80, F0 80),
+    // surrogate (ED A0), past U+10FFFF (F4 90, F5), and the never-valid
+    // lead bytes C0 and C1. Each byte is its own replacement character.
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xe0\x80", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xf0\x80\x80", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xed\xa0", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xf4\x90", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xf5\x80", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xc1\xbf", 0));
+}
+
+test "prefixFitting and displayWidth give each invalid prefix byte its own cell" {
+    try std.testing.expectEqual(@as(usize, 2), displayWidth("\xe0\x80"));
+    try std.testing.expectEqualStrings("\xe0", prefixFitting("\xe0\x80", 1));
 }
 
 test "displayWidth counts code points not bytes" {
@@ -244,6 +304,11 @@ test "prefixFitting keeps the longest prefix that fits the cells" {
     try std.testing.expectEqualStrings("a\xe2", prefixFitting("a\xe2", 2));
 }
 
+test "prefixFitting keeps a character cut off at the end as one cell" {
+    try std.testing.expectEqualStrings("a\xf0\x9f", prefixFitting("a\xf0\x9f", 2));
+    try std.testing.expectEqualStrings("a", prefixFitting("a\xf0\x9f", 1));
+}
+
 test "displayWidth treats combining marks as zero-width" {
     try std.testing.expectEqual(@as(usize, 1), displayWidth("e\u{301}"));
     try std.testing.expectEqual(@as(usize, 2), displayWidth("a\u{200D}b"));
@@ -252,6 +317,16 @@ test "displayWidth treats combining marks as zero-width" {
 test "displayWidth counts invalid UTF-8 bytes as one column each" {
     try std.testing.expectEqual(@as(usize, 1), displayWidth(&.{0xff}));
     try std.testing.expectEqual(@as(usize, 2), displayWidth(&.{ 0x80, 0x80 }));
+}
+
+test "displayWidth counts a character cut off at the end as one column" {
+    try std.testing.expectEqual(@as(usize, 2), displayWidth("a\xe2"));
+    try std.testing.expectEqual(@as(usize, 2), displayWidth("a\xf0\x9f"));
+}
+
+test "ansiVisibleWidth counts a character cut off at the end as one column" {
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("a\xe2"));
+    try std.testing.expectEqual(@as(usize, 2), ansiVisibleWidth("\x1b[2ma\xf0\x9f"));
 }
 
 test "ansiVisibleWidth ignores dangling and truncated escapes" {
