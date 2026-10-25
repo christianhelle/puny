@@ -23,18 +23,33 @@ fn oneLine(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
 
 /// Picker items for a multiple choice question: each option in the order
 /// given, the one matching `recommended` labelled as such, then "Other".
-pub fn answerItems(arena: std.mem.Allocator, options: []const []const u8, recommended: ?[]const u8) ![]const list_picker.Item {
+/// Labels are cut to fit one row of a `width` column terminal, since the
+/// picker can't redraw a label that wraps.
+pub fn answerItems(arena: std.mem.Allocator, options: []const []const u8, recommended: ?[]const u8, width: usize) ![]const list_picker.Item {
+    // The picker puts "> " before the selected label, and one spare cell
+    // keeps a full row from wrapping.
+    const label_cells = width -| 3;
+    const recommended_suffix = " (recommended)";
     const items = try arena.alloc(list_picker.Item, options.len + 1);
     for (options, 0..) |option, i| {
         const is_recommended = if (recommended) |r| std.mem.eql(u8, r, option) else false;
-        const label = try oneLine(arena, option);
+        const text = try oneLine(arena, option);
         items[i] = .{
             .value = option,
-            .label = if (is_recommended) try std.fmt.allocPrint(arena, "{s} (recommended)", .{label}) else label,
+            .label = if (is_recommended)
+                try std.fmt.allocPrint(arena, "{s}" ++ recommended_suffix, .{try cutLabel(arena, text, label_cells -| recommended_suffix.len)})
+            else
+                try cutLabel(arena, text, label_cells),
         };
     }
-    items[options.len] = .{ .value = other_value, .label = "Other (type your own answer)" };
+    items[options.len] = .{ .value = other_value, .label = try cutLabel(arena, "Other (type your own answer)", label_cells) };
     return items;
+}
+
+/// `text` cut to at most `max_cells` display cells, ending in "…" when cut.
+fn cutLabel(arena: std.mem.Allocator, text: []const u8, max_cells: usize) ![]const u8 {
+    if (text_width.prefixFitting(text, max_cells).len == text.len) return text;
+    return std.fmt.allocPrint(arena, "{s}…", .{text_width.prefixFitting(text, max_cells -| 1)});
 }
 
 /// How the user responded to a multiple choice question.
@@ -119,10 +134,9 @@ fn askOn(
     // The question goes on one (possibly wrapping) line.
     const one_line_question = try oneLine(arena, question);
     const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
-    const items = try answerItems(arena, options, recommended);
-    const selected = try C.select(arena, io, stdout_writer, title, items);
-
     const width = C.width();
+    const items = try answerItems(arena, options, recommended, width);
+    const selected = try C.select(arena, io, stdout_writer, title, items);
 
     const answer: Answer = if (selected) |value|
         if (std.mem.eql(u8, value, other_value)) try readTypedAnswer(C, arena, io, stdout_writer, width) else .{ .picked = value }
@@ -200,7 +214,7 @@ test "answerItems lists the options, marks the recommended one and offers Other 
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
-    const items = try answerItems(arena_state.allocator(), &.{ "SQLite", "Postgres" }, "Postgres");
+    const items = try answerItems(arena_state.allocator(), &.{ "SQLite", "Postgres" }, "Postgres", 80);
     try std.testing.expectEqual(@as(usize, 3), items.len);
     try std.testing.expectEqualStrings("SQLite", items[0].value);
     try std.testing.expectEqualStrings("SQLite", items[0].label);
@@ -214,11 +228,26 @@ test "answerItems turns control characters in the labels into spaces" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
-    const items = try answerItems(arena_state.allocator(), &.{ "SQLite\x1b[2J", "Post\r\ngres" }, "Post\r\ngres");
+    const items = try answerItems(arena_state.allocator(), &.{ "SQLite\x1b[2J", "Post\r\ngres" }, "Post\r\ngres", 80);
     try std.testing.expectEqualStrings("SQLite [2J", items[0].label);
     try std.testing.expectEqualStrings("Post  gres (recommended)", items[1].label);
     // The value still matches the option the model gave.
     try std.testing.expectEqualStrings("SQLite\x1b[2J", items[0].value);
+}
+
+test "answerItems cuts labels to fit one row of the terminal" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    // 20 columns leave 17 cells per label: 2 for the "> " marker and one
+    // spare so a full row never wraps.
+    const items = try answerItems(arena_state.allocator(), &.{ "SQLite", "A very long option label here", "Another long option" }, "Another long option", 20);
+    try std.testing.expectEqualStrings("SQLite", items[0].label);
+    try std.testing.expectEqualStrings("A very long opti…", items[1].label);
+    try std.testing.expectEqualStrings("A very long option label here", items[1].value);
+    // The recommendation stays visible.
+    try std.testing.expectEqualStrings("An… (recommended)", items[2].label);
+    try std.testing.expectEqualStrings("Other (type your…", items[3].label);
 }
 
 test "toolResult tells the model which answer the user gave" {
@@ -275,6 +304,8 @@ const FakeConsole = struct {
     var backspaces: usize = 0;
     /// Whether Enter ended the typed line, rather than Esc.
     var submitted = true;
+    /// Display cells of the widest label the picker was given.
+    var widest_label: usize = 0;
 
     fn reset() void {
         tty = true;
@@ -283,6 +314,7 @@ const FakeConsole = struct {
         typed = "";
         backspaces = 0;
         submitted = true;
+        widest_label = 0;
     }
 
     fn isTty(_: std.Io) bool {
@@ -295,7 +327,10 @@ const FakeConsole = struct {
 
     fn select(_: std.mem.Allocator, _: std.Io, stdout_writer: *std.Io.Writer, title: []const u8, items: []const list_picker.Item) !?[]const u8 {
         try stdout_writer.print("\r\n\r\n{s}\r\n", .{title});
-        for (items) |item| try stdout_writer.print("  {s}\r\n", .{item.label});
+        for (items) |item| {
+            widest_label = @max(widest_label, text_width.displayWidth(item.label));
+            try stdout_writer.print("  {s}\r\n", .{item.label});
+        }
         try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
         return picked;
     }
@@ -434,6 +469,19 @@ test "ask echoes a picked option with its control characters as spaces" {
     const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
     try std.testing.expectEqualStrings("Post\x1b[2Jgres", asked.answer.picked);
     try std.testing.expectEqualStrings("🔧 Asking\n↳ Post [2Jgres", asked.text);
+}
+
+test "ask cuts option labels to the terminal width" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    FakeConsole.reset();
+    FakeConsole.columns = 32;
+    FakeConsole.picked = "Postgres";
+
+    var out = std.Io.Writer.Allocating.init(arena);
+    _ = try askOn(FakeConsole, arena, std.testing.io, &out.writer, "Which database?", &.{ "SQLite", "an option label far too long for this terminal" }, null);
+    try std.testing.expectEqual(@as(usize, 29), FakeConsole.widest_label);
 }
 
 test "ask clears a question that contains a carriage return" {
