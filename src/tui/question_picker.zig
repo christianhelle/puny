@@ -106,10 +106,10 @@ const Console = struct {
         return terminal.terminalWidth() orelse 80;
     }
 
-    fn select(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, title: []const u8, items: []const list_picker.Item) !?[]const u8 {
+    fn select(arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, title: []const u8, title_rows: usize, items: []const list_picker.Item) !?[]const u8 {
         // The picker writes through its own stdout writer.
         try stdout_writer.flush();
-        return list_picker.selectFromList(arena, io, title, items);
+        return list_picker.selectFromListUnder(arena, io, title, title_rows, items);
     }
 
     const readLine = input.readPromptedLine;
@@ -135,8 +135,9 @@ fn askOn(
     const one_line_question = try oneLine(arena, question);
     const title = try std.fmt.allocPrint(arena, "{s}\r\n{s}{s}{s}", .{ one_line_question, ansi.dim, hint, ansi.reset });
     const width = C.width();
+    const title_rows = rowsFor(one_line_question, width) + rowsFor(hint, width);
     const items = try answerItems(arena, options, recommended, width);
-    const selected = try C.select(arena, io, stdout_writer, title, items);
+    const selected = try C.select(arena, io, stdout_writer, title, title_rows, items);
 
     const answer: Answer = if (selected) |value|
         if (std.mem.eql(u8, value, other_value)) try readTypedAnswer(C, arena, io, stdout_writer, width) else .{ .picked = value }
@@ -145,7 +146,6 @@ fn askOn(
 
     // The picker leaves the cursor on the last row of its title, which sits
     // one blank row below the tool call line. The echo takes that blank row.
-    const title_rows = rowsFor(one_line_question, width) + rowsFor(hint, width);
     try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start ++ terminal.erase_display, .{title_rows});
     try stdout_writer.print("{s}↳ {s}{s}", .{ ansi.dim, try oneLine(arena, echoText(answer, width -| 4)), ansi.reset });
     try stdout_writer.flush();
@@ -306,6 +306,8 @@ const FakeConsole = struct {
     var submitted = true;
     /// Display cells of the widest label the picker was given.
     var widest_label: usize = 0;
+    /// Rows the picker was told its title takes.
+    var title_rows: usize = 0;
 
     fn reset() void {
         tty = true;
@@ -315,6 +317,7 @@ const FakeConsole = struct {
         backspaces = 0;
         submitted = true;
         widest_label = 0;
+        title_rows = 0;
     }
 
     fn isTty(_: std.Io) bool {
@@ -325,7 +328,8 @@ const FakeConsole = struct {
         return columns;
     }
 
-    fn select(_: std.mem.Allocator, _: std.Io, stdout_writer: *std.Io.Writer, title: []const u8, items: []const list_picker.Item) !?[]const u8 {
+    fn select(_: std.mem.Allocator, _: std.Io, stdout_writer: *std.Io.Writer, title: []const u8, rows: usize, items: []const list_picker.Item) !?[]const u8 {
+        title_rows = rows;
         try stdout_writer.print("\r\n\r\n{s}\r\n", .{title});
         for (items) |item| {
             widest_label = @max(widest_label, text_width.displayWidth(item.label));
@@ -482,6 +486,18 @@ test "ask cuts option labels to the terminal width" {
     var out = std.Io.Writer.Allocating.init(arena);
     _ = try askOn(FakeConsole, arena, std.testing.io, &out.writer, "Which database?", &.{ "SQLite", "an option label far too long for this terminal" }, null);
     try std.testing.expectEqual(@as(usize, 29), FakeConsole.widest_label);
+}
+
+test "ask tells the picker how many rows the question and hint take" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.columns = 32;
+    FakeConsole.picked = "Postgres";
+
+    // One row of question, and the hint wraps onto two rows at 32 columns.
+    _ = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expectEqual(@as(usize, 3), FakeConsole.title_rows);
 }
 
 test "ask clears a question that contains a carriage return" {
