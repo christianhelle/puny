@@ -133,6 +133,26 @@ fn isZeroWidthCodePoint(cp: u21) bool {
     };
 }
 
+/// The character at the start of some text: its byte length, and its code
+/// point, or null when the bytes aren't valid UTF-8.
+pub const Decoded = struct { len: usize, cp: ?u21 };
+
+/// Decodes the character starting at `text[i]` without reading past the
+/// end of `text`. A character cut off at the end, or by a byte that doesn't
+/// continue it, takes the bytes it has, which terminals draw as one
+/// replacement character. Any other invalid byte takes one byte.
+pub fn decodeAt(text: []const u8, i: usize) Decoded {
+    const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch return .{ .len = 1, .cp = null };
+    if (seq_len == 1) return .{ .len = 1, .cp = text[i] };
+    var have: usize = 1;
+    while (have < seq_len and i + have < text.len and text[i + have] & 0xc0 == 0x80) have += 1;
+    if (have < seq_len) return .{ .len = have, .cp = null };
+    // utf8Decode picks its decoder by slice length, so it gets exactly the
+    // bytes the lead byte announces.
+    const cp = std.unicode.utf8Decode(text[i..][0..seq_len]) catch return .{ .len = 1, .cp = null };
+    return .{ .len = seq_len, .cp = cp };
+}
+
 /// Display width of a single code point: 0 for combining/format marks, 2 for
 /// wide (CJK/emoji) code points, otherwise 1.
 pub fn codePointWidth(cp: u21) usize {
@@ -199,6 +219,19 @@ pub fn ansiVisibleWidth(text: []const u8) usize {
         i += seq_len;
     }
     return width;
+}
+
+test "decodeAt reads one character, or marks bytes that aren't one" {
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = 'a' }, decodeAt("ab", 0));
+    try std.testing.expectEqual(Decoded{ .len = 3, .cp = 0x6570 }, decodeAt("a数", 1));
+    // A character cut off at the end, or by a byte that doesn't continue it,
+    // shows as one replacement character.
+    try std.testing.expectEqual(Decoded{ .len = 2, .cp = null }, decodeAt("a\xf0\x9f", 1));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("a\xe2", 1));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xe2\x1b[", 0));
+    // A stray continuation byte, and an overlong encoding of '/'.
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\x9b", 0));
+    try std.testing.expectEqual(Decoded{ .len = 1, .cp = null }, decodeAt("\xc0\xaf", 0));
 }
 
 test "displayWidth counts code points not bytes" {
