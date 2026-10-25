@@ -5,6 +5,7 @@ const ansi = @import("ansi.zig");
 const text_width = @import("markdown/width.zig");
 const input = @import("input.zig");
 const FakeScreen = @import("fake_screen.zig").FakeScreen;
+const line_editor = @import("input/line_editor.zig");
 
 /// Value of the trailing item that lets the user type an answer the
 /// options don't cover.
@@ -85,7 +86,7 @@ const Console = struct {
         return list_picker.selectFromList(arena, io, title, items);
     }
 
-    const readLine = input.readLineSimple;
+    const readLine = input.readPromptedLine;
 };
 
 fn askOn(
@@ -139,12 +140,14 @@ fn readTypedAnswer(comptime C: type, arena: std.mem.Allocator, io: std.Io, stdou
 
     var line: std.Io.Writer.Allocating = .init(arena);
     var stdin_buffer: [4096]u8 = undefined;
-    const submitted = try C.readLine(arena, io, stdout_writer, &line, &stdin_buffer);
+    const submitted = try C.readLine(arena, io, stdout_writer, &line, &stdin_buffer, typed_prompt);
 
-    // The prompt and the text are on screen. Submitting also moved the
-    // cursor below them; Esc left it on their last row.
-    const echoed = try std.fmt.allocPrint(arena, "{s}{s}", .{ typed_prompt, line.written() });
-    const rows_up = if (submitted != null) rowsFor(echoed, width) else rowsFor(echoed, width) - 1;
+    // The prompt and the text are on screen, plus the row the editor wraps
+    // onto when the text ends at the right edge. Submitting moved the cursor
+    // below them; Esc left it on their last row.
+    const info = line_editor.rowsNeeded(typed_prompt.len, width, line.written());
+    const input_rows = info.rows + @intFromBool(info.ends_at_edge);
+    const rows_up = if (submitted != null) input_rows else input_rows - 1;
     if (rows_up > 0) try stdout_writer.print(terminal.cursor_up, .{rows_up});
     try stdout_writer.writeAll(terminal.move_to_line_start);
 
@@ -252,6 +255,7 @@ const FakeConsole = struct {
     /// Value the picker returns; null when the user pressed q or Esc.
     var picked: ?[]const u8 = null;
     var typed: []const u8 = "";
+    var backspaces: usize = 0;
     /// Whether Enter ended the typed line, rather than Esc.
     var submitted = true;
 
@@ -260,6 +264,7 @@ const FakeConsole = struct {
         columns = 80;
         picked = null;
         typed = "";
+        backspaces = 0;
         submitted = true;
     }
 
@@ -278,10 +283,18 @@ const FakeConsole = struct {
         return picked;
     }
 
-    fn readLine(_: std.mem.Allocator, _: std.Io, stdout_writer: *std.Io.Writer, line: *std.Io.Writer.Allocating, _: []u8) !?[]const u8 {
-        try line.writer.writeAll(typed);
-        try stdout_writer.writeAll(typed);
-        if (!submitted) return null;
+    /// Types `typed` into a real line editor, presses Backspace
+    /// `backspaces` times, then Enter or Esc.
+    fn readLine(_: std.mem.Allocator, _: std.Io, stdout_writer: *std.Io.Writer, line: *std.Io.Writer.Allocating, _: []u8, prompt: []const u8) !?[]const u8 {
+        var editor = line_editor.LineEditor.initWithPrompt(line, stdout_writer, null, columns, prompt);
+        editor.mentions_enabled = false;
+        try editor.appendSlice(typed);
+        for (0..backspaces) |_| try editor.backspace();
+        if (!submitted) {
+            try editor.parkAtInputEnd();
+            return null;
+        }
+        try editor.moveEnd();
         try stdout_writer.writeAll("\r\n");
         return line.written();
     }
@@ -406,5 +419,35 @@ test "ask clears a question that contains a carriage return" {
     const question = "Which storage engine should the session history use for this" ++ "\r\n" ++ "when the user has no network?";
     const asked = try askOnFakeScreen(arena_state.allocator(), question);
     try std.testing.expectEqualStrings("🔧 Asking\n↳ Postgres", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask places the answer correctly after backspacing a wrapped answer back onto one row" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.columns = 32;
+    FakeConsole.picked = other_value;
+    // "Your answer: " and 20 characters take 33 columns, one more than fit.
+    FakeConsole.typed = "abcdefghijklmnopqrst";
+    FakeConsole.backspaces = 2;
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expectEqualStrings("abcdefghijklmnopqr", asked.answer.typed);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ abcdefghijklmnopqr", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask places the answer correctly when the typed answer ends at the right edge" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.columns = 32;
+    FakeConsole.picked = other_value;
+    // "Your answer: " and 19 characters fill the 32 columns exactly.
+    FakeConsole.typed = "abcdefghijklmnopqrs";
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ abcdefghijklmnopqrs", asked.text);
     try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
 }
