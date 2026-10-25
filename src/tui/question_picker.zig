@@ -4,6 +4,7 @@ const terminal = @import("terminal.zig");
 const ansi = @import("ansi.zig");
 const text_width = @import("markdown/width.zig");
 const input = @import("input.zig");
+const FakeScreen = @import("fake_screen.zig").FakeScreen;
 
 /// Value of the trailing item that lets the user type an answer the
 /// options don't cover.
@@ -232,4 +233,156 @@ test "rowsFor counts wide characters as two cells" {
     try std.testing.expectEqual(@as(usize, 2), rowsFor("a数", 2));
     // Combining marks take no cell of their own.
     try std.testing.expectEqual(@as(usize, 1), rowsFor("e\u{0301}e\u{0301}", 2));
+}
+
+/// Stands in for the terminal: draws and clears the picker the way
+/// `list_picker.selectFromList` does, and echoes typed text like the line
+/// editor.
+const FakeConsole = struct {
+    var tty = true;
+    var columns: usize = 80;
+    /// Value the picker returns; null when the user pressed q or Esc.
+    var picked: ?[]const u8 = null;
+    var typed: []const u8 = "";
+    /// Whether Enter ended the typed line, rather than Esc.
+    var submitted = true;
+
+    fn reset() void {
+        tty = true;
+        columns = 80;
+        picked = null;
+        typed = "";
+        submitted = true;
+    }
+
+    fn isTty(_: std.Io) bool {
+        return tty;
+    }
+
+    fn width() usize {
+        return columns;
+    }
+
+    fn select(_: std.mem.Allocator, _: std.Io, stdout_writer: *std.Io.Writer, title: []const u8, items: []const list_picker.Item) !?[]const u8 {
+        try stdout_writer.print("\r\n\r\n{s}\r\n", .{title});
+        for (items) |item| try stdout_writer.print("  {s}\r\n", .{item.label});
+        try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
+        return picked;
+    }
+
+    fn readLine(_: std.mem.Allocator, _: std.Io, stdout_writer: *std.Io.Writer, line: *std.Io.Writer.Allocating, _: []u8) !?[]const u8 {
+        try line.writer.writeAll(typed);
+        try stdout_writer.writeAll(typed);
+        if (!submitted) return null;
+        try stdout_writer.writeAll("\r\n");
+        return line.written();
+    }
+};
+
+/// Screen left after asking, below a tool call line, with `FakeConsole`.
+const AskedScreen = struct {
+    answer: Answer,
+    text: []const u8,
+    cursor_row: usize,
+};
+
+fn askOnFakeScreen(arena: std.mem.Allocator, question: []const u8) !AskedScreen {
+    var out = std.Io.Writer.Allocating.init(arena);
+    const answer = try askOn(FakeConsole, arena, std.testing.io, &out.writer, question, &.{ "SQLite", "Postgres" }, "Postgres");
+
+    var screen = FakeScreen{ .width = FakeConsole.columns };
+    try screen.feed(arena, "🔧 Asking");
+    try screen.feed(arena, out.written());
+    return .{ .answer = answer, .text = try screen.toText(arena), .cursor_row = screen.cur_row };
+}
+
+test "ask replaces the picker with the picked answer under the tool call" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.picked = "Postgres";
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expectEqualStrings("Postgres", asked.answer.picked);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ Postgres", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask replaces the picker and the typed line with the typed answer" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.picked = other_value;
+    FakeConsole.typed = "  DuckDB ";
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expectEqualStrings("DuckDB", asked.answer.typed);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ DuckDB", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask dismisses the question when the user presses Esc while typing" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.picked = other_value;
+    FakeConsole.typed = "Duck";
+    FakeConsole.submitted = false;
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expect(asked.answer == .cancelled);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ cancelled", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask dismisses the question when the typed answer is empty" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.picked = other_value;
+    FakeConsole.typed = "   ";
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expect(asked.answer == .cancelled);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ cancelled", asked.text);
+}
+
+test "ask dismisses the question when the user quits the picker" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expect(asked.answer == .cancelled);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ cancelled", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask dismisses the question without drawing a picker when stdin is not a terminal" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    FakeConsole.tty = false;
+    FakeConsole.picked = "Postgres";
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
+    try std.testing.expect(asked.answer == .cancelled);
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ cancelled", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "ask clears a question and a typed answer that wrap on a narrow terminal" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    FakeConsole.reset();
+    // Wide enough for the option labels, which the picker itself can't wrap.
+    FakeConsole.columns = 32;
+    FakeConsole.picked = other_value;
+    FakeConsole.typed = "a much longer answer than fits";
+
+    const asked = try askOnFakeScreen(arena_state.allocator(), "Which database should the app use\nfor sessions?");
+    try std.testing.expectEqualStrings("a much longer answer than fits", asked.answer.typed);
+    // The echo is cut to fit its row, leaving room for the "↳ " prefix.
+    try std.testing.expectEqualStrings("🔧 Asking\n↳ a much longer answer than fi", asked.text);
+    try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
 }
