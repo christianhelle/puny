@@ -13,8 +13,15 @@ pub const bold_end = "\x1b[22m";
 /// untrusted text (anything the model wrote) can't move the cursor or send
 /// escape sequences to the terminal. The length never changes.
 pub fn scrubControls(text: []u8) void {
-    for (text) |*byte| {
-        if (std.ascii.isControl(byte.*)) byte.* = ' ';
+    var i: usize = 0;
+    while (i < text.len) {
+        const seq_len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        const end = @min(i + seq_len, text.len);
+        const cp: ?u21 = std.unicode.utf8Decode(text[i..end]) catch null;
+        // C0 controls and DEL, plus C1 controls, which some terminals read
+        // as escape sequences (U+009B is CSI).
+        if (cp) |c| if (c < 0x20 or (c >= 0x7f and c <= 0x9f)) @memset(text[i..end], ' ');
+        i = end;
     }
 }
 
@@ -22,6 +29,13 @@ test "scrubControls turns control characters into spaces" {
     var text = "a\x1b[2Jb\r\nc\td\x7f".*;
     scrubControls(&text);
     try std.testing.expectEqualStrings("a [2Jb  c d ", &text);
+}
+
+test "scrubControls turns UTF-8 encoded C1 controls into spaces" {
+    // U+009B is CSI on terminals that read C1 controls; U+0085 is NEL.
+    var text = "a\xc2\x9b2Jb\xc2\x85c é".*;
+    scrubControls(&text);
+    try std.testing.expectEqualStrings("a  2Jb  c é", &text);
 }
 
 test "ansi constants are well-formed escape sequences" {
