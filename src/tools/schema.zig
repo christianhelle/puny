@@ -15,6 +15,16 @@ fn comptimeJsonType(comptime T: type) []const u8 {
     };
 }
 
+/// Element type of a parameter the schema describes as an array, so its
+/// `items` can be typed; providers reject arrays without them.
+fn arrayChild(comptime T: type) ?type {
+    return switch (@typeInfo(T)) {
+        .optional => |opt| arrayChild(opt.child),
+        .pointer => |ptr| if (ptr.size == .slice and ptr.child != u8) ptr.child else null,
+        else => null,
+    };
+}
+
 pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u8, comptime Params: type) type {
     return struct {
         pub const tool_name = name;
@@ -47,7 +57,13 @@ pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u
                     S.append(&buf, &pos, field_name);
                     S.append(&buf, &pos, "\":{\"type\":\"");
                     S.append(&buf, &pos, comptimeJsonType(field_type));
-                    S.append(&buf, &pos, "\",\"description\":\"");
+                    S.append(&buf, &pos, "\"");
+                    if (arrayChild(field_type)) |child| {
+                        S.append(&buf, &pos, ",\"items\":{\"type\":\"");
+                        S.append(&buf, &pos, comptimeJsonType(child));
+                        S.append(&buf, &pos, "\"}");
+                    }
+                    S.append(&buf, &pos, ",\"description\":\"");
                     S.append(&buf, &pos, field_name);
                     S.append(&buf, &pos, "\"}");
                 }
@@ -114,6 +130,17 @@ test "schema generation" {
 
     const required = params.get("required").?.array;
     try std.testing.expectEqual(@as(usize, 4), required.items.len);
+}
+
+test "schema describes the items of a string array parameter" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const Schema = ToolDefinition("test_tool", "A test tool.", TestParams);
+    const schema_value = try Schema.schema(arena_state.allocator());
+
+    const tags = schema_value.object.get("parameters").?.object.get("properties").?.object.get("tags").?.object;
+    try std.testing.expectEqualStrings("string", tags.get("items").?.object.get("type").?.string);
 }
 
 pub const Tool = struct {
