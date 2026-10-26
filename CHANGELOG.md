@@ -3,14 +3,12 @@
 ## [Unreleased Changes]
 
 ### Features
+- Stop width and scrub functions from crashing on a cut-off UTF-8 character ([#230](https://github.com/christianhelle/puny/pull/230)) ([@christianhelle](https://github.com/christianhelle/))
 - Pick answers to multiple choice questions from a list ([#228](https://github.com/christianhelle/puny/pull/228)) ([@christianhelle](https://github.com/christianhelle/))
 - Drop the planning instructions when switching to build mode ([#227](https://github.com/christianhelle/puny/pull/227)) ([@christianhelle](https://github.com/christianhelle/))
 - Branded --help header and combined-flag examples ([#226](https://github.com/christianhelle/puny/pull/226)) ([@christianhelle](https://github.com/christianhelle/))
 - Upgrade to Zig 0.17.0 ([#224](https://github.com/christianhelle/puny/pull/224)) ([@christianhelle](https://github.com/christianhelle/))
 - Show the local time after the thought duration ([#225](https://github.com/christianhelle/puny/pull/225)) ([@christianhelle](https://github.com/christianhelle/))
-
-### Bug Fixes
-- Stop width and scrub functions from crashing on a cut-off UTF-8 character ([#230](https://github.com/christianhelle/puny/pull/230)) ([@christianhelle](https://github.com/christianhelle/))
 
 
 ## [v0.4.2](https://github.com/christianhelle/puny/releases/tag/v0.4.2) (2026-10-06)
