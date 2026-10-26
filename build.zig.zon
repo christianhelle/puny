@@ -1,6 +1,6 @@
 .{
     .name = .puny,
-    .version = "0.4.2",
+    .version = "0.5.0",
     .fingerprint = 0xcae65a8a91984534, // Changing this has security and trust implications.
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
