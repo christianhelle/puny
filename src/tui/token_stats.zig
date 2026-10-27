@@ -77,20 +77,24 @@ pub fn formatCredits(buf: *[40]u8, nano_ai_credits: i64) []const u8 {
 /// Prints the per-response token footer as a single dim line, e.g.
 /// `⏱ tokens: in 140 | out 120 | total 260 (session 12.4k)`. Per-turn numbers
 /// are prefixed with `~` when the turn used estimated (not provider-reported)
-/// usage; the session total is an aggregate and carries no marker.
+/// usage; the session total is an aggregate and carries no marker. When the
+/// session was billed in AI Credits (GitHub Copilot), the line ends with the
+/// turn's credits and the session's, e.g. `| AI credits 0.09 (session 1.23)`.
 pub fn printTokenFooter(
     writer: *std.Io.Writer,
     turn_in: i64,
     turn_out: i64,
     turn_estimated: bool,
     session_total: i64,
+    turn_nano_ai_credits: ?i64,
+    session_nano_ai_credits: ?i64,
 ) !void {
     const tilde = if (turn_estimated) "~" else "";
     var in_buf: [24]u8 = undefined;
     var out_buf: [24]u8 = undefined;
     var total_buf: [24]u8 = undefined;
     var session_buf: [24]u8 = undefined;
-    try writer.print("\n{s}⏱ tokens: in {s}{s} | out {s}{s} | total {s}{s} (session {s}){s}\n", .{
+    try writer.print("\n{s}⏱ tokens: in {s}{s} | out {s}{s} | total {s}{s} (session {s})", .{
         ansi.dim,
         tilde,
         formatTokens(&in_buf, turn_in),
@@ -99,8 +103,16 @@ pub fn printTokenFooter(
         tilde,
         formatTokens(&total_buf, turn_in + turn_out),
         formatTokens(&session_buf, session_total),
-        ansi.reset,
     });
+    if (session_nano_ai_credits) |session_credits| {
+        var turn_credits_buf: [40]u8 = undefined;
+        var session_credits_buf: [40]u8 = undefined;
+        try writer.print(" | AI credits {s} (session {s})", .{
+            formatCredits(&turn_credits_buf, turn_nano_ai_credits orelse 0),
+            formatCredits(&session_credits_buf, session_credits),
+        });
+    }
+    try writer.print("{s}\n", .{ansi.reset});
     try writer.flush();
 }
 
@@ -161,7 +173,7 @@ test "formatTokens prints absolute value for negative numbers" {
 test "printTokenFooter renders exact numbers on a single dim line" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234);
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, null);
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234)" ++ ansi.reset ++ "\n",
         out.written(),
@@ -171,24 +183,41 @@ test "printTokenFooter renders exact numbers on a single dim line" {
 test "printTokenFooter prefixes tilde when the turn was estimated" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, true, 1234);
+    try printTokenFooter(&out.writer, 140, 120, true, 1234, null, null);
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in ~140 | out ~120 | total ~260 (session 1234)" ++ ansi.reset ++ "\n",
         out.written(),
     );
 }
 
+test "printTokenFooter ends with the AI Credits billed for the turn and the session" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, 90_000_000, 1_230_000_000);
+    try std.testing.expectEqualStrings(
+        "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234) | AI credits 0.09 (session 1.23)" ++ ansi.reset ++ "\n",
+        out.written(),
+    );
+}
+
+test "printTokenFooter shows zero AI Credits for a turn that reported none in a billed session" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, 1_230_000_000);
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.00 (session 1.23)" ++ ansi.reset ++ "\n"));
+}
+
 test "printTokenFooter renders session total in k notation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 12400);
+    try printTokenFooter(&out.writer, 140, 120, false, 12400, null, null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "session 12.4k") != null);
 }
 
 test "printTokenFooter renders large turns in k notation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try @call(.never_inline, printTokenFooter, .{ &out.writer, 10000, 23000, false, 90000 });
+    try @call(.never_inline, printTokenFooter, .{ &out.writer, 10000, 23000, false, 90000, null, null });
     const text = out.written();
     try std.testing.expect(std.mem.indexOf(u8, text, "in 10.0k") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "out 23.0k") != null);
