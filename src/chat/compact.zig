@@ -336,8 +336,9 @@ pub const ContextBudget = struct {
     }
 
     /// The context limit for `model_key`. Without an explicit budget, the
-    /// provider is asked once per model; a failed lookup
-    /// leaves auto compaction off for that model.
+    /// provider is asked once per model. A model the provider reports no
+    /// window for leaves auto compaction off; a lookup that got no answer
+    /// is retried on the next request.
     pub fn resolveLimit(self: *ContextBudget, prov: *provider.Provider, model_key: []const u8) ?usize {
         if (self.explicit != null or self.disabled) return self.limit();
         const provider_kind = std.meta.activeTag(prov.*);

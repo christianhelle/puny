@@ -59,7 +59,8 @@ pub const ContextLookup = union(enum) {
     size: ContextSize,
     /// The provider does not report one for this model.
     unreported,
-    /// The provider reports it only once the model is loaded, so ask again later.
+    /// No answer yet: the model is not loaded, or the provider could not be
+    /// reached. Ask again later.
     not_loaded,
 
     pub fn from(length: ?usize) ContextLookup {

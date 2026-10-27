@@ -109,7 +109,10 @@ pub const Provider = union(enum) {
             )),
             else => {},
         }
-        var models = self.listModels() catch return .unreported;
+        // A failed request (server not up yet, network hiccup) is not an
+        // answer: report `.not_loaded` so the next request asks again
+        // instead of leaving auto compaction off for the whole session.
+        var models = self.listModels() catch return .not_loaded;
         defer models.deinit();
         return windowInList(models.value().models, model_key, tier);
     }
@@ -408,6 +411,20 @@ test "Provider.contextLength finds the window in the model list" {
 
     try std.testing.expectEqual(ContextLookup{ .size = .{ .prompt = 32000 } }, prov.contextLength("mock-model-fast", .default));
     try std.testing.expectEqual(ContextLookup.unreported, prov.contextLength("missing", .default));
+}
+
+test "Provider.contextLength asks again later when the model list cannot be fetched" {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}", .{server.socket.address.getPort()});
+    defer std.testing.allocator.free(url);
+    server.deinit(std.testing.io);
+
+    var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    try std.testing.expectEqual(ContextLookup.not_loaded, prov.contextLength("qwen2.5-7b", .default));
 }
 
 test "Provider.setConfig applies config to the copilot client" {
