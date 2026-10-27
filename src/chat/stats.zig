@@ -17,6 +17,10 @@ pub const PerModelStats = struct {
     ttft_count: usize = 0,
     tps_sum: f64 = 0,
     tps_count: usize = 0,
+    /// AI Credits the provider billed, summed over the requests that report them.
+    ai_credits: f64 = 0,
+    /// Requests whose usage carried AI Credits (GitHub Copilot only).
+    ai_credit_requests: usize = 0,
 };
 
 pub const ModelEntry = struct {
@@ -106,6 +110,10 @@ pub const SessionStats = struct {
         if (usage) |u| {
             stats.input_tokens += u.input_tokens - self.current_turn_input;
             stats.cached_input_tokens += u.cached_input_tokens orelse 0;
+            if (u.ai_credits) |credits| {
+                stats.ai_credits += credits;
+                stats.ai_credit_requests += 1;
+            }
 
             // Providers count reasoning tokens inside the output total; track
             // them separately so totals are not double-counted.
@@ -158,6 +166,7 @@ pub const SessionStats = struct {
         }
         return total;
     }
+
     pub fn print(self: *const @This(), io: std.Io, writer: *std.Io.Writer) !void {
         const now = std.Io.Clock.Timestamp.now(io, .awake);
         const elapsed_ns = self.start_time.raw.durationTo(now.raw).nanoseconds;
@@ -512,4 +521,19 @@ test "SessionStats.print counts every request a turn makes" {
 
     const written = output.written();
     try std.testing.expect(std.mem.indexOf(u8, written, "  Turns:               1\n  Requests:            2\n") != null);
+}
+
+test "SessionStats sums the AI Credits each request reports" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 0.25 }, false);
+    stats.beginTurn("model-a", 200);
+    stats.finalizeTurn(.{ .input_tokens = 200, .output_tokens = 5, .ai_credits = 0.5 }, true);
+    stats.beginTurn("model-a", 300);
+    stats.finalizeTurn(null, false);
+
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectApproxEqAbs(@as(f64, 0.75), model_stats.ai_credits, 1e-12);
+    try std.testing.expectEqual(@as(usize, 2), model_stats.ai_credit_requests);
 }
