@@ -946,7 +946,7 @@ While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
 - `/new` or `/reset` — clear the conversation, start a new session, and unload all skills
-- `/stats` — show session statistics (turns, requests, and tokens summed over every request) and memory usage
+- `/stats` — show session statistics (turns, requests, and tokens summed over every request) and memory usage; with GitHub Copilot it also shows the [AI Credits](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) each model and the whole session used, as Copilot reports them per request
 - `/compact` — summarize the conversation so far into one message to free context
 - `/context [tokens|off|default|long]` — show how full the context is and a breakdown of what fills it (system prompt, tools, skills, messages), set the context limit for this conversation, pick a [context tier](#context-tiers), or turn auto compaction off
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
