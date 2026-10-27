@@ -169,13 +169,15 @@ pub const SessionStats = struct {
     }
 
     /// AI Credits billed this session across all models, or null when no
-    /// request reported any (every provider but GitHub Copilot).
-    fn totalNanoAiCredits(self: *const @This()) ?i64 {
-        var total: i64 = 0;
+    /// request reported any (every provider but GitHub Copilot). Partial when
+    /// a billed model has requests that reported no cost.
+    pub fn totalAiCredits(self: *const @This()) ?token_stats.AiCredits {
+        var total: token_stats.AiCredits = .{ .nano = 0 };
         var reported = false;
         for (self.models.items) |entry| {
             if (entry.stats.ai_credit_requests == 0) continue;
-            total += entry.stats.nano_ai_credits;
+            total.nano += entry.stats.nano_ai_credits;
+            total.partial = total.partial or entry.stats.ai_credit_requests < entry.stats.request_count;
             reported = true;
         }
         return if (reported) total else null;
@@ -194,9 +196,9 @@ pub const SessionStats = struct {
         try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
         var session_turns_buf: [32]u8 = undefined;
         try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, self.totalTurns())});
-        if (self.totalNanoAiCredits()) |nano| {
+        if (self.totalAiCredits()) |credits| {
             var credits_buf: [40]u8 = undefined;
-            try writer.print("  AI credits:          {s}\n", .{formatCredits(&credits_buf, nano)});
+            try writer.print("  AI credits:          {s}\n", .{token_stats.formatCredits(&credits_buf, credits.nano)});
         }
         for (self.models.items) |entry| {
             const stats = entry.stats;
@@ -235,7 +237,7 @@ pub const SessionStats = struct {
             )});
             if (stats.ai_credit_requests > 0) {
                 var credits_buf: [40]u8 = undefined;
-                const credits = formatCredits(&credits_buf, stats.nano_ai_credits);
+                const credits = token_stats.formatCredits(&credits_buf, stats.nano_ai_credits);
                 if (stats.ai_credit_requests < stats.request_count) {
                     try writer.print("  AI credits:          {s} (reported for {d} of {d} requests)\n", .{ credits, stats.ai_credit_requests, stats.request_count });
                 } else {
@@ -265,22 +267,6 @@ pub const SessionStats = struct {
         try writer.flush();
     }
 };
-
-/// Billionths of an AI Credit in one hundredth of a credit.
-const nano_ai_credits_per_cent = 10_000_000;
-
-/// AI Credits, given in billionths, rounded half up to two decimals with
-/// grouped thousands, e.g. `1,234.57`. Whole-number arithmetic keeps half-cent
-/// totals from rounding down. A charge too small to show as 0.01 reads
-/// `<0.01`, not as free.
-fn formatCredits(buf: *[40]u8, nano_ai_credits: i64) []const u8 {
-    const nano: u64 = @intCast(@max(nano_ai_credits, 0));
-    const cents = (nano + nano_ai_credits_per_cent / 2) / nano_ai_credits_per_cent;
-    if (cents == 0 and nano > 0) return std.fmt.bufPrint(buf, "<0.01", .{}) catch buf[0..0];
-    var whole_buf: [32]u8 = undefined;
-    const whole = token_stats.formatGrouped(&whole_buf, cents / 100);
-    return std.fmt.bufPrint(buf, "{s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
-}
 
 test "SessionStats begins turn with input tokens" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
@@ -614,19 +600,19 @@ test "SessionStats.print says when some requests reported no AI Credits" {
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "  AI credits:          2.00 (reported for 1 of 2 requests)\n") != null);
 }
 
-test "formatCredits marks a charge below a hundredth instead of showing it as free" {
-    var buf: [40]u8 = undefined;
-    try std.testing.expectEqualStrings("<0.01", formatCredits(&buf, 3_400_000));
-    try std.testing.expectEqualStrings("0.00", formatCredits(&buf, 0));
-    try std.testing.expectEqualStrings("0.01", formatCredits(&buf, 5_000_000));
-}
+test "SessionStats.totalAiCredits is partial only when a billed model missed a cost" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("billed", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 2_000_000_000 }, true);
+    // A model that never reports credits leaves the total complete.
+    stats.beginTurn("unbilled", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, true);
+    try std.testing.expectEqual(token_stats.AiCredits{ .nano = 2_000_000_000 }, stats.totalAiCredits().?);
 
-test "formatCredits rounds half-cent totals up" {
-    var buf: [40]u8 = undefined;
-    // As f64, 0.145 * 100 is 14.499999999999998 and would round to 0.14.
-    try std.testing.expectEqualStrings("0.15", formatCredits(&buf, 145_000_000));
-    try std.testing.expectEqualStrings("1.01", formatCredits(&buf, 1_005_000_000));
-    try std.testing.expectEqualStrings("1.00", formatCredits(&buf, 1_004_999_999));
+    stats.beginTurn("billed", 200);
+    stats.finalizeTurn(null, false);
+    try std.testing.expectEqual(token_stats.AiCredits{ .nano = 2_000_000_000, .partial = true }, stats.totalAiCredits().?);
 }
 
 test "SessionStats.print omits AI Credits when no request reports them" {

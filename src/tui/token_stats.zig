@@ -58,23 +58,55 @@ pub fn formatGrouped(buf: []u8, n: anytype) []const u8 {
     return buf[0..i];
 }
 
+/// Billionths of an AI Credit in one hundredth of a credit.
+const nano_ai_credits_per_cent = 10_000_000;
+
+/// AI Credits, given in billionths, rounded half up to two decimals with
+/// grouped thousands, e.g. `1,234.57`. Whole-number arithmetic keeps half-cent
+/// totals from rounding down. A charge too small to show as 0.01 reads
+/// `<0.01`, not as free.
+pub fn formatCredits(buf: *[40]u8, nano_ai_credits: i64) []const u8 {
+    const nano: u64 = @intCast(@max(nano_ai_credits, 0));
+    const cents = (nano + nano_ai_credits_per_cent / 2) / nano_ai_credits_per_cent;
+    if (cents == 0 and nano > 0) return std.fmt.bufPrint(buf, "<0.01", .{}) catch buf[0..0];
+    var whole_buf: [32]u8 = undefined;
+    const whole = formatGrouped(&whole_buf, cents / 100);
+    return std.fmt.bufPrint(buf, "{s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
+}
+
+/// AI Credits billed, in billionths, and whether some requests reported no
+/// cost, so the total is only a lower bound.
+pub const AiCredits = struct {
+    nano: i64,
+    partial: bool = false,
+};
+
+fn partialMark(credits: AiCredits) []const u8 {
+    return if (credits.partial) "+" else "";
+}
+
 /// Prints the per-response token footer as a single dim line, e.g.
 /// `⏱ tokens: in 140 | out 120 | total 260 (session 12.4k)`. Per-turn numbers
 /// are prefixed with `~` when the turn used estimated (not provider-reported)
-/// usage; the session total is an aggregate and carries no marker.
+/// usage; the session total is an aggregate and carries no marker. When the
+/// session was billed in AI Credits (GitHub Copilot), the line ends with the
+/// turn's credits and the session's, e.g. `| AI credits 0.09 (session 1.23)`.
+/// A total that misses some requests' costs ends in `+`.
 pub fn printTokenFooter(
     writer: *std.Io.Writer,
     turn_in: i64,
     turn_out: i64,
     turn_estimated: bool,
     session_total: i64,
+    turn_credits: ?AiCredits,
+    session_credits: ?AiCredits,
 ) !void {
     const tilde = if (turn_estimated) "~" else "";
     var in_buf: [24]u8 = undefined;
     var out_buf: [24]u8 = undefined;
     var total_buf: [24]u8 = undefined;
     var session_buf: [24]u8 = undefined;
-    try writer.print("\n{s}⏱ tokens: in {s}{s} | out {s}{s} | total {s}{s} (session {s}){s}\n", .{
+    try writer.print("\n{s}⏱ tokens: in {s}{s} | out {s}{s} | total {s}{s} (session {s})", .{
         ansi.dim,
         tilde,
         formatTokens(&in_buf, turn_in),
@@ -83,8 +115,19 @@ pub fn printTokenFooter(
         tilde,
         formatTokens(&total_buf, turn_in + turn_out),
         formatTokens(&session_buf, session_total),
-        ansi.reset,
     });
+    if (session_credits) |session| {
+        var turn_credits_buf: [40]u8 = undefined;
+        var session_credits_buf: [40]u8 = undefined;
+        // A turn whose requests reported no cost is unknown, not free.
+        try writer.print(" | AI credits {s}{s} (session {s}{s})", .{
+            if (turn_credits) |turn| formatCredits(&turn_credits_buf, turn.nano) else "n/a",
+            if (turn_credits) |turn| partialMark(turn) else "",
+            formatCredits(&session_credits_buf, session.nano),
+            partialMark(session),
+        });
+    }
+    try writer.print("{s}\n", .{ansi.reset});
     try writer.flush();
 }
 
@@ -145,7 +188,7 @@ test "formatTokens prints absolute value for negative numbers" {
 test "printTokenFooter renders exact numbers on a single dim line" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234);
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, null);
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234)" ++ ansi.reset ++ "\n",
         out.written(),
@@ -155,24 +198,55 @@ test "printTokenFooter renders exact numbers on a single dim line" {
 test "printTokenFooter prefixes tilde when the turn was estimated" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, true, 1234);
+    try printTokenFooter(&out.writer, 140, 120, true, 1234, null, null);
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in ~140 | out ~120 | total ~260 (session 1234)" ++ ansi.reset ++ "\n",
         out.written(),
     );
 }
 
+test "printTokenFooter ends with the AI Credits billed for the turn and the session" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 90_000_000 }, .{ .nano = 1_230_000_000 });
+    try std.testing.expectEqualStrings(
+        "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234) | AI credits 0.09 (session 1.23)" ++ ansi.reset ++ "\n",
+        out.written(),
+    );
+}
+
+test "printTokenFooter marks a turn with no reported cost as unknown, not free" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, .{ .nano = 1_230_000_000 });
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits n/a (session 1.23)" ++ ansi.reset ++ "\n"));
+}
+
+test "printTokenFooter marks totals that miss some requests' costs with a plus" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 50_000_000, .partial = true }, .{ .nano = 1_230_000_000, .partial = true });
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.05+ (session 1.23+)" ++ ansi.reset ++ "\n"));
+}
+
+test "printTokenFooter shows a reported zero-cost turn as 0.00" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 0 }, .{ .nano = 1_230_000_000 });
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.00 (session 1.23)" ++ ansi.reset ++ "\n"));
+}
+
 test "printTokenFooter renders session total in k notation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 12400);
+    try printTokenFooter(&out.writer, 140, 120, false, 12400, null, null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "session 12.4k") != null);
 }
 
 test "printTokenFooter renders large turns in k notation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try @call(.never_inline, printTokenFooter, .{ &out.writer, 10000, 23000, false, 90000 });
+    try @call(.never_inline, printTokenFooter, .{ &out.writer, 10000, 23000, false, 90000, null, null });
     const text = out.written();
     try std.testing.expect(std.mem.indexOf(u8, text, "in 10.0k") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "out 23.0k") != null);
@@ -199,4 +273,19 @@ test "formatContextSize labels context windows as the Copilot app does" {
     try std.testing.expectEqualStrings("1.1M", formatContextSize(&buf, 1_050_000));
     try std.testing.expectEqualStrings("8K", formatContextSize(&buf, 8_192));
     try std.testing.expectEqualStrings("512", formatContextSize(&buf, 512));
+}
+
+test "formatCredits marks a charge below a hundredth instead of showing it as free" {
+    var buf: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("<0.01", formatCredits(&buf, 3_400_000));
+    try std.testing.expectEqualStrings("0.00", formatCredits(&buf, 0));
+    try std.testing.expectEqualStrings("0.01", formatCredits(&buf, 5_000_000));
+}
+
+test "formatCredits rounds half-cent totals up" {
+    var buf: [40]u8 = undefined;
+    // As f64, 0.145 * 100 is 14.499999999999998 and would round to 0.14.
+    try std.testing.expectEqualStrings("0.15", formatCredits(&buf, 145_000_000));
+    try std.testing.expectEqualStrings("1.01", formatCredits(&buf, 1_005_000_000));
+    try std.testing.expectEqualStrings("1.00", formatCredits(&buf, 1_004_999_999));
 }

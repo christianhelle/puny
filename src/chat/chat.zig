@@ -748,7 +748,7 @@ test "agent loop output never leaves consecutive blank lines" {
             const result = try runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random, "mock-model", null, &messages, &.{}, &thinking_indicator, null);
             turn_complete = result.turn_complete;
         }
-        try token_stats.printTokenFooter(&output.writer, 1, 1, false, 2);
+        try token_stats.printTokenFooter(&output.writer, 1, 1, false, 2, null, null);
     }
     try output.writer.writeAll("\n> ");
 
