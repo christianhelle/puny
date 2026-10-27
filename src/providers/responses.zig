@@ -66,6 +66,13 @@ fn parseUsage(usage_obj: std.json.ObjectMap) openai.TurnUsage {
     };
 }
 
+/// AI Credits GitHub Copilot puts beside the response in a final event.
+fn copilotAiCredits(event_obj: std.json.ObjectMap) ?f64 {
+    const usage = event_obj.get("copilot_usage") orelse return null;
+    if (usage != .object) return null;
+    return openai.aiCreditsFromNano(integerField(usage.object, "total_nano_aiu"));
+}
+
 pub const ResponsesSseCallback = struct {
     allocator: std.mem.Allocator,
     callback: StreamCallback,
@@ -192,7 +199,9 @@ pub const ResponsesSseCallback = struct {
                     const resp_obj = resp_val.object;
                     if (resp_obj.get("usage")) |usage_val| {
                         if (usage_val == .object) {
-                            try self.callback.emit(.{ .usage = parseUsage(usage_val.object) });
+                            var usage = parseUsage(usage_val.object);
+                            usage.ai_credits = copilotAiCredits(obj);
+                            try self.callback.emit(.{ .usage = usage });
                         }
                     }
                 }
@@ -207,7 +216,9 @@ pub const ResponsesSseCallback = struct {
                     const resp_obj = resp_val.object;
                     if (resp_obj.get("usage")) |usage_val| {
                         if (usage_val == .object) {
-                            try self.callback.emit(.{ .usage = parseUsage(usage_val.object) });
+                            var usage = parseUsage(usage_val.object);
+                            usage.ai_credits = copilotAiCredits(obj);
+                            try self.callback.emit(.{ .usage = usage });
                         }
                     }
                 }
@@ -736,6 +747,32 @@ test "ResponsesSseCallback reports cached input tokens from input_tokens_details
     try std.testing.expectEqual(@as(i64, 900), usages.items[0].cached_input_tokens.?);
     try std.testing.expectEqual(@as(i64, 500), usages.items[1].input_tokens);
     try std.testing.expectEqual(@as(i64, 400), usages.items[1].cached_input_tokens.?);
+}
+
+test "ResponsesSseCallback reports the AI Credits Copilot billed" {
+    var usages = std.ArrayList(openai.TurnUsage).empty;
+    defer usages.deinit(std.testing.allocator);
+
+    const Recorder = struct {
+        usages: *std.ArrayList(openai.TurnUsage),
+        fn event(ctx: *anyopaque, ev: StreamEvent) !void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            if (ev == .usage) try self.usages.append(std.testing.allocator, ev.usage);
+        }
+    };
+
+    var recorder = Recorder{ .usages = &usages };
+    var sse = ResponsesSseCallback{ .allocator = std.testing.allocator, .callback = .{
+        .context = &recorder,
+        .vtable = &.{ .event = Recorder.event, .reset = null },
+    } };
+
+    try sse.event("{\"copilot_usage\":{\"token_details\":[],\"total_nano_aiu\":41442500},\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"x\",\"output\":[],\"usage\":{\"input_tokens\":3296,\"output_tokens\":5,\"total_tokens\":3301}}}");
+    try sse.event("{\"type\":\"response.incomplete\",\"sequence_number\":2,\"response\":{\"id\":\"resp_2\",\"object\":\"response\",\"status\":\"incomplete\",\"model\":\"x\",\"output\":[],\"usage\":{\"input_tokens\":500,\"output_tokens\":20,\"total_tokens\":520}}}");
+
+    try std.testing.expectEqual(@as(usize, 2), usages.items.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0414425), usages.items[0].ai_credits.?, 1e-12);
+    try std.testing.expectEqual(@as(?f64, null), usages.items[1].ai_credits);
 }
 
 test "ResponsesSseCallback handles output at streaming server" {
