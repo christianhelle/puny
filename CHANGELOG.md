@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Show GitHub Copilot AI Credits in session stats ([#232](https://github.com/christianhelle/puny/pull/232)) ([@christianhelle](https://github.com/christianhelle/))
 - Skip model list validation at startup for faster LM Studio launch ([#231](https://github.com/christianhelle/puny/pull/231)) ([@christianhelle](https://github.com/christianhelle/))
 
 
