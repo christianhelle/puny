@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Skip model list validation at startup for faster LM Studio launch ([#231](https://github.com/christianhelle/puny/pull/231)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.5.0](https://github.com/christianhelle/puny/releases/tag/v0.5.0) (2026-10-26)
 
 ### Features
