@@ -666,6 +666,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_estimated = false;
     var turn_in: i64 = 0;
     var turn_out: i64 = 0;
+    var turn_nano_ai_credits: ?i64 = null;
     var compaction_failed = false;
     while (!turn_complete) {
         if (!compaction_failed) {
@@ -730,6 +731,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         if (result.usage) |u| {
             turn_in += u.input_tokens;
             turn_out += u.output_tokens;
+            if (u.nano_ai_credits) |c| turn_nano_ai_credits = (turn_nano_ai_credits orelse 0) + c;
         }
         turn_estimated = turn_estimated or result.usage_estimated;
 
@@ -743,7 +745,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     }
 
     if (turn_complete and !turn_cancelled and !turn_had_error) {
-        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), null, null);
+        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_nano_ai_credits, ctx.session_stats.totalNanoAiCredits());
     }
 
     if (branch_review.isActive()) {

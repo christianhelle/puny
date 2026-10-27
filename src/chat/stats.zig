@@ -170,7 +170,7 @@ pub const SessionStats = struct {
 
     /// AI Credits billed this session across all models, or null when no
     /// request reported any (every provider but GitHub Copilot).
-    fn totalNanoAiCredits(self: *const @This()) ?i64 {
+    pub fn totalNanoAiCredits(self: *const @This()) ?i64 {
         var total: i64 = 0;
         var reported = false;
         for (self.models.items) |entry| {
