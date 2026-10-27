@@ -745,7 +745,10 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     }
 
     if (turn_complete and !turn_cancelled and !turn_had_error) {
-        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_nano_ai_credits, ctx.session_stats.totalNanoAiCredits());
+        // Only Copilot bills in AI Credits; after switching away, /stats keeps
+        // the session's credits but the footer goes back to tokens alone.
+        const session_nano_ai_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalNanoAiCredits() else null;
+        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_nano_ai_credits, session_nano_ai_credits);
     }
 
     if (branch_review.isActive()) {
