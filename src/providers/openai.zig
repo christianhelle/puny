@@ -17,19 +17,16 @@ pub const TurnUsage = struct {
     cached_input_tokens: ?i64 = null,
     tokens_per_second: ?f64 = null,
     time_to_first_token_seconds: ?f64 = null,
-    /// AI Credits GitHub Copilot billed for this request, as it reports them.
-    ai_credits: ?f64 = null,
+    /// AI Credits GitHub Copilot billed for this request, in the billionths
+    /// of a credit it reports them in. Kept whole so sums round exactly.
+    nano_ai_credits: ?i64 = null,
 };
 
-/// GitHub Copilot reports a request's cost in billionths of an AI Credit.
-const nano_ai_credits_per_credit = 1_000_000_000.0;
-
-/// The AI Credits in a Copilot `copilot_usage.total_nano_aiu`, or null when
-/// the value is missing or negative.
-pub fn aiCreditsFromNano(total_nano_aiu: ?i64) ?f64 {
+/// A Copilot `copilot_usage.total_nano_aiu`, or null when it is missing or
+/// negative.
+pub fn nanoAiCredits(total_nano_aiu: ?i64) ?i64 {
     const nano = total_nano_aiu orelse return null;
-    if (nano < 0) return null;
-    return @as(f64, @floatFromInt(nano)) / nano_ai_credits_per_credit;
+    return if (nano < 0) null else nano;
 }
 
 pub const ToolDefinition = struct {
@@ -191,7 +188,7 @@ pub const SseCallback = struct {
                 .cached_input_tokens = if (usage.prompt_tokens_details) |d| d.cached_tokens else null,
                 .tokens_per_second = usage.tokens_per_second,
                 .time_to_first_token_seconds = usage.time_to_first_token_seconds,
-                .ai_credits = aiCreditsFromNano(if (parsed.value.copilot_usage) |c| c.total_nano_aiu else null),
+                .nano_ai_credits = nanoAiCredits(if (parsed.value.copilot_usage) |c| c.total_nano_aiu else null),
             } });
         }
     }
@@ -579,15 +576,15 @@ test "usage event reports the AI Credits Copilot billed" {
     try sse.event("{\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}");
 
     try std.testing.expectEqual(@as(usize, 2), events.items.len);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.0712775), events.items[0].ai_credits.?, 1e-12);
-    try std.testing.expectEqual(@as(?f64, null), events.items[1].ai_credits);
+    try std.testing.expectEqual(@as(?i64, 71277500), events.items[0].nano_ai_credits);
+    try std.testing.expectEqual(@as(?i64, null), events.items[1].nano_ai_credits);
 }
 
-test "aiCreditsFromNano rejects missing and negative totals" {
-    try std.testing.expectEqual(@as(?f64, null), aiCreditsFromNano(null));
-    try std.testing.expectEqual(@as(?f64, null), aiCreditsFromNano(-1));
-    try std.testing.expectEqual(@as(?f64, 0), aiCreditsFromNano(0));
-    try std.testing.expectEqual(@as(?f64, 1.5), aiCreditsFromNano(1_500_000_000));
+test "nanoAiCredits rejects missing and negative totals" {
+    try std.testing.expectEqual(@as(?i64, null), nanoAiCredits(null));
+    try std.testing.expectEqual(@as(?i64, null), nanoAiCredits(-1));
+    try std.testing.expectEqual(@as(?i64, 0), nanoAiCredits(0));
+    try std.testing.expectEqual(@as(?i64, 1_500_000_000), nanoAiCredits(1_500_000_000));
 }
 
 test "requestPayload omits reasoning_effort when null" {

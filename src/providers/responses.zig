@@ -67,10 +67,10 @@ fn parseUsage(usage_obj: std.json.ObjectMap) openai.TurnUsage {
 }
 
 /// AI Credits GitHub Copilot puts beside the response in a final event.
-fn copilotAiCredits(event_obj: std.json.ObjectMap) ?f64 {
+fn copilotNanoAiCredits(event_obj: std.json.ObjectMap) ?i64 {
     const usage = event_obj.get("copilot_usage") orelse return null;
     if (usage != .object) return null;
-    return openai.aiCreditsFromNano(integerField(usage.object, "total_nano_aiu"));
+    return openai.nanoAiCredits(integerField(usage.object, "total_nano_aiu"));
 }
 
 pub const ResponsesSseCallback = struct {
@@ -200,7 +200,7 @@ pub const ResponsesSseCallback = struct {
                     if (resp_obj.get("usage")) |usage_val| {
                         if (usage_val == .object) {
                             var usage = parseUsage(usage_val.object);
-                            usage.ai_credits = copilotAiCredits(obj);
+                            usage.nano_ai_credits = copilotNanoAiCredits(obj);
                             try self.callback.emit(.{ .usage = usage });
                         }
                     }
@@ -217,7 +217,7 @@ pub const ResponsesSseCallback = struct {
                     if (resp_obj.get("usage")) |usage_val| {
                         if (usage_val == .object) {
                             var usage = parseUsage(usage_val.object);
-                            usage.ai_credits = copilotAiCredits(obj);
+                            usage.nano_ai_credits = copilotNanoAiCredits(obj);
                             try self.callback.emit(.{ .usage = usage });
                         }
                     }
@@ -771,8 +771,8 @@ test "ResponsesSseCallback reports the AI Credits Copilot billed" {
     try sse.event("{\"type\":\"response.incomplete\",\"sequence_number\":2,\"response\":{\"id\":\"resp_2\",\"object\":\"response\",\"status\":\"incomplete\",\"model\":\"x\",\"output\":[],\"usage\":{\"input_tokens\":500,\"output_tokens\":20,\"total_tokens\":520}}}");
 
     try std.testing.expectEqual(@as(usize, 2), usages.items.len);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.0414425), usages.items[0].ai_credits.?, 1e-12);
-    try std.testing.expectEqual(@as(?f64, null), usages.items[1].ai_credits);
+    try std.testing.expectEqual(@as(?i64, 41442500), usages.items[0].nano_ai_credits);
+    try std.testing.expectEqual(@as(?i64, null), usages.items[1].nano_ai_credits);
 }
 
 test "ResponsesSseCallback handles output at streaming server" {

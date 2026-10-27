@@ -17,8 +17,9 @@ pub const PerModelStats = struct {
     ttft_count: usize = 0,
     tps_sum: f64 = 0,
     tps_count: usize = 0,
-    /// AI Credits the provider billed, summed over the requests that report them.
-    ai_credits: f64 = 0,
+    /// AI Credits the provider billed, in billionths of a credit, summed over
+    /// the requests that report them.
+    nano_ai_credits: i64 = 0,
     /// Requests whose usage carried AI Credits (GitHub Copilot only).
     ai_credit_requests: usize = 0,
 };
@@ -110,8 +111,8 @@ pub const SessionStats = struct {
         if (usage) |u| {
             stats.input_tokens += u.input_tokens - self.current_turn_input;
             stats.cached_input_tokens += u.cached_input_tokens orelse 0;
-            if (u.ai_credits) |credits| {
-                stats.ai_credits += credits;
+            if (u.nano_ai_credits) |nano| {
+                stats.nano_ai_credits += nano;
                 stats.ai_credit_requests += 1;
             }
 
@@ -169,12 +170,12 @@ pub const SessionStats = struct {
 
     /// AI Credits billed this session across all models, or null when no
     /// request reported any (every provider but GitHub Copilot).
-    fn totalAiCredits(self: *const @This()) ?f64 {
-        var total: f64 = 0;
+    fn totalNanoAiCredits(self: *const @This()) ?i64 {
+        var total: i64 = 0;
         var reported = false;
         for (self.models.items) |entry| {
             if (entry.stats.ai_credit_requests == 0) continue;
-            total += entry.stats.ai_credits;
+            total += entry.stats.nano_ai_credits;
             reported = true;
         }
         return if (reported) total else null;
@@ -193,9 +194,9 @@ pub const SessionStats = struct {
         try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
         var session_turns_buf: [32]u8 = undefined;
         try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, self.totalTurns())});
-        if (self.totalAiCredits()) |credits| {
+        if (self.totalNanoAiCredits()) |nano| {
             var credits_buf: [40]u8 = undefined;
-            try writer.print("  AI credits:          {s}\n", .{formatCredits(&credits_buf, credits)});
+            try writer.print("  AI credits:          {s}\n", .{formatCredits(&credits_buf, nano)});
         }
         for (self.models.items) |entry| {
             const stats = entry.stats;
@@ -234,7 +235,7 @@ pub const SessionStats = struct {
             )});
             if (stats.ai_credit_requests > 0) {
                 var credits_buf: [40]u8 = undefined;
-                const credits = formatCredits(&credits_buf, stats.ai_credits);
+                const credits = formatCredits(&credits_buf, stats.nano_ai_credits);
                 if (stats.ai_credit_requests < stats.request_count) {
                     try writer.print("  AI credits:          {s} (reported for {d} of {d} requests)\n", .{ credits, stats.ai_credit_requests, stats.request_count });
                 } else {
@@ -265,11 +266,17 @@ pub const SessionStats = struct {
     }
 };
 
-/// AI Credits rounded to two decimals with grouped thousands, e.g. `1,234.57`.
-/// A charge too small to show as 0.01 reads `<0.01`, not as free.
-fn formatCredits(buf: *[40]u8, credits: f64) []const u8 {
-    const cents: u64 = @intFromFloat(@round(@max(credits, 0) * 100));
-    if (cents == 0 and credits > 0) return std.fmt.bufPrint(buf, "<0.01", .{}) catch buf[0..0];
+/// Billionths of an AI Credit in one hundredth of a credit.
+const nano_ai_credits_per_cent = 10_000_000;
+
+/// AI Credits, given in billionths, rounded half up to two decimals with
+/// grouped thousands, e.g. `1,234.57`. Whole-number arithmetic keeps half-cent
+/// totals from rounding down. A charge too small to show as 0.01 reads
+/// `<0.01`, not as free.
+fn formatCredits(buf: *[40]u8, nano_ai_credits: i64) []const u8 {
+    const nano: u64 = @intCast(@max(nano_ai_credits, 0));
+    const cents = (nano + nano_ai_credits_per_cent / 2) / nano_ai_credits_per_cent;
+    if (cents == 0 and nano > 0) return std.fmt.bufPrint(buf, "<0.01", .{}) catch buf[0..0];
     var whole_buf: [32]u8 = undefined;
     const whole = token_stats.formatGrouped(&whole_buf, cents / 100);
     return std.fmt.bufPrint(buf, "{s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
@@ -563,14 +570,14 @@ test "SessionStats sums the AI Credits each request reports" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.beginTurn("model-a", 100);
-    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 0.25 }, false);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 250_000_000 }, false);
     stats.beginTurn("model-a", 200);
-    stats.finalizeTurn(.{ .input_tokens = 200, .output_tokens = 5, .ai_credits = 0.5 }, true);
+    stats.finalizeTurn(.{ .input_tokens = 200, .output_tokens = 5, .nano_ai_credits = 500_000_000 }, true);
     stats.beginTurn("model-a", 300);
     stats.finalizeTurn(null, false);
 
     const model_stats = &stats.models.items[0].stats;
-    try std.testing.expectApproxEqAbs(@as(f64, 0.75), model_stats.ai_credits, 1e-12);
+    try std.testing.expectEqual(@as(i64, 750_000_000), model_stats.nano_ai_credits);
     try std.testing.expectEqual(@as(usize, 2), model_stats.ai_credit_requests);
 }
 
@@ -578,9 +585,9 @@ test "SessionStats.print shows AI Credits per model and for the session" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.beginTurn("model-a", 100);
-    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 1_234.5 }, true);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 1_234_500_000_000 }, true);
     stats.beginTurn("model-b", 100);
-    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 0.0712775 }, true);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 71_277_500 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
@@ -596,7 +603,7 @@ test "SessionStats.print says when some requests reported no AI Credits" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.beginTurn("model-a", 100);
-    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 2 }, false);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 2_000_000_000 }, false);
     stats.beginTurn("model-a", 200);
     stats.finalizeTurn(null, false);
 
@@ -609,9 +616,9 @@ test "SessionStats.print says when some requests reported no AI Credits" {
 
 test "formatCredits marks a charge below a hundredth instead of showing it as free" {
     var buf: [40]u8 = undefined;
-    try std.testing.expectEqualStrings("<0.01", formatCredits(&buf, 0.0034));
+    try std.testing.expectEqualStrings("<0.01", formatCredits(&buf, 3_400_000));
     try std.testing.expectEqualStrings("0.00", formatCredits(&buf, 0));
-    try std.testing.expectEqualStrings("0.01", formatCredits(&buf, 0.005));
+    try std.testing.expectEqualStrings("0.01", formatCredits(&buf, 5_000_000));
 }
 
 test "SessionStats.print omits AI Credits when no request reports them" {
