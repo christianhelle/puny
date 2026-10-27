@@ -107,8 +107,9 @@ pub fn printTokenFooter(
     if (session_nano_ai_credits) |session_credits| {
         var turn_credits_buf: [40]u8 = undefined;
         var session_credits_buf: [40]u8 = undefined;
+        // A turn whose requests reported no cost is unknown, not free.
         try writer.print(" | AI credits {s} (session {s})", .{
-            formatCredits(&turn_credits_buf, turn_nano_ai_credits orelse 0),
+            if (turn_nano_ai_credits) |turn_credits| formatCredits(&turn_credits_buf, turn_credits) else "n/a",
             formatCredits(&session_credits_buf, session_credits),
         });
     }
@@ -200,10 +201,17 @@ test "printTokenFooter ends with the AI Credits billed for the turn and the sess
     );
 }
 
-test "printTokenFooter shows zero AI Credits for a turn that reported none in a billed session" {
+test "printTokenFooter marks a turn with no reported cost as unknown, not free" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try printTokenFooter(&out.writer, 140, 120, false, 1234, null, 1_230_000_000);
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits n/a (session 1.23)" ++ ansi.reset ++ "\n"));
+}
+
+test "printTokenFooter shows a reported zero-cost turn as 0.00" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, 0, 1_230_000_000);
     try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.00 (session 1.23)" ++ ansi.reset ++ "\n"));
 }
 
