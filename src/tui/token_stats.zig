@@ -58,6 +58,22 @@ pub fn formatGrouped(buf: []u8, n: anytype) []const u8 {
     return buf[0..i];
 }
 
+/// Billionths of an AI Credit in one hundredth of a credit.
+const nano_ai_credits_per_cent = 10_000_000;
+
+/// AI Credits, given in billionths, rounded half up to two decimals with
+/// grouped thousands, e.g. `1,234.57`. Whole-number arithmetic keeps half-cent
+/// totals from rounding down. A charge too small to show as 0.01 reads
+/// `<0.01`, not as free.
+pub fn formatCredits(buf: *[40]u8, nano_ai_credits: i64) []const u8 {
+    const nano: u64 = @intCast(@max(nano_ai_credits, 0));
+    const cents = (nano + nano_ai_credits_per_cent / 2) / nano_ai_credits_per_cent;
+    if (cents == 0 and nano > 0) return std.fmt.bufPrint(buf, "<0.01", .{}) catch buf[0..0];
+    var whole_buf: [32]u8 = undefined;
+    const whole = formatGrouped(&whole_buf, cents / 100);
+    return std.fmt.bufPrint(buf, "{s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
+}
+
 /// Prints the per-response token footer as a single dim line, e.g.
 /// `⏱ tokens: in 140 | out 120 | total 260 (session 12.4k)`. Per-turn numbers
 /// are prefixed with `~` when the turn used estimated (not provider-reported)
@@ -199,4 +215,19 @@ test "formatContextSize labels context windows as the Copilot app does" {
     try std.testing.expectEqualStrings("1.1M", formatContextSize(&buf, 1_050_000));
     try std.testing.expectEqualStrings("8K", formatContextSize(&buf, 8_192));
     try std.testing.expectEqualStrings("512", formatContextSize(&buf, 512));
+}
+
+test "formatCredits marks a charge below a hundredth instead of showing it as free" {
+    var buf: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("<0.01", formatCredits(&buf, 3_400_000));
+    try std.testing.expectEqualStrings("0.00", formatCredits(&buf, 0));
+    try std.testing.expectEqualStrings("0.01", formatCredits(&buf, 5_000_000));
+}
+
+test "formatCredits rounds half-cent totals up" {
+    var buf: [40]u8 = undefined;
+    // As f64, 0.145 * 100 is 14.499999999999998 and would round to 0.14.
+    try std.testing.expectEqualStrings("0.15", formatCredits(&buf, 145_000_000));
+    try std.testing.expectEqualStrings("1.01", formatCredits(&buf, 1_005_000_000));
+    try std.testing.expectEqualStrings("1.00", formatCredits(&buf, 1_004_999_999));
 }
