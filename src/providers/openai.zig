@@ -17,7 +17,20 @@ pub const TurnUsage = struct {
     cached_input_tokens: ?i64 = null,
     tokens_per_second: ?f64 = null,
     time_to_first_token_seconds: ?f64 = null,
+    /// AI Credits GitHub Copilot billed for this request, as it reports them.
+    ai_credits: ?f64 = null,
 };
+
+/// GitHub Copilot reports a request's cost in billionths of an AI Credit.
+const nano_ai_credits_per_credit = 1_000_000_000.0;
+
+/// The AI Credits in a Copilot `copilot_usage.total_nano_aiu`, or null when
+/// the value is missing or negative.
+pub fn aiCreditsFromNano(total_nano_aiu: ?i64) ?f64 {
+    const nano = total_nano_aiu orelse return null;
+    if (nano < 0) return null;
+    return @as(f64, @floatFromInt(nano)) / nano_ai_credits_per_credit;
+}
 
 pub const ToolDefinition = struct {
     type: []const u8 = "function",
@@ -527,6 +540,13 @@ test "usage event reports cached prompt tokens from prompt_tokens_details" {
     try std.testing.expectEqual(@as(usize, 1), events.items.len);
     try std.testing.expectEqual(@as(i64, 1000), events.items[0].input_tokens);
     try std.testing.expectEqual(@as(i64, 900), events.items[0].cached_input_tokens.?);
+}
+
+test "aiCreditsFromNano rejects missing and negative totals" {
+    try std.testing.expectEqual(@as(?f64, null), aiCreditsFromNano(null));
+    try std.testing.expectEqual(@as(?f64, null), aiCreditsFromNano(-1));
+    try std.testing.expectEqual(@as(?f64, 0), aiCreditsFromNano(0));
+    try std.testing.expectEqual(@as(?f64, 1.5), aiCreditsFromNano(1_500_000_000));
 }
 
 test "requestPayload omits reasoning_effort when null" {
