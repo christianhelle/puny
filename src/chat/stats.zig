@@ -167,6 +167,19 @@ pub const SessionStats = struct {
         return total;
     }
 
+    /// AI Credits billed this session across all models, or null when no
+    /// request reported any (every provider but GitHub Copilot).
+    fn totalAiCredits(self: *const @This()) ?f64 {
+        var total: f64 = 0;
+        var reported = false;
+        for (self.models.items) |entry| {
+            if (entry.stats.ai_credit_requests == 0) continue;
+            total += entry.stats.ai_credits;
+            reported = true;
+        }
+        return if (reported) total else null;
+    }
+
     pub fn print(self: *const @This(), io: std.Io, writer: *std.Io.Writer) !void {
         const now = std.Io.Clock.Timestamp.now(io, .awake);
         const elapsed_ns = self.start_time.raw.durationTo(now.raw).nanoseconds;
@@ -180,6 +193,10 @@ pub const SessionStats = struct {
         try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
         var session_turns_buf: [32]u8 = undefined;
         try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, self.totalTurns())});
+        if (self.totalAiCredits()) |credits| {
+            var credits_buf: [40]u8 = undefined;
+            try writer.print("  AI credits:          {s}\n", .{formatCredits(&credits_buf, credits)});
+        }
         for (self.models.items) |entry| {
             const stats = entry.stats;
             if (stats.turn_count == 0 and stats.input_tokens == 0 and stats.output_tokens == 0) continue;
@@ -215,6 +232,15 @@ pub const SessionStats = struct {
                 &total_buf,
                 stats.input_tokens + stats.output_tokens + stats.reasoning_output_tokens,
             )});
+            if (stats.ai_credit_requests > 0) {
+                var credits_buf: [40]u8 = undefined;
+                const credits = formatCredits(&credits_buf, stats.ai_credits);
+                if (stats.ai_credit_requests < stats.request_count) {
+                    try writer.print("  AI credits:          {s} (reported for {d} of {d} requests)\n", .{ credits, stats.ai_credit_requests, stats.request_count });
+                } else {
+                    try writer.print("  AI credits:          {s}\n", .{credits});
+                }
+            }
             if (stats.tps_count > 0) {
                 try writer.print("  Avg tokens/sec:      {d:.1}\n", .{stats.tps_sum / @as(f64, @floatFromInt(stats.tps_count))});
             }
@@ -238,6 +264,16 @@ pub const SessionStats = struct {
         try writer.flush();
     }
 };
+
+/// AI Credits rounded to two decimals with grouped thousands, e.g. `1,234.57`.
+/// A charge too small to show as 0.01 reads `<0.01`, not as free.
+fn formatCredits(buf: *[40]u8, credits: f64) []const u8 {
+    const cents: u64 = @intFromFloat(@round(@max(credits, 0) * 100));
+    if (cents == 0 and credits > 0) return std.fmt.bufPrint(buf, "<0.01", .{}) catch buf[0..0];
+    var whole_buf: [32]u8 = undefined;
+    const whole = token_stats.formatGrouped(&whole_buf, cents / 100);
+    return std.fmt.bufPrint(buf, "{s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
+}
 
 test "SessionStats begins turn with input tokens" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
@@ -536,4 +572,57 @@ test "SessionStats sums the AI Credits each request reports" {
     const model_stats = &stats.models.items[0].stats;
     try std.testing.expectApproxEqAbs(@as(f64, 0.75), model_stats.ai_credits, 1e-12);
     try std.testing.expectEqual(@as(usize, 2), model_stats.ai_credit_requests);
+}
+
+test "SessionStats.print shows AI Credits per model and for the session" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 1_234.5 }, true);
+    stats.beginTurn("model-b", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 0.0712775 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "  Turns:               2\n  AI credits:          1,234.57\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "  AI credits:          1,234.50\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "  AI credits:          0.07\n") != null);
+}
+
+test "SessionStats.print says when some requests reported no AI Credits" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .ai_credits = 2 }, false);
+    stats.beginTurn("model-a", 200);
+    stats.finalizeTurn(null, false);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "  AI credits:          2.00 (reported for 1 of 2 requests)\n") != null);
+}
+
+test "formatCredits marks a charge below a hundredth instead of showing it as free" {
+    var buf: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("<0.01", formatCredits(&buf, 0.0034));
+    try std.testing.expectEqualStrings("0.00", formatCredits(&buf, 0));
+    try std.testing.expectEqualStrings("0.01", formatCredits(&buf, 0.005));
+}
+
+test "SessionStats.print omits AI Credits when no request reports them" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("model-a", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "AI credits") == null);
 }
