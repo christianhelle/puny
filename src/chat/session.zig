@@ -666,7 +666,8 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_estimated = false;
     var turn_in: i64 = 0;
     var turn_out: i64 = 0;
-    var turn_nano_ai_credits: ?i64 = null;
+    var turn_credits: ?token_stats.AiCredits = null;
+    var turn_credits_missing = false;
     var compaction_failed = false;
     while (!turn_complete) {
         if (!compaction_failed) {
@@ -731,7 +732,12 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         if (result.usage) |u| {
             turn_in += u.input_tokens;
             turn_out += u.output_tokens;
-            if (u.nano_ai_credits) |c| turn_nano_ai_credits = (turn_nano_ai_credits orelse 0) + c;
+        }
+        if (if (result.usage) |u| u.nano_ai_credits else null) |nano| {
+            const so_far: i64 = if (turn_credits) |c| c.nano else 0;
+            turn_credits = .{ .nano = so_far + nano };
+        } else {
+            turn_credits_missing = true;
         }
         turn_estimated = turn_estimated or result.usage_estimated;
 
@@ -747,8 +753,9 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     if (turn_complete and !turn_cancelled and !turn_had_error) {
         // Only Copilot bills in AI Credits; after switching away, /stats keeps
         // the session's credits but the footer goes back to tokens alone.
-        const session_nano_ai_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalNanoAiCredits() else null;
-        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_nano_ai_credits, session_nano_ai_credits);
+        const session_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalAiCredits() else null;
+        if (turn_credits) |*c| c.partial = turn_credits_missing;
+        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits);
     }
 
     if (branch_review.isActive()) {

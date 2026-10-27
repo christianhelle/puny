@@ -169,13 +169,15 @@ pub const SessionStats = struct {
     }
 
     /// AI Credits billed this session across all models, or null when no
-    /// request reported any (every provider but GitHub Copilot).
-    pub fn totalNanoAiCredits(self: *const @This()) ?i64 {
-        var total: i64 = 0;
+    /// request reported any (every provider but GitHub Copilot). Partial when
+    /// a billed model has requests that reported no cost.
+    pub fn totalAiCredits(self: *const @This()) ?token_stats.AiCredits {
+        var total: token_stats.AiCredits = .{ .nano = 0 };
         var reported = false;
         for (self.models.items) |entry| {
             if (entry.stats.ai_credit_requests == 0) continue;
-            total += entry.stats.nano_ai_credits;
+            total.nano += entry.stats.nano_ai_credits;
+            total.partial = total.partial or entry.stats.ai_credit_requests < entry.stats.request_count;
             reported = true;
         }
         return if (reported) total else null;
@@ -194,9 +196,9 @@ pub const SessionStats = struct {
         try writer.print("\n{s}{s}{s}\n", .{ ansi.dim, session_label, ansi.reset });
         var session_turns_buf: [32]u8 = undefined;
         try writer.print("  Turns:               {s}\n", .{token_stats.formatGrouped(&session_turns_buf, self.totalTurns())});
-        if (self.totalNanoAiCredits()) |nano| {
+        if (self.totalAiCredits()) |credits| {
             var credits_buf: [40]u8 = undefined;
-            try writer.print("  AI credits:          {s}\n", .{token_stats.formatCredits(&credits_buf, nano)});
+            try writer.print("  AI credits:          {s}\n", .{token_stats.formatCredits(&credits_buf, credits.nano)});
         }
         for (self.models.items) |entry| {
             const stats = entry.stats;
@@ -596,6 +598,21 @@ test "SessionStats.print says when some requests reported no AI Credits" {
     try stats.print(std.testing.io, &output.writer);
 
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "  AI credits:          2.00 (reported for 1 of 2 requests)\n") != null);
+}
+
+test "SessionStats.totalAiCredits is partial only when a billed model missed a cost" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.beginTurn("billed", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 2_000_000_000 }, true);
+    // A model that never reports credits leaves the total complete.
+    stats.beginTurn("unbilled", 100);
+    stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, true);
+    try std.testing.expectEqual(token_stats.AiCredits{ .nano = 2_000_000_000 }, stats.totalAiCredits().?);
+
+    stats.beginTurn("billed", 200);
+    stats.finalizeTurn(null, false);
+    try std.testing.expectEqual(token_stats.AiCredits{ .nano = 2_000_000_000, .partial = true }, stats.totalAiCredits().?);
 }
 
 test "SessionStats.print omits AI Credits when no request reports them" {

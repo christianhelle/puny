@@ -74,20 +74,32 @@ pub fn formatCredits(buf: *[40]u8, nano_ai_credits: i64) []const u8 {
     return std.fmt.bufPrint(buf, "{s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
 }
 
+/// AI Credits billed, in billionths, and whether some requests reported no
+/// cost, so the total is only a lower bound.
+pub const AiCredits = struct {
+    nano: i64,
+    partial: bool = false,
+};
+
+fn partialMark(credits: AiCredits) []const u8 {
+    return if (credits.partial) "+" else "";
+}
+
 /// Prints the per-response token footer as a single dim line, e.g.
 /// `⏱ tokens: in 140 | out 120 | total 260 (session 12.4k)`. Per-turn numbers
 /// are prefixed with `~` when the turn used estimated (not provider-reported)
 /// usage; the session total is an aggregate and carries no marker. When the
 /// session was billed in AI Credits (GitHub Copilot), the line ends with the
 /// turn's credits and the session's, e.g. `| AI credits 0.09 (session 1.23)`.
+/// A total that misses some requests' costs ends in `+`.
 pub fn printTokenFooter(
     writer: *std.Io.Writer,
     turn_in: i64,
     turn_out: i64,
     turn_estimated: bool,
     session_total: i64,
-    turn_nano_ai_credits: ?i64,
-    session_nano_ai_credits: ?i64,
+    turn_credits: ?AiCredits,
+    session_credits: ?AiCredits,
 ) !void {
     const tilde = if (turn_estimated) "~" else "";
     var in_buf: [24]u8 = undefined;
@@ -104,13 +116,15 @@ pub fn printTokenFooter(
         formatTokens(&total_buf, turn_in + turn_out),
         formatTokens(&session_buf, session_total),
     });
-    if (session_nano_ai_credits) |session_credits| {
+    if (session_credits) |session| {
         var turn_credits_buf: [40]u8 = undefined;
         var session_credits_buf: [40]u8 = undefined;
         // A turn whose requests reported no cost is unknown, not free.
-        try writer.print(" | AI credits {s} (session {s})", .{
-            if (turn_nano_ai_credits) |turn_credits| formatCredits(&turn_credits_buf, turn_credits) else "n/a",
-            formatCredits(&session_credits_buf, session_credits),
+        try writer.print(" | AI credits {s}{s} (session {s}{s})", .{
+            if (turn_credits) |turn| formatCredits(&turn_credits_buf, turn.nano) else "n/a",
+            if (turn_credits) |turn| partialMark(turn) else "",
+            formatCredits(&session_credits_buf, session.nano),
+            partialMark(session),
         });
     }
     try writer.print("{s}\n", .{ansi.reset});
@@ -194,7 +208,7 @@ test "printTokenFooter prefixes tilde when the turn was estimated" {
 test "printTokenFooter ends with the AI Credits billed for the turn and the session" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, 90_000_000, 1_230_000_000);
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 90_000_000 }, .{ .nano = 1_230_000_000 });
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234) | AI credits 0.09 (session 1.23)" ++ ansi.reset ++ "\n",
         out.written(),
@@ -204,14 +218,21 @@ test "printTokenFooter ends with the AI Credits billed for the turn and the sess
 test "printTokenFooter marks a turn with no reported cost as unknown, not free" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, 1_230_000_000);
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, .{ .nano = 1_230_000_000 });
     try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits n/a (session 1.23)" ++ ansi.reset ++ "\n"));
+}
+
+test "printTokenFooter marks totals that miss some requests' costs with a plus" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 50_000_000, .partial = true }, .{ .nano = 1_230_000_000, .partial = true });
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.05+ (session 1.23+)" ++ ansi.reset ++ "\n"));
 }
 
 test "printTokenFooter shows a reported zero-cost turn as 0.00" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, 0, 1_230_000_000);
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 0 }, .{ .nano = 1_230_000_000 });
     try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.00 (session 1.23)" ++ ansi.reset ++ "\n"));
 }
 
