@@ -662,11 +662,11 @@ fn initializeProviderAndModel(
     errdefer prov.deinit();
     if (!parsed.mock) try resolver.ensureCopilotAuth(arena, io, init, cfg, stdout_writer, prov);
 
-    const skip_validation = parsed.mock or parsed.oneshot or !std.mem.eql(
-        u8,
-        provider_url.*,
-        config.default_lm_studio_url,
-    );
+    // A configured model is trusted at startup rather than checked against
+    // the provider's model list: that request would delay the welcome
+    // screen. The context window is looked up on the first request instead,
+    // and an unknown model surfaces as that request's error.
+    const skip_validation = true;
     const init_result = (model_selection.select(
         prov,
         configured_model,
