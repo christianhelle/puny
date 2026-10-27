@@ -130,9 +130,14 @@ const UsageJson = struct {
     time_to_first_token_seconds: ?f64 = null,
 };
 
+const CopilotUsageJson = struct {
+    total_nano_aiu: ?i64 = null,
+};
+
 const StreamChunk = struct {
     choices: []const DeltaChoice,
     usage: ?UsageJson = null,
+    copilot_usage: ?CopilotUsageJson = null,
 };
 
 pub const SseCallback = struct {
@@ -186,6 +191,7 @@ pub const SseCallback = struct {
                 .cached_input_tokens = if (usage.prompt_tokens_details) |d| d.cached_tokens else null,
                 .tokens_per_second = usage.tokens_per_second,
                 .time_to_first_token_seconds = usage.time_to_first_token_seconds,
+                .ai_credits = aiCreditsFromNano(if (parsed.value.copilot_usage) |c| c.total_nano_aiu else null),
             } });
         }
     }
@@ -540,6 +546,41 @@ test "usage event reports cached prompt tokens from prompt_tokens_details" {
     try std.testing.expectEqual(@as(usize, 1), events.items.len);
     try std.testing.expectEqual(@as(i64, 1000), events.items[0].input_tokens);
     try std.testing.expectEqual(@as(i64, 900), events.items[0].cached_input_tokens.?);
+}
+
+test "usage event reports the AI Credits Copilot billed" {
+    var events: std.ArrayList(TurnUsage) = .empty;
+    defer events.deinit(std.testing.allocator);
+
+    const UsageListener = struct {
+        events: *std.ArrayList(TurnUsage),
+
+        pub fn event(self: *@This(), ev: StreamEvent) !void {
+            if (ev == .usage) try self.events.append(std.testing.allocator, ev.usage);
+        }
+    };
+
+    var listener = UsageListener{ .events = &events };
+    const callback = StreamCallback{
+        .context = &listener,
+        .vtable = &.{
+            .event = struct {
+                pub fn event(ctx: *anyopaque, ev: StreamEvent) !void {
+                    const state: *UsageListener = @ptrCast(@alignCast(ctx));
+                    try state.event(ev);
+                }
+            }.event,
+        },
+    };
+
+    var sse = SseCallback{ .allocator = std.testing.allocator, .callback = callback };
+
+    try sse.event("{\"choices\":[],\"usage\":{\"prompt_tokens\":5703,\"completion_tokens\":4},\"copilot_usage\":{\"token_details\":[{\"batch_size\":1000000,\"cost_per_batch\":10000000000,\"token_count\":84,\"token_type\":\"input\"}],\"total_nano_aiu\":71277500}}");
+    try sse.event("{\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}");
+
+    try std.testing.expectEqual(@as(usize, 2), events.items.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0712775), events.items[0].ai_credits.?, 1e-12);
+    try std.testing.expectEqual(@as(?f64, null), events.items[1].ai_credits);
 }
 
 test "aiCreditsFromNano rejects missing and negative totals" {
