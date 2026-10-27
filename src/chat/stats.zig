@@ -621,6 +621,14 @@ test "formatCredits marks a charge below a hundredth instead of showing it as fr
     try std.testing.expectEqualStrings("0.01", formatCredits(&buf, 5_000_000));
 }
 
+test "formatCredits rounds half-cent totals up" {
+    var buf: [40]u8 = undefined;
+    // As f64, 0.145 * 100 is 14.499999999999998 and would round to 0.14.
+    try std.testing.expectEqualStrings("0.15", formatCredits(&buf, 145_000_000));
+    try std.testing.expectEqualStrings("1.01", formatCredits(&buf, 1_005_000_000));
+    try std.testing.expectEqualStrings("1.00", formatCredits(&buf, 1_004_999_999));
+}
+
 test "SessionStats.print omits AI Credits when no request reports them" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
