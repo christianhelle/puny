@@ -1,6 +1,7 @@
 const std = @import("std");
 const client = @import("client.zig");
 const openai = @import("openai.zig");
+const message = @import("message.zig");
 const mock = @import("mock.zig");
 const opencode_zen = @import("opencode_zen.zig");
 const anthropic = @import("anthropic.zig");
@@ -144,7 +145,7 @@ pub const Provider = union(enum) {
 
     pub fn chatStreaming(self: *Provider, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
         return switch (self.*) {
-            .lmstudio => |*c| chatStreamingCaptured(c, request, callback, chatStreamingOpenAi),
+            .lmstudio => |*c| chatStreamingCaptured(c, request, callback, chatStreamingLmStudio),
             .opencode => |*c| if (opencode_zen.isResponsesModel(request.model))
                 chatStreamingCaptured(c, request, callback, chatStreamingResponses)
             else if (opencode_zen.isAnthropicModel(request.model))
@@ -280,6 +281,16 @@ fn chatStreamingUnslothCaptured(c: *unsloth.Client, request: openai.ChatRequest,
 /// `/v1/chat/completions` endpoint.
 fn chatStreamingOpenAi(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
     return openai.chatStreaming(c, request, callback);
+}
+
+/// LM Studio renders the model's own chat template, and some (Qwen) reject any
+/// system message that is not the first message of the conversation.
+fn chatStreamingLmStudio(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
+    var arena = std.heap.ArenaAllocator.init(c.allocator);
+    defer arena.deinit();
+    var merged_request = request;
+    merged_request.messages = try message.mergeSystemMessages(arena.allocator(), request.messages);
+    return openai.chatStreaming(c, merged_request, callback);
 }
 
 fn chatStreamingResponses(c: *client.Client, request: openai.ChatRequest, callback: openai.StreamCallback) !void {
@@ -1004,6 +1015,44 @@ test "Provider.chatStreaming dispatches to the lmstudio provider" {
         .content => |content| try std.testing.expectEqualStrings("Hi from LM", content),
         else => return error.ExpectedContentEvent,
     }
+}
+
+test "Provider.chatStreaming sends LM Studio a single leading system message" {
+    const body = "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "qwen3.5-0.8b",
+        .messages = &.{
+            .{ .system = "You are Puny." },
+            .{ .system = "<available_skills></available_skills>" },
+            .{ .user = "say hi" },
+        },
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, ctx.getRequestBody(), .{});
+    defer parsed.deinit();
+    const messages = parsed.value.object.get("messages").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), messages.len);
+    try std.testing.expectEqualStrings("system", messages[0].object.get("role").?.string);
+    try std.testing.expectEqualStrings(
+        "You are Puny.\n\n<available_skills></available_skills>",
+        messages[0].object.get("content").?.string,
+    );
+    try std.testing.expectEqualStrings("user", messages[1].object.get("role").?.string);
 }
 
 test "Provider.chatStreaming preserves OpenAI-compatible HTTP error details" {
