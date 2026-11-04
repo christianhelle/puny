@@ -156,19 +156,24 @@ pub const Message = union(enum) {
     }
 };
 
-/// Folds the leading system messages into one, for chat templates that accept a
-/// single system message. The returned slice and text belong to `allocator`.
+/// Folds every system message into one at the start, for chat templates that
+/// accept a single system message and reject any that comes later. The returned
+/// slice and text belong to `allocator`.
 pub fn mergeSystemMessages(allocator: std.mem.Allocator, messages: []const Message) ![]Message {
     var system_text: std.ArrayList(u8) = .empty;
-    var first_other: usize = 0;
-    while (first_other < messages.len and messages[first_other] == .system) : (first_other += 1) {
-        if (first_other > 0) try system_text.appendSlice(allocator, "\n\n");
-        try system_text.appendSlice(allocator, messages[first_other].system);
+    var merged: std.ArrayList(Message) = .empty;
+    var has_system = false;
+    for (messages) |message| {
+        if (message != .system) {
+            try merged.append(allocator, message);
+            continue;
+        }
+        if (has_system) try system_text.appendSlice(allocator, "\n\n");
+        try system_text.appendSlice(allocator, message.system);
+        has_system = true;
     }
 
-    var merged: std.ArrayList(Message) = .empty;
-    if (first_other > 0) try merged.append(allocator, .{ .system = system_text.items });
-    try merged.appendSlice(allocator, messages[first_other..]);
+    if (has_system) try merged.insert(allocator, 0, .{ .system = system_text.items });
     return merged.items;
 }
 
@@ -330,4 +335,22 @@ test "mergeSystemMessages adds no system message when there is none" {
     const merged = try mergeSystemMessages(arena.allocator(), &.{.{ .user = "say hi" }});
 
     try std.testing.expectEqualDeep(@as([]const Message, &.{.{ .user = "say hi" }}), merged);
+}
+
+test "mergeSystemMessages moves a mid-conversation system message to the start" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const merged = try mergeSystemMessages(arena.allocator(), &.{
+        .{ .system = "You are Puny." },
+        .{ .user = "review this" },
+        .{ .system = "Skill: review" },
+        .{ .user = "now say hi" },
+    });
+
+    try std.testing.expectEqualDeep(@as([]const Message, &.{
+        .{ .system = "You are Puny.\n\nSkill: review" },
+        .{ .user = "review this" },
+        .{ .user = "now say hi" },
+    }), merged);
 }
