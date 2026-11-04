@@ -1055,6 +1055,43 @@ test "Provider.chatStreaming sends LM Studio a single leading system message" {
     try std.testing.expectEqualStrings("user", messages[1].object.get("role").?.string);
 }
 
+test "Provider.chatStreaming moves a mid-conversation system message to the start for LM Studio" {
+    const body = "data: [DONE]\n\n";
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .lmstudio = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    var rec_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer rec_state.deinit();
+    var rec = TestRecorder{ .events = .empty, .allocator = rec_state.allocator() };
+
+    const request = openai.ChatRequest{
+        .model = "qwen3.5-0.8b",
+        .messages = &.{
+            .{ .system = "You are Puny." },
+            .{ .user = "review this" },
+            .{ .system = "Skill: review" },
+            .{ .user = "now say hi" },
+        },
+        .tools = &.{},
+    };
+    try prov.chatStreaming(request, rec.callback());
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, ctx.getRequestBody(), .{});
+    defer parsed.deinit();
+    const messages = parsed.value.object.get("messages").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), messages.len);
+    try std.testing.expectEqualStrings("system", messages[0].object.get("role").?.string);
+    try std.testing.expectEqualStrings("You are Puny.\n\nSkill: review", messages[0].object.get("content").?.string);
+    try std.testing.expectEqualStrings("review this", messages[1].object.get("content").?.string);
+    try std.testing.expectEqualStrings("now say hi", messages[2].object.get("content").?.string);
+}
+
 test "Provider.chatStreaming preserves OpenAI-compatible HTTP error details" {
     const body = "{\"error\":{\"message\":\"model is temporarily unavailable\"}}";
     const ctx = try startProviderTestServer(.internal_server_error, body);
