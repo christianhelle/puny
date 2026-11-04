@@ -530,6 +530,7 @@ const ProviderTestServer = struct {
     status: std.http.Status,
     body: []const u8,
     request_path: std.ArrayList(u8) = .empty,
+    request_body: std.ArrayList(u8) = .empty,
     request_path_mutex: std.atomic.Mutex = .unlocked,
     thread: std.Thread = undefined,
     session_header: [64]u8 = undefined,
@@ -564,8 +565,17 @@ const ProviderTestServer = struct {
                     self.session_header_len = len;
                 }
             }
+            var body_buf: [4096]u8 = undefined;
+            const body_reader = request.readerExpectNone(&body_buf);
+            body_reader.appendRemaining(std.testing.allocator, &self.request_body, .limited(1 << 16)) catch {};
         }
         request.respond(self.body, .{ .status = self.status }) catch return;
+    }
+
+    fn getRequestBody(self: *@This()) []const u8 {
+        lockMutex(&self.request_path_mutex);
+        defer self.request_path_mutex.unlock();
+        return self.request_body.items;
     }
 
     fn getSessionHeader(self: *@This()) []const u8 {
@@ -596,6 +606,7 @@ fn stopProviderTestServer(ctx: *ProviderTestServer) void {
     ctx.server.deinit(std.testing.io);
     ctx.thread.join();
     ctx.request_path.deinit(std.testing.allocator);
+    ctx.request_body.deinit(std.testing.allocator);
     std.testing.allocator.destroy(ctx);
 }
 
