@@ -141,14 +141,7 @@ fn httpRequest(
     defer response_body.deinit();
 
     const start = std.Io.Clock.awake.now(self.inner.io);
-    const result = self.inner.http.fetch(.{
-        .location = .{ .uri = uri },
-        .method = method,
-        .headers = .{ .user_agent = .{ .override = user_agent } },
-        .extra_headers = extra_headers,
-        .payload = payload,
-        .response_writer = &response_body.writer,
-    }) catch |err| {
+    const result = client.fetchFollowingRedirects(&self.inner, method, uri, extra_headers, user_agent, payload, &response_body.writer) catch |err| {
         if (self.inner.http_observer) |obs| {
             if (obs.onError) |cb| cb(obs.ctx, method, url, @errorName(err));
         }
@@ -1471,6 +1464,28 @@ fn copilotClientForServer(ctx: *CopilotServer, arena: std.mem.Allocator) !Client
     c.withBaseUrl(url);
     try seedEmptyModelCatalog(&c);
     return c;
+}
+
+test "httpRequest keeps the GitHub token off a redirect to another origin" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const other_origin = try client.startRedirectTestServer(null, 1);
+    defer client.stopRedirectTestServer(other_origin);
+    const origin = try client.startRedirectTestServer(try other_origin.url(arena), 1);
+    defer client.stopRedirectTestServer(origin);
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "gho_test");
+    defer c.deinit();
+
+    const headers = [_]std.http.Header{.{ .name = "Authorization", .value = "token gho_test" }};
+    var raw = try httpRequest(&c, .GET, try origin.url(arena), &headers, null);
+    defer raw.deinit();
+
+    try std.testing.expectEqual(std.http.Status.ok, raw.status);
+    try std.testing.expectEqual(@as(usize, 1), other_origin.requests);
+    try std.testing.expect(!other_origin.saw_authorization);
 }
 
 test "listModels fetches models from a local server with a cached token" {
