@@ -312,6 +312,91 @@ pub const HttpFailureCapture = struct {
     }
 };
 
+const max_redirects = 3;
+
+/// Fetches `uri`, following up to `max_redirects` redirects of a bodiless
+/// request. `headers` stay on the original origin, because std.http.Client's
+/// own redirect handling keeps extra_headers across hosts, which would hand
+/// API keys to whichever host a redirect names.
+pub fn fetchFollowingRedirects(client: *Client, method: std.http.Method, uri: std.Uri, headers: []const std.http.Header, agent: []const u8, payload: ?[]const u8, response_writer: *std.Io.Writer) !std.http.Client.FetchResult {
+    if (payload != null) return client.http.fetch(.{
+        .redirect_behavior = .unhandled,
+        .location = .{ .uri = uri },
+        .method = method,
+        .headers = .{ .user_agent = .{ .override = agent } },
+        .extra_headers = headers,
+        .payload = payload,
+        .response_writer = response_writer,
+    });
+
+    var location_storage: [8 * 1024]u8 = undefined;
+    var location_buffer: []u8 = &location_storage;
+    var current_uri = uri;
+    var current_method = method;
+    var current_headers = headers;
+    var remaining_redirects: u8 = max_redirects;
+    while (true) {
+        var req = try client.http.request(current_method, current_uri, .{
+            .redirect_behavior = .unhandled,
+            .headers = .{ .user_agent = .{ .override = agent } },
+            .extra_headers = current_headers,
+        });
+        defer req.deinit();
+        try req.sendBodiless();
+        var response = try req.receiveHead(&.{});
+        const status = response.head.status;
+        const location = switch (status) {
+            .moved_permanently, .found, .see_other, .temporary_redirect, .permanent_redirect => response.head.location,
+            else => null,
+        };
+        if (location) |target| {
+            if (remaining_redirects == 0) return error.TooManyHttpRedirects;
+            remaining_redirects -= 1;
+            if (target.len > location_buffer.len) return error.HttpRedirectLocationOversize;
+            @memcpy(location_buffer[0..target.len], target);
+            const next_uri = try current_uri.resolveInPlace(target.len, &location_buffer);
+            if (!isSameOrigin(current_uri, next_uri)) current_headers = &.{};
+            if (status == .see_other and current_method != .HEAD) current_method = .GET;
+            current_uri = next_uri;
+            continue;
+        }
+
+        const decompress_buffer: []u8 = switch (response.head.content_encoding) {
+            .identity => &.{},
+            .zstd => try client.allocator.alloc(u8, std.compress.zstd.default_window_len),
+            .deflate, .gzip => try client.allocator.alloc(u8, std.compress.flate.max_window_len),
+            .compress => return error.UnsupportedCompressionMethod,
+        };
+        defer client.allocator.free(decompress_buffer);
+        var transfer_buffer: [64]u8 = undefined;
+        var decompress: std.http.Decompress = undefined;
+        const reader = response.readerDecompressing(&transfer_buffer, &decompress, decompress_buffer);
+        _ = reader.streamRemaining(response_writer) catch |err| switch (err) {
+            error.ReadFailed => return response.bodyErr().?,
+            else => |e| return e,
+        };
+        return .{ .status = status };
+    }
+}
+
+/// A URI that omits its port uses the default of its scheme.
+fn originPort(uri: std.Uri) ?u16 {
+    if (uri.port) |port| return port;
+    const protocol = std.http.Client.Protocol.fromUri(uri) orelse return null;
+    return switch (protocol) {
+        .plain => 80,
+        .tls => 443,
+    };
+}
+
+fn isSameOrigin(left: std.Uri, right: std.Uri) bool {
+    var left_buffer: [std.Io.net.HostName.max_len]u8 = undefined;
+    var right_buffer: [std.Io.net.HostName.max_len]u8 = undefined;
+    const left_host = std.Io.net.HostName.fromUri(left, &left_buffer) catch return false;
+    const right_host = std.Io.net.HostName.fromUri(right, &right_buffer) catch return false;
+    return std.ascii.eqlIgnoreCase(left.scheme, right.scheme) and left_host.eql(right_host) and originPort(left) == originPort(right);
+}
+
 pub fn requestRaw(client: *Client, method: std.http.Method, url: []const u8, payload: ?[]const u8) !RawResponse {
     return requestRawWithContentType(client, method, url, payload, "application/json");
 }
@@ -331,14 +416,7 @@ pub fn requestRawWithContentType(client: *Client, method: std.http.Method, url: 
     defer response_body.deinit();
 
     const start = std.Io.Clock.awake.now(client.io);
-    const result = client.http.fetch(.{
-        .location = .{ .uri = uri },
-        .method = method,
-        .extra_headers = headers.items,
-        .payload = payload,
-        .response_writer = &response_body.writer,
-        .headers = .{ .user_agent = .{ .override = user_agent } },
-    }) catch |err| {
+    const result = fetchFollowingRedirects(client, method, uri, headers.items, user_agent, payload, &response_body.writer) catch |err| {
         if (client.http_observer) |obs| {
             if (obs.onError) |cb| cb(obs.ctx, method, url, @errorName(err));
         }
@@ -1408,6 +1486,96 @@ test "requestRaw identifies itself as puny with its version" {
     const received = ctx.received();
     try std.testing.expect(std.mem.startsWith(u8, received, "puny/"));
     try std.testing.expectEqualStrings(version.version, received["puny/".len..]);
+}
+
+/// Answers `max_requests` requests, redirecting those for "/" to `redirect_to`
+/// when it is set, and remembers the credentials the last request carried.
+const RedirectTestServer = struct {
+    io: std.Io,
+    server: std.Io.net.Server,
+    redirect_to: ?[]const u8,
+    max_requests: usize,
+    requests: usize = 0,
+    saw_authorization: bool = false,
+    saw_default_header: bool = false,
+    thread: std.Thread = undefined,
+
+    fn serve(self: *@This()) void {
+        while (self.requests < self.max_requests) {
+            var stream = self.server.accept(self.io) catch return;
+            defer stream.close(self.io);
+
+            var in_buf: [4096]u8 = undefined;
+            var out_buf: [4096]u8 = undefined;
+            var reader = stream.reader(self.io, &in_buf);
+            var writer = stream.writer(self.io, &out_buf);
+
+            var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+            var request = http_server.receiveHead() catch return;
+            self.requests += 1;
+            self.saw_authorization = false;
+            self.saw_default_header = false;
+            var it = request.iterateHeaders();
+            while (it.next()) |header| {
+                if (std.ascii.eqlIgnoreCase(header.name, "authorization")) self.saw_authorization = true;
+                if (std.ascii.eqlIgnoreCase(header.name, "x-default")) self.saw_default_header = true;
+            }
+            if (self.redirect_to != null and std.mem.eql(u8, request.head.target, "/")) {
+                request.respond("", .{
+                    .status = .found,
+                    .keep_alive = false,
+                    .extra_headers = &.{.{ .name = "Location", .value = self.redirect_to.? }},
+                }) catch return;
+            } else {
+                request.respond("{\"ok\":true}", .{ .status = .ok, .keep_alive = false }) catch return;
+            }
+        }
+    }
+
+    fn url(self: *const @This(), arena: std.mem.Allocator) ![]const u8 {
+        return std.fmt.allocPrint(arena, "http://127.0.0.1:{d}/", .{self.server.socket.address.getPort()});
+    }
+};
+
+fn startRedirectTestServer(redirect_to: ?[]const u8, max_requests: usize) !*RedirectTestServer {
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
+    const ctx = std.testing.allocator.create(RedirectTestServer) catch |err| {
+        server.deinit(std.testing.io);
+        return err;
+    };
+    ctx.* = .{ .io = std.testing.io, .server = server, .redirect_to = redirect_to, .max_requests = max_requests };
+    ctx.thread = try std.Thread.spawn(.{}, RedirectTestServer.serve, .{ctx});
+    return ctx;
+}
+
+fn stopRedirectTestServer(ctx: *RedirectTestServer) void {
+    ctx.server.deinit(std.testing.io);
+    ctx.thread.join();
+    std.testing.allocator.destroy(ctx);
+}
+
+test "requestRaw keeps credentials off a redirect to another origin" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const other_origin = try startRedirectTestServer(null, 1);
+    defer stopRedirectTestServer(other_origin);
+    const origin = try startRedirectTestServer(try other_origin.url(arena), 1);
+    defer stopRedirectTestServer(origin);
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "secret-key");
+    defer c.deinit();
+    c.default_headers = &.{.{ .name = "X-Default", .value = "1" }};
+
+    var raw = try requestRaw(&c, .GET, try origin.url(arena), null);
+    defer raw.deinit();
+
+    try std.testing.expectEqual(std.http.Status.ok, raw.status);
+    try std.testing.expectEqual(@as(usize, 1), other_origin.requests);
+    try std.testing.expect(!other_origin.saw_authorization);
+    try std.testing.expect(!other_origin.saw_default_header);
 }
 
 test "setConfig applies the session id and preserves it when unset" {
