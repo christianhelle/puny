@@ -9,7 +9,7 @@
         // and releasing puny never fetches it.
         .openapi2zig = .{
             .url = "https://github.com/christianhelle/openapi2zig/archive/refs/tags/v0.6.1.tar.gz",
-            .hash = "openapi2zig-0.6.0-ykENAq09dwG_jQddqL2RuVczW3DTkX_tRfdH0Cx4BWET",
+            .hash = "openapi2zig-0.6.1-ykENAq09dwERKmtCJhaWiRM4OPQIrxZykdZByKX5ej4Y",
             .lazy = true,
         },
     },
