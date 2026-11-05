@@ -1578,6 +1578,41 @@ test "requestRaw keeps credentials off a redirect to another origin" {
     try std.testing.expect(!other_origin.saw_default_header);
 }
 
+test "requestRaw keeps credentials on a redirect within the same origin" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const origin = try startRedirectTestServer("/moved", 2);
+    defer stopRedirectTestServer(origin);
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "secret-key");
+    defer c.deinit();
+
+    var raw = try requestRaw(&c, .GET, try origin.url(arena), null);
+    defer raw.deinit();
+
+    try std.testing.expectEqual(std.http.Status.ok, raw.status);
+    try std.testing.expectEqualStrings("{\"ok\":true}", raw.body);
+    try std.testing.expectEqual(@as(usize, 2), origin.requests);
+    try std.testing.expect(origin.saw_authorization);
+}
+
+test "requestRaw gives up after too many redirects" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const origin = try startRedirectTestServer("/", 4);
+    defer stopRedirectTestServer(origin);
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+
+    try std.testing.expectError(error.TooManyHttpRedirects, requestRaw(&c, .GET, try origin.url(arena), null));
+    try std.testing.expectEqual(@as(usize, 4), origin.requests);
+}
+
 test "setConfig applies the session id and preserves it when unset" {
     var client = Client{
         .allocator = undefined,
