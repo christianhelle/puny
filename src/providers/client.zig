@@ -1490,7 +1490,7 @@ test "requestRaw identifies itself as puny with its version" {
 
 /// Answers `max_requests` requests, redirecting those for "/" to `redirect_to`
 /// when it is set, and remembers the credentials the last request carried.
-const RedirectTestServer = struct {
+pub const RedirectTestServer = struct {
     io: std.Io,
     server: std.Io.net.Server,
     redirect_to: ?[]const u8,
@@ -1532,12 +1532,12 @@ const RedirectTestServer = struct {
         }
     }
 
-    fn url(self: *const @This(), arena: std.mem.Allocator) ![]const u8 {
+    pub fn url(self: *const @This(), arena: std.mem.Allocator) ![]const u8 {
         return std.fmt.allocPrint(arena, "http://127.0.0.1:{d}/", .{self.server.socket.address.getPort()});
     }
 };
 
-fn startRedirectTestServer(redirect_to: ?[]const u8, max_requests: usize) !*RedirectTestServer {
+pub fn startRedirectTestServer(redirect_to: ?[]const u8, max_requests: usize) !*RedirectTestServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     var server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
     const ctx = std.testing.allocator.create(RedirectTestServer) catch |err| {
@@ -1549,7 +1549,7 @@ fn startRedirectTestServer(redirect_to: ?[]const u8, max_requests: usize) !*Redi
     return ctx;
 }
 
-fn stopRedirectTestServer(ctx: *RedirectTestServer) void {
+pub fn stopRedirectTestServer(ctx: *RedirectTestServer) void {
     ctx.server.deinit(std.testing.io);
     ctx.thread.join();
     std.testing.allocator.destroy(ctx);
