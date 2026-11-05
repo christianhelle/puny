@@ -1559,8 +1559,13 @@ pub fn startRedirectTestServer(redirect_to: ?[]const u8, max_requests: usize) !*
 }
 
 pub fn stopRedirectTestServer(ctx: *RedirectTestServer) void {
-    ctx.server.deinit(std.testing.io);
+    // Closing the listener doesn't wake a blocked accept on every platform, so
+    // connect once: a failed test may have left the server waiting for a request.
+    // The serve loop exits when this connection closes without sending one.
+    const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(ctx.server.socket.address.getPort()) };
+    if (address.connect(std.testing.io, .{ .mode = .stream })) |stream| stream.close(std.testing.io) else |_| {}
     ctx.thread.join();
+    ctx.server.deinit(std.testing.io);
     std.testing.allocator.destroy(ctx);
 }
 
