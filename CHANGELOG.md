@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Keep credentials off cross-origin redirects ([#236](https://github.com/christianhelle/puny/pull/236)) ([@christianhelle](https://github.com/christianhelle/))
 - Update openapi2zig to v0.6.1 ([#235](https://github.com/christianhelle/puny/pull/235)) ([@christianhelle](https://github.com/christianhelle/))
 - Send LM Studio a single leading system message ([#234](https://github.com/christianhelle/puny/pull/234)) ([@christianhelle](https://github.com/christianhelle/))
 - Show Copilot AI credits on the line after each turn ([#233](https://github.com/christianhelle/puny/pull/233)) ([@christianhelle](https://github.com/christianhelle/))
