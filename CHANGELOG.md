@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Update openapi2zig to v0.6.1 ([#235](https://github.com/christianhelle/puny/pull/235)) ([@christianhelle](https://github.com/christianhelle/))
 - Send LM Studio a single leading system message ([#234](https://github.com/christianhelle/puny/pull/234)) ([@christianhelle](https://github.com/christianhelle/))
 - Show Copilot AI credits on the line after each turn ([#233](https://github.com/christianhelle/puny/pull/233)) ([@christianhelle](https://github.com/christianhelle/))
 - Show GitHub Copilot AI Credits in session stats ([#232](https://github.com/christianhelle/puny/pull/232)) ([@christianhelle](https://github.com/christianhelle/))
