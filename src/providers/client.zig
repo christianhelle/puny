@@ -1498,6 +1498,7 @@ pub const RedirectTestServer = struct {
     requests: usize = 0,
     saw_authorization: bool = false,
     saw_default_header: bool = false,
+    gzip_response: bool = false,
     thread: std.Thread = undefined,
 
     fn serve(self: *@This()) void {
@@ -1525,6 +1526,14 @@ pub const RedirectTestServer = struct {
                     .status = .found,
                     .keep_alive = false,
                     .extra_headers = &.{.{ .name = "Location", .value = self.redirect_to.? }},
+                }) catch return;
+            } else if (self.gzip_response) {
+                // `{"ok":true}` as compressed by the gzip tool.
+                const gzipped = "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\xab\x56\xca\xcf\x56\xb2\x2a\x29\x2a\x4d\xad\x05\x00\x90\x5f\xd4\xa7\x0b\x00\x00\x00";
+                request.respond(gzipped, .{
+                    .status = .ok,
+                    .keep_alive = false,
+                    .extra_headers = &.{.{ .name = "Content-Encoding", .value = "gzip" }},
                 }) catch return;
             } else {
                 request.respond("{\"ok\":true}", .{ .status = .ok, .keep_alive = false }) catch return;
@@ -1596,6 +1605,24 @@ test "requestRaw keeps credentials on a redirect within the same origin" {
     try std.testing.expectEqualStrings("{\"ok\":true}", raw.body);
     try std.testing.expectEqual(@as(usize, 2), origin.requests);
     try std.testing.expect(origin.saw_authorization);
+}
+
+test "requestRaw decompresses a gzip response" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const origin = try startRedirectTestServer(null, 1);
+    defer stopRedirectTestServer(origin);
+    origin.gzip_response = true;
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+
+    var raw = try requestRaw(&c, .GET, try origin.url(arena), null);
+    defer raw.deinit();
+
+    try std.testing.expectEqualStrings("{\"ok\":true}", raw.body);
 }
 
 test "requestRaw gives up after too many redirects" {
