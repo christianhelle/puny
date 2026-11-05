@@ -45,13 +45,13 @@ the following:
 ### 1. Use the pinned generator version
 
 The CLI must be built from the same version as the dependency in `build.zig.zon`,
-currently `v0.6.0`. Other commits can generate different code.
+currently `v0.6.1`. Other commits can generate different code.
 
 Don't rely on the version number to check this: a build made from a later commit
 can still report `0.6.0`. To be sure, build the CLI from the tag:
 
 ```sh
-git clone --depth 1 --branch v0.6.0 https://github.com/christianhelle/openapi2zig
+git clone --depth 1 --branch v0.6.1 https://github.com/christianhelle/openapi2zig
 cd openapi2zig
 zig build
 ```

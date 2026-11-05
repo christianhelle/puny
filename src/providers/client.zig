@@ -727,6 +727,15 @@ test "lmstudio client compiles after regeneration" {
     _ = contracts.ModelInfo;
 }
 
+test "every generated provider client compiles" {
+    // Production code only reaches the generated contracts, so nothing else
+    // makes the compiler analyze these clients after a regeneration.
+    std.testing.refAllDecls(@import("openai/client.zig"));
+    std.testing.refAllDecls(@import("lmstudio/client.zig"));
+    std.testing.refAllDecls(@import("anthropic/client.zig"));
+    std.testing.refAllDecls(@import("google/client.zig"));
+}
+
 test "isValidUtf8 accepts ASCII and rejects invalid bytes" {
     try std.testing.expect(isValidUtf8("hello"));
     try std.testing.expect(isValidUtf8("Qwen2.5 7B Instruct"));
