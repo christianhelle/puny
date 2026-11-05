@@ -372,7 +372,8 @@ pub fn fetchFollowingRedirects(client: *Client, method: std.http.Method, uri: st
         var decompress: std.http.Decompress = undefined;
         const reader = response.readerDecompressing(&transfer_buffer, &decompress, decompress_buffer);
         _ = reader.streamRemaining(response_writer) catch |err| switch (err) {
-            error.ReadFailed => return response.bodyErr().?,
+            // A corrupt compressed body fails in the decompressor, leaving no body error.
+            error.ReadFailed => return response.bodyErr() orelse err,
             else => |e| return e,
         };
         return .{ .status = status };
@@ -1498,7 +1499,7 @@ pub const RedirectTestServer = struct {
     requests: usize = 0,
     saw_authorization: bool = false,
     saw_default_header: bool = false,
-    gzip_response: bool = false,
+    gzip_body: ?[]const u8 = null,
     thread: std.Thread = undefined,
 
     fn serve(self: *@This()) void {
@@ -1527,9 +1528,7 @@ pub const RedirectTestServer = struct {
                     .keep_alive = false,
                     .extra_headers = &.{.{ .name = "Location", .value = self.redirect_to.? }},
                 }) catch return;
-            } else if (self.gzip_response) {
-                // `{"ok":true}` as compressed by the gzip tool.
-                const gzipped = "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\xab\x56\xca\xcf\x56\xb2\x2a\x29\x2a\x4d\xad\x05\x00\x90\x5f\xd4\xa7\x0b\x00\x00\x00";
+            } else if (self.gzip_body) |gzipped| {
                 request.respond(gzipped, .{
                     .status = .ok,
                     .keep_alive = false,
@@ -1619,7 +1618,8 @@ test "requestRaw decompresses a gzip response" {
 
     const origin = try startRedirectTestServer(null, 1);
     defer stopRedirectTestServer(origin);
-    origin.gzip_response = true;
+    // `{"ok":true}` as compressed by the gzip tool.
+    origin.gzip_body = "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\xab\x56\xca\xcf\x56\xb2\x2a\x29\x2a\x4d\xad\x05\x00\x90\x5f\xd4\xa7\x0b\x00\x00\x00";
 
     var c = Client.init(std.testing.allocator, std.testing.io, "");
     defer c.deinit();
@@ -1628,6 +1628,22 @@ test "requestRaw decompresses a gzip response" {
     defer raw.deinit();
 
     try std.testing.expectEqualStrings("{\"ok\":true}", raw.body);
+}
+
+test "requestRaw returns an error for a corrupt gzip response" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const origin = try startRedirectTestServer(null, 1);
+    defer stopRedirectTestServer(origin);
+    // A valid gzip header followed by a deflate block of the reserved type.
+    origin.gzip_body = "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\xff\xff\xff\xff";
+
+    var c = Client.init(std.testing.allocator, std.testing.io, "");
+    defer c.deinit();
+
+    try std.testing.expectError(error.ReadFailed, requestRaw(&c, .GET, try origin.url(arena), null));
 }
 
 test "requestRaw gives up after too many redirects" {
