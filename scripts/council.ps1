@@ -487,8 +487,10 @@ function Invoke-Summary {
 
   Write-Info "Summarising the verdict ($(Get-ChairLabel))"
   $dest = Join-Path $script:OutDir 'round4'
+  Open-ViewerPanes @(Join-Path $dest 'summary.stdout.log')
   $job = Start-Member 'summary' $script:ChairProvider $script:ChairModel $prompt $dest
   $status = Complete-Member $job
+  Close-ViewerPanes
 
   if ($status -ne 'ok') {
     Write-WarningMessage "The summary step failed ($status); the full verdict is still in verdict.md"
@@ -1208,6 +1210,48 @@ function Start-Member {
   }
 }
 
+# Opens one WezTerm pane per log, stacked in a column to the right of the pane
+# running the council, each tailing a member's stdout as it is written. The
+# panes are only a view: members, timeouts and status stay with this script, so
+# a pane that fails to open costs the view and nothing else.
+function Open-ViewerPanes {
+  param([string[]]$Logs)
+  if (-not $script:UseWezTerm) { return }
+
+  $shell = (Get-Process -Id $PID).Path
+  $total = $Logs.Count
+  for ($k = 0; $k -lt $total; $k++) {
+    $log = $Logs[$k]
+    if (-not (Test-Path -LiteralPath $log)) { Write-TextFile $log '' }
+    if ($k -eq 0) {
+      $split = @('--pane-id', $env:WEZTERM_PANE, '--right', '--percent', '50')
+    }
+    else {
+      # Each split takes its share of what is left, so the column ends up even.
+      $percent = [int][Math]::Floor(100 * ($total - $k) / ($total - $k + 1))
+      $split = @('--pane-id', $script:ViewerPanes[$k - 1], '--bottom', '--percent', "$percent")
+    }
+    $quoted = $log.Replace("'", "''")
+    $name = [System.IO.Path]::GetFileName($log).Replace("'", "''")
+    $command = "Write-Host '==> $name <=='; Get-Content -LiteralPath '$quoted' -Wait"
+    $id = & wezterm cli split-pane @split --cwd $script:OutDir -- $shell -NoLogo -NoProfile -Command $command 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not "$id".Trim()) {
+      Write-WarningMessage 'Could not open a WezTerm pane; continuing without live panes'
+      Close-ViewerPanes
+      $script:UseWezTerm = $false
+      return
+    }
+    [void]$script:ViewerPanes.Add("$id".Trim())
+  }
+}
+
+function Close-ViewerPanes {
+  foreach ($id in @($script:ViewerPanes)) {
+    & wezterm cli kill-pane --pane-id $id 2>&1 | Out-Null
+  }
+  $script:ViewerPanes.Clear()
+}
+
 function Get-RemainingBudgetMs {
   param([pscustomobject]$Job)
   $spent = $Job.Started.Elapsed.TotalMilliseconds
@@ -1298,6 +1342,7 @@ function Invoke-Round {
   Write-Info "Round ${Round}: $($Indices.Count) member(s), up to $($script:JobLimit) at once"
 
   $running = [System.Collections.ArrayList]::new()
+  Open-ViewerPanes @($Indices | ForEach-Object { Join-Path $dest "$($script:Seats[$_].Slug).stdout.log" })
 
   foreach ($i in $Indices) {
     while (@($running | Where-Object { -not $_.Proc.HasExited }).Count -ge $script:JobLimit) {
@@ -1325,6 +1370,7 @@ function Invoke-Round {
     $null = Complete-Member $job
     $running.Remove($job)
   }
+  Close-ViewerPanes
 
   $ok = 0
   $bad = 0
@@ -1355,8 +1401,10 @@ function Invoke-Chair {
 
   Write-Info "Round three: the chair ($(Get-ChairLabel)) synthesises the verdict"
   $dest = Join-Path $script:OutDir 'round3'
+  Open-ViewerPanes @(Join-Path $dest 'chair.stdout.log')
   $job = Start-Member 'chair' $script:ChairProvider $script:ChairModel $promptPath $dest
   $status = Complete-Member $job
+  Close-ViewerPanes
 
   $verdictPath = Join-Path $script:OutDir 'verdict.md'
   if ($status -eq 'ok') {
@@ -1673,6 +1721,7 @@ function Invoke-Main {
         try { $proc.Kill($true) } catch { }
       }
     }
+    Close-ViewerPanes
     if (-not $KeepTemp -and (Test-Path -LiteralPath $script:TempRoot)) {
       Remove-Item -LiteralPath $script:TempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
