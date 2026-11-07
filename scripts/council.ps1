@@ -1210,39 +1210,124 @@ function Start-Member {
   }
 }
 
-# Opens one WezTerm pane per log, stacked in a column to the right of the pane
-# running the council, each tailing a member's stdout as it is written. The
-# panes are only a view: members, timeouts and status stay with this script, so
-# a pane that fails to open costs the view and nothing else.
+# Share of the window, in percent, that the viewer panes take from the pane
+# running the council. Its own log is a few lines per round, so the members get
+# most of the room.
+$ViewerShare = 60
+
+# Picks how many columns of viewer panes to use for N members. Panes are laid
+# out as a grid, and the column count that makes each pane closest to a 3:2
+# landscape shape wins: tall slivers wrap every line and short strips show only
+# a few. A terminal cell is about twice as tall as it is wide, which is why rows
+# count double. Ties go to fewer, wider columns. When the pane size cannot be
+# read, falls back to the floor of the square root of N.
+function Get-ViewerGridColumns {
+  param([int]$Count)
+
+  $w = 0
+  $h = 0
+  try {
+    $pane = & wezterm cli list --format json 2>$null | ConvertFrom-Json |
+      Where-Object { "$($_.pane_id)" -eq $env:WEZTERM_PANE } | Select-Object -First 1
+    if ($pane) {
+      $w = $pane.size.cols * $ViewerShare / 100
+      $h = $pane.size.rows
+    }
+  }
+  catch { }
+
+  if ($w -le 0 -or $h -le 0) {
+    return [Math]::Max(1, [int][Math]::Floor([Math]::Sqrt($Count)))
+  }
+
+  $best = 1
+  $bestDistance = -1
+  for ($c = 1; $c -le $Count; $c++) {
+    $r = [Math]::Ceiling($Count / $c)
+    $distance = [Math]::Abs([Math]::Log((($w / $c) / (2 * $h / $r)) / 1.5))
+    if ($bestDistance -lt 0 -or $distance -lt $bestDistance - 1e-9) {
+      $best = $c
+      $bestDistance = $distance
+    }
+  }
+  return $best
+}
+
+# Splits one viewer pane off Target and tails Log in it. Returns the new pane
+# id, or $null when WezTerm refused.
+function Split-ViewerPane {
+  param([string]$Target, [string]$Side, [int]$Percent, [string]$Log)
+
+  if (-not (Test-Path -LiteralPath $Log)) { Write-TextFile $Log '' }
+  $shell = (Get-Process -Id $PID).Path
+  $quoted = $Log.Replace("'", "''")
+  $name = [System.IO.Path]::GetFileName($Log).Replace("'", "''")
+  $command = "Write-Host '==> $name <=='; Get-Content -LiteralPath '$quoted' -Wait"
+  $id = & wezterm cli split-pane --pane-id $Target "--$Side" --percent "$Percent" --cwd $script:OutDir -- `
+    $shell -NoLogo -NoProfile -Command $command 2>$null
+  if ($LASTEXITCODE -ne 0 -or -not "$id".Trim()) { return $null }
+  return "$id".Trim()
+}
+
+# Opens one WezTerm pane per log, laid out as a grid to the right of the pane
+# running the council, each tailing a member's stdout as it is written. Logs
+# fill the grid column by column, so adversarial pairs sit one above the other.
+# The panes are only a view: members, timeouts and status stay with this
+# script, so a pane that fails to open costs the view and nothing else.
 function Open-ViewerPanes {
   param([string[]]$Logs)
   if (-not $script:UseWezTerm) { return }
 
-  $shell = (Get-Process -Id $PID).Path
   $total = $Logs.Count
-  for ($k = 0; $k -lt $total; $k++) {
-    $log = $Logs[$k]
-    if (-not (Test-Path -LiteralPath $log)) { Write-TextFile $log '' }
-    if ($k -eq 0) {
-      $split = @('--pane-id', $env:WEZTERM_PANE, '--right', '--percent', '50')
+  $cols = Get-ViewerGridColumns $total
+  $base = [Math]::Floor($total / $cols)
+  $extra = $total % $cols
+  $colStart = @()
+  $colRows = @()
+  $s = 0
+  for ($j = 0; $j -lt $cols; $j++) {
+    $r = $base
+    if ($j -lt $extra) { $r++ }
+    $colStart += $s
+    $colRows += $r
+    $s += $r
+  }
+  $ids = @{}
+
+  # Column heads first, left to right, then each column is stacked downward.
+  # Every split takes its share of what is left, so columns and rows end even.
+  for ($j = 0; $j -lt $cols; $j++) {
+    if ($j -eq 0) {
+      $target = $env:WEZTERM_PANE
+      $percent = $ViewerShare
     }
     else {
-      # Each split takes its share of what is left, so the column ends up even.
-      $percent = [int][Math]::Floor(100 * ($total - $k) / ($total - $k + 1))
-      $split = @('--pane-id', $script:ViewerPanes[$k - 1], '--bottom', '--percent', "$percent")
+      $target = $ids[$colStart[$j - 1]]
+      $percent = [Math]::Floor(100 * ($cols - $j) / ($cols - $j + 1))
     }
-    $quoted = $log.Replace("'", "''")
-    $name = [System.IO.Path]::GetFileName($log).Replace("'", "''")
-    $command = "Write-Host '==> $name <=='; Get-Content -LiteralPath '$quoted' -Wait"
-    $id = & wezterm cli split-pane @split --cwd $script:OutDir -- $shell -NoLogo -NoProfile -Command $command 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not "$id".Trim()) {
-      Write-WarningMessage 'Could not open a WezTerm pane; continuing without live panes'
-      Close-ViewerPanes
-      $script:UseWezTerm = $false
-      return
-    }
-    [void]$script:ViewerPanes.Add("$id".Trim())
+    $id = Split-ViewerPane $target 'right' $percent $Logs[$colStart[$j]]
+    if (-not $id) { Stop-ViewerPanes; return }
+    $ids[$colStart[$j]] = $id
+    [void]$script:ViewerPanes.Add($id)
   }
+
+  for ($j = 0; $j -lt $cols; $j++) {
+    $r = $colRows[$j]
+    for ($k = 1; $k -lt $r; $k++) {
+      $s = $colStart[$j] + $k
+      $percent = [Math]::Floor(100 * ($r - $k) / ($r - $k + 1))
+      $id = Split-ViewerPane $ids[$s - 1] 'bottom' $percent $Logs[$s]
+      if (-not $id) { Stop-ViewerPanes; return }
+      $ids[$s] = $id
+      [void]$script:ViewerPanes.Add($id)
+    }
+  }
+}
+
+function Stop-ViewerPanes {
+  Write-WarningMessage 'Could not open a WezTerm pane; continuing without live panes'
+  Close-ViewerPanes
+  $script:UseWezTerm = $false
 }
 
 function Close-ViewerPanes {
