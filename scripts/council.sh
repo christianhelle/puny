@@ -46,6 +46,8 @@ USE_CHAT_LOG=1
 ISOLATE_HOME=1
 KEEP_TEMP=0
 FORCE=0
+TERMINAL_MODE="${COUNCIL_TERMINAL:-auto}"
+USE_WEZTERM=0
 
 COLOR_GREEN=""
 COLOR_RED=""
@@ -112,6 +114,8 @@ Execution:
       --no-chat-log         Extract answers from stdout instead of puny_chat.log
       --no-isolate-home     Share the real puny config directory between members
       --keep-temp           Do not delete the per-member working directories
+      --terminal NAME       auto | wezterm | plain (default: auto). In WezTerm,
+                            each running member is tailed in a split pane
 
 Output:
   -o, --out DIR             Output directory (default: .council/<timestamp>-<slug>)
@@ -121,7 +125,8 @@ Output:
   -h, --help                Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR,
-COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE, NO_COLOR
+COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE,
+COUNCIL_TERMINAL, NO_COLOR
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 USAGE
@@ -266,6 +271,11 @@ parse_args() {
     --keep-temp)
       KEEP_TEMP=1
       shift
+      ;;
+    --terminal)
+      require_value "$1" "${2:-}"
+      TERMINAL_MODE="$2"
+      shift 2
       ;;
     --force)
       FORCE=1
@@ -480,6 +490,33 @@ validate_args() {
   if [[ "$MAX_PEER_CHARS" -lt 1000 ]]; then
     die "--max-peer-chars must be at least 1000, got $MAX_PEER_CHARS"
   fi
+
+  case "$TERMINAL_MODE" in
+  auto | wezterm | plain) ;;
+  *) die "--terminal must be auto, wezterm, or plain (got '$TERMINAL_MODE')" ;;
+  esac
+}
+
+# WezTerm exports WEZTERM_PANE into every pane it spawns, which is both the
+# detection signal and the pane the viewer panes are split from. Only WezTerm
+# gets different behaviour; every other terminal runs plain.
+resolve_terminal() {
+  USE_WEZTERM=0
+  [[ "$DRY_RUN" -eq 1 ]] && return 0
+
+  case "$TERMINAL_MODE" in
+  plain) return 0 ;;
+  wezterm)
+    command -v wezterm >/dev/null 2>&1 || die "--terminal wezterm needs the 'wezterm' command on PATH"
+    [[ -n "${WEZTERM_PANE:-}" ]] || die "--terminal wezterm needs to run inside a WezTerm pane (WEZTERM_PANE is not set)"
+    ;;
+  auto)
+    [[ -n "${WEZTERM_PANE:-}" ]] && command -v wezterm >/dev/null 2>&1 || return 0
+    ;;
+  esac
+
+  USE_WEZTERM=1
+  log_info "Terminal: wezterm (members are tailed in split panes)"
 }
 
 # --roles decides the council size, so anything derived from the member count has
@@ -1739,6 +1776,7 @@ main() {
   load_shared_lists
   check_dependencies
   validate_args
+  resolve_terminal
   resolve_binary
   load_roles
   finalize_limits

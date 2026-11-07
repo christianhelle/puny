@@ -43,6 +43,7 @@ param(
   [switch]$Force,
   [switch]$DryRun,
   [switch]$Smoke,
+  [ValidateSet('auto', 'wezterm', 'plain')][string]$Terminal,
   [switch]$Help
 )
 
@@ -94,6 +95,8 @@ Execution:
   -NoChatLog            Extract answers from stdout instead of puny_chat.log
   -NoIsolateHome        Share the real puny config directory between members
   -KeepTemp             Do not delete the per-member working directories
+  -Terminal NAME        auto | wezterm | plain (default: auto). In WezTerm,
+                        each running member is tailed in a split pane
 
 Output:
   -Out DIR              Output directory (default: .council/<timestamp>-<slug>)
@@ -103,7 +106,7 @@ Output:
   -Help                 Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR, COUNCIL_OUT,
-COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE
+COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE, COUNCIL_TERMINAL
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 '@
@@ -291,6 +294,30 @@ function Test-Arguments {
   if ($MaxPeerChars -lt 1000) {
     Stop-WithError "-MaxPeerChars must be at least 1000, got $MaxPeerChars"
   }
+
+  if ($script:TerminalMode -notin @('auto', 'wezterm', 'plain')) {
+    Stop-WithError "-Terminal must be auto, wezterm, or plain (got '$($script:TerminalMode)')"
+  }
+}
+
+# WezTerm exports WEZTERM_PANE into every pane it spawns, which is both the
+# detection signal and the pane the viewer panes are split from. Only WezTerm
+# gets different behaviour; every other terminal runs plain.
+function Resolve-Terminal {
+  $script:UseWezTerm = $false
+  if ($DryRun -or $script:TerminalMode -eq 'plain') { return }
+
+  $hasCli = [bool](Get-Command wezterm -ErrorAction SilentlyContinue)
+  if ($script:TerminalMode -eq 'wezterm') {
+    if (-not $hasCli) { Stop-WithError "-Terminal wezterm needs the 'wezterm' command on PATH" }
+    if (-not $env:WEZTERM_PANE) { Stop-WithError '-Terminal wezterm needs to run inside a WezTerm pane (WEZTERM_PANE is not set)' }
+  }
+  elseif (-not ($env:WEZTERM_PANE -and $hasCli)) {
+    return
+  }
+
+  $script:UseWezTerm = $true
+  Write-Info 'Terminal: wezterm (members are tailed in split panes)'
 }
 
 # -Roles decides the council size, so anything derived from the member count has
@@ -1495,6 +1522,9 @@ function Invoke-Main {
   elseif ($env:COUNCIL_MEMBERS) { ConvertTo-WholeNumber 'Member count (COUNCIL_MEMBERS)' $env:COUNCIL_MEMBERS 1 }
   else { $Members }
   $script:MemberFloor = $MinMembers
+  $script:TerminalMode = if ($Terminal) { $Terminal } elseif ($env:COUNCIL_TERMINAL) { $env:COUNCIL_TERMINAL } else { 'auto' }
+  $script:UseWezTerm = $false
+  $script:ViewerPanes = [System.Collections.ArrayList]::new()
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
   $script:CompareWarnBytes = 409600
@@ -1511,6 +1541,7 @@ function Invoke-Main {
 
   Import-SharedLists
   Test-Arguments
+  Resolve-Terminal
   Resolve-PunyBinary
   Import-Roles
   Set-FinalLimits
