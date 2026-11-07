@@ -1071,11 +1071,16 @@ viewer_grid_columns() {
 
 # Splits one viewer pane off TARGET and tails LOG in it. Prints the new pane id.
 split_viewer_pane() {
-  local target="$1" side="$2" percent="$3" log="$4" id
+  local target="$1" side="$2" percent="$3" log="$4" id dir
   : >>"$log"
+  # OUT_DIR is usually relative, so a relative log path read from inside a pane
+  # started in OUT_DIR would point at OUT_DIR/OUT_DIR/... Resolve it first.
+  dir="$(cd "$(dirname "$log")" && pwd)"
+  log="$dir/$(basename "$log")"
+  # No -v: BSD tail on macOS rejects it and the pane would exit at once.
   id="$(wezterm cli split-pane --pane-id "$target" "--$side" --percent "$percent" \
-    --cwd "$(to_native "$OUT_DIR")" -- \
-    "$(to_native "$(command -v tail)")" -v -n +1 -F "$(to_native "$log")" 2>/dev/null)" || return 1
+    --cwd "$(to_native "$dir")" -- \
+    "$(to_native "$(command -v tail)")" -n +1 -F "$(to_native "$log")" 2>/dev/null)" || return 1
   id="${id//[[:space:]]/}"
   [[ -n "$id" ]] || return 1
   echo "$id"
