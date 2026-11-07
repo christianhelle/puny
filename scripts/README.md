@@ -67,8 +67,9 @@ the window and form a grid: the runner reads the pane size from `wezterm cli
 list` and picks the number of columns that keeps each pane closest to a 3:2
 landscape shape, so six members in a wide window get two columns of three.
 Seats fill the grid column by column, so each adversarial pair sits one above
-the other. The panes close when the round ends and reopen for the next one,
-including the chair and the summary. They are only a view: the runner still owns the members, their
+the other. Each pane closes as soon as its member's puny process exits, and
+WezTerm hands its space to the panes still running. A new set opens for the
+next round, and one pane each for the chair and the summary. They are only a view: the runner still owns the members, their
 timeouts and their results, so a pane that fails to open just turns the view
 off for the rest of the run.
 
