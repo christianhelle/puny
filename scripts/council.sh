@@ -1029,8 +1029,51 @@ compose_round1_prompt() {
 
 TEMP_ROOT=""
 SEED_CONFIG=""
+declare -a VIEWER_PANES=()
+
+# Opens one WezTerm pane per log, stacked in a column to the right of the pane
+# running the council, each tailing a member's stdout as it is written. The
+# panes are only a view: members, timeouts and status stay with this script, so
+# a pane that fails to open costs the view and nothing else.
+open_viewer_panes() {
+  [[ "$USE_WEZTERM" -eq 1 ]] || return 0
+  local -a logs=("$@")
+  local total="${#logs[@]}" k=0 log id percent tail_bin
+  local -a split=()
+
+  tail_bin="$(to_native "$(command -v tail)")"
+  for log in "${logs[@]}"; do
+    : >>"$log"
+    if [[ "$k" -eq 0 ]]; then
+      split=(--pane-id "$WEZTERM_PANE" --right --percent 50)
+    else
+      # Each split takes its share of what is left, so the column ends up even.
+      percent=$((100 * (total - k) / (total - k + 1)))
+      split=(--pane-id "${VIEWER_PANES[$((k - 1))]}" --bottom --percent "$percent")
+    fi
+    if ! id="$(wezterm cli split-pane "${split[@]}" --cwd "$(to_native "$OUT_DIR")" -- \
+      "$tail_bin" -v -n +1 -F "$(to_native "$log")" 2>/dev/null)" || [[ -z "${id//[[:space:]]/}" ]]; then
+      log_warning "Could not open a WezTerm pane; continuing without live panes"
+      close_viewer_panes
+      USE_WEZTERM=0
+      return 0
+    fi
+    VIEWER_PANES+=("${id//[[:space:]]/}")
+    k=$((k + 1))
+  done
+}
+
+close_viewer_panes() {
+  local id
+  # The +expansion keeps an empty array from tripping 'set -u' on bash 3.2.
+  for id in ${VIEWER_PANES[@]+"${VIEWER_PANES[@]}"}; do
+    wezterm cli kill-pane --pane-id "$id" >/dev/null 2>&1 || true
+  done
+  VIEWER_PANES=()
+}
 
 cleanup() {
+  close_viewer_panes
   if [[ -n "$TEMP_ROOT" ]] && [[ -d "$TEMP_ROOT" ]] && [[ "$KEEP_TEMP" -eq 0 ]]; then
     rm -rf "$TEMP_ROOT"
   fi
@@ -1047,6 +1090,7 @@ terminate() {
   done
   wait 2>/dev/null || true
   cleanup
+  trap - EXIT
   exit 130
 }
 
@@ -1301,12 +1345,19 @@ run_round() {
 
   log_info "Round $round: ${#indices[@]} member(s), up to $JOBS at once"
 
+  local -a logs=()
+  for i in "${indices[@]}"; do
+    logs+=("$dest/${MEMBER_SLUG[$i]}.stdout.log")
+  done
+  open_viewer_panes "${logs[@]}"
+
   for i in "${indices[@]}"; do
     wait_for_slot
     run_one "${MEMBER_SLUG[$i]}" "${MEMBER_PROVIDER[$i]}" "${MEMBER_MODEL[$i]}" \
       "$dest/${MEMBER_SLUG[$i]}.prompt.md" "$dest" &
   done
   wait
+  close_viewer_panes
 
   for i in "${indices[@]}"; do
     slug="${MEMBER_SLUG[$i]}"
@@ -1509,8 +1560,10 @@ run_chair() {
   warn_if_prompt_large "$OUT_DIR/round3/chair.prompt.md"
 
   log_info "Round three: the chair ($(chair_label)) synthesises the verdict"
+  open_viewer_panes "$OUT_DIR/round3/chair.stdout.log"
   run_one "chair" "$CHAIR_PROVIDER" "$CHAIR_MODEL" \
     "$OUT_DIR/round3/chair.prompt.md" "$OUT_DIR/round3"
+  close_viewer_panes
 
   status="$(read_status_field "$OUT_DIR/round3/chair.status" 1)"
   if [[ "$status" == "ok" ]]; then
@@ -1566,7 +1619,9 @@ run_summary() {
   rm -f "$scratch"
 
   log_info "Summarising the verdict ($(chair_label))"
+  open_viewer_panes "$OUT_DIR/round4/summary.stdout.log"
   run_one "summary" "$CHAIR_PROVIDER" "$CHAIR_MODEL" "$prompt" "$OUT_DIR/round4"
+  close_viewer_panes
 
   status="$(read_status_field "$OUT_DIR/round4/summary.status" 1)"
   if [[ "$status" != "ok" ]]; then
