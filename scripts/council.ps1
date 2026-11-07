@@ -1309,6 +1309,7 @@ function Open-ViewerPanes {
     if (-not $id) { Stop-ViewerPanes; return }
     $ids[$colStart[$j]] = $id
     [void]$script:ViewerPanes.Add($id)
+    $script:ViewerPaneByLog[$Logs[$colStart[$j]]] = $id
   }
 
   for ($j = 0; $j -lt $cols; $j++) {
@@ -1320,6 +1321,7 @@ function Open-ViewerPanes {
       if (-not $id) { Stop-ViewerPanes; return }
       $ids[$s] = $id
       [void]$script:ViewerPanes.Add($id)
+      $script:ViewerPaneByLog[$Logs[$s]] = $id
     }
   }
 }
@@ -1335,6 +1337,35 @@ function Close-ViewerPanes {
     & wezterm cli kill-pane --pane-id $id 2>&1 | Out-Null
   }
   $script:ViewerPanes.Clear()
+  $script:ViewerPaneByLog.Clear()
+}
+
+# Closes the pane tailing Log, if one is open.
+function Close-ViewerPaneFor {
+  param([string]$Log)
+  if (-not $script:ViewerPaneByLog.ContainsKey($Log)) { return }
+  $id = $script:ViewerPaneByLog[$Log]
+  & wezterm cli kill-pane --pane-id $id 2>&1 | Out-Null
+  $script:ViewerPaneByLog.Remove($Log)
+  $script:ViewerPanes.Remove($id)
+}
+
+# Completes every running member that has exited or run out of time. Polling
+# rather than waiting on each member in turn means a member that finishes early
+# is completed, and its pane closed, without waiting for the ones before it.
+function Complete-FinishedMembers {
+  param([System.Collections.ArrayList]$Running)
+  foreach ($done in @($Running | Where-Object { $_.Proc.HasExited })) {
+    $null = Complete-Member $done
+    $Running.Remove($done)
+  }
+  # Nothing else reaps a member that never exits, so its slot would stay
+  # occupied and the rest of the round would never start.
+  foreach ($expired in @($Running | Where-Object {
+        $script:Timeout -gt 0 -and (Get-RemainingBudgetMs $_) -le 0 })) {
+    $null = Complete-Member $expired
+    $Running.Remove($expired)
+  }
 }
 
 function Get-RemainingBudgetMs {
@@ -1363,6 +1394,8 @@ function Complete-Member {
   [void][System.Threading.Tasks.Task]::WaitAll(@($Job.Stdout, $Job.Stderr))
   $Job.StdoutFile.Dispose()
   $Job.StderrFile.Dispose()
+  # puny is done, so there is nothing more for its pane to show.
+  Close-ViewerPaneFor (Join-Path $Job.Dest "$($Job.Slug).stdout.log")
   $script:ActiveProcesses.Remove($Job.Proc)
   $Job.Started.Stop()
 
@@ -1432,17 +1465,7 @@ function Invoke-Round {
   foreach ($i in $Indices) {
     while (@($running | Where-Object { -not $_.Proc.HasExited }).Count -ge $script:JobLimit) {
       Start-Sleep -Milliseconds 200
-      foreach ($done in @($running | Where-Object { $_.Proc.HasExited })) {
-        $null = Complete-Member $done
-        $running.Remove($done)
-      }
-      # Nothing else reaps a member that never exits, so its slot would stay
-      # occupied and the rest of the round would never start.
-      foreach ($expired in @($running | Where-Object {
-            $script:Timeout -gt 0 -and (Get-RemainingBudgetMs $_) -le 0 })) {
-        $null = Complete-Member $expired
-        $running.Remove($expired)
-      }
+      Complete-FinishedMembers $running
     }
     $seat = $script:Seats[$i]
     [void]$running.Add((Start-Member $seat.Slug $seat.Provider $seat.Model (Join-Path $dest "$($seat.Slug).prompt.md") $dest))
@@ -1451,9 +1474,9 @@ function Invoke-Round {
   # Complete-Member enforces the timeout itself by killing the process after
   # -TimeoutSec and blocking on WaitForExit until it dies, so a hung member is
   # stopped even when every other slot stays full.
-  foreach ($job in @($running)) {
-    $null = Complete-Member $job
-    $running.Remove($job)
+  while ($running.Count -gt 0) {
+    Complete-FinishedMembers $running
+    if ($running.Count -gt 0) { Start-Sleep -Milliseconds 200 }
   }
   Close-ViewerPanes
 
@@ -1658,6 +1681,7 @@ function Invoke-Main {
   $script:TerminalMode = if ($Terminal) { $Terminal } elseif ($env:COUNCIL_TERMINAL) { $env:COUNCIL_TERMINAL } else { 'auto' }
   $script:UseWezTerm = $false
   $script:ViewerPanes = [System.Collections.ArrayList]::new()
+  $script:ViewerPaneByLog = @{}
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
   $script:CompareWarnBytes = 409600
