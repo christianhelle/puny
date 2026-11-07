@@ -741,6 +741,9 @@ init_out_dir() {
   fi
 
   mkdir -p "$OUT_DIR/round1" "$OUT_DIR/round2" "$OUT_DIR/round3" "$OUT_DIR/round4"
+  # Members run from their own working directory, so a relative OUT_DIR would
+  # leave puny unable to find its prompt file. council.ps1 does the same.
+  OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 }
 
 # A three-dot diff is committed work only. Reviewing a branch with uncommitted
