@@ -1156,19 +1156,28 @@ function Start-Member {
   if ($Provider) { [void]$psi.ArgumentList.Add('--provider'); [void]$psi.ArgumentList.Add($Provider) }
   if ($Model) { [void]$psi.ArgumentList.Add('-m'); [void]$psi.ArgumentList.Add($Model) }
 
+  $base = Join-Path $Dest $Slug
   $proc = [System.Diagnostics.Process]::Start($psi)
   [void]$script:ActiveProcesses.Add($proc)
 
+  # Both pipes must be drained asynchronously or a chatty child fills a pipe
+  # buffer and deadlocks waiting for us to read it. They are copied straight to
+  # the log files, so the logs grow while the member runs and can be watched.
+  # A buffer size of 1 turns off FileStream buffering, so every chunk the child
+  # writes reaches the file at once instead of in 4 KB batches.
+  $stdoutFile = [System.IO.FileStream]::new("$base.stdout.log", 'Create', 'Write', 'ReadWrite', 1)
+  $stderrFile = [System.IO.FileStream]::new("$base.stderr.log", 'Create', 'Write', 'ReadWrite', 1)
+
   return [pscustomobject]@{
-    Slug    = $Slug
-    Dest    = $Dest
-    Work    = $work
-    Proc    = $proc
-    # Both pipes must be drained asynchronously or a chatty child fills a pipe
-    # buffer and deadlocks waiting for us to read it.
-    Stdout  = $proc.StandardOutput.ReadToEndAsync()
-    Stderr  = $proc.StandardError.ReadToEndAsync()
-    Started = [System.Diagnostics.Stopwatch]::StartNew()
+    Slug       = $Slug
+    Dest       = $Dest
+    Work       = $work
+    Proc       = $proc
+    StdoutFile = $stdoutFile
+    StderrFile = $stderrFile
+    Stdout     = $proc.StandardOutput.BaseStream.CopyToAsync($stdoutFile)
+    Stderr     = $proc.StandardError.BaseStream.CopyToAsync($stderrFile)
+    Started    = [System.Diagnostics.Stopwatch]::StartNew()
   }
 }
 
@@ -1196,6 +1205,8 @@ function Complete-Member {
     $status = 'timeout'
   }
   [void][System.Threading.Tasks.Task]::WaitAll(@($Job.Stdout, $Job.Stderr))
+  $Job.StdoutFile.Dispose()
+  $Job.StderrFile.Dispose()
   $script:ActiveProcesses.Remove($Job.Proc)
   $Job.Started.Stop()
 
@@ -1203,8 +1214,6 @@ function Complete-Member {
   if ($status -eq 'ok' -and $code -ne 0) { $status = "exit:$code" }
 
   $base = Join-Path $Job.Dest $Job.Slug
-  Write-TextFile "$base.stdout.log" $Job.Stdout.Result
-  Write-TextFile "$base.stderr.log" $Job.Stderr.Result
 
   $chatLog = Join-Path $Job.Work 'puny_chat.log'
   if (Test-Path -LiteralPath $chatLog) { Copy-Item -LiteralPath $chatLog -Destination "$base.chat.log" -Force }
