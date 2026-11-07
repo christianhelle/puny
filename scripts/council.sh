@@ -1030,6 +1030,9 @@ compose_round1_prompt() {
 TEMP_ROOT=""
 SEED_CONFIG=""
 declare -a VIEWER_PANES=()
+# The log each viewer pane tails, index for index with VIEWER_PANES, so a
+# member's pane can be found and closed the moment that member exits.
+declare -a VIEWER_LOGS=()
 
 # Share of the window, in percent, that the viewer panes take from the pane
 # running the council. Its own log is a few lines per round, so the members get
@@ -1115,6 +1118,7 @@ open_viewer_panes() {
     }
     ids[${col_start[$j]}]="$id"
     VIEWER_PANES+=("$id")
+    VIEWER_LOGS+=("${logs[${col_start[$j]}]}")
   done
 
   for ((j = 0; j < cols; j++)); do
@@ -1128,6 +1132,7 @@ open_viewer_panes() {
       }
       ids[$s]="$id"
       VIEWER_PANES+=("$id")
+      VIEWER_LOGS+=("${logs[$s]}")
     done
   done
 }
@@ -1145,6 +1150,21 @@ close_viewer_panes() {
     wezterm cli kill-pane --pane-id "$id" >/dev/null 2>&1 || true
   done
   VIEWER_PANES=()
+  VIEWER_LOGS=()
+}
+
+# Closes the pane tailing LOG, if one is open. Members run in background
+# subshells, so this cannot update the parent's arrays; the parent's later
+# close_viewer_panes asks again for the same pane, which WezTerm ignores once
+# it is gone. Pane ids are never reused, so that repeat cannot hit another pane.
+close_viewer_pane_for() {
+  local log="$1" i
+  [[ "${#VIEWER_LOGS[@]}" -gt 0 ]] || return 0
+  for i in "${!VIEWER_LOGS[@]}"; do
+    if [[ "${VIEWER_LOGS[$i]}" == "$log" ]]; then
+      wezterm cli kill-pane --pane-id "${VIEWER_PANES[$i]}" >/dev/null 2>&1 || true
+    fi
+  done
 }
 
 cleanup() {
@@ -1361,6 +1381,9 @@ run_one() {
   (cd "$work" && "${cmd[@]}") >"$dest/$slug.stdout.log" 2>"$dest/$slug.stderr.log"
   code=$?
   set -e
+
+  # puny is done, so there is nothing more for its pane to show.
+  close_viewer_pane_for "$dest/$slug.stdout.log"
 
   ended="$(now_ms)"
 
