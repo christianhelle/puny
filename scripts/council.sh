@@ -1031,36 +1031,111 @@ TEMP_ROOT=""
 SEED_CONFIG=""
 declare -a VIEWER_PANES=()
 
-# Opens one WezTerm pane per log, stacked in a column to the right of the pane
-# running the council, each tailing a member's stdout as it is written. The
-# panes are only a view: members, timeouts and status stay with this script, so
-# a pane that fails to open costs the view and nothing else.
+# Share of the window, in percent, that the viewer panes take from the pane
+# running the council. Its own log is a few lines per round, so the members get
+# most of the room.
+VIEWER_SHARE=60
+
+# Picks how many columns of viewer panes to use for N members. Panes are laid
+# out as a grid, and the column count that makes each pane closest to a 3:2
+# landscape shape wins: tall slivers wrap every line and short strips show only
+# a few. A terminal cell is about twice as tall as it is wide, which is why rows
+# count double. Ties go to fewer, wider columns. When the pane size cannot be
+# read, falls back to the floor of the square root of N.
+viewer_grid_columns() {
+  local n="$1" size
+  size="$(wezterm cli list 2>/dev/null | awk -v id="$WEZTERM_PANE" '$3 == id { print $5; exit }')"
+  awk -v n="$n" -v size="$size" -v share="$VIEWER_SHARE" 'BEGIN {
+    split(size, dims, "x")
+    w = dims[1] * share / 100
+    h = dims[2]
+    if (w <= 0 || h <= 0) {
+      c = int(sqrt(n))
+      print (c < 1 ? 1 : c)
+      exit
+    }
+    best = 1
+    bestd = -1
+    for (c = 1; c <= n; c++) {
+      r = int((n + c - 1) / c)
+      d = log(((w / c) / (2 * h / r)) / 1.5)
+      if (d < 0) d = -d
+      if (bestd < 0 || d < bestd - 1e-9) { best = c; bestd = d }
+    }
+    print best
+  }'
+}
+
+# Splits one viewer pane off TARGET and tails LOG in it. Prints the new pane id.
+split_viewer_pane() {
+  local target="$1" side="$2" percent="$3" log="$4" id
+  : >>"$log"
+  id="$(wezterm cli split-pane --pane-id "$target" "--$side" --percent "$percent" \
+    --cwd "$(to_native "$OUT_DIR")" -- \
+    "$(to_native "$(command -v tail)")" -v -n +1 -F "$(to_native "$log")" 2>/dev/null)" || return 1
+  id="${id//[[:space:]]/}"
+  [[ -n "$id" ]] || return 1
+  echo "$id"
+}
+
+# Opens one WezTerm pane per log, laid out as a grid to the right of the pane
+# running the council, each tailing a member's stdout as it is written. Logs
+# fill the grid column by column, so adversarial pairs sit one above the other.
+# The panes are only a view: members, timeouts and status stay with this
+# script, so a pane that fails to open costs the view and nothing else.
 open_viewer_panes() {
   [[ "$USE_WEZTERM" -eq 1 ]] || return 0
-  local -a logs=("$@")
-  local total="${#logs[@]}" k=0 log id percent tail_bin
-  local -a split=()
+  local -a logs=("$@") ids=() col_start=() col_rows=()
+  local total="${#logs[@]}" cols base extra j k r s=0 target percent id
 
-  tail_bin="$(to_native "$(command -v tail)")"
-  for log in "${logs[@]}"; do
-    : >>"$log"
-    if [[ "$k" -eq 0 ]]; then
-      split=(--pane-id "$WEZTERM_PANE" --right --percent 50)
-    else
-      # Each split takes its share of what is left, so the column ends up even.
-      percent=$((100 * (total - k) / (total - k + 1)))
-      split=(--pane-id "${VIEWER_PANES[$((k - 1))]}" --bottom --percent "$percent")
-    fi
-    if ! id="$(wezterm cli split-pane "${split[@]}" --cwd "$(to_native "$OUT_DIR")" -- \
-      "$tail_bin" -v -n +1 -F "$(to_native "$log")" 2>/dev/null)" || [[ -z "${id//[[:space:]]/}" ]]; then
-      log_warning "Could not open a WezTerm pane; continuing without live panes"
-      close_viewer_panes
-      USE_WEZTERM=0
-      return 0
-    fi
-    VIEWER_PANES+=("${id//[[:space:]]/}")
-    k=$((k + 1))
+  cols="$(viewer_grid_columns "$total")"
+  base=$((total / cols))
+  extra=$((total % cols))
+  for ((j = 0; j < cols; j++)); do
+    r="$base"
+    [[ "$j" -lt "$extra" ]] && r=$((r + 1))
+    col_start+=("$s")
+    col_rows+=("$r")
+    s=$((s + r))
   done
+
+  # Column heads first, left to right, then each column is stacked downward.
+  # Every split takes its share of what is left, so columns and rows end even.
+  for ((j = 0; j < cols; j++)); do
+    if [[ "$j" -eq 0 ]]; then
+      target="$WEZTERM_PANE"
+      percent="$VIEWER_SHARE"
+    else
+      target="${ids[${col_start[$((j - 1))]}]}"
+      percent=$((100 * (cols - j) / (cols - j + 1)))
+    fi
+    id="$(split_viewer_pane "$target" right "$percent" "${logs[${col_start[$j]}]}")" || {
+      viewer_panes_failed
+      return 0
+    }
+    ids[${col_start[$j]}]="$id"
+    VIEWER_PANES+=("$id")
+  done
+
+  for ((j = 0; j < cols; j++)); do
+    r="${col_rows[$j]}"
+    for ((k = 1; k < r; k++)); do
+      s=$((col_start[j] + k))
+      percent=$((100 * (r - k) / (r - k + 1)))
+      id="$(split_viewer_pane "${ids[$((s - 1))]}" bottom "$percent" "${logs[$s]}")" || {
+        viewer_panes_failed
+        return 0
+      }
+      ids[$s]="$id"
+      VIEWER_PANES+=("$id")
+    done
+  done
+}
+
+viewer_panes_failed() {
+  log_warning "Could not open a WezTerm pane; continuing without live panes"
+  close_viewer_panes
+  USE_WEZTERM=0
 }
 
 close_viewer_panes() {
