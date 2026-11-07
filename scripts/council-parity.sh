@@ -86,7 +86,7 @@ run_both() {
   local subject="$SCRIPT_DIR/council/smoke/subject.md"
 
   log_info "Running council.sh with $MEMBERS members against the mock provider"
-  bash "$SCRIPT_DIR/council.sh" --smoke --members "$MEMBERS" --jobs 2 \
+  bash "$SCRIPT_DIR/council.sh" --smoke --terminal plain --members "$MEMBERS" --jobs 2 \
     --min-answer-chars 20 --subject-file "$subject" --out "$WORK_DIR/bash" \
     >"$WORK_DIR/bash.log" 2>&1 || {
     log_error "council.sh failed; see $WORK_DIR/bash.log"
@@ -95,7 +95,7 @@ run_both() {
   }
 
   log_info "Running council.ps1 with $MEMBERS members against the mock provider"
-  pwsh -NoProfile -File "$SCRIPT_DIR/council.ps1" -Smoke -Members "$MEMBERS" -Jobs 2 \
+  pwsh -NoProfile -File "$SCRIPT_DIR/council.ps1" -Smoke -Terminal plain -Members "$MEMBERS" -Jobs 2 \
     -MinAnswerChars 20 -SubjectFile "$subject" -Out "$WORK_DIR/pwsh" \
     >"$WORK_DIR/pwsh.log" 2>&1 || {
     log_error "council.ps1 failed; see $WORK_DIR/pwsh.log"
@@ -110,7 +110,7 @@ run_both_compare() {
   log_info "Running council.sh --compare with $MEMBERS members against the mock provider"
   (
     cd "$repo" || exit 1
-    bash "$SCRIPT_DIR/council.sh" --smoke --members "$MEMBERS" --jobs 2 \
+    bash "$SCRIPT_DIR/council.sh" --smoke --terminal plain --members "$MEMBERS" --jobs 2 \
       --min-answer-chars 20 --compare side-a side-b --out "$WORK_DIR/compare-bash" \
       >"$WORK_DIR/compare-bash.log" 2>&1 || {
       log_error "council.sh --compare failed; see $WORK_DIR/compare-bash.log"
@@ -122,7 +122,7 @@ run_both_compare() {
   log_info "Running council.ps1 -Compare with $MEMBERS members against the mock provider"
   (
     cd "$repo" || exit 1
-    pwsh -NoProfile -File "$SCRIPT_DIR/council.ps1" -Smoke -Members "$MEMBERS" -Jobs 2 \
+    pwsh -NoProfile -File "$SCRIPT_DIR/council.ps1" -Smoke -Terminal plain -Members "$MEMBERS" -Jobs 2 \
       -MinAnswerChars 20 -Compare side-a,side-b -Out "$WORK_DIR/compare-pwsh" \
       >"$WORK_DIR/compare-pwsh.log" 2>&1 || {
       log_error "council.ps1 -Compare failed; see $WORK_DIR/compare-pwsh.log"
