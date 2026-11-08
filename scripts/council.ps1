@@ -43,6 +43,7 @@ param(
   [switch]$Force,
   [switch]$DryRun,
   [switch]$Smoke,
+  [ValidateSet('auto', 'wezterm', 'plain')][string]$Terminal,
   [switch]$Help
 )
 
@@ -94,6 +95,8 @@ Execution:
   -NoChatLog            Extract answers from stdout instead of puny_chat.log
   -NoIsolateHome        Share the real puny config directory between members
   -KeepTemp             Do not delete the per-member working directories
+  -Terminal NAME        auto | wezterm | plain (default: auto). In WezTerm,
+                        each running member is tailed in a split pane
 
 Output:
   -Out DIR              Output directory (default: .council/<timestamp>-<slug>)
@@ -103,7 +106,7 @@ Output:
   -Help                 Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR, COUNCIL_OUT,
-COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE
+COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE, COUNCIL_TERMINAL
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 '@
@@ -291,6 +294,30 @@ function Test-Arguments {
   if ($MaxPeerChars -lt 1000) {
     Stop-WithError "-MaxPeerChars must be at least 1000, got $MaxPeerChars"
   }
+
+  if ($script:TerminalMode -notin @('auto', 'wezterm', 'plain')) {
+    Stop-WithError "-Terminal must be auto, wezterm, or plain (got '$($script:TerminalMode)')"
+  }
+}
+
+# WezTerm exports WEZTERM_PANE into every pane it spawns, which is both the
+# detection signal and the pane the viewer panes are split from. Only WezTerm
+# gets different behaviour; every other terminal runs plain.
+function Resolve-Terminal {
+  $script:UseWezTerm = $false
+  if ($DryRun -or $script:TerminalMode -eq 'plain') { return }
+
+  $hasCli = [bool](Get-Command wezterm -ErrorAction SilentlyContinue)
+  if ($script:TerminalMode -eq 'wezterm') {
+    if (-not $hasCli) { Stop-WithError "-Terminal wezterm needs the 'wezterm' command on PATH" }
+    if (-not $env:WEZTERM_PANE) { Stop-WithError '-Terminal wezterm needs to run inside a WezTerm pane (WEZTERM_PANE is not set)' }
+  }
+  elseif (-not ($env:WEZTERM_PANE -and $hasCli)) {
+    return
+  }
+
+  $script:UseWezTerm = $true
+  Write-Info 'Terminal: wezterm (members are tailed in split panes)'
 }
 
 # -Roles decides the council size, so anything derived from the member count has
@@ -460,8 +487,10 @@ function Invoke-Summary {
 
   Write-Info "Summarising the verdict ($(Get-ChairLabel))"
   $dest = Join-Path $script:OutDir 'round4'
+  Open-ViewerPanes @(Join-Path $dest 'summary.stdout.log')
   $job = Start-Member 'summary' $script:ChairProvider $script:ChairModel $prompt $dest
   $status = Complete-Member $job
+  Close-ViewerPanes
 
   if ($status -ne 'ok') {
     Write-WarningMessage "The summary step failed ($status); the full verdict is still in verdict.md"
@@ -1156,19 +1185,186 @@ function Start-Member {
   if ($Provider) { [void]$psi.ArgumentList.Add('--provider'); [void]$psi.ArgumentList.Add($Provider) }
   if ($Model) { [void]$psi.ArgumentList.Add('-m'); [void]$psi.ArgumentList.Add($Model) }
 
+  $base = Join-Path $Dest $Slug
   $proc = [System.Diagnostics.Process]::Start($psi)
   [void]$script:ActiveProcesses.Add($proc)
 
+  # Both pipes must be drained asynchronously or a chatty child fills a pipe
+  # buffer and deadlocks waiting for us to read it. They are copied straight to
+  # the log files, so the logs grow while the member runs and can be watched.
+  # A buffer size of 1 turns off FileStream buffering, so every chunk the child
+  # writes reaches the file at once instead of in 4 KB batches.
+  $stdoutFile = [System.IO.FileStream]::new("$base.stdout.log", 'Create', 'Write', 'ReadWrite', 1)
+  $stderrFile = [System.IO.FileStream]::new("$base.stderr.log", 'Create', 'Write', 'ReadWrite', 1)
+
   return [pscustomobject]@{
-    Slug    = $Slug
-    Dest    = $Dest
-    Work    = $work
-    Proc    = $proc
-    # Both pipes must be drained asynchronously or a chatty child fills a pipe
-    # buffer and deadlocks waiting for us to read it.
-    Stdout  = $proc.StandardOutput.ReadToEndAsync()
-    Stderr  = $proc.StandardError.ReadToEndAsync()
-    Started = [System.Diagnostics.Stopwatch]::StartNew()
+    Slug       = $Slug
+    Dest       = $Dest
+    Work       = $work
+    Proc       = $proc
+    StdoutFile = $stdoutFile
+    StderrFile = $stderrFile
+    Stdout     = $proc.StandardOutput.BaseStream.CopyToAsync($stdoutFile)
+    Stderr     = $proc.StandardError.BaseStream.CopyToAsync($stderrFile)
+    Started    = [System.Diagnostics.Stopwatch]::StartNew()
+  }
+}
+
+# Share of the window, in percent, that the viewer panes take from the pane
+# running the council. Its own log is a few lines per round, so the members get
+# most of the room.
+$ViewerShare = 60
+
+# Picks how many columns of viewer panes to use for N members. Panes are laid
+# out as a grid, and the column count that makes each pane closest to a 3:2
+# landscape shape wins: tall slivers wrap every line and short strips show only
+# a few. A terminal cell is about twice as tall as it is wide, which is why rows
+# count double. Ties go to fewer, wider columns. When the pane size cannot be
+# read, falls back to the floor of the square root of N.
+function Get-ViewerGridColumns {
+  param([int]$Count)
+
+  $w = 0
+  $h = 0
+  try {
+    $pane = & wezterm cli list --format json 2>$null | ConvertFrom-Json |
+      Where-Object { "$($_.pane_id)" -eq $env:WEZTERM_PANE } | Select-Object -First 1
+    if ($pane) {
+      $w = $pane.size.cols * $ViewerShare / 100
+      $h = $pane.size.rows
+    }
+  }
+  catch { }
+
+  if ($w -le 0 -or $h -le 0) {
+    return [Math]::Max(1, [int][Math]::Floor([Math]::Sqrt($Count)))
+  }
+
+  $best = 1
+  $bestDistance = -1
+  for ($c = 1; $c -le $Count; $c++) {
+    $r = [Math]::Ceiling($Count / $c)
+    $distance = [Math]::Abs([Math]::Log((($w / $c) / (2 * $h / $r)) / 1.5))
+    if ($bestDistance -lt 0 -or $distance -lt $bestDistance - 1e-9) {
+      $best = $c
+      $bestDistance = $distance
+    }
+  }
+  return $best
+}
+
+# Splits one viewer pane off Target and tails Log in it. Returns the new pane
+# id, or $null when WezTerm refused.
+function Split-ViewerPane {
+  param([string]$Target, [string]$Side, [int]$Percent, [string]$Log)
+
+  if (-not (Test-Path -LiteralPath $Log)) { Write-TextFile $Log '' }
+  $shell = (Get-Process -Id $PID).Path
+  $quoted = $Log.Replace("'", "''")
+  $name = [System.IO.Path]::GetFileName($Log).Replace("'", "''")
+  $command = "Write-Host '==> $name <=='; Get-Content -LiteralPath '$quoted' -Wait"
+  $id = & wezterm cli split-pane --pane-id $Target "--$Side" --percent "$Percent" --cwd $script:OutDir -- `
+    $shell -NoLogo -NoProfile -Command $command 2>$null
+  if ($LASTEXITCODE -ne 0 -or -not "$id".Trim()) { return $null }
+  return "$id".Trim()
+}
+
+# Opens one WezTerm pane per log, laid out as a grid to the right of the pane
+# running the council, each tailing a member's stdout as it is written. Logs
+# fill the grid column by column, so adversarial pairs sit one above the other.
+# The panes are only a view: members, timeouts and status stay with this
+# script, so a pane that fails to open costs the view and nothing else.
+function Open-ViewerPanes {
+  param([string[]]$Logs)
+  if (-not $script:UseWezTerm) { return }
+
+  $total = $Logs.Count
+  $cols = Get-ViewerGridColumns $total
+  $base = [Math]::Floor($total / $cols)
+  $extra = $total % $cols
+  $colStart = @()
+  $colRows = @()
+  $s = 0
+  for ($j = 0; $j -lt $cols; $j++) {
+    $r = $base
+    if ($j -lt $extra) { $r++ }
+    $colStart += $s
+    $colRows += $r
+    $s += $r
+  }
+  $ids = @{}
+
+  # Column heads first, left to right, then each column is stacked downward.
+  # Every split takes its share of what is left, so columns and rows end even.
+  for ($j = 0; $j -lt $cols; $j++) {
+    if ($j -eq 0) {
+      $target = $env:WEZTERM_PANE
+      $percent = $ViewerShare
+    }
+    else {
+      $target = $ids[$colStart[$j - 1]]
+      $percent = [Math]::Floor(100 * ($cols - $j) / ($cols - $j + 1))
+    }
+    $id = Split-ViewerPane $target 'right' $percent $Logs[$colStart[$j]]
+    if (-not $id) { Stop-ViewerPanes; return }
+    $ids[$colStart[$j]] = $id
+    [void]$script:ViewerPanes.Add($id)
+    $script:ViewerPaneByLog[$Logs[$colStart[$j]]] = $id
+  }
+
+  for ($j = 0; $j -lt $cols; $j++) {
+    $r = $colRows[$j]
+    for ($k = 1; $k -lt $r; $k++) {
+      $s = $colStart[$j] + $k
+      $percent = [Math]::Floor(100 * ($r - $k) / ($r - $k + 1))
+      $id = Split-ViewerPane $ids[$s - 1] 'bottom' $percent $Logs[$s]
+      if (-not $id) { Stop-ViewerPanes; return }
+      $ids[$s] = $id
+      [void]$script:ViewerPanes.Add($id)
+      $script:ViewerPaneByLog[$Logs[$s]] = $id
+    }
+  }
+}
+
+function Stop-ViewerPanes {
+  Write-WarningMessage 'Could not open a WezTerm pane; continuing without live panes'
+  Close-ViewerPanes
+  $script:UseWezTerm = $false
+}
+
+function Close-ViewerPanes {
+  foreach ($id in @($script:ViewerPanes)) {
+    & wezterm cli kill-pane --pane-id $id 2>&1 | Out-Null
+  }
+  $script:ViewerPanes.Clear()
+  $script:ViewerPaneByLog.Clear()
+}
+
+# Closes the pane tailing Log, if one is open.
+function Close-ViewerPaneFor {
+  param([string]$Log)
+  if (-not $script:ViewerPaneByLog.ContainsKey($Log)) { return }
+  $id = $script:ViewerPaneByLog[$Log]
+  & wezterm cli kill-pane --pane-id $id 2>&1 | Out-Null
+  $script:ViewerPaneByLog.Remove($Log)
+  $script:ViewerPanes.Remove($id)
+}
+
+# Completes every running member that has exited or run out of time. Polling
+# rather than waiting on each member in turn means a member that finishes early
+# is completed, and its pane closed, without waiting for the ones before it.
+function Complete-FinishedMembers {
+  param([System.Collections.ArrayList]$Running)
+  foreach ($done in @($Running | Where-Object { $_.Proc.HasExited })) {
+    $null = Complete-Member $done
+    $Running.Remove($done)
+  }
+  # Nothing else reaps a member that never exits, so its slot would stay
+  # occupied and the rest of the round would never start.
+  foreach ($expired in @($Running | Where-Object {
+        $script:Timeout -gt 0 -and (Get-RemainingBudgetMs $_) -le 0 })) {
+    $null = Complete-Member $expired
+    $Running.Remove($expired)
   }
 }
 
@@ -1196,6 +1392,10 @@ function Complete-Member {
     $status = 'timeout'
   }
   [void][System.Threading.Tasks.Task]::WaitAll(@($Job.Stdout, $Job.Stderr))
+  $Job.StdoutFile.Dispose()
+  $Job.StderrFile.Dispose()
+  # puny is done, so there is nothing more for its pane to show.
+  Close-ViewerPaneFor (Join-Path $Job.Dest "$($Job.Slug).stdout.log")
   $script:ActiveProcesses.Remove($Job.Proc)
   $Job.Started.Stop()
 
@@ -1203,8 +1403,6 @@ function Complete-Member {
   if ($status -eq 'ok' -and $code -ne 0) { $status = "exit:$code" }
 
   $base = Join-Path $Job.Dest $Job.Slug
-  Write-TextFile "$base.stdout.log" $Job.Stdout.Result
-  Write-TextFile "$base.stderr.log" $Job.Stderr.Result
 
   $chatLog = Join-Path $Job.Work 'puny_chat.log'
   if (Test-Path -LiteralPath $chatLog) { Copy-Item -LiteralPath $chatLog -Destination "$base.chat.log" -Force }
@@ -1262,21 +1460,12 @@ function Invoke-Round {
   Write-Info "Round ${Round}: $($Indices.Count) member(s), up to $($script:JobLimit) at once"
 
   $running = [System.Collections.ArrayList]::new()
+  Open-ViewerPanes @($Indices | ForEach-Object { Join-Path $dest "$($script:Seats[$_].Slug).stdout.log" })
 
   foreach ($i in $Indices) {
     while (@($running | Where-Object { -not $_.Proc.HasExited }).Count -ge $script:JobLimit) {
       Start-Sleep -Milliseconds 200
-      foreach ($done in @($running | Where-Object { $_.Proc.HasExited })) {
-        $null = Complete-Member $done
-        $running.Remove($done)
-      }
-      # Nothing else reaps a member that never exits, so its slot would stay
-      # occupied and the rest of the round would never start.
-      foreach ($expired in @($running | Where-Object {
-            $script:Timeout -gt 0 -and (Get-RemainingBudgetMs $_) -le 0 })) {
-        $null = Complete-Member $expired
-        $running.Remove($expired)
-      }
+      Complete-FinishedMembers $running
     }
     $seat = $script:Seats[$i]
     [void]$running.Add((Start-Member $seat.Slug $seat.Provider $seat.Model (Join-Path $dest "$($seat.Slug).prompt.md") $dest))
@@ -1285,10 +1474,11 @@ function Invoke-Round {
   # Complete-Member enforces the timeout itself by killing the process after
   # -TimeoutSec and blocking on WaitForExit until it dies, so a hung member is
   # stopped even when every other slot stays full.
-  foreach ($job in @($running)) {
-    $null = Complete-Member $job
-    $running.Remove($job)
+  while ($running.Count -gt 0) {
+    Complete-FinishedMembers $running
+    if ($running.Count -gt 0) { Start-Sleep -Milliseconds 200 }
   }
+  Close-ViewerPanes
 
   $ok = 0
   $bad = 0
@@ -1319,8 +1509,10 @@ function Invoke-Chair {
 
   Write-Info "Round three: the chair ($(Get-ChairLabel)) synthesises the verdict"
   $dest = Join-Path $script:OutDir 'round3'
+  Open-ViewerPanes @(Join-Path $dest 'chair.stdout.log')
   $job = Start-Member 'chair' $script:ChairProvider $script:ChairModel $promptPath $dest
   $status = Complete-Member $job
+  Close-ViewerPanes
 
   $verdictPath = Join-Path $script:OutDir 'verdict.md'
   if ($status -eq 'ok') {
@@ -1486,6 +1678,10 @@ function Invoke-Main {
   elseif ($env:COUNCIL_MEMBERS) { ConvertTo-WholeNumber 'Member count (COUNCIL_MEMBERS)' $env:COUNCIL_MEMBERS 1 }
   else { $Members }
   $script:MemberFloor = $MinMembers
+  $script:TerminalMode = if ($Terminal) { $Terminal } elseif ($env:COUNCIL_TERMINAL) { $env:COUNCIL_TERMINAL } else { 'auto' }
+  $script:UseWezTerm = $false
+  $script:ViewerPanes = [System.Collections.ArrayList]::new()
+  $script:ViewerPaneByLog = @{}
   $script:Isolate = -not $NoIsolateHome
   $script:SeedConfig = ''
   $script:CompareWarnBytes = 409600
@@ -1502,6 +1698,7 @@ function Invoke-Main {
 
   Import-SharedLists
   Test-Arguments
+  Resolve-Terminal
   Resolve-PunyBinary
   Import-Roles
   Set-FinalLimits
@@ -1633,6 +1830,7 @@ function Invoke-Main {
         try { $proc.Kill($true) } catch { }
       }
     }
+    Close-ViewerPanes
     if (-not $KeepTemp -and (Test-Path -LiteralPath $script:TempRoot)) {
       Remove-Item -LiteralPath $script:TempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

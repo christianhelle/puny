@@ -46,6 +46,8 @@ USE_CHAT_LOG=1
 ISOLATE_HOME=1
 KEEP_TEMP=0
 FORCE=0
+TERMINAL_MODE="${COUNCIL_TERMINAL:-auto}"
+USE_WEZTERM=0
 
 COLOR_GREEN=""
 COLOR_RED=""
@@ -112,6 +114,8 @@ Execution:
       --no-chat-log         Extract answers from stdout instead of puny_chat.log
       --no-isolate-home     Share the real puny config directory between members
       --keep-temp           Do not delete the per-member working directories
+      --terminal NAME       auto | wezterm | plain (default: auto). In WezTerm,
+                            each running member is tailed in a split pane
 
 Output:
   -o, --out DIR             Output directory (default: .council/<timestamp>-<slug>)
@@ -121,7 +125,8 @@ Output:
   -h, --help                Show this help text
 
 Environment: PUNY_BIN, COUNCIL_MEMBERS, COUNCIL_MODELS, COUNCIL_CHAIR,
-COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE, NO_COLOR
+COUNCIL_OUT, COUNCIL_JOBS, COUNCIL_TIMEOUT, COUNCIL_COMPARE, COUNCIL_COMPARE_BASE,
+COUNCIL_TERMINAL, NO_COLOR
 
 Exit codes: 0 ok, 1 usage or preflight, 2 quorum not met, 3 chair failed
 USAGE
@@ -266,6 +271,11 @@ parse_args() {
     --keep-temp)
       KEEP_TEMP=1
       shift
+      ;;
+    --terminal)
+      require_value "$1" "${2:-}"
+      TERMINAL_MODE="$2"
+      shift 2
       ;;
     --force)
       FORCE=1
@@ -480,6 +490,33 @@ validate_args() {
   if [[ "$MAX_PEER_CHARS" -lt 1000 ]]; then
     die "--max-peer-chars must be at least 1000, got $MAX_PEER_CHARS"
   fi
+
+  case "$TERMINAL_MODE" in
+  auto | wezterm | plain) ;;
+  *) die "--terminal must be auto, wezterm, or plain (got '$TERMINAL_MODE')" ;;
+  esac
+}
+
+# WezTerm exports WEZTERM_PANE into every pane it spawns, which is both the
+# detection signal and the pane the viewer panes are split from. Only WezTerm
+# gets different behaviour; every other terminal runs plain.
+resolve_terminal() {
+  USE_WEZTERM=0
+  [[ "$DRY_RUN" -eq 1 ]] && return 0
+
+  case "$TERMINAL_MODE" in
+  plain) return 0 ;;
+  wezterm)
+    command -v wezterm >/dev/null 2>&1 || die "--terminal wezterm needs the 'wezterm' command on PATH"
+    [[ -n "${WEZTERM_PANE:-}" ]] || die "--terminal wezterm needs to run inside a WezTerm pane (WEZTERM_PANE is not set)"
+    ;;
+  auto)
+    [[ -n "${WEZTERM_PANE:-}" ]] && command -v wezterm >/dev/null 2>&1 || return 0
+    ;;
+  esac
+
+  USE_WEZTERM=1
+  log_info "Terminal: wezterm (members are tailed in split panes)"
 }
 
 # --roles decides the council size, so anything derived from the member count has
@@ -704,6 +741,9 @@ init_out_dir() {
   fi
 
   mkdir -p "$OUT_DIR/round1" "$OUT_DIR/round2" "$OUT_DIR/round3" "$OUT_DIR/round4"
+  # Members run from their own working directory, so a relative OUT_DIR would
+  # leave puny unable to find its prompt file. council.ps1 does the same.
+  OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 }
 
 # A three-dot diff is committed work only. Reviewing a branch with uncommitted
@@ -992,8 +1032,151 @@ compose_round1_prompt() {
 
 TEMP_ROOT=""
 SEED_CONFIG=""
+declare -a VIEWER_PANES=()
+# The log each viewer pane tails, index for index with VIEWER_PANES, so a
+# member's pane can be found and closed the moment that member exits.
+declare -a VIEWER_LOGS=()
+
+# Share of the window, in percent, that the viewer panes take from the pane
+# running the council. Its own log is a few lines per round, so the members get
+# most of the room.
+VIEWER_SHARE=60
+
+# Picks how many columns of viewer panes to use for N members. Panes are laid
+# out as a grid, and the column count that makes each pane closest to a 3:2
+# landscape shape wins: tall slivers wrap every line and short strips show only
+# a few. A terminal cell is about twice as tall as it is wide, which is why rows
+# count double. Ties go to fewer, wider columns. When the pane size cannot be
+# read, falls back to the floor of the square root of N.
+viewer_grid_columns() {
+  local n="$1" size
+  size="$(wezterm cli list 2>/dev/null | awk -v id="$WEZTERM_PANE" '$3 == id { print $5; exit }')"
+  awk -v n="$n" -v size="$size" -v share="$VIEWER_SHARE" 'BEGIN {
+    split(size, dims, "x")
+    w = dims[1] * share / 100
+    h = dims[2]
+    if (w <= 0 || h <= 0) {
+      c = int(sqrt(n))
+      print (c < 1 ? 1 : c)
+      exit
+    }
+    best = 1
+    bestd = -1
+    for (c = 1; c <= n; c++) {
+      r = int((n + c - 1) / c)
+      d = log(((w / c) / (2 * h / r)) / 1.5)
+      if (d < 0) d = -d
+      if (bestd < 0 || d < bestd - 1e-9) { best = c; bestd = d }
+    }
+    print best
+  }'
+}
+
+# Splits one viewer pane off TARGET and tails LOG in it. Prints the new pane id.
+split_viewer_pane() {
+  local target="$1" side="$2" percent="$3" log="$4" id dir
+  : >>"$log"
+  # OUT_DIR is usually relative, so a relative log path read from inside a pane
+  # started in OUT_DIR would point at OUT_DIR/OUT_DIR/... Resolve it first.
+  dir="$(cd "$(dirname "$log")" && pwd)"
+  log="$dir/$(basename "$log")"
+  # No -v: BSD tail on macOS rejects it and the pane would exit at once.
+  id="$(wezterm cli split-pane --pane-id "$target" "--$side" --percent "$percent" \
+    --cwd "$(to_native "$dir")" -- \
+    "$(to_native "$(command -v tail)")" -n +1 -F "$(to_native "$log")" 2>/dev/null)" || return 1
+  id="${id//[[:space:]]/}"
+  [[ -n "$id" ]] || return 1
+  echo "$id"
+}
+
+# Opens one WezTerm pane per log, laid out as a grid to the right of the pane
+# running the council, each tailing a member's stdout as it is written. Logs
+# fill the grid column by column, so adversarial pairs sit one above the other.
+# The panes are only a view: members, timeouts and status stay with this
+# script, so a pane that fails to open costs the view and nothing else.
+open_viewer_panes() {
+  [[ "$USE_WEZTERM" -eq 1 ]] || return 0
+  local -a logs=("$@") ids=() col_start=() col_rows=()
+  local total="${#logs[@]}" cols base extra j k r s=0 target percent id
+
+  cols="$(viewer_grid_columns "$total")"
+  base=$((total / cols))
+  extra=$((total % cols))
+  for ((j = 0; j < cols; j++)); do
+    r="$base"
+    [[ "$j" -lt "$extra" ]] && r=$((r + 1))
+    col_start+=("$s")
+    col_rows+=("$r")
+    s=$((s + r))
+  done
+
+  # Column heads first, left to right, then each column is stacked downward.
+  # Every split takes its share of what is left, so columns and rows end even.
+  for ((j = 0; j < cols; j++)); do
+    if [[ "$j" -eq 0 ]]; then
+      target="$WEZTERM_PANE"
+      percent="$VIEWER_SHARE"
+    else
+      target="${ids[${col_start[$((j - 1))]}]}"
+      percent=$((100 * (cols - j) / (cols - j + 1)))
+    fi
+    id="$(split_viewer_pane "$target" right "$percent" "${logs[${col_start[$j]}]}")" || {
+      viewer_panes_failed
+      return 0
+    }
+    ids[${col_start[$j]}]="$id"
+    VIEWER_PANES+=("$id")
+    VIEWER_LOGS+=("${logs[${col_start[$j]}]}")
+  done
+
+  for ((j = 0; j < cols; j++)); do
+    r="${col_rows[$j]}"
+    for ((k = 1; k < r; k++)); do
+      s=$((col_start[j] + k))
+      percent=$((100 * (r - k) / (r - k + 1)))
+      id="$(split_viewer_pane "${ids[$((s - 1))]}" bottom "$percent" "${logs[$s]}")" || {
+        viewer_panes_failed
+        return 0
+      }
+      ids[$s]="$id"
+      VIEWER_PANES+=("$id")
+      VIEWER_LOGS+=("${logs[$s]}")
+    done
+  done
+}
+
+viewer_panes_failed() {
+  log_warning "Could not open a WezTerm pane; continuing without live panes"
+  close_viewer_panes
+  USE_WEZTERM=0
+}
+
+close_viewer_panes() {
+  local id
+  # The +expansion keeps an empty array from tripping 'set -u' on bash 3.2.
+  for id in ${VIEWER_PANES[@]+"${VIEWER_PANES[@]}"}; do
+    wezterm cli kill-pane --pane-id "$id" >/dev/null 2>&1 || true
+  done
+  VIEWER_PANES=()
+  VIEWER_LOGS=()
+}
+
+# Closes the pane tailing LOG, if one is open. Members run in background
+# subshells, so this cannot update the parent's arrays; the parent's later
+# close_viewer_panes asks again for the same pane, which WezTerm ignores once
+# it is gone. Pane ids are never reused, so that repeat cannot hit another pane.
+close_viewer_pane_for() {
+  local log="$1" i
+  [[ "${#VIEWER_LOGS[@]}" -gt 0 ]] || return 0
+  for i in "${!VIEWER_LOGS[@]}"; do
+    if [[ "${VIEWER_LOGS[$i]}" == "$log" ]]; then
+      wezterm cli kill-pane --pane-id "${VIEWER_PANES[$i]}" >/dev/null 2>&1 || true
+    fi
+  done
+}
 
 cleanup() {
+  close_viewer_panes
   if [[ -n "$TEMP_ROOT" ]] && [[ -d "$TEMP_ROOT" ]] && [[ "$KEEP_TEMP" -eq 0 ]]; then
     rm -rf "$TEMP_ROOT"
   fi
@@ -1010,6 +1193,7 @@ terminate() {
   done
   wait 2>/dev/null || true
   cleanup
+  trap - EXIT
   exit 130
 }
 
@@ -1206,6 +1390,9 @@ run_one() {
   code=$?
   set -e
 
+  # puny is done, so there is nothing more for its pane to show.
+  close_viewer_pane_for "$dest/$slug.stdout.log"
+
   ended="$(now_ms)"
 
   if [[ "$code" -eq 124 ]] || [[ "$code" -eq 137 ]]; then
@@ -1264,12 +1451,19 @@ run_round() {
 
   log_info "Round $round: ${#indices[@]} member(s), up to $JOBS at once"
 
+  local -a logs=()
+  for i in "${indices[@]}"; do
+    logs+=("$dest/${MEMBER_SLUG[$i]}.stdout.log")
+  done
+  open_viewer_panes "${logs[@]}"
+
   for i in "${indices[@]}"; do
     wait_for_slot
     run_one "${MEMBER_SLUG[$i]}" "${MEMBER_PROVIDER[$i]}" "${MEMBER_MODEL[$i]}" \
       "$dest/${MEMBER_SLUG[$i]}.prompt.md" "$dest" &
   done
   wait
+  close_viewer_panes
 
   for i in "${indices[@]}"; do
     slug="${MEMBER_SLUG[$i]}"
@@ -1472,8 +1666,10 @@ run_chair() {
   warn_if_prompt_large "$OUT_DIR/round3/chair.prompt.md"
 
   log_info "Round three: the chair ($(chair_label)) synthesises the verdict"
+  open_viewer_panes "$OUT_DIR/round3/chair.stdout.log"
   run_one "chair" "$CHAIR_PROVIDER" "$CHAIR_MODEL" \
     "$OUT_DIR/round3/chair.prompt.md" "$OUT_DIR/round3"
+  close_viewer_panes
 
   status="$(read_status_field "$OUT_DIR/round3/chair.status" 1)"
   if [[ "$status" == "ok" ]]; then
@@ -1529,7 +1725,9 @@ run_summary() {
   rm -f "$scratch"
 
   log_info "Summarising the verdict ($(chair_label))"
+  open_viewer_panes "$OUT_DIR/round4/summary.stdout.log"
   run_one "summary" "$CHAIR_PROVIDER" "$CHAIR_MODEL" "$prompt" "$OUT_DIR/round4"
+  close_viewer_panes
 
   status="$(read_status_field "$OUT_DIR/round4/summary.status" 1)"
   if [[ "$status" != "ok" ]]; then
@@ -1739,6 +1937,7 @@ main() {
   load_shared_lists
   check_dependencies
   validate_args
+  resolve_terminal
   resolve_binary
   load_roles
   finalize_limits

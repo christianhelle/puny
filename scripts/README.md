@@ -57,6 +57,26 @@ chair and one summary. In general that is `2N + 2`. Both runners also warn that
 the chat log they depend on forces high reasoning effort, which costs more per
 call.
 
+### WezTerm
+
+Run inside [WezTerm](https://wezterm.org) and both runners show each member
+live. WezTerm sets `WEZTERM_PANE` in every pane it starts, so the runner detects
+it on its own and uses `wezterm cli split-pane` to open panes to the right, one
+per running member, each tailing that member's stdout log. The panes take 60% of
+the window and form a grid: the runner reads the pane size from `wezterm cli
+list` and picks the number of columns that keeps each pane closest to a 3:2
+landscape shape, so six members in a wide window get two columns of three.
+Seats fill the grid column by column, so each adversarial pair sits one above
+the other. Each pane closes as soon as its member's puny process exits, and
+WezTerm hands its space to the panes still running. A new set opens for the
+next round, and one pane each for the chair and the summary. They are only a view: the runner still owns the members, their
+timeouts and their results, so a pane that fails to open just turns the view
+off for the rest of the run.
+
+`--terminal` (`-Terminal`, `COUNCIL_TERMINAL`) overrides detection: `auto` (the
+default), `wezterm` to require it, or `plain` to turn the panes off. Every
+other terminal runs plain. Dry runs never open panes.
+
 ## How a run works
 
 ```mermaid
@@ -450,6 +470,7 @@ recognised `VERDICT:` line. In a dry run, the round-one rows show `PLANNED`.
 | `--no-chat-log` | `-NoChatLog` | | Extract answers from stdout (lossy) |
 | `--no-isolate-home` | `-NoIsolateHome` | | Share the real config directory |
 | `--keep-temp` | `-KeepTemp` | | Keep working directories, including token copies |
+| `--terminal NAME` | `-Terminal` | `auto` | `auto`, `wezterm` or `plain`; see [WezTerm](#wezterm) |
 
 ### Output
 
@@ -476,6 +497,7 @@ Flags take precedence over these.
 | `COUNCIL_TIMEOUT` | `--timeout` |
 | `COUNCIL_COMPARE` | `--compare`, as two whitespace-separated refs |
 | `COUNCIL_COMPARE_BASE` | `--compare-base` |
+| `COUNCIL_TERMINAL` | `--terminal` |
 | `NO_COLOR` | Turns off colour in `council.sh` |
 
 ## Testing
