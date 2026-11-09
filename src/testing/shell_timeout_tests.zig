@@ -1,7 +1,7 @@
 //! Slow execute_shell tests, run only as part of the regression suite
 //! (`zig build test-regression`) so that `zig build test` stays fast.
 const std = @import("std");
-const shell = @import("tools/shell.zig");
+const shell = @import("../tools/shell.zig");
 
 test "execute_shell reports a timeout when the command runs too long" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;

@@ -14,7 +14,7 @@ test "include chat_retry slow tests" {
 }
 
 test "include shell_timeout slow tests" {
-    _ = @import("shell_timeout_tests.zig");
+    _ = @import("testing/shell_timeout_tests.zig");
 }
 
 test "include models/select slow tests" {
