@@ -199,6 +199,7 @@ fn monitorThreadWindows() void {
                         handleFirstEscape(&first_esc_ts);
                     } else {
                         first_esc_ts = null;
+                        typed.feedUtf16(record.Event.KeyEvent.uChar.UnicodeChar);
                     }
                 }
             }

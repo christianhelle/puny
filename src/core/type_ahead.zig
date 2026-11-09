@@ -10,6 +10,7 @@ pub const TypeAhead = struct {
     partial: std.ArrayList(u8) = .empty,
     lines: std.ArrayList([]u8) = .empty,
     state: enum { text, escape, csi, ss3 } = .text,
+    high_surrogate: ?u16 = null,
 
     const esc: u8 = 0x1b;
 
@@ -60,6 +61,25 @@ pub const TypeAhead = struct {
                 self.partial.append(self.allocator, byte) catch {};
             },
         }
+    }
+
+    /// Takes one UTF-16 code unit, as the Windows console reports key presses.
+    pub fn feedUtf16(self: *TypeAhead, unit: u16) void {
+        if (unit == 0) return;
+        if (std.unicode.utf16IsHighSurrogate(unit)) {
+            self.high_surrogate = unit;
+            return;
+        }
+        var code_point: u21 = unit;
+        if (std.unicode.utf16IsLowSurrogate(unit)) {
+            const high = self.high_surrogate orelse return;
+            code_point = std.unicode.utf16DecodeSurrogatePair(&.{ high, unit }) catch return;
+        }
+        self.high_surrogate = null;
+
+        var encoded: [4]u8 = undefined;
+        const len = std.unicode.utf8Encode(code_point, &encoded) catch return;
+        for (encoded[0..len]) |byte| self.feed(byte);
     }
 
     fn deleteCodePoint(self: *TypeAhead) void {
@@ -229,6 +249,31 @@ test "takeAll with only an unfinished line has no stray separator" {
     feedAll(&buffer, "only this");
 
     try std.testing.expectEqualStrings("only this", try buffer.takeAll(arena_state.allocator()));
+}
+
+test "feedUtf16 encodes console characters and ignores keys without one" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    // 0 is what the console reports for keys like the arrows.
+    for ([_]u16{ 'c', 0, 'a', 'f', 0x00e9, '\r' }) |unit| buffer.feedUtf16(unit);
+
+    const lines = try buffer.takeLines(arena_state.allocator());
+    try std.testing.expectEqualStrings("caf\xc3\xa9", lines[0]);
+}
+
+test "feedUtf16 joins a surrogate pair into one code point" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    for ([_]u16{ 0xd83d, 0xde00, '\r' }) |unit| buffer.feedUtf16(unit);
+
+    const lines = try buffer.takeLines(arena_state.allocator());
+    try std.testing.expectEqualStrings("\xf0\x9f\x98\x80", lines[0]);
 }
 
 test "a blank line is not queued" {
