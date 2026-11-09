@@ -85,7 +85,11 @@ pub const TypeAhead = struct {
                     self.state = .ss3;
                     return;
                 },
-                else => self.state = .text,
+                else => {
+                    self.state = .text;
+                    const key = keys.decodeAlt(byte);
+                    if (key != .unknown) return self.editor().handleKey(key);
+                },
             },
             .csi => {
                 // Parameter and intermediate bytes run from 0x20 to 0x3F;
@@ -121,6 +125,14 @@ pub const TypeAhead = struct {
             0x17 => try ed.deleteWhitespaceWordBackward(),
             else => if (byte >= 0x20) try ed.append(byte),
         }
+    }
+
+    /// Call when input goes quiet: an Esc with nothing behind it was the key
+    /// itself, so whatever comes next is not an Alt shortcut.
+    pub fn settleEscape(self: *TypeAhead) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.state == .escape) self.state = .text;
     }
 
     /// Takes one UTF-16 code unit, as the Windows console reports key presses.
@@ -404,4 +416,48 @@ test "a blank line is not queued" {
     feedAll(&buffer, "\r   \n");
 
     try std.testing.expectEqual(@as(usize, 0), (try buffer.takeLines(arena_state.allocator())).len);
+}
+
+test "Alt shortcuts edit like the prompt instead of typing letters" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("one two") |byte| buffer.feed(byte);
+    for ("\x1bb") |byte| buffer.feed(byte);
+    for ("\x1bd") |byte| buffer.feed(byte);
+    buffer.feed('\r');
+
+    const lines = try buffer.takeLines(std.testing.allocator);
+    defer {
+        for (lines) |line| std.testing.allocator.free(line);
+        std.testing.allocator.free(lines);
+    }
+    try std.testing.expectEqualStrings("one", lines[0]);
+}
+
+test "Alt+Backspace deletes a word" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("one two\x1b\x7f\r") |byte| buffer.feed(byte);
+
+    const lines = try buffer.takeLines(std.testing.allocator);
+    defer {
+        for (lines) |line| std.testing.allocator.free(line);
+        std.testing.allocator.free(lines);
+    }
+    try std.testing.expectEqualStrings("one", lines[0]);
+}
+
+test "a letter typed after a lone Esc is text, not an Alt shortcut" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    buffer.feed(0x1b);
+    buffer.settleEscape();
+    for ("b\r") |byte| buffer.feed(byte);
+
+    const lines = try buffer.takeLines(std.testing.allocator);
+    defer {
+        for (lines) |line| std.testing.allocator.free(line);
+        std.testing.allocator.free(lines);
+    }
+    try std.testing.expectEqualStrings("b", lines[0]);
 }

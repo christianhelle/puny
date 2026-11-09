@@ -107,6 +107,7 @@ fn syncBar(hint: bool) void {
 /// Runs on the monitor's idle ticks: follows window resizes, and picks up
 /// lines the chat loop took off the queue.
 fn tick(first_esc_ts: ?Io.Timestamp) void {
+    typed.settleEscape();
     if (!barWanted()) return;
     if (terminal.terminalHeight()) |rows| {
         if (terminal.terminalWidth()) |cols| {
