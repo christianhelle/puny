@@ -24,7 +24,7 @@ ANSI = re.compile(r"\x1b(\[[0-9;?]*[ -/]*[@-~]|[@-Z\\^_])")
 TIMEOUT_SECONDS = 15
 ROWS = 24
 COLUMNS = 80
-SET_REGION = f"\x1b[1;{ROWS - 1}r"
+SET_REGION = f"\x1b[1;{ROWS - 2}r"
 RESET_REGION = "\x1b[r"
 SHORT_STREAM = b"slow\r"
 # Takes far longer than a test should, so only for turns the test cancels.

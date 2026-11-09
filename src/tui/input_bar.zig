@@ -9,7 +9,8 @@ pub var global: InputBar = .{};
 pub var screen_lock: SpinLock = .{};
 
 /// The `>` input row pinned to the bottom of the terminal while the agent
-/// works. A scroll region keeps streamed output above it.
+/// works. A scroll region keeps streamed output above it, with one empty row
+/// between the two.
 pub const InputBar = struct {
     out: ?*std.Io.Writer = null,
     active: bool = false,
@@ -22,7 +23,8 @@ pub const InputBar = struct {
     hint: bool = false,
 
     pub const text_capacity = 8192;
-    const min_rows = 3;
+    const reserved_rows = 2;
+    const min_rows = 4;
     const min_cols = 10;
     const hint_text = "(Press Esc again to cancel)";
 
@@ -30,17 +32,17 @@ pub const InputBar = struct {
         return rows >= min_rows and cols >= min_cols;
     }
 
-    /// Enters the bar if the terminal is big enough to spare a row.
+    /// Enters the bar if the terminal is big enough to spare the rows.
     pub fn enter(self: *InputBar, rows: usize, cols: usize) !void {
         const out = self.out orelse return;
         if (self.active or !fits(rows, cols)) return;
         self.active = true;
         self.rows = rows;
         self.cols = cols;
-        // Index then reverse index scrolls up a row if the cursor is on the
-        // last one, without moving its column. Setting a region homes the
-        // cursor, so it is saved around that.
-        try out.print("\x1bD\x1bM\x1b7\x1b[1;{d}r\x1b8", .{rows - 1});
+        // Index then reverse index, once per reserved row, scrolls up if the
+        // cursor is on a row about to be reserved, without moving its column.
+        // Setting a region homes the cursor, so it is saved around that.
+        try out.print("\x1bD\x1bD\x1bM\x1bM\x1b7\x1b[1;{d}r\x1b8", .{rows - reserved_rows});
         try self.paint();
     }
 
@@ -48,7 +50,7 @@ pub const InputBar = struct {
         if (!self.active) return;
         const out = self.out orelse return;
         self.active = false;
-        try out.print("\x1b7\x1b[r\x1b[{d};1H\x1b[2K\x1b8", .{self.rows});
+        try out.print("\x1b7\x1b[r\x1b[{d};1H\x1b[J\x1b8", .{self.rows - reserved_rows + 1});
         try out.flush();
     }
 
@@ -76,7 +78,8 @@ pub const InputBar = struct {
         if (!fits(rows, cols)) return self.leave();
         self.rows = rows;
         self.cols = cols;
-        try out.print("\x1b7\x1b[1;{d}r\x1b8", .{rows - 1});
+        // Old output can land on the row that has to stay empty.
+        try out.print("\x1b7\x1b[1;{d}r\x1b[{d};1H\x1b[2K\x1b8", .{ rows - reserved_rows, rows - 1 });
         try self.paint();
     }
 
@@ -229,7 +232,7 @@ fn expectContains(haystack: []const u8, needle: []const u8) !void {
     try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
 }
 
-test "entering reserves the bottom row and keeps the cursor where it was" {
+test "entering reserves the bottom row and an empty one above it, keeping the cursor where it was" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
     var bar: InputBar = .{ .out = &out.writer };
@@ -237,16 +240,17 @@ test "entering reserves the bottom row and keeps the cursor where it was" {
     try bar.enter(24, 80);
 
     try std.testing.expect(bar.active);
-    // Index then reverse index makes room if the cursor is on the last row.
-    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\x1bD\x1bM\x1b7\x1b[1;23r\x1b8"));
+    // Index then reverse index, twice, makes room if the cursor is on a row
+    // that is about to be reserved.
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\x1bD\x1bD\x1bM\x1bM\x1b7\x1b[1;22r\x1b8"));
 }
 
-test "a terminal too small to spare a row gets no bar" {
+test "a terminal too small to spare two rows gets no bar" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
     var bar: InputBar = .{ .out = &out.writer };
 
-    try bar.enter(2, 80);
+    try bar.enter(3, 80);
 
     try std.testing.expect(!bar.active);
     try std.testing.expectEqualStrings("", out.written());
@@ -341,7 +345,7 @@ test "repaint draws the last state again after the screen was erased" {
     try expectContains(out.written(), "(1 queued) > kept");
 }
 
-test "leaving resets the scroll region and clears the row" {
+test "leaving resets the scroll region and clears the reserved rows" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
     var bar: InputBar = .{ .out = &out.writer };
@@ -351,7 +355,7 @@ test "leaving resets the scroll region and clears the row" {
     try bar.leave();
 
     try std.testing.expect(!bar.active);
-    try std.testing.expectEqualStrings("\x1b7\x1b[r\x1b[24;1H\x1b[2K\x1b8", out.written());
+    try std.testing.expectEqualStrings("\x1b7\x1b[r\x1b[23;1H\x1b[J\x1b8", out.written());
 }
 
 test "resizing moves the region and the bar" {
@@ -364,7 +368,7 @@ test "resizing moves the region and the bar" {
 
     try bar.resize(40, 100);
 
-    try expectContains(out.written(), "\x1b[1;39r");
+    try expectContains(out.written(), "\x1b[1;38r\x1b[39;1H\x1b[2K");
     try expectContains(out.written(), "\x1b[40;1H\x1b[2K> typed");
 }
 
@@ -375,7 +379,7 @@ test "shrinking below the minimum drops the bar" {
     try bar.enter(24, 80);
     out.clearRetainingCapacity();
 
-    try bar.resize(2, 80);
+    try bar.resize(3, 80);
 
     try std.testing.expect(!bar.active);
     try expectContains(out.written(), "\x1b[r");
