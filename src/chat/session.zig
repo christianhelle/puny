@@ -27,6 +27,8 @@ const branch_review = @import("../review/review.zig");
 const orchestrate = @import("orchestrate.zig");
 const compact = @import("compact.zig");
 const help = @import("../tui/help.zig");
+const cancel = @import("../core/cancel.zig");
+const TypeAhead = @import("../core/type_ahead.zig").TypeAhead;
 
 pub const ReconfigurePrompt = session_commands.ReconfigurePrompt;
 pub const promptReconfigure = session_commands.promptReconfigure;
@@ -655,6 +657,20 @@ fn readUserInput(
             return .exit;
         },
     };
+}
+
+fn injectTyped(
+    allocator: std.mem.Allocator,
+    messages: *std.ArrayList(openai.Message),
+    writer: *std.Io.Writer,
+    typed: *TypeAhead,
+) ![]const []const u8 {
+    const lines = try typed.takeLines(allocator);
+    for (lines) |line| {
+        try messages.append(allocator, .{ .user = line });
+        try printNotice(writer, "Queued: {s}", .{line});
+    }
+    return lines;
 }
 
 /// Drives one agentic turn. `honor_oneshot` is false for orchestrate phases,
@@ -1406,6 +1422,50 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
     }) catch |err| {
         std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
     };
+}
+
+test "injectTyped appends queued lines after the tool results and announces them" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("first\rsecond\r") |byte| buffer.feed(byte);
+
+    var messages = std.ArrayList(openai.Message).empty;
+    try messages.append(arena, .{ .user = "start" });
+    try messages.append(arena, .{ .tool = .{ .tool_call_id = "call_1", .content = "done" } });
+
+    const delivered = try injectTyped(arena, &messages, &output.writer, &buffer);
+
+    try std.testing.expectEqual(@as(usize, 2), delivered.len);
+    try std.testing.expectEqual(@as(usize, 4), messages.items.len);
+    try std.testing.expectEqualStrings("first", messages.items[2].user);
+    try std.testing.expectEqualStrings("second", messages.items[3].user);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Queued: first") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Queued: second") != null);
+}
+
+test "injectTyped leaves the conversation alone when nothing was typed" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("unfinished") |byte| buffer.feed(byte);
+
+    var messages = std.ArrayList(openai.Message).empty;
+    try messages.append(arena, .{ .user = "start" });
+
+    const delivered = try injectTyped(arena, &messages, &output.writer, &buffer);
+
+    try std.testing.expectEqual(@as(usize, 0), delivered.len);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqualStrings("", output.written());
 }
 
 test "printNotice writes a dim line with a single blank line above it" {
