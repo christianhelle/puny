@@ -1,6 +1,7 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const question_picker = @import("../tui/question_picker.zig");
+const cancel = @import("../core/cancel.zig");
 
 const AskUserParams = struct {
     question: []const u8,
@@ -13,6 +14,9 @@ const AskUserParams = struct {
 var asker: *const fn (std.mem.Allocator, std.Io, []const u8, []const []const u8, ?[]const u8) anyerror!question_picker.Answer = question_picker.ask;
 
 fn askUser(allocator: std.mem.Allocator, io: std.Io, params: AskUserParams) ![]const u8 {
+    // The picker reads the keyboard and draws its own rows.
+    cancel.pause();
+    defer cancel.unpause();
     // toolResult copies the answer before the parsed params are freed.
     const answer = try asker(allocator, io, params.question, params.options, params.recommended);
     return question_picker.toolResult(allocator, answer);

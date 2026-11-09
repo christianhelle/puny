@@ -701,6 +701,17 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_credits: ?token_stats.AiCredits = null;
     var turn_credits_missing = false;
     var compaction_failed = false;
+
+    // A one-shot run has no next prompt to type towards.
+    if (!ctx.parsed.oneshot) {
+        try ctx.stdout_writer.flush();
+        cancel.beginLoop(ctx.io);
+    }
+    defer {
+        ctx.stdout_writer.flush() catch {};
+        cancel.endLoop();
+    }
+
     while (!turn_complete) {
         if (!compaction_failed) {
             if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {

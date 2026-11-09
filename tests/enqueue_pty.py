@@ -7,18 +7,25 @@ starts, so this drives the real binary through a pseudo-terminal.
 Usage: enqueue_pty.py <path to puny>
 """
 
+import fcntl
 import os
 import pty
 import re
 import select
 import shutil
 import signal
+import struct
 import sys
 import tempfile
+import termios
 import time
 
 ANSI = re.compile(r"\x1b(\[[0-9;?]*[ -/]*[@-~]|[@-Z\\^_])")
-TIMEOUT_SECONDS = 30
+TIMEOUT_SECONDS = 15
+ROWS = 24
+COLUMNS = 80
+SET_REGION = f"\x1b[1;{ROWS - 1}r"
+RESET_REGION = "\x1b[r"
 SHORT_STREAM = b"slow\r"
 # Takes far longer than a test should, so only for turns the test cancels.
 LONG_STREAM = b"slow long story\r"
@@ -27,8 +34,10 @@ LONG_STREAM = b"slow long story\r"
 class Puny:
     def __init__(self, binary, home):
         self.output = ""
+        self.raw = ""
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
+            fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLUMNS, 0, 0))
             os.environ["HOME"] = home
             os.environ["XDG_CONFIG_HOME"] = os.path.join(home, ".config")
             os.environ["TERM"] = "xterm-256color"
@@ -50,7 +59,9 @@ class Puny:
                 return
             if not data:
                 return
-            self.output += ANSI.sub("", data.decode("utf-8", "replace"))
+            text = data.decode("utf-8", "replace")
+            self.raw += text
+            self.output += ANSI.sub("", text)
 
     def wait_for(self, text, start=0):
         deadline = time.monotonic() + TIMEOUT_SECONDS
@@ -60,6 +71,15 @@ class Puny:
                 return index
             self.pump(0.05)
         raise AssertionError(f"timed out waiting for {text!r}; output was:\n{self.output}")
+
+    def wait_for_raw(self, text, start=0):
+        deadline = time.monotonic() + TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            index = self.raw.find(text, start)
+            if index >= 0:
+                return index
+            self.pump(0.05)
+        raise AssertionError(f"timed out waiting for {text!r}; output was:\n{self.raw!r}")
 
     def send(self, data):
         os.write(self.fd, data)
@@ -106,6 +126,29 @@ def cancel_holds_typed_text_for_the_prompt(puny):
     assert "Queued:" not in puny.output[mark:], puny.output[mark:]
 
 
+def typing_shows_in_a_bar_that_goes_away(puny):
+    start_streaming(puny, LONG_STREAM)
+    region = puny.wait_for_raw(SET_REGION)
+    puny.send(b"visible")
+
+    painted = puny.wait_for_raw(f"\x1b[{ROWS};1H", region)
+    puny.wait_for_raw("visible", painted)
+    puny.send(b"\x1b")
+    puny.pump(0.05)
+    puny.send(b"\x1b")
+    puny.wait_for_raw(RESET_REGION, region)
+
+
+def picker_gets_the_whole_screen_and_the_bar_returns(puny):
+    start_streaming(puny, b"give me a choice\r")
+    first = puny.wait_for_raw(SET_REGION)
+    puny.wait_for_raw(RESET_REGION, first)
+    puny.pump(0.5)
+    puny.send(b"\r")
+    puny.wait_for_raw(SET_REGION, first + len(SET_REGION))
+    puny.wait_for("Got your answer")
+
+
 def run_case(binary, case):
     home = tempfile.mkdtemp(prefix="puny-pty-")
     # An existing config keeps the first-launch setup wizard away.
@@ -130,7 +173,12 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     binary = os.path.abspath(sys.argv[1])
-    cases = [line_typed_while_streaming_is_delivered, cancel_holds_typed_text_for_the_prompt]
+    cases = [
+        line_typed_while_streaming_is_delivered,
+        cancel_holds_typed_text_for_the_prompt,
+        typing_shows_in_a_bar_that_goes_away,
+        picker_gets_the_whole_screen_and_the_bar_returns,
+    ]
     results = [run_case(binary, case) for case in cases]
     sys.exit(0 if all(results) else 1)
 
