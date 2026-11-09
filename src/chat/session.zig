@@ -673,6 +673,13 @@ fn injectTyped(
     return lines;
 }
 
+/// Orchestrate phases reset their context, reviews need an uninterrupted
+/// verdict, and a one-shot run has no next prompt, so typed lines only join an
+/// ordinary chat loop. Elsewhere they wait for the next prompt.
+fn injectsTyped(honor_oneshot: bool, oneshot: bool, review_active: bool) bool {
+    return honor_oneshot and !oneshot and !review_active;
+}
+
 /// Drives one agentic turn. `honor_oneshot` is false for orchestrate phases,
 /// which run several turns inside a single `--oneshot` invocation.
 fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
@@ -1446,6 +1453,16 @@ test "injectTyped appends queued lines after the tool results and announces them
     try std.testing.expectEqualStrings("second", messages.items[3].user);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Queued: first") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Queued: second") != null);
+}
+
+test "typed lines are injected into an ordinary chat loop" {
+    try std.testing.expect(injectsTyped(true, false, false));
+}
+
+test "typed lines are held for orchestrate phases, one-shot runs and reviews" {
+    try std.testing.expect(!injectsTyped(false, false, false));
+    try std.testing.expect(!injectsTyped(true, true, false));
+    try std.testing.expect(!injectsTyped(true, false, true));
 }
 
 test "injectTyped leaves the conversation alone when nothing was typed" {
