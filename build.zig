@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) !void {
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
-        .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .server },
+        .test_runner = .{ .path = b.path("src/testing/custom_test_runner.zig"), .mode = .server },
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) !void {
     const test_coverage_step = b.step("test-coverage", "Build test binary for coverage");
     const coverage_exe = b.addTest(.{
         .root_module = exe.root_module,
-        .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .simple },
+        .test_runner = .{ .path = b.path("src/testing/custom_test_runner.zig"), .mode = .simple },
         .use_llvm = true,
     });
     b.installArtifact(coverage_exe);
@@ -141,7 +141,7 @@ pub fn build(b: *std.Build) !void {
 
     const slow_tests = b.addTest(.{
         .root_module = slow_tests_root,
-        .test_runner = .{ .path = b.path("src/custom_test_runner.zig"), .mode = .server },
+        .test_runner = .{ .path = b.path("src/testing/custom_test_runner.zig"), .mode = .server },
     });
 
     const run_slow_tests = b.addRunArtifact(slow_tests);
