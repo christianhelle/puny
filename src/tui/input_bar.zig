@@ -1,6 +1,12 @@
 const std = @import("std");
 const ansi = @import("ansi.zig");
 const width = @import("markdown/width.zig");
+const SpinLock = @import("../core/type_ahead.zig").SpinLock;
+
+/// The bar shown during chat loops, and the lock over everything written to
+/// the terminal while it is up.
+pub var global: InputBar = .{};
+pub var screen_lock: SpinLock = .{};
 
 /// The `>` input row pinned to the bottom of the terminal while the agent
 /// works. A scroll region keeps streamed output above it.
@@ -121,6 +127,95 @@ fn codePointEnd(text: []const u8, index: usize) usize {
     var end = index + 1;
     while (end < text.len and text[end] & 0xC0 == 0x80) end += 1;
     return end;
+}
+
+/// Stdout for everything except the bar. Writes take `lock`, so the monitor
+/// thread's bar updates cannot land inside them, and repaint the bar after
+/// erasing the screen, which ignores the scroll region.
+pub const ScreenWriter = struct {
+    interface: std.Io.Writer,
+    inner: *std.Io.Writer,
+    bar: *InputBar,
+    lock: *SpinLock,
+
+    pub fn init(inner: *std.Io.Writer, bar: *InputBar, lock: *SpinLock, buffer: []u8) ScreenWriter {
+        return .{
+            .interface = .{ .buffer = buffer, .vtable = &.{ .drain = drain } },
+            .inner = inner,
+            .bar = bar,
+            .lock = lock,
+        };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *ScreenWriter = @fieldParentPtr("interface", w);
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const buffered = w.buffered();
+        if (buffered.len > 0) {
+            // Holding back an unfinished sequence keeps it whole. A flush
+            // lands here again with only that tail, which then goes out.
+            const safe = safeLength(buffered);
+            const count = if (safe > 0) safe else buffered.len;
+            try self.writeOut(buffered[0..count]);
+            _ = w.consume(count);
+            return 0;
+        }
+
+        // Everything goes through the buffer so it gets the same treatment.
+        for (data[0 .. data.len - 1]) |bytes| {
+            if (bytes.len > 0) return fill(w, bytes);
+        }
+        const last = data[data.len - 1];
+        return if (splat > 0 and last.len > 0) fill(w, last) else 0;
+    }
+
+    fn fill(w: *std.Io.Writer, bytes: []const u8) usize {
+        const count = @min(bytes.len, w.buffer.len);
+        @memcpy(w.buffer[0..count], bytes[0..count]);
+        w.end = count;
+        return count;
+    }
+
+    fn writeOut(self: *ScreenWriter, bytes: []const u8) std.Io.Writer.Error!void {
+        try self.inner.writeAll(bytes);
+        const erased = std.mem.indexOf(u8, bytes, "\x1b[J") != null or
+            std.mem.indexOf(u8, bytes, "\x1b[0J") != null or
+            std.mem.indexOf(u8, bytes, "\x1b[2J") != null;
+        if (erased and self.bar.active) return self.bar.repaint();
+        try self.inner.flush();
+    }
+};
+
+/// How much of `bytes` can be written without ending inside an escape
+/// sequence or a UTF-8 code point, where the bar's output would corrupt it.
+pub fn safeLength(bytes: []const u8) usize {
+    // Terminal sequences are short, so only the tail can hold an open one.
+    const window_start = bytes.len -| 32;
+    if (std.mem.lastIndexOfScalar(u8, bytes[window_start..], 0x1b)) |offset| {
+        const at = window_start + offset;
+        if (!escapeComplete(bytes[at..])) return at;
+    }
+
+    var index = bytes.len;
+    while (index > 0 and bytes.len - index < 4) {
+        index -= 1;
+        const byte = bytes[index];
+        if (byte & 0xC0 == 0x80) continue;
+        const expected = std.unicode.utf8ByteSequenceLength(byte) catch return bytes.len;
+        return if (bytes.len - index < expected) index else bytes.len;
+    }
+    return bytes.len;
+}
+
+fn escapeComplete(sequence: []const u8) bool {
+    if (sequence.len < 2) return false;
+    if (sequence[1] != '[') return true;
+    for (sequence[2..]) |byte| {
+        if (byte >= 0x40 and byte <= 0x7E) return true;
+    }
+    return false;
 }
 
 fn expectContains(haystack: []const u8, needle: []const u8) !void {
@@ -290,4 +385,67 @@ test "inactive bars write nothing" {
     try bar.leave();
 
     try std.testing.expectEqualStrings("", out.written());
+}
+
+test "safeLength stops before an unfinished escape sequence" {
+    try std.testing.expectEqual(@as(usize, 3), safeLength("abc"));
+    try std.testing.expectEqual(@as(usize, 2), safeLength("ab\x1b[3"));
+    try std.testing.expectEqual(@as(usize, 6), safeLength("ab\x1b[3m"));
+    try std.testing.expectEqual(@as(usize, 1), safeLength("x\x1b"));
+    try std.testing.expectEqual(@as(usize, 2), safeLength("\x1b7"));
+}
+
+test "safeLength stops before an unfinished code point" {
+    try std.testing.expectEqual(@as(usize, 2), safeLength("ab\xe2\x82"));
+    try std.testing.expectEqual(@as(usize, 5), safeLength("ab\xe2\x82\xac"));
+    try std.testing.expectEqual(@as(usize, 0), safeLength("\xf0\x9f"));
+}
+
+test "ScreenWriter passes everything through, including writes bigger than its buffer" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    var lock: SpinLock = .{};
+    var buffer: [8]u8 = undefined;
+    var screen = ScreenWriter.init(&out.writer, &bar, &lock, &buffer);
+
+    const text = "a long line \x1b[1mwith style\x1b[0m and caf\xc3\xa9 at the end";
+    try screen.interface.writeAll(text);
+    try screen.interface.flush();
+
+    try std.testing.expectEqualStrings(text, out.written());
+}
+
+test "ScreenWriter repaints the bar after an erase" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    try bar.enter(24, 80);
+    try bar.draw("kept", 4, 0, false);
+    out.clearRetainingCapacity();
+    var lock: SpinLock = .{};
+    var buffer: [64]u8 = undefined;
+    var screen = ScreenWriter.init(&out.writer, &bar, &lock, &buffer);
+
+    try screen.interface.writeAll("x\x1b[Jy");
+    try screen.interface.flush();
+
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "x\x1b[Jy\x1b7\x1b[24;1H"));
+    try expectContains(out.written(), "> kept");
+}
+
+test "ScreenWriter leaves the bar alone for ordinary output" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    try bar.enter(24, 80);
+    out.clearRetainingCapacity();
+    var lock: SpinLock = .{};
+    var buffer: [64]u8 = undefined;
+    var screen = ScreenWriter.init(&out.writer, &bar, &lock, &buffer);
+
+    try screen.interface.writeAll("plain");
+    try screen.interface.flush();
+
+    try std.testing.expectEqualStrings("plain", out.written());
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const input_bar = @import("tui/input_bar.zig");
 const chat = @import("chat/chat.zig");
 const stats = @import("chat/stats.zig");
 const upgrade = @import("upgrade.zig");
@@ -206,7 +207,10 @@ fn run(init: std.process.Init) !u8 {
 
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), init.io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
+    input_bar.global.out = &stdout_file_writer.interface;
+    var screen_buffer: [1024]u8 = undefined;
+    var screen_writer = input_bar.ScreenWriter.init(&stdout_file_writer.interface, &input_bar.global, &input_bar.screen_lock, &screen_buffer);
+    const stdout_writer = &screen_writer.interface;
 
     if (parsed.reconfigure) {
         try runStartupReconfigure(arena, init.io, init, cfg, stdout_writer, !cfg_result.file_existed);
