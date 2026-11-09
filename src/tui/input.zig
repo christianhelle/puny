@@ -18,6 +18,7 @@ pub fn readLine(
     line_alloc: *std.Io.Writer.Allocating,
     stdin_buffer: []u8,
     history: ?*prompt_history.History,
+    initial_text: []const u8,
 ) !ReadLineResult {
     line_alloc.clearRetainingCapacity();
     if (history) |h| h.resetNavigation();
@@ -33,12 +34,26 @@ pub fn readLine(
     };
     defer cancel.setRawMode(false) catch {};
 
-    var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, history, terminal.terminalWidth());
+    var editor = try promptEditor(line_alloc, stdout_writer, history, terminal.terminalWidth(), initial_text);
     const result = if (builtin.os.tag == .windows)
         try windows_impl.readLineWindows(allocator, io, &editor)
     else
         try posix.readLinePosix(allocator, io, &editor);
     return endPromptRow(stdout_writer, result);
+}
+
+/// An editor for the chat prompt, starting from `initial_text` with the cursor
+/// after it, so text the user typed earlier can be edited before it is sent.
+fn promptEditor(
+    line_alloc: *std.Io.Writer.Allocating,
+    stdout_writer: *std.Io.Writer,
+    history: ?*prompt_history.History,
+    width: ?usize,
+    initial_text: []const u8,
+) !line_editor.LineEditor {
+    var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, history, width);
+    if (initial_text.len > 0) try editor.appendSlice(initial_text);
+    return editor;
 }
 
 /// Output before the prompt ends its own line, so one newline leaves a single
@@ -162,6 +177,35 @@ fn readLineSimpleCanonical(
     else
         raw_message;
     return result;
+}
+
+test "the prompt starts from held text, shows it, and lets it be edited" {
+    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    var editor = try promptEditor(&line_alloc, &out.writer, null, 80, "draft");
+
+    try std.testing.expectEqualStrings("draft", line_alloc.written());
+    try std.testing.expectEqual(@as(usize, 5), editor.cursor);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "draft") != null);
+
+    try editor.backspace();
+    try std.testing.expectEqualStrings("draf", line_alloc.written());
+}
+
+test "the prompt starts empty with no held text" {
+    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    const editor = try promptEditor(&line_alloc, &out.writer, null, 80, "");
+
+    try std.testing.expectEqualStrings("", line_alloc.written());
+    try std.testing.expectEqual(@as(usize, 0), editor.cursor);
+    try std.testing.expectEqualStrings("", out.written());
 }
 
 /// Scripted stand-in for the terminal used by the `readPlainLine` tests.
