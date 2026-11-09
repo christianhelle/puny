@@ -1,7 +1,7 @@
 const std = @import("std");
-const core_session = @import("core/session.zig");
-const release = @import("upgrade/release.zig");
-const version = @import("version.zig");
+const core_session = @import("../core/session.zig");
+const release = @import("release.zig");
+const version = @import("../version.zig");
 
 pub const flag_file_name = "update-available";
 

@@ -29,7 +29,7 @@ const welcome = @import("tui/welcome.zig");
 const crash_prompt = @import("tui/crash_prompt.zig");
 const ansi = @import("tui/ansi.zig");
 const vt = @import("tui/vt.zig");
-const update_check = @import("update_check.zig");
+const update_check = @import("upgrade/update_check.zig");
 
 comptime {
     // Keep the module analyzed so its tests run under `zig build test`.
