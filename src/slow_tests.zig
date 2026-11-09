@@ -10,7 +10,7 @@ test "include run_command slow tests" {
 }
 
 test "include chat_retry slow tests" {
-    _ = @import("chat_retry_tests.zig");
+    _ = @import("testing/chat_retry_tests.zig");
 }
 
 test "include shell_timeout slow tests" {
