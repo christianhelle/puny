@@ -6,7 +6,7 @@ test "include retry_download slow tests" {
 }
 
 test "include run_command slow tests" {
-    _ = @import("run_command_tests.zig");
+    _ = @import("testing/run_command_tests.zig");
 }
 
 test "include chat_retry slow tests" {

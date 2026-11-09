@@ -1,7 +1,7 @@
 //! Slow runCommand/runCommandTimed tests, run only as part of the regression
 //! suite (`zig build test-regression`) so that `zig build test` stays fast.
 const std = @import("std");
-const run_command = @import("tools/run_command.zig");
+const run_command = @import("../tools/run_command.zig");
 
 test "runCommandTimed returns output for a command that finishes within the deadline" {
     const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
