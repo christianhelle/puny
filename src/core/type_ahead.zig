@@ -36,6 +36,8 @@ pub const TypeAhead = struct {
     csi_params: [16]u8 = undefined,
     csi_len: usize = 0,
     high_surrogate: ?u16 = null,
+    /// When false, 0x08 can only be Ctrl+Backspace.
+    erase_is_ctrl_h: bool = true,
 
     const esc: u8 = 0x1b;
 
@@ -113,7 +115,8 @@ pub const TypeAhead = struct {
         const ed = self.editor();
         switch (byte) {
             '\r', '\n' => try self.completeLine(),
-            0x7f, 0x08 => try ed.backspace(),
+            0x7f => try ed.backspace(),
+            0x08 => if (self.erase_is_ctrl_h) try ed.backspace() else try ed.deleteWordBackward(),
             esc => self.state = .escape,
             0x01 => try ed.moveHome(),
             0x02 => try ed.moveLeft(),
@@ -125,6 +128,12 @@ pub const TypeAhead = struct {
             0x17 => try ed.deleteWhitespaceWordBackward(),
             else => if (byte >= 0x20) try ed.append(byte),
         }
+    }
+
+    pub fn setEraseIsCtrlH(self: *TypeAhead, value: bool) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.erase_is_ctrl_h = value;
     }
 
     /// Call when input goes quiet: an Esc with nothing behind it was the key
@@ -460,4 +469,32 @@ test "a letter typed after a lone Esc is text, not an Alt shortcut" {
         std.testing.allocator.free(lines);
     }
     try std.testing.expectEqualStrings("b", lines[0]);
+}
+
+test "Ctrl+Backspace deletes a word when Backspace does not send ^H" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    buffer.setEraseIsCtrlH(false);
+    for ("one two\x08\r") |byte| buffer.feed(byte);
+
+    const lines = try buffer.takeLines(std.testing.allocator);
+    defer {
+        for (lines) |line| std.testing.allocator.free(line);
+        std.testing.allocator.free(lines);
+    }
+    try std.testing.expectEqualStrings("one", lines[0]);
+}
+
+test "^H is a plain Backspace when the terminal's Backspace sends it" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    buffer.setEraseIsCtrlH(true);
+    for ("one two\x08\r") |byte| buffer.feed(byte);
+
+    const lines = try buffer.takeLines(std.testing.allocator);
+    defer {
+        for (lines) |line| std.testing.allocator.free(line);
+        std.testing.allocator.free(lines);
+    }
+    try std.testing.expectEqualStrings("one tw", lines[0]);
 }

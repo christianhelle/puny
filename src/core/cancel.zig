@@ -175,6 +175,7 @@ fn startMonitor() !void {
     monitor_mode = true;
     errdefer monitor_mode = false;
     try setRawMode(true);
+    if (!is_windows) typed.setEraseIsCtrlH(eraseIsCtrlH());
     monitor_thread = try std.Thread.spawn(.{}, monitorThread, .{});
 }
 
