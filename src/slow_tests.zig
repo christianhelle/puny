@@ -2,7 +2,7 @@
 //! test-regression`, keeping `zig build test` fast.
 
 test "include retry_download slow tests" {
-    _ = @import("retry_download_tests.zig");
+    _ = @import("testing/retry_download_tests.zig");
 }
 
 test "include run_command slow tests" {
