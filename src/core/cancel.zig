@@ -82,6 +82,12 @@ fn leaveBar() void {
     input_bar.global.leave() catch {};
 }
 
+fn barWanted() bool {
+    input_bar.screen_lock.lock();
+    defer input_bar.screen_lock.unlock();
+    return input_bar.global.wanted;
+}
+
 fn barActive() bool {
     input_bar.screen_lock.lock();
     defer input_bar.screen_lock.unlock();
@@ -101,12 +107,13 @@ fn syncBar(hint: bool) void {
 /// Runs on the monitor's idle ticks: follows window resizes, and picks up
 /// lines the chat loop took off the queue.
 fn tick(first_esc_ts: ?Io.Timestamp) void {
-    if (!barActive()) return;
+    if (!barWanted()) return;
     if (terminal.terminalHeight()) |rows| {
         if (terminal.terminalWidth()) |cols| {
             input_bar.screen_lock.lock();
             defer input_bar.screen_lock.unlock();
-            if (rows != input_bar.global.rows or cols != input_bar.global.cols) input_bar.global.resize(rows, cols) catch {};
+            const bar = &input_bar.global;
+            if (!bar.active or rows != bar.rows or cols != bar.cols) bar.resize(rows, cols) catch {};
         }
     }
     syncBar(first_esc_ts != null);

@@ -150,6 +150,11 @@ const Puny = struct {
         if (c.write(self.fd, bytes.ptr, bytes.len) != bytes.len) return error.WriteFailed;
     }
 
+    fn resize(self: *Puny, height: u16) void {
+        const size: Winsize = .{ .row = height, .col = columns };
+        _ = c.ioctl(self.fd, c.T.IOCSWINSZ, &size);
+    }
+
     fn doubleEsc(self: *Puny) !void {
         try self.send("\x1b");
         try self.pump(50);
@@ -219,6 +224,17 @@ fn pickerGetsTheWholeScreenAndTheBarReturns(puny: *Puny) !void {
     _ = try puny.waitFor("Got your answer", 0);
 }
 
+fn barReturnsWhenASmallWindowGrowsBack(puny: *Puny) !void {
+    _ = try startStreaming(puny, long_stream);
+    const first = try puny.waitForRaw(set_region, 0);
+
+    puny.resize(3);
+    const released = try puny.waitForRaw(reset_region, first);
+    puny.resize(rows);
+    _ = try puny.waitForRaw(set_region, released);
+    try puny.doubleEsc();
+}
+
 const Case = struct {
     name: []const u8,
     run: *const fn (*Puny) anyerror!void,
@@ -229,6 +245,7 @@ const cases = [_]Case{
     .{ .name = "cancel holds typed text for the prompt", .run = cancelHoldsTypedTextForThePrompt },
     .{ .name = "typing shows in a bar that goes away", .run = typingShowsInABarThatGoesAway },
     .{ .name = "picker gets the whole screen and the bar returns", .run = pickerGetsTheWholeScreenAndTheBarReturns },
+    .{ .name = "bar returns when a small window grows back", .run = barReturnsWhenASmallWindowGrowsBack },
 };
 
 fn runCase(allocator: std.mem.Allocator, io: std.Io, binary: [:0]const u8, env: *const std.process.Environ.Map, case: Case) !void {

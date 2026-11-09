@@ -14,6 +14,9 @@ pub var screen_lock: SpinLock = .{};
 pub const InputBar = struct {
     out: ?*std.Io.Writer = null,
     active: bool = false,
+    /// Up between `enter` and `leave`, even while the window is too small to
+    /// show the bar, so it can come back when the window grows.
+    wanted: bool = false,
     rows: usize = 0,
     cols: usize = 0,
     text: [text_capacity]u8 = undefined,
@@ -37,6 +40,7 @@ pub const InputBar = struct {
     /// Enters the bar if the terminal is big enough to spare the rows.
     pub fn enter(self: *InputBar, rows: usize, cols: usize) !void {
         const out = self.out orelse return;
+        self.wanted = true;
         if (self.active or !fits(rows, cols)) return;
         self.active = true;
         self.rows = rows;
@@ -49,6 +53,11 @@ pub const InputBar = struct {
     }
 
     pub fn leave(self: *InputBar) !void {
+        self.wanted = false;
+        try self.release();
+    }
+
+    fn release(self: *InputBar) !void {
         if (!self.active) return;
         const out = self.out orelse return;
         self.active = false;
@@ -75,9 +84,10 @@ pub const InputBar = struct {
     }
 
     pub fn resize(self: *InputBar, rows: usize, cols: usize) !void {
-        if (!self.active) return;
+        if (!self.wanted) return;
         const out = self.out orelse return;
-        if (!fits(rows, cols)) return self.leave();
+        if (!fits(rows, cols)) return self.release();
+        if (!self.active) return self.enter(rows, cols);
         self.rows = rows;
         self.cols = cols;
         // Shrinking can leave the cursor below the new region, where output
@@ -416,6 +426,47 @@ test "shrinking below the minimum drops the bar" {
 
     try std.testing.expect(!bar.active);
     try expectContains(out.written(), "\x1b[r");
+}
+
+test "a bar dropped by a small window comes back when it grows" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    try bar.enter(24, 80);
+    try bar.draw("kept", 4, 0, false);
+    try bar.resize(3, 80);
+    out.clearRetainingCapacity();
+
+    try bar.resize(24, 80);
+
+    try std.testing.expect(bar.active);
+    try expectContains(out.written(), "\x1b[1;22r");
+    try expectContains(out.written(), "> kept");
+}
+
+test "a bar that started in a small window appears when it grows" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    try bar.enter(3, 80);
+
+    try bar.resize(24, 80);
+
+    try std.testing.expect(bar.active);
+}
+
+test "a bar that was left stays away when the window changes" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    try bar.enter(24, 80);
+    try bar.leave();
+    out.clearRetainingCapacity();
+
+    try bar.resize(40, 80);
+
+    try std.testing.expect(!bar.active);
+    try std.testing.expectEqualStrings("", out.written());
 }
 
 test "inactive bars write nothing" {
