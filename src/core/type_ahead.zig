@@ -25,7 +25,15 @@ pub const TypeAhead = struct {
     pub fn feed(self: *TypeAhead, byte: u8) void {
         switch (byte) {
             '\r', '\n' => self.completeLine() catch {},
+            0x7f, 0x08 => self.deleteCodePoint(),
             else => self.partial.append(self.allocator, byte) catch {},
+        }
+    }
+
+    fn deleteCodePoint(self: *TypeAhead) void {
+        // UTF-8 continuation bytes look like 0b10xxxxxx; the lead byte does not.
+        while (self.partial.pop()) |removed| {
+            if (removed & 0xC0 != 0x80) break;
         }
     }
 
@@ -63,6 +71,30 @@ test "Enter queues the typed line" {
     const lines = try buffer.takeLines(arena_state.allocator());
     try std.testing.expectEqual(@as(usize, 1), lines.len);
     try std.testing.expectEqualStrings("also fix the tests", lines[0]);
+}
+
+test "Backspace removes a whole UTF-8 code point" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "caf\xc3\xa9\x7fe\r");
+
+    const lines = try buffer.takeLines(arena_state.allocator());
+    try std.testing.expectEqualStrings("cafe", lines[0]);
+}
+
+test "Backspace on an empty line does nothing" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "\x7f\x08ok\r");
+
+    const lines = try buffer.takeLines(arena_state.allocator());
+    try std.testing.expectEqualStrings("ok", lines[0]);
 }
 
 test "a blank line is not queued" {
