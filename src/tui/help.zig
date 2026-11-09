@@ -27,6 +27,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/help", "Show this help message");
     try printCommand(writer, "@path", "Attach a file to the prompt");
     try writer.print("\n{s}Tip:{s} Type @ to search and attach files to your prompt.\n", .{ ansi.yellow, ansi.reset });
+    try writer.print("{s}Tip:{s} Keep typing while Puny works and press Enter to queue a message.\n", .{ ansi.yellow, ansi.reset });
     try writer.flush();
 }
 
@@ -57,6 +58,7 @@ test "showHelp lists all commands" {
     try std.testing.expect(std.mem.indexOf(u8, text, "Available commands:") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Exit Puny") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Type @ to search and attach files") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "press Enter to queue a message") != null);
 }
 
 test "printCommand pads short command names to the column width" {
