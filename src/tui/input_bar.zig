@@ -27,6 +27,8 @@ pub const InputBar = struct {
     const min_rows = 4;
     const min_cols = 10;
     const hint_text = "(Press Esc again to cancel)";
+    /// Index then reverse index, once per reserved row.
+    const make_room = "\x1bD\x1bD\x1bM\x1bM";
 
     fn fits(rows: usize, cols: usize) bool {
         return rows >= min_rows and cols >= min_cols;
@@ -42,7 +44,7 @@ pub const InputBar = struct {
         // Index then reverse index, once per reserved row, scrolls up if the
         // cursor is on a row about to be reserved, without moving its column.
         // Setting a region homes the cursor, so it is saved around that.
-        try out.print("\x1bD\x1bD\x1bM\x1bM\x1b7\x1b[1;{d}r\x1b8", .{rows - reserved_rows});
+        try out.print(make_room ++ "\x1b7\x1b[1;{d}r\x1b8", .{rows - reserved_rows});
         try self.paint();
     }
 
@@ -78,8 +80,10 @@ pub const InputBar = struct {
         if (!fits(rows, cols)) return self.leave();
         self.rows = rows;
         self.cols = cols;
-        // Old output can land on the row that has to stay empty.
-        try out.print("\x1b7\x1b[1;{d}r\x1b[{d};1H\x1b[2K\x1b8", .{ rows - reserved_rows, rows - 1 });
+        // Shrinking can leave the cursor below the new region, where output
+        // would no longer scroll, so room is made without a region in the
+        // way. Old output can also land on the row that has to stay empty.
+        try out.print("\x1b7\x1b[r\x1b8" ++ make_room ++ "\x1b7\x1b[1;{d}r\x1b[{d};1H\x1b[2K\x1b8", .{ rows - reserved_rows, rows - 1 });
         try self.paint();
     }
 
@@ -385,6 +389,20 @@ test "resizing moves the region and the bar" {
 
     try expectContains(out.written(), "\x1b[1;38r\x1b[39;1H\x1b[2K");
     try expectContains(out.written(), "\x1b[40;1H\x1b[2K> typed");
+}
+
+test "resizing brings a cursor below the new region back inside it" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    try bar.enter(24, 80);
+    out.clearRetainingCapacity();
+
+    try bar.resize(12, 80);
+
+    // Scrolling only moves a cursor below the region if the region is gone,
+    // so it is released before making room and set again afterwards.
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\x1b7\x1b[r\x1b8\x1bD\x1bD\x1bM\x1bM\x1b7\x1b[1;10r"));
 }
 
 test "shrinking below the minimum drops the bar" {
