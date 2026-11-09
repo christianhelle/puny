@@ -917,7 +917,7 @@ test "test runner suppresses unexpected error stack traces" {
 }
 
 test "include all module tests" {
-    _ = @import("test_runner.zig");
+    _ = @import("testing/test_runner.zig");
 }
 
 test "http log file is hardened with 0600 permissions on posix" {
