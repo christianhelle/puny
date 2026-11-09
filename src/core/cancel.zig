@@ -315,6 +315,7 @@ fn monitorThreadPosix() void {
         };
         const rc = posix.poll(&pfd, 50) catch break;
         if (rc == 0) {
+            expireFirstEscape(&first_esc_ts);
             tick(first_esc_ts);
             continue;
         }
@@ -363,6 +364,7 @@ fn monitorThreadWindows() void {
                 }
             }
         } else {
+            expireFirstEscape(&first_esc_ts);
             tick(first_esc_ts);
             global_io.sleep(.{ .nanoseconds = @as(i96, @intCast(50 * std.time.ns_per_ms)) }, .awake) catch {};
         }
@@ -383,6 +385,14 @@ fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
         if (byte == 0x1a) suspend_job();
     }
     syncBar(first_esc_ts.* != null);
+}
+
+/// Forgets a first Esc once a second one can no longer cancel, which also
+/// takes its hint off the bar.
+fn expireFirstEscape(first_esc_ts: *?Io.Timestamp) void {
+    const first = first_esc_ts.* orelse return;
+    const elapsed = first.durationTo(Io.Timestamp.now(global_io, .awake)).nanoseconds;
+    if (elapsed > double_tap_window_ns) first_esc_ts.* = null;
 }
 
 /// Raw mode turns the terminal's interrupt key off, so Ctrl+C is read here and
@@ -825,4 +835,17 @@ test "suspending brings the bar back only if one was wanted" {
     input_bar.global.wanted = true;
     suspendAround(FakeRestore.stop, FakeRestore.restore);
     try std.testing.expectEqual(@as(usize, 1), FakeRestore.restored);
+}
+
+test "a first Esc expires once the double-tap window has passed" {
+    global_io = std.testing.io;
+    const now = Io.Timestamp.now(global_io, .awake);
+
+    var recent: ?Io.Timestamp = now;
+    expireFirstEscape(&recent);
+    try std.testing.expect(recent != null);
+
+    var old: ?Io.Timestamp = .{ .nanoseconds = now.nanoseconds - 2 * double_tap_window_ns };
+    expireFirstEscape(&old);
+    try std.testing.expect(old == null);
 }
