@@ -684,9 +684,10 @@ fn loopFinished(model_done: bool, delivered: usize) bool {
 
 /// Orchestrate phases reset their context, reviews need an uninterrupted
 /// verdict, and a one-shot run has no next prompt, so typed lines only join an
-/// ordinary chat loop. Elsewhere they wait for the next prompt.
-fn injectsTyped(honor_oneshot: bool, oneshot: bool, review_active: bool) bool {
-    return honor_oneshot and !oneshot and !review_active;
+/// ordinary chat loop. Elsewhere, and once the user has cancelled, they wait
+/// for the next prompt.
+fn injectsTyped(honor_oneshot: bool, oneshot: bool, review_active: bool, cancelled: bool) bool {
+    return honor_oneshot and !oneshot and !review_active and !cancelled;
 }
 
 /// Drives one agentic turn. `honor_oneshot` is false for orchestrate phases,
@@ -791,10 +792,9 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
 
-        // Tool results are in place by now, so every tool call stays paired
-        // and the monitor thread has been joined.
+        // Tool results are in place by now, so every tool call stays paired.
         var delivered: []const []const u8 = &.{};
-        if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive())) {
+        if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
             delivered = try injectTyped(ctx.messages_arena.allocator(), ctx.messages, ctx.stdout_writer, &cancel.typed);
             for (delivered) |line| {
                 if (ctx.chat_log) |log| log.print("[USER]\n{s}\n\n", .{line});
@@ -1495,13 +1495,17 @@ test "the loop finishes only when the model is done and nothing was delivered" {
 }
 
 test "typed lines are injected into an ordinary chat loop" {
-    try std.testing.expect(injectsTyped(true, false, false));
+    try std.testing.expect(injectsTyped(true, false, false, false));
 }
 
 test "typed lines are held for orchestrate phases, one-shot runs and reviews" {
-    try std.testing.expect(!injectsTyped(false, false, false));
-    try std.testing.expect(!injectsTyped(true, true, false));
-    try std.testing.expect(!injectsTyped(true, false, true));
+    try std.testing.expect(!injectsTyped(false, false, false, false));
+    try std.testing.expect(!injectsTyped(true, true, false, false));
+    try std.testing.expect(!injectsTyped(true, false, true, false));
+}
+
+test "typed lines are held when a cancel is pending" {
+    try std.testing.expect(!injectsTyped(true, false, false, true));
 }
 
 test "a line typed during a tool call reaches the model on the next request" {
