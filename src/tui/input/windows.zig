@@ -35,6 +35,10 @@ pub fn readLineWindows(
         const word = ctrl or alt;
 
         if (vk != windows.VK_ESCAPE) first_esc_ts = null;
+        if (keys.decodeVirtualKey(vk, word)) |key| {
+            try editor.handleKey(key);
+            continue;
+        }
         switch (vk) {
             windows.VK_RETURN => {
                 try editor.moveEnd();
@@ -44,7 +48,6 @@ pub fn readLineWindows(
                 pending_high = null;
                 if (word) try editor.deleteWordBackward() else try editor.backspace();
             },
-            windows.VK_DELETE => try editor.handleKey(if (word) .delete_word_forward else .delete),
             windows.VK_ESCAPE => {
                 const now = std.Io.Timestamp.now(io, .awake);
                 if (first_esc_ts) |first| {
@@ -56,12 +59,6 @@ pub fn readLineWindows(
                 }
                 first_esc_ts = now;
             },
-            windows.VK_UP => try editor.handleKey(.up),
-            windows.VK_DOWN => try editor.handleKey(.down),
-            windows.VK_LEFT => try editor.handleKey(if (word) .word_left else .left),
-            windows.VK_RIGHT => try editor.handleKey(if (word) .word_right else .right),
-            windows.VK_HOME => try editor.handleKey(.home),
-            windows.VK_END => try editor.handleKey(.end),
             else => {
                 const ch = key_event.uChar.UnicodeChar;
                 if (ch == 3 and ctrl) {
@@ -132,13 +129,6 @@ const windows = if (builtin.os.tag == .windows) struct {
     pub const VK_RETURN: u16 = 0x0D;
     pub const VK_BACK: u16 = 0x08;
     pub const VK_ESCAPE: u16 = 0x1B;
-    pub const VK_END: u16 = 0x23;
-    pub const VK_HOME: u16 = 0x24;
-    pub const VK_LEFT: u16 = 0x25;
-    pub const VK_UP: u16 = 0x26;
-    pub const VK_RIGHT: u16 = 0x27;
-    pub const VK_DOWN: u16 = 0x28;
-    pub const VK_DELETE: u16 = 0x2E;
     pub const KEY_EVENT: u16 = 0x0001;
     pub const LEFT_CTRL_PRESSED: DWORD = 0x0008;
     pub const RIGHT_CTRL_PRESSED: DWORD = 0x0004;

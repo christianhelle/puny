@@ -144,6 +144,49 @@ pub const TypeAhead = struct {
         if (self.state == .escape) self.state = .text;
     }
 
+    pub const WindowsKey = struct {
+        virtual_key: u16,
+        char: u16,
+        ctrl: bool = false,
+        alt: bool = false,
+    };
+
+    /// Takes one Windows console key press. Editing keys report no character
+    /// of their own, so they are decoded from the virtual-key code.
+    pub fn feedWindowsKey(self: *TypeAhead, key: WindowsKey) void {
+        const handled = blk: {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            break :blk self.editWindowsKey(key) catch true;
+        };
+        if (!handled) self.feedUtf16(key.char);
+    }
+
+    fn editWindowsKey(self: *TypeAhead, key: WindowsKey) !bool {
+        const virtual_key_back = 0x08;
+        const ed = self.editor();
+        const word = key.ctrl or key.alt;
+        if (keys.decodeVirtualKey(key.virtual_key, word)) |decoded| {
+            try ed.handleKey(decoded);
+            return true;
+        }
+        if (key.virtual_key == virtual_key_back) {
+            self.high_surrogate = null;
+            try if (word) ed.deleteWordBackward() else ed.backspace();
+            return true;
+        }
+        if (key.alt and !key.ctrl) {
+            if (keys.altByteFromVirtualKey(key.virtual_key, key.char)) |byte| {
+                const decoded = keys.decodeAlt(byte);
+                if (decoded != .unknown) {
+                    try ed.handleKey(decoded);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /// Takes one UTF-16 code unit, as the Windows console reports key presses.
     pub fn feedUtf16(self: *TypeAhead, unit: u16) void {
         if (unit == 0) return;
@@ -497,4 +540,62 @@ test "^H is a plain Backspace when the terminal's Backspace sends it" {
         std.testing.allocator.free(lines);
     }
     try std.testing.expectEqualStrings("one tw", lines[0]);
+}
+
+const WindowsKeys = struct {
+    const left: u16 = 0x25;
+    const back: u16 = 0x08;
+    const delete: u16 = 0x2E;
+    const home: u16 = 0x24;
+    const b: u16 = 0x42;
+};
+
+fn expectOnlyLine(buffer: *TypeAhead, expected: []const u8) !void {
+    buffer.feed('\r');
+    const lines = try buffer.takeLines(std.testing.allocator);
+    defer {
+        for (lines) |line| std.testing.allocator.free(line);
+        std.testing.allocator.free(lines);
+    }
+    try std.testing.expectEqual(@as(usize, 1), lines.len);
+    try std.testing.expectEqualStrings(expected, lines[0]);
+}
+
+test "Windows arrow and Delete keys edit the line" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("abc") |byte| buffer.feed(byte);
+    buffer.feedWindowsKey(.{ .virtual_key = WindowsKeys.left, .char = 0 });
+    buffer.feedWindowsKey(.{ .virtual_key = WindowsKeys.left, .char = 0 });
+    buffer.feedWindowsKey(.{ .virtual_key = WindowsKeys.delete, .char = 0 });
+
+    try expectOnlyLine(&buffer, "ac");
+}
+
+test "Windows Ctrl keys work word-wise" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("one two") |byte| buffer.feed(byte);
+    buffer.feedWindowsKey(.{ .virtual_key = WindowsKeys.back, .char = 0x7f, .ctrl = true });
+
+    try expectOnlyLine(&buffer, "one");
+}
+
+test "Windows Alt shortcuts edit even without a character" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("one two") |byte| buffer.feed(byte);
+    buffer.feedWindowsKey(.{ .virtual_key = WindowsKeys.b, .char = 0, .alt = true });
+    buffer.feedWindowsKey(.{ .virtual_key = WindowsKeys.home, .char = 0 });
+    buffer.feedWindowsKey(.{ .virtual_key = 0x58, .char = 'x' });
+
+    try expectOnlyLine(&buffer, "xone two");
+}
+
+test "Windows text and AltGr characters are typed" {
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    buffer.feedWindowsKey(.{ .virtual_key = 0x32, .char = '@', .ctrl = true, .alt = true });
+
+    try expectOnlyLine(&buffer, "@");
 }

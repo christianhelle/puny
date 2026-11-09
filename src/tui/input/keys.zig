@@ -80,6 +80,21 @@ pub fn withAlt(key: Key) Key {
     };
 }
 
+/// Decodes a Windows virtual-key code for a key that carries no text. Ctrl
+/// or Alt (`word`) turns arrows and Delete into their word-wise variants.
+pub fn decodeVirtualKey(vk: u16, word: bool) ?Key {
+    return switch (vk) {
+        0x23 => .end,
+        0x24 => .home,
+        0x25 => if (word) .word_left else .left,
+        0x26 => .up,
+        0x27 => if (word) .word_right else .right,
+        0x28 => .down,
+        0x2E => if (word) .delete_word_forward else .delete,
+        else => null,
+    };
+}
+
 /// Byte to pass to `decodeAlt` for a Windows Alt key-down record. Consoles
 /// may report Alt+letter with a zero character, so a letter virtual-key code
 /// (`A`..`Z`) stands in as its lowercase byte. Returns null when the record
@@ -161,6 +176,15 @@ test "altByteFromVirtualKey derives a lowercase letter when the character is zer
 test "altByteFromVirtualKey rejects non-letter keys without a character" {
     try std.testing.expectEqual(@as(?u8, null), altByteFromVirtualKey(0x70, 0));
     try std.testing.expectEqual(@as(?u8, null), altByteFromVirtualKey(0x41, 0x00E9));
+}
+
+test "decodeVirtualKey maps Windows editing keys" {
+    try std.testing.expectEqual(@as(?Key, .left), decodeVirtualKey(0x25, false));
+    try std.testing.expectEqual(@as(?Key, .word_left), decodeVirtualKey(0x25, true));
+    try std.testing.expectEqual(@as(?Key, .word_right), decodeVirtualKey(0x27, true));
+    try std.testing.expectEqual(@as(?Key, .delete_word_forward), decodeVirtualKey(0x2E, true));
+    try std.testing.expectEqual(@as(?Key, .home), decodeVirtualKey(0x24, true));
+    try std.testing.expectEqual(@as(?Key, null), decodeVirtualKey(0x41, false));
 }
 
 test "withAlt turns arrows and Delete into their word-wise variants" {

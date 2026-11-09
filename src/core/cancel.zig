@@ -341,7 +341,13 @@ fn monitorThreadWindows() void {
                         handleFirstEscape(&first_esc_ts);
                     } else {
                         first_esc_ts = null;
-                        typed.feedUtf16(record.Event.KeyEvent.uChar.UnicodeChar);
+                        const modifiers = record.Event.KeyEvent.dwControlKeyState;
+                        typed.feedWindowsKey(.{
+                            .virtual_key = vk,
+                            .char = record.Event.KeyEvent.uChar.UnicodeChar,
+                            .ctrl = modifiers & (windows.LEFT_CTRL_PRESSED | windows.RIGHT_CTRL_PRESSED) != 0,
+                            .alt = modifiers & (windows.LEFT_ALT_PRESSED | windows.RIGHT_ALT_PRESSED) != 0,
+                        });
                     }
                     syncBar(first_esc_ts != null);
                 }
@@ -394,6 +400,10 @@ const windows = if (is_windows) struct {
 
     pub const VK_ESCAPE: u16 = 0x1B;
     pub const KEY_EVENT: u16 = 0x0001;
+    pub const LEFT_CTRL_PRESSED: DWORD = 0x0008;
+    pub const RIGHT_CTRL_PRESSED: DWORD = 0x0004;
+    pub const RIGHT_ALT_PRESSED: DWORD = 0x0001;
+    pub const LEFT_ALT_PRESSED: DWORD = 0x0002;
 
     pub const KEY_EVENT_RECORD = extern struct {
         bKeyDown: BOOL,
