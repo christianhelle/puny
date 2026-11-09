@@ -86,6 +86,29 @@ pub const TypeAhead = struct {
         self.lines.clearRetainingCapacity();
         return taken;
     }
+
+    /// Hands over everything typed so far as one space-separated string, for
+    /// the next prompt to start from. The caller owns it.
+    pub fn takeAll(self: *TypeAhead, allocator: std.mem.Allocator) ![]const u8 {
+        var joined: std.ArrayList(u8) = .empty;
+        errdefer joined.deinit(allocator);
+        for (self.lines.items) |line| {
+            if (joined.items.len > 0) try joined.append(allocator, ' ');
+            try joined.appendSlice(allocator, line);
+        }
+        const unfinished = std.mem.trim(u8, self.partial.items, &std.ascii.whitespace);
+        if (unfinished.len > 0) {
+            if (joined.items.len > 0) try joined.append(allocator, ' ');
+            try joined.appendSlice(allocator, unfinished);
+        }
+        const result = try joined.toOwnedSlice(allocator);
+
+        for (self.lines.items) |line| self.allocator.free(line);
+        self.lines.clearRetainingCapacity();
+        self.partial.clearRetainingCapacity();
+        self.state = .text;
+        return result;
+    }
 };
 
 fn feedAll(buffer: *TypeAhead, bytes: []const u8) void {
@@ -163,6 +186,49 @@ test "a lone Esc does not swallow the text after it" {
 
     const lines = try buffer.takeLines(arena_state.allocator());
     try std.testing.expectEqualStrings("hello", lines[0]);
+}
+
+test "takeLines returns oldest first and leaves the unfinished line" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "first\rsecond\rstill typ");
+
+    const lines = try buffer.takeLines(arena);
+    try std.testing.expectEqual(@as(usize, 2), lines.len);
+    try std.testing.expectEqualStrings("first", lines[0]);
+    try std.testing.expectEqualStrings("second", lines[1]);
+    try std.testing.expectEqual(@as(usize, 0), (try buffer.takeLines(arena)).len);
+
+    feedAll(&buffer, "ing\r");
+    try std.testing.expectEqualStrings("still typing", (try buffer.takeLines(arena))[0]);
+}
+
+test "takeAll joins completed lines and the unfinished line, then empties the buffer" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "first\rsecond\rthi");
+
+    try std.testing.expectEqualStrings("first second thi", try buffer.takeAll(arena));
+    try std.testing.expectEqualStrings("", try buffer.takeAll(arena));
+}
+
+test "takeAll with only an unfinished line has no stray separator" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "only this");
+
+    try std.testing.expectEqualStrings("only this", try buffer.takeAll(arena_state.allocator()));
 }
 
 test "a blank line is not queued" {
