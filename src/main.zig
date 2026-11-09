@@ -918,7 +918,7 @@ test "test runner suppresses unexpected error stack traces" {
 
 test "include all module tests" {
     if (@import("build_options").slow_tests) {
-        _ = @import("slow_tests.zig");
+        _ = @import("testing/slow_tests.zig");
     } else {
         _ = @import("testing/test_runner.zig");
     }
