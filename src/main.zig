@@ -1,5 +1,17 @@
 const std = @import("std");
 const input_bar = @import("tui/input_bar.zig");
+
+pub const panic = std.debug.FullPanic(panicHandler);
+
+fn panicHandler(message: []const u8, first_trace_address: ?usize) noreturn {
+    input_bar.emergencyReset(&input_bar.global, writeStdoutRaw);
+    std.debug.defaultPanic(message, first_trace_address);
+}
+
+fn writeStdoutRaw(bytes: []const u8) void {
+    if (@import("builtin").os.tag == .windows) return;
+    _ = std.posix.system.write(std.posix.STDOUT_FILENO, bytes.ptr, bytes.len);
+}
 const chat = @import("chat/chat.zig");
 const stats = @import("chat/stats.zig");
 const upgrade = @import("upgrade.zig");

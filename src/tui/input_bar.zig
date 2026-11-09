@@ -218,6 +218,12 @@ fn escapeComplete(sequence: []const u8) bool {
     return false;
 }
 
+/// Gives a panicking process's shell its whole screen back. Skips the lock,
+/// since the panicking thread may hold it.
+pub fn emergencyReset(bar: *const InputBar, write: *const fn ([]const u8) void) void {
+    if (bar.active) write("\x1b[r");
+}
+
 fn expectContains(haystack: []const u8, needle: []const u8) !void {
     errdefer std.debug.print("missing {s} in {s}\n", .{ needle, haystack });
     try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
@@ -385,6 +391,24 @@ test "inactive bars write nothing" {
     try bar.leave();
 
     try std.testing.expectEqualStrings("", out.written());
+}
+
+const FakeWrite = struct {
+    var last: []const u8 = "";
+    fn write(bytes: []const u8) void {
+        last = bytes;
+    }
+};
+
+test "emergencyReset releases the scroll region only when the bar is up" {
+    FakeWrite.last = "";
+    var bar: InputBar = .{};
+    emergencyReset(&bar, FakeWrite.write);
+    try std.testing.expectEqualStrings("", FakeWrite.last);
+
+    bar.active = true;
+    emergencyReset(&bar, FakeWrite.write);
+    try std.testing.expectEqualStrings("\x1b[r", FakeWrite.last);
 }
 
 test "safeLength stops before an unfinished escape sequence" {
