@@ -9,6 +9,9 @@ pub const TypeAhead = struct {
     allocator: std.mem.Allocator,
     partial: std.ArrayList(u8) = .empty,
     lines: std.ArrayList([]u8) = .empty,
+    state: enum { text, escape, csi, ss3 } = .text,
+
+    const esc: u8 = 0x1b;
 
     pub fn init(allocator: std.mem.Allocator) TypeAhead {
         return .{ .allocator = allocator };
@@ -23,10 +26,39 @@ pub const TypeAhead = struct {
     /// Takes one input byte. Running out of memory drops the keystroke, since
     /// the monitor thread has nobody to report the failure to.
     pub fn feed(self: *TypeAhead, byte: u8) void {
+        switch (self.state) {
+            .text => {},
+            .escape => switch (byte) {
+                esc => return,
+                '[' => {
+                    self.state = .csi;
+                    return;
+                },
+                'O' => {
+                    self.state = .ss3;
+                    return;
+                },
+                else => self.state = .text,
+            },
+            .csi => {
+                // Parameter and intermediate bytes run from 0x20 to 0x3F;
+                // anything else ends the sequence.
+                if (byte < 0x20 or byte > 0x3F) self.state = .text;
+                return;
+            },
+            .ss3 => {
+                self.state = .text;
+                return;
+            },
+        }
+
         switch (byte) {
             '\r', '\n' => self.completeLine() catch {},
             0x7f, 0x08 => self.deleteCodePoint(),
-            else => self.partial.append(self.allocator, byte) catch {},
+            esc => self.state = .escape,
+            else => if (byte >= 0x20) {
+                self.partial.append(self.allocator, byte) catch {};
+            },
         }
     }
 
@@ -95,6 +127,42 @@ test "Backspace on an empty line does nothing" {
 
     const lines = try buffer.takeLines(arena_state.allocator());
     try std.testing.expectEqualStrings("ok", lines[0]);
+}
+
+test "control bytes stay out of the text" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "a\x01b\x03c\x1ad\r");
+
+    const lines = try buffer.takeLines(arena_state.allocator());
+    try std.testing.expectEqualStrings("abcd", lines[0]);
+}
+
+test "arrow keys and other escape sequences stay out of the text" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "a\x1b[Ab\x1b[1;5Dc\x1bOHd\r");
+
+    const lines = try buffer.takeLines(arena_state.allocator());
+    try std.testing.expectEqualStrings("abcd", lines[0]);
+}
+
+test "a lone Esc does not swallow the text after it" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    feedAll(&buffer, "\x1b\x1bhello\r");
+
+    const lines = try buffer.takeLines(arena_state.allocator());
+    try std.testing.expectEqualStrings("hello", lines[0]);
 }
 
 test "a blank line is not queued" {
