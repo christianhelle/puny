@@ -4,6 +4,11 @@ const is_windows = builtin.os.tag == .windows;
 const Io = std.Io;
 const job_control = @import("job_control.zig");
 const test_support = @import("../testing/test_support.zig");
+const TypeAhead = @import("type_ahead.zig").TypeAhead;
+
+/// What the user typed while the monitor owned stdin. Only read it once
+/// `stop` has joined the monitor thread.
+pub var typed: TypeAhead = .init(std.heap.smp_allocator);
 
 /// Atomic flags shared between monitor thread and main thread.
 var cancelled: std.atomic.Value(bool) = .{ .raw = false };
@@ -206,6 +211,7 @@ fn monitorThreadWindows() void {
 // ── Escape detection logic ───────────────────────────────────────────
 
 fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
+    typed.feed(byte);
     if (byte == 0x1b) {
         handleFirstEscape(first_esc_ts);
     } else {
@@ -425,6 +431,70 @@ test "Ctrl+Z while a response streams suspends the job without cancelling" {
 
     try std.testing.expectEqual(@as(usize, 1), FakeSuspend.count);
     try std.testing.expect(!isCancelled());
+}
+
+test "keys typed while a response streams reach the type-ahead buffer" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    _ = try typed.takeAll(arena_state.allocator());
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    for ("next step\r") |byte| handleKeyByte(byte, &first_esc_ts);
+
+    const lines = try typed.takeLines(arena_state.allocator());
+    try std.testing.expectEqual(@as(usize, 1), lines.len);
+    try std.testing.expectEqualStrings("next step", lines[0]);
+    try std.testing.expect(!isCancelled());
+}
+
+test "double escape still cancels and adds no typed text" {
+    reset();
+    defer reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    _ = try typed.takeAll(arena_state.allocator());
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1b, &first_esc_ts);
+    handleKeyByte(0x1b, &first_esc_ts);
+
+    try std.testing.expect(isCancelled());
+    try std.testing.expectEqualStrings("", try typed.takeAll(arena_state.allocator()));
+}
+
+test "Ctrl+Z suspends without adding typed text" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+    const FakeSuspend = struct {
+        var count: usize = 0;
+        fn suspendJob() void {
+            count += 1;
+        }
+    };
+    const original = suspend_job;
+    defer suspend_job = original;
+    suspend_job = FakeSuspend.suspendJob;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    _ = try typed.takeAll(arena_state.allocator());
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1a, &first_esc_ts);
+
+    try std.testing.expectEqual(@as(usize, 1), FakeSuspend.count);
+    try std.testing.expectEqualStrings("", try typed.takeAll(arena_state.allocator()));
 }
 
 test "suspendJob stops the job and returns once it is continued" {
