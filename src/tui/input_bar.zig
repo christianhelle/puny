@@ -157,9 +157,18 @@ pub const ScreenWriter = struct {
 
         const buffered = w.buffered();
         if (buffered.len > 0) {
-            // Holding back an unfinished sequence keeps it whole. A flush
-            // lands here again with only that tail, which then goes out.
+            // Holding back an unfinished sequence keeps it whole. With only
+            // that tail left, more of the write joins it in the buffer; a
+            // flush has nothing more to add, so the tail then goes out.
             const safe = safeLength(buffered);
+            if (safe == 0 and w.end < w.buffer.len) {
+                if (incoming(data, splat)) |bytes| {
+                    const count = @min(bytes.len, w.buffer.len - w.end);
+                    @memcpy(w.buffer[w.end..][0..count], bytes[0..count]);
+                    w.end += count;
+                    return count;
+                }
+            }
             const count = if (safe > 0) safe else buffered.len;
             try self.writeOut(buffered[0..count]);
             _ = w.consume(count);
@@ -167,11 +176,17 @@ pub const ScreenWriter = struct {
         }
 
         // Everything goes through the buffer so it gets the same treatment.
+        const bytes = incoming(data, splat) orelse return 0;
+        return fill(w, bytes);
+    }
+
+    /// The next bytes of the write being drained, if any.
+    fn incoming(data: []const []const u8, splat: usize) ?[]const u8 {
         for (data[0 .. data.len - 1]) |bytes| {
-            if (bytes.len > 0) return fill(w, bytes);
+            if (bytes.len > 0) return bytes;
         }
         const last = data[data.len - 1];
-        return if (splat > 0 and last.len > 0) fill(w, last) else 0;
+        return if (splat > 0 and last.len > 0) last else null;
     }
 
     fn fill(w: *std.Io.Writer, bytes: []const u8) usize {
@@ -442,6 +457,42 @@ test "ScreenWriter passes everything through, including writes bigger than its b
     try screen.interface.flush();
 
     try std.testing.expectEqualStrings(text, out.written());
+}
+
+const WholeChunks = struct {
+    interface: std.Io.Writer = .{ .buffer = &.{}, .vtable = &.{ .drain = drain } },
+    split: bool = false,
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        _ = splat;
+        const self: *WholeChunks = @fieldParentPtr("interface", w);
+        for (data) |chunk| {
+            if (chunk.len == 0) continue;
+            if (safeLength(chunk) != chunk.len or !startsClean(chunk)) self.split = true;
+            return chunk.len;
+        }
+        return 0;
+    }
+
+    /// True unless `chunk` opens with the rest of a sequence cut in two.
+    fn startsClean(chunk: []const u8) bool {
+        return chunk[0] != '[' and chunk[0] & 0xC0 != 0x80;
+    }
+};
+
+test "ScreenWriter keeps sequences whole across a write bigger than its buffer" {
+    var inner: WholeChunks = .{};
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    var bar: InputBar = .{ .out = &out.writer };
+    var lock: SpinLock = .{};
+    var buffer: [8]u8 = undefined;
+    var screen = ScreenWriter.init(&inner.interface, &bar, &lock, &buffer);
+
+    try screen.interface.writeAll("abcdefg\x1b[1mhij caf\xc3\xa9 and more");
+    try screen.interface.flush();
+
+    try std.testing.expect(!inner.split);
 }
 
 test "ScreenWriter repaints the bar after an erase" {
