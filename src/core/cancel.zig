@@ -5,10 +5,112 @@ const Io = std.Io;
 const job_control = @import("job_control.zig");
 const test_support = @import("../testing/test_support.zig");
 const TypeAhead = @import("type_ahead.zig").TypeAhead;
+const input_bar = @import("../tui/input_bar.zig");
+const terminal = @import("../tui/terminal.zig");
 
-/// What the user typed while the monitor owned stdin. Only read it once
-/// `stop` has joined the monitor thread.
+/// What the user typed while the monitor owned stdin.
 pub var typed: TypeAhead = .init(std.heap.smp_allocator);
+
+/// True while a chat loop keeps the monitor running across its requests.
+var held: bool = false;
+
+/// Stderr for the monitor's hints while a chat loop holds it.
+var loop_stderr_buffer: [128]u8 = undefined;
+var loop_stderr: Io.File.Writer = undefined;
+/// Set while the monitor runs, so raw mode leaves output processing on.
+var monitor_mode: bool = false;
+
+/// Keeps the monitor and the input bar up until `endLoop`, across every
+/// request and tool call in between. Without a terminal this does nothing and
+/// each request falls back to its own monitor.
+pub fn beginLoop(io: Io) void {
+    if (held) return;
+    loop_stderr = .init(.stderr(), io, &loop_stderr_buffer);
+    start(io, &loop_stderr.interface) catch return;
+    held = true;
+    enterBar();
+}
+
+pub fn endLoop() void {
+    if (!held) return;
+    leaveBar();
+    held = false;
+    stop();
+}
+
+/// Starts watching for cancellation for one provider request. Inside a held
+/// loop the monitor is already up, and a cancel pressed during a tool call
+/// must survive to stop this request.
+pub fn beginRequest(io: Io, stderr_writer: *Io.Writer) void {
+    if (held) return;
+    reset();
+    start(io, stderr_writer) catch {};
+}
+
+pub fn endRequest() void {
+    if (!held) stop();
+}
+
+/// Hands the terminal to something that reads the keyboard itself, such as a
+/// question picker, until `unpause`.
+pub fn pause() void {
+    if (!held) return;
+    leaveBar();
+    stopMonitor();
+}
+
+pub fn unpause() void {
+    if (!held) return;
+    startMonitor() catch return;
+    enterBar();
+}
+
+fn enterBar() void {
+    const rows = terminal.terminalHeight() orelse return;
+    const cols = terminal.terminalWidth() orelse return;
+    {
+        input_bar.screen_lock.lock();
+        defer input_bar.screen_lock.unlock();
+        input_bar.global.enter(rows, cols) catch {};
+    }
+    syncBar(false);
+}
+
+fn leaveBar() void {
+    input_bar.screen_lock.lock();
+    defer input_bar.screen_lock.unlock();
+    input_bar.global.leave() catch {};
+}
+
+fn barActive() bool {
+    input_bar.screen_lock.lock();
+    defer input_bar.screen_lock.unlock();
+    return input_bar.global.active;
+}
+
+/// Shows the current type-ahead state in the bar.
+fn syncBar(hint: bool) void {
+    if (!barActive()) return;
+    var copy: [input_bar.InputBar.text_capacity]u8 = undefined;
+    const view = typed.snapshot(&copy);
+    input_bar.screen_lock.lock();
+    defer input_bar.screen_lock.unlock();
+    input_bar.global.draw(view.text, view.cursor, view.queued, hint) catch {};
+}
+
+/// Runs on the monitor's idle ticks: follows window resizes, and picks up
+/// lines the chat loop took off the queue.
+fn tick(first_esc_ts: ?Io.Timestamp) void {
+    if (!barActive()) return;
+    if (terminal.terminalHeight()) |rows| {
+        if (terminal.terminalWidth()) |cols| {
+            input_bar.screen_lock.lock();
+            defer input_bar.screen_lock.unlock();
+            if (rows != input_bar.global.rows or cols != input_bar.global.cols) input_bar.global.resize(rows, cols) catch {};
+        }
+    }
+    syncBar(first_esc_ts != null);
+}
 
 /// Atomic flags shared between monitor thread and main thread.
 var cancelled: std.atomic.Value(bool) = .{ .raw = false };
@@ -26,7 +128,7 @@ var global_io: Io = undefined;
 /// interleave with the AI stream on stdout.
 var global_stderr: *Io.Writer = undefined;
 /// Suspends the job when the monitor reads Ctrl+Z; tests substitute a fake.
-var suspend_job: *const fn () void = suspendJob;
+var suspend_job: *const fn () void = suspendWithBar;
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 
@@ -55,8 +157,15 @@ pub fn start(io: Io, stderr_writer: *Io.Writer) !void {
     global_io = io;
     global_stderr = stderr_writer;
     cancelled.store(false, .monotonic);
+    try startMonitor();
+}
+
+fn startMonitor() !void {
+    if (running.load(.monotonic)) return;
     running.store(true, .monotonic);
     errdefer running.store(false, .monotonic);
+    monitor_mode = true;
+    errdefer monitor_mode = false;
     try setRawMode(true);
     monitor_thread = try std.Thread.spawn(.{}, monitorThread, .{});
 }
@@ -64,13 +173,19 @@ pub fn start(io: Io, stderr_writer: *Io.Writer) !void {
 /// Stop the monitor thread, join it, and restore terminal state.
 pub fn stop() void {
     if (!running.load(.monotonic)) return;
+    stopMonitor();
+    cancelled.store(false, .monotonic);
+}
+
+fn stopMonitor() void {
+    if (!running.load(.monotonic)) return;
     running.store(false, .monotonic);
     if (monitor_thread) |t| {
         t.join();
         monitor_thread = null;
     }
     setRawMode(false) catch {};
-    cancelled.store(false, .monotonic);
+    monitor_mode = false;
 }
 
 // ── Platform-specific: raw mode ──────────────────────────────────────
@@ -83,30 +198,38 @@ pub fn setRawMode(enable: bool) !void {
     }
 }
 
+/// Raw input settings for `base`. The monitor keeps output processing on,
+/// because everything printed during a chat loop relies on it.
+fn rawTermios(base: std.posix.termios, keep_output: bool) std.posix.termios {
+    var raw = base;
+    // cfmakeraw(3): put terminal into raw mode
+    raw.iflag.IGNBRK = true;
+    raw.iflag.BRKINT = false;
+    raw.iflag.PARMRK = false;
+    raw.iflag.ISTRIP = false;
+    raw.iflag.INLCR = false;
+    raw.iflag.IGNCR = false;
+    raw.iflag.ICRNL = false;
+    raw.iflag.IXON = false;
+    raw.oflag.OPOST = keep_output;
+    raw.lflag.ECHO = false;
+    raw.lflag.ECHONL = false;
+    raw.lflag.ICANON = false;
+    raw.lflag.ISIG = false;
+    raw.lflag.IEXTEN = false;
+    raw.cflag.CSIZE = .CS8;
+    raw.cflag.PARENB = false;
+    raw.cc[@backingInt(std.posix.V.MIN)] = 1;
+    raw.cc[@backingInt(std.posix.V.TIME)] = 0;
+    return raw;
+}
+
 fn setRawModePosix(enable: bool) !void {
     const posix = std.posix;
     if (enable) {
-        var raw = try posix.tcgetattr(0);
-        saved_termios = raw;
-        // cfmakeraw(3): put terminal into raw mode
-        raw.iflag.IGNBRK = true;
-        raw.iflag.BRKINT = false;
-        raw.iflag.PARMRK = false;
-        raw.iflag.ISTRIP = false;
-        raw.iflag.INLCR = false;
-        raw.iflag.IGNCR = false;
-        raw.iflag.ICRNL = false;
-        raw.iflag.IXON = false;
-        raw.oflag.OPOST = false;
-        raw.lflag.ECHO = false;
-        raw.lflag.ECHONL = false;
-        raw.lflag.ICANON = false;
-        raw.lflag.ISIG = false;
-        raw.lflag.IEXTEN = false;
-        raw.cflag.CSIZE = .CS8;
-        raw.cflag.PARENB = false;
-        raw.cc[@backingInt(posix.V.MIN)] = 1;
-        raw.cc[@backingInt(posix.V.TIME)] = 0;
+        const current = try posix.tcgetattr(0);
+        saved_termios = current;
+        const raw = rawTermios(current, monitor_mode);
         try posix.tcsetattr(0, .NOW, raw);
     } else {
         posix.tcsetattr(0, .NOW, saved_termios) catch {};
@@ -120,6 +243,13 @@ pub fn suspendJob() void {
     setRawMode(false) catch {};
     job_control.stop();
     setRawMode(true) catch {};
+}
+
+/// Suspends from the monitor, giving the shell back a whole screen meanwhile.
+fn suspendWithBar() void {
+    leaveBar();
+    suspendJob();
+    enterBar();
 }
 
 /// True when the terminal's erase character, saved when raw mode was last
@@ -167,7 +297,10 @@ fn monitorThreadPosix() void {
             .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
         };
         const rc = posix.poll(&pfd, 50) catch break;
-        if (rc == 0) continue;
+        if (rc == 0) {
+            tick(first_esc_ts);
+            continue;
+        }
         if (pfd[0].revents & posix.POLL.IN == 0) continue;
 
         const n = posix.read(0, buf[0..]) catch break;
@@ -201,9 +334,11 @@ fn monitorThreadWindows() void {
                         first_esc_ts = null;
                         typed.feedUtf16(record.Event.KeyEvent.uChar.UnicodeChar);
                     }
+                    syncBar(first_esc_ts != null);
                 }
             }
         } else {
+            tick(first_esc_ts);
             global_io.sleep(.{ .nanoseconds = @as(i96, @intCast(50 * std.time.ns_per_ms)) }, .awake) catch {};
         }
     }
@@ -221,6 +356,7 @@ fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
         // stops the job here instead.
         if (byte == 0x1a) suspend_job();
     }
+    syncBar(first_esc_ts.* != null);
 }
 
 fn handleFirstEscape(first_esc_ts: *?Io.Timestamp) void {
@@ -234,6 +370,8 @@ fn handleFirstEscape(first_esc_ts: *?Io.Timestamp) void {
         }
     }
     first_esc_ts.* = now;
+    // With a bar up, `syncBar` shows the hint there.
+    if (barActive()) return;
     global_stderr.print("\x1b[2m\n\n(Press Esc again to cancel)\n\x1b[0m\n", .{}) catch {};
     global_stderr.flush() catch {};
 }
@@ -496,6 +634,113 @@ test "Ctrl+Z suspends without adding typed text" {
 
     try std.testing.expectEqual(@as(usize, 1), FakeSuspend.count);
     try std.testing.expectEqualStrings("", try typed.takeAll(arena_state.allocator()));
+}
+
+test "the monitor keeps output processing on and the prompt turns it off" {
+    if (is_windows) return;
+    var base = std.mem.zeroes(std.posix.termios);
+    base.oflag.OPOST = true;
+    base.lflag.ICANON = true;
+
+    const monitor = rawTermios(base, true);
+    try std.testing.expect(monitor.oflag.OPOST);
+    try std.testing.expect(!monitor.lflag.ICANON);
+
+    const prompt = rawTermios(base, false);
+    try std.testing.expect(!prompt.oflag.OPOST);
+}
+
+const BarFixture = struct {
+    out: std.Io.Writer.Allocating,
+    saved: input_bar.InputBar,
+
+    fn init(self: *BarFixture) !void {
+        self.out = .init(std.testing.allocator);
+        self.saved = input_bar.global;
+        input_bar.global = .{ .out = &self.out.writer };
+        try input_bar.global.enter(24, 80);
+        self.out.clearRetainingCapacity();
+    }
+
+    fn deinit(self: *BarFixture) void {
+        input_bar.global = self.saved;
+        self.out.deinit();
+    }
+};
+
+test "a request inside a held loop leaves a pending cancel and the monitor alone" {
+    reset();
+    defer reset();
+    held = true;
+    defer held = false;
+    running.store(true, .monotonic);
+    defer running.store(false, .monotonic);
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+
+    setCancelled();
+    beginRequest(std.testing.io, &stderr_alloc.writer);
+    try std.testing.expect(isCancelled());
+
+    endRequest();
+    try std.testing.expect(running.load(.monotonic));
+    try std.testing.expect(isCancelled());
+}
+
+test "typing shows up in the bar" {
+    reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    _ = try typed.takeAll(arena_state.allocator());
+    var fixture: BarFixture = undefined;
+    try fixture.init();
+    defer fixture.deinit();
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    for ("hi") |byte| handleKeyByte(byte, &first_esc_ts);
+    _ = try typed.takeAll(arena_state.allocator());
+
+    try std.testing.expect(std.mem.indexOf(u8, fixture.out.written(), "> hi") != null);
+}
+
+test "the Esc hint goes to the bar instead of over the stream" {
+    reset();
+    defer reset();
+    var stderr_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stderr_alloc.deinit();
+    global_io = std.testing.io;
+    global_stderr = &stderr_alloc.writer;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    _ = try typed.takeAll(arena_state.allocator());
+    var fixture: BarFixture = undefined;
+    try fixture.init();
+    defer fixture.deinit();
+
+    var first_esc_ts: ?Io.Timestamp = null;
+    handleKeyByte(0x1b, &first_esc_ts);
+    _ = try typed.takeAll(arena_state.allocator());
+
+    try std.testing.expectEqualStrings("", stderr_alloc.written());
+    try std.testing.expect(std.mem.indexOf(u8, fixture.out.written(), "Press Esc again to cancel") != null);
+}
+
+test "pausing a held loop takes the bar down" {
+    held = true;
+    defer held = false;
+    running.store(false, .monotonic);
+    var fixture: BarFixture = undefined;
+    try fixture.init();
+    defer fixture.deinit();
+
+    pause();
+
+    try std.testing.expect(!input_bar.global.active);
+    try std.testing.expect(std.mem.indexOf(u8, fixture.out.written(), "\x1b[r") != null);
 }
 
 test "suspendJob stops the job and returns once it is continued" {
