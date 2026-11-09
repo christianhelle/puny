@@ -638,7 +638,10 @@ fn readUserInput(
         return .{ .message = p };
     }
 
-    const maybe_input = input.readLine(ctx.arena, ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history, "") catch |err| {
+    // Whatever is still typed-ahead here was not sent: unfinished typing, or
+    // lines held back by a cancelled or failed turn.
+    const held_text = try cancel.typed.takeAll(ctx.arena);
+    const maybe_input = input.readLine(ctx.arena, ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history, held_text) catch |err| {
         if (sigint.isTriggered()) {
             finalizeSession(ctx);
             return .exit;
