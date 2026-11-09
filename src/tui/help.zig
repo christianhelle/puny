@@ -26,8 +26,8 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "/file [path|url]", "Load a prompt from a file or URL");
     try printCommand(writer, "/help", "Show this help message");
     try printCommand(writer, "@path", "Attach a file to the prompt");
-    try writer.print("\n{s}Tip:{s} Type @ to search and attach files to your prompt.\n", .{ ansi.yellow, ansi.reset });
-    try writer.print("{s}Tip:{s} Keep typing while Puny works and press Enter to queue a message.\n", .{ ansi.yellow, ansi.reset });
+    try writer.print("\n{s}Tip:{s} Keep typing while Puny works and press Enter to queue a message.\n", .{ ansi.yellow, ansi.reset });
+    try writer.print("{s}Tip:{s} Type @ to search and attach files to your prompt.\n", .{ ansi.yellow, ansi.reset });
     try writer.flush();
 }
 
