@@ -673,6 +673,12 @@ fn injectTyped(
     return lines;
 }
 
+/// A line delivered as the model finished still needs an answer, so the loop
+/// goes round again.
+fn loopFinished(model_done: bool, delivered: usize) bool {
+    return model_done and delivered == 0;
+}
+
 /// Orchestrate phases reset their context, reviews need an uninterrupted
 /// verdict, and a one-shot run has no next prompt, so typed lines only join an
 /// ordinary chat loop. Elsewhere they wait for the next prompt.
@@ -770,7 +776,19 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         }
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
-        turn_complete = result.turn_complete;
+
+        // Tool results are in place by now, so every tool call stays paired
+        // and the monitor thread has been joined.
+        var delivered: []const []const u8 = &.{};
+        if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive())) {
+            delivered = try injectTyped(ctx.messages_arena.allocator(), ctx.messages, ctx.stdout_writer, &cancel.typed);
+            for (delivered) |line| {
+                if (ctx.chat_log) |log| log.print("[USER]\n{s}\n\n", .{line});
+                try ctx.history.add(line);
+                try ctx.history.save(ctx.io);
+            }
+        }
+        turn_complete = loopFinished(result.turn_complete, delivered.len);
     }
 
     if (turn_complete and !turn_cancelled and !turn_had_error) {
@@ -1455,6 +1473,13 @@ test "injectTyped appends queued lines after the tool results and announces them
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "Queued: second") != null);
 }
 
+test "the loop finishes only when the model is done and nothing was delivered" {
+    try std.testing.expect(loopFinished(true, 0));
+    try std.testing.expect(!loopFinished(false, 0));
+    try std.testing.expect(!loopFinished(true, 1));
+    try std.testing.expect(!loopFinished(false, 2));
+}
+
 test "typed lines are injected into an ordinary chat loop" {
     try std.testing.expect(injectsTyped(true, false, false));
 }
@@ -1463,6 +1488,36 @@ test "typed lines are held for orchestrate phases, one-shot runs and reviews" {
     try std.testing.expect(!injectsTyped(false, false, false));
     try std.testing.expect(!injectsTyped(true, true, false));
     try std.testing.expect(!injectsTyped(true, false, true));
+}
+
+test "a line typed during a tool call reaches the model on the next request" {
+    const provider = @import("../providers/provider.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    try messages.append(arena, .{ .user = "read the file" });
+
+    const first = try chat.runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random_source.interface(), "mock-model", null, &messages, &.{}, null, null);
+    try std.testing.expect(!first.turn_complete);
+
+    for ("say fast\r") |byte| buffer.feed(byte);
+    _ = try injectTyped(arena, &messages, &output.writer, &buffer);
+    try std.testing.expectEqualStrings("say fast", messages.items[messages.items.len - 1].user);
+
+    const second = try chat.runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random_source.interface(), "mock-model", null, &messages, &.{}, null, null);
+    try std.testing.expect(second.turn_complete);
+    try std.testing.expect(messages.items[messages.items.len - 1] == .assistant);
 }
 
 test "injectTyped leaves the conversation alone when nothing was typed" {
