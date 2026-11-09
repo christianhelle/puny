@@ -257,9 +257,16 @@ pub fn suspendJob() void {
 
 /// Suspends from the monitor, giving the shell back a whole screen meanwhile.
 fn suspendWithBar() void {
+    suspendAround(suspendJob, enterBar);
+}
+
+/// One-shot runs and per-request monitors have no bar, and nothing would take
+/// down one created here, so only a bar that was wanted comes back.
+fn suspendAround(stop_job: *const fn () void, restore: *const fn () void) void {
+    const had_bar = barWanted();
     leaveBar();
-    suspendJob();
-    enterBar();
+    stop_job();
+    if (had_bar) restore();
 }
 
 /// True when the terminal's erase character, saved when raw mode was last
@@ -791,4 +798,31 @@ test "Ctrl+C interrupts while the monitor holds the keyboard" {
 
     try std.testing.expect(sigint.isTriggered());
     try std.testing.expect(isCancelled());
+}
+
+const FakeRestore = struct {
+    var stopped: usize = 0;
+    var restored: usize = 0;
+    fn stop() void {
+        stopped += 1;
+    }
+    fn restore() void {
+        restored += 1;
+    }
+};
+
+test "suspending brings the bar back only if one was wanted" {
+    const saved = input_bar.global;
+    defer input_bar.global = saved;
+    input_bar.global = .{};
+    FakeRestore.stopped = 0;
+    FakeRestore.restored = 0;
+
+    suspendAround(FakeRestore.stop, FakeRestore.restore);
+    try std.testing.expectEqual(@as(usize, 1), FakeRestore.stopped);
+    try std.testing.expectEqual(@as(usize, 0), FakeRestore.restored);
+
+    input_bar.global.wanted = true;
+    suspendAround(FakeRestore.stop, FakeRestore.restore);
+    try std.testing.expectEqual(@as(usize, 1), FakeRestore.restored);
 }
