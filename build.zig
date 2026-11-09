@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) !void {
 
     const build_options = createBuildInfoOptions(b);
     build_options.addOption(bool, "docker", docker);
+    build_options.addOption(bool, "slow_tests", false);
 
     const exe = addPunyExecutable(b, "puny", target, optimize, build_options);
 
@@ -132,12 +133,21 @@ pub fn build(b: *std.Build) !void {
 
     test_regression_step.dependOn(test_step);
 
+    // Rooted at main.zig so test files under src/testing can import the whole
+    // source tree; the slow_tests option selects which aggregator main.zig uses.
+    const slow_build_options = createBuildInfoOptions(b);
+    slow_build_options.addOption(bool, "docker", docker);
+    slow_build_options.addOption(bool, "slow_tests", true);
+
     const slow_tests_root = b.createModule(.{
-        .root_source_file = b.path("src/slow_tests.zig"),
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    slow_tests_root.addOptions("build_options", build_options);
+    slow_tests_root.addOptions("build_options", slow_build_options);
+    if (target.result.os.tag == .windows) {
+        slow_tests_root.linkSystemLibrary("psapi", .{});
+    }
 
     const slow_tests = b.addTest(.{
         .root_module = slow_tests_root,
