@@ -235,6 +235,13 @@ fn barReturnsWhenASmallWindowGrowsBack(puny: *Puny) !void {
     try puny.doubleEsc();
 }
 
+fn ctrlCStopsTheLoopAndReleasesTheTerminal(puny: *Puny) !void {
+    _ = try startStreaming(puny, long_stream);
+    const region = try puny.waitForRaw(set_region, 0);
+    try puny.send("\x03");
+    _ = try puny.waitForRaw(reset_region, region);
+}
+
 const Case = struct {
     name: []const u8,
     run: *const fn (*Puny) anyerror!void,
@@ -246,6 +253,7 @@ const cases = [_]Case{
     .{ .name = "typing shows in a bar that goes away", .run = typingShowsInABarThatGoesAway },
     .{ .name = "picker gets the whole screen and the bar returns", .run = pickerGetsTheWholeScreenAndTheBarReturns },
     .{ .name = "bar returns when a small window grows back", .run = barReturnsWhenASmallWindowGrowsBack },
+    .{ .name = "Ctrl+C stops the loop and releases the terminal", .run = ctrlCStopsTheLoopAndReleasesTheTerminal },
 };
 
 fn runCase(allocator: std.mem.Allocator, io: std.Io, binary: [:0]const u8, env: *const std.process.Environ.Map, case: Case) !void {

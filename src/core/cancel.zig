@@ -7,6 +7,7 @@ const test_support = @import("../testing/test_support.zig");
 const TypeAhead = @import("type_ahead.zig").TypeAhead;
 const input_bar = @import("../tui/input_bar.zig");
 const terminal = @import("../tui/terminal.zig");
+const sigint = @import("sigint.zig");
 
 /// What the user typed while the monitor owned stdin.
 pub var typed: TypeAhead = .init(std.heap.smp_allocator);
@@ -342,10 +343,12 @@ fn monitorThreadWindows() void {
                     } else {
                         first_esc_ts = null;
                         const modifiers = record.Event.KeyEvent.dwControlKeyState;
+                        const ctrl = modifiers & (windows.LEFT_CTRL_PRESSED | windows.RIGHT_CTRL_PRESSED) != 0;
+                        if (ctrl and record.Event.KeyEvent.uChar.UnicodeChar == 0x03) handleInterrupt();
                         typed.feedWindowsKey(.{
                             .virtual_key = vk,
                             .char = record.Event.KeyEvent.uChar.UnicodeChar,
-                            .ctrl = modifiers & (windows.LEFT_CTRL_PRESSED | windows.RIGHT_CTRL_PRESSED) != 0,
+                            .ctrl = ctrl,
                             .alt = modifiers & (windows.LEFT_ALT_PRESSED | windows.RIGHT_ALT_PRESSED) != 0,
                         });
                     }
@@ -367,11 +370,19 @@ fn handleKeyByte(byte: u8, first_esc_ts: *?Io.Timestamp) void {
         handleFirstEscape(first_esc_ts);
     } else {
         first_esc_ts.* = null;
+        if (byte == 0x03) handleInterrupt();
         // Raw mode turns the terminal's suspend key off, so Ctrl+Z (0x1a)
         // stops the job here instead.
         if (byte == 0x1a) suspend_job();
     }
     syncBar(first_esc_ts.* != null);
+}
+
+/// Raw mode turns the terminal's interrupt key off, so Ctrl+C is read here and
+/// acts as the signal would, stopping the work under way as well.
+fn handleInterrupt() void {
+    sigint.trigger();
+    cancelled.store(true, .monotonic);
 }
 
 fn handleFirstEscape(first_esc_ts: *?Io.Timestamp) void {
@@ -764,4 +775,20 @@ test "pausing a held loop takes the bar down" {
 
 test "suspendJob stops the job and returns once it is continued" {
     try test_support.expectSuspends(suspendJob);
+}
+
+test "Ctrl+C interrupts while the monitor holds the keyboard" {
+    global_io = std.testing.io;
+    reset();
+    sigint.clear();
+    defer {
+        reset();
+        sigint.clear();
+    }
+    var first_esc_ts: ?Io.Timestamp = null;
+
+    handleKeyByte(0x03, &first_esc_ts);
+
+    try std.testing.expect(sigint.isTriggered());
+    try std.testing.expect(isCancelled());
 }
