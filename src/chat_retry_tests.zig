@@ -4,7 +4,7 @@ const std = @import("std");
 const chat_retry = @import("chat/retry.zig");
 const http_client = @import("providers/client.zig");
 const openai = @import("providers/openai.zig");
-const test_support = @import("test_support.zig");
+const test_support = @import("testing/test_support.zig");
 
 const TestChatProvider = struct {
     calls: usize = 0,

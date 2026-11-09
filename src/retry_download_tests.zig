@@ -2,7 +2,7 @@
 //! (`zig build test-regression`) so that `zig build test` stays fast.
 const std = @import("std");
 const retry_download = @import("tools/retry_download.zig");
-const test_support = @import("test_support.zig");
+const test_support = @import("testing/test_support.zig");
 
 var test_download_attempts: usize = 0;
 var test_download_fail_until: usize = 0;

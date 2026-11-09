@@ -8,7 +8,7 @@ const model_picker = @import("../tui/model_picker.zig");
 const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const retry = @import("../core/retry.zig");
-const test_support = @import("../test_support.zig");
+const test_support = @import("../testing/test_support.zig");
 const welcome = @import("../tui/welcome.zig");
 
 pub const SelectionResult = struct {

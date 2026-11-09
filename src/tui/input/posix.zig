@@ -6,7 +6,7 @@ const line_editor = @import("./line_editor.zig");
 const mention = @import("./mention.zig");
 const sigint = @import("../../core/sigint.zig");
 const terminal = @import("../terminal.zig");
-const test_support = @import("../../test_support.zig");
+const test_support = @import("../../testing/test_support.zig");
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
 

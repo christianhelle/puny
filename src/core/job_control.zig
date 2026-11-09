@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const test_support = @import("../test_support.zig");
+const test_support = @import("../testing/test_support.zig");
 
 /// Stops the process's job the way the terminal's suspend key (Ctrl+Z)
 /// would, and returns once the shell continues it with `fg` or `bg`. Raw

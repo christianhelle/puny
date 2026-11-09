@@ -4,7 +4,7 @@ const openai = @import("../providers/openai.zig");
 const http_client = @import("../providers/client.zig");
 const redact = @import("redact.zig");
 const retry = @import("../core/retry.zig");
-const test_support = @import("../test_support.zig");
+const test_support = @import("../testing/test_support.zig");
 
 pub const ChatRetryOutcome = union(enum) {
     success,
