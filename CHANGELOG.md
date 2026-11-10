@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.5.1](https://github.com/christianhelle/puny/releases/tag/v0.5.1) (2026-11-10)
 
 ### Features
 - Upgrade to Zig 0.17.1 ([#239](https://github.com/christianhelle/puny/pull/239)) ([@christianhelle](https://github.com/christianhelle/))
