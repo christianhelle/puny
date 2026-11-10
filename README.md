@@ -122,7 +122,7 @@ This re-runs the install script for your platform.
 
 ### Build from source
 
-Requires [Zig](https://ziglang.org/) 0.17.0 or later.
+Requires [Zig](https://ziglang.org/) 0.17.1 or later.
 
 ```bash
 git clone https://github.com/christianhelle/puny.git
