@@ -29,18 +29,17 @@ pub fn runChatWithRetry(
     const cancel_stderr = &cancel_stderr_fw.interface;
 
     while (true) {
-        cancel.reset();
-        cancel.start(io, cancel_stderr) catch {};
+        cancel.beginRequest(io, cancel_stderr);
 
         // Drop partial state from the failed attempt so a retry does not
         // duplicate streamed content or usage in the accumulator.
         if (retry_count > 0) callback.reset();
 
         if (prov.chatStreaming(request, callback)) |_| {
-            cancel.stop();
+            cancel.endRequest();
             return .success;
         } else |err| {
-            cancel.stop();
+            cancel.endRequest();
 
             if (err == error.Canceled) return .cancelled;
 

@@ -186,6 +186,22 @@ pub fn build(b: *std.Build) !void {
     const test_integration_step = b.step("test-integration", "Run integration tests against all provider/model combos");
     test_integration_step.dependOn(&run_integration.step);
 
+    const enqueue_pty = b.addExecutable(.{
+        .name = "enqueue_pty",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/enqueue_pty.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+            .link_libc = true,
+        }),
+    });
+
+    const run_pty = b.addRunArtifact(enqueue_pty);
+    run_pty.addArtifactArg(exe);
+    run_pty.has_side_effects = true;
+    const test_pty_step = b.step("test-pty", "Run end-to-end tests that need a terminal (POSIX)");
+    test_pty_step.dependOn(&run_pty.step);
+
     // `build()` runs in full regardless of which step ends up being executed,
     // so an unconditional b.lazyDependency call here would make plain
     // `zig build` and `zig build test` fetch openapi2zig too — build.zig has

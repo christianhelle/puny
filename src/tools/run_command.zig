@@ -1,6 +1,8 @@
 const std = @import("std");
 const event_wait = @import("../core/event_wait.zig");
 const job_control = @import("../core/job_control.zig");
+const cancellation = @import("../core/cancel.zig");
+const sigint = @import("../core/sigint.zig");
 
 pub fn ownedSliceOrEmpty(list: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
     if (list.items.len == 0) return "";
@@ -268,9 +270,39 @@ fn killProcessTree(io: std.Io, child: *std.process.Child) void {
     }
 }
 
+const cancelled_output = "Command cancelled by the user.";
+
+/// How often a running command checks whether the user has cancelled.
+const interrupt_poll_ns: i96 = 100 * std.time.ns_per_ms;
+
+fn userInterrupted() bool {
+    return cancellation.isCancelled() or sigint.isTriggered();
+}
+
+/// Waits like `event_wait.waitTimeout`, giving up with `error.Interrupted`
+/// soon after the user cancels.
+fn waitUnlessInterrupted(done: *std.Io.Event, io: std.Io, timeout_ns: i96) !void {
+    var remaining = timeout_ns;
+    while (true) {
+        if (userInterrupted()) return error.Interrupted;
+        const slice = @min(remaining, interrupt_poll_ns);
+        event_wait.waitTimeout(done, io, slice) catch |err| switch (err) {
+            error.Timeout => {
+                remaining -= slice;
+                if (remaining <= 0) return error.Timeout;
+                continue;
+            },
+            else => return err,
+        };
+        return;
+    }
+}
+
 /// Runs `argv` in a worker thread and waits up to `timeout_ns` for it to
 /// finish. If the deadline passes, the child process tree is terminated and
-/// `error.TimedOut` is returned. The returned output is caller-owned.
+/// `error.TimedOut` is returned. If the user cancels first, the tree is
+/// terminated the same way and the output says so. The returned output is
+/// caller-owned.
 pub fn runCommandTimed(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -278,6 +310,8 @@ pub fn runCommandTimed(
     cwd: ?[]const u8,
     timeout_ns: i96,
 ) ![]const u8 {
+    if (userInterrupted()) return allocator.dupe(u8, cancelled_output);
+
     const spawn_ctx = blk: {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         // Only active during setup below: once the worker thread starts it owns
@@ -329,23 +363,27 @@ pub fn runCommandTimed(
     const shared = spawn_ctx.shared;
     const child = spawn_ctx.child;
 
-    event_wait.waitTimeout(shared.done, io, timeout_ns) catch |wait_err| switch (wait_err) {
-        error.Timeout => {
+    waitUnlessInterrupted(shared.done, io, timeout_ns) catch |wait_err| switch (wait_err) {
+        error.Timeout, error.Interrupted => {
             // The worker may be blocked reading the child's pipes and unable
             // to observe `cancel`, so terminate the whole process tree from
             // here. Killing the tree closes the pipes, which unblocks the
             // worker; it then finishes and can be joined.
             shared.cancel.store(true, .release);
             killProcessTree(io, child);
+            const stopped: anyerror![]const u8 = if (wait_err == error.Interrupted)
+                allocator.dupe(u8, cancelled_output)
+            else
+                error.TimedOut;
             event_wait.waitTimeout(shared.done, io, kill_grace_ns) catch {
                 shared.ack.set(io);
                 thread.detach();
                 test_run_command_worker_detached += 1;
-                return error.TimedOut;
+                return stopped;
             };
             shared.ack.set(io);
             thread.join();
-            return error.TimedOut;
+            return stopped;
         },
         else => {
             shared.ack.set(io);

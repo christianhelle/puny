@@ -379,6 +379,16 @@ The prompt supports shell-style (readline) editing:
 | `Esc` `Esc`                                               | Cancel                                                            |
 | `Ctrl+Z`                                                  | Suspend Puny (Linux and macOS); resume with `fg`                  |
 
+You can keep typing while Puny works. The `>` input stays on the bottom row with the
+usual editing keys (prompt history is only available at the normal prompt), and the
+agent's output scrolls above it. Pressing `Enter` queues the line: the bar counts it,
+then Puny prints `Queued: <text>` and sends it to the model at the next tool boundary,
+or when the model finishes. Queued lines are plain text, so
+slash commands only work at the prompt. If you cancel a turn with `Esc` `Esc` or it
+fails, queued lines are not sent and appear in the next prompt for editing, along
+with anything you had not finished typing. During `/review`, `/orchestrate` and
+`--oneshot` runs, typed lines wait for the next prompt instead.
+
 On POSIX terminals whose erase key is `Ctrl+H`, `Ctrl+Backspace` sends the same byte as `Backspace` and deletes a single character. Use `Alt+Backspace` or `Ctrl+W` there instead.
 
 On Linux and macOS, `Ctrl+Z` suspends Puny like any other terminal program, at the

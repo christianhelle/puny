@@ -27,6 +27,8 @@ const branch_review = @import("../review/review.zig");
 const orchestrate = @import("orchestrate.zig");
 const compact = @import("compact.zig");
 const help = @import("../tui/help.zig");
+const cancel = @import("../core/cancel.zig");
+const TypeAhead = @import("../core/type_ahead.zig").TypeAhead;
 
 pub const ReconfigurePrompt = session_commands.ReconfigurePrompt;
 pub const promptReconfigure = session_commands.promptReconfigure;
@@ -636,7 +638,10 @@ fn readUserInput(
         return .{ .message = p };
     }
 
-    const maybe_input = input.readLine(ctx.arena, ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history) catch |err| {
+    // Whatever is still typed-ahead here was not sent: unfinished typing, or
+    // lines held back by a cancelled or failed turn.
+    const held_text = try cancel.typed.takeAll(ctx.arena);
+    const maybe_input = input.readLine(ctx.arena, ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history, held_text) catch |err| {
         if (sigint.isTriggered()) {
             finalizeSession(ctx);
             return .exit;
@@ -657,6 +662,34 @@ fn readUserInput(
     };
 }
 
+fn injectTyped(
+    allocator: std.mem.Allocator,
+    messages: *std.ArrayList(openai.Message),
+    writer: *std.Io.Writer,
+    typed: *TypeAhead,
+) ![]const []const u8 {
+    const lines = try typed.takeLines(allocator);
+    for (lines) |line| {
+        try messages.append(allocator, .{ .user = line });
+        try printNotice(writer, "Queued: {s}", .{line});
+    }
+    return lines;
+}
+
+/// A line delivered as the model finished still needs an answer, so the loop
+/// goes round again.
+fn loopFinished(model_done: bool, delivered: usize) bool {
+    return model_done and delivered == 0;
+}
+
+/// Orchestrate phases reset their context, reviews need an uninterrupted
+/// verdict, and a one-shot run has no next prompt, so typed lines only join an
+/// ordinary chat loop. Elsewhere, and once the user has cancelled, they wait
+/// for the next prompt.
+fn injectsTyped(honor_oneshot: bool, oneshot: bool, review_active: bool, cancelled: bool) bool {
+    return honor_oneshot and !oneshot and !review_active and !cancelled;
+}
+
 /// Drives one agentic turn. `honor_oneshot` is false for orchestrate phases,
 /// which run several turns inside a single `--oneshot` invocation.
 fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
@@ -669,6 +702,17 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_credits: ?token_stats.AiCredits = null;
     var turn_credits_missing = false;
     var compaction_failed = false;
+
+    // A one-shot run has no next prompt to type towards.
+    if (!ctx.parsed.oneshot) {
+        try ctx.stdout_writer.flush();
+        cancel.beginLoop(ctx.io);
+    }
+    defer {
+        ctx.stdout_writer.flush() catch {};
+        cancel.endLoop();
+    }
+
     while (!turn_complete) {
         if (!compaction_failed) {
             if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
@@ -747,7 +791,18 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         }
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
-        turn_complete = result.turn_complete;
+
+        // Tool results are in place by now, so every tool call stays paired.
+        var delivered: []const []const u8 = &.{};
+        if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
+            delivered = try injectTyped(ctx.messages_arena.allocator(), ctx.messages, ctx.stdout_writer, &cancel.typed);
+            for (delivered) |line| {
+                if (ctx.chat_log) |log| log.print("[USER]\n{s}\n\n", .{line});
+                try ctx.history.add(line);
+                try ctx.history.save(ctx.io);
+            }
+        }
+        turn_complete = loopFinished(result.turn_complete, delivered.len);
     }
 
     if (turn_complete and !turn_cancelled and !turn_had_error) {
@@ -1406,6 +1461,101 @@ fn upsertCurrentSession(ctx: *ChatLoopContext) void {
     }) catch |err| {
         std.log.warn("failed to update sessions index: {s}", .{@errorName(err)});
     };
+}
+
+test "injectTyped appends queued lines after the tool results and announces them" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("first\rsecond\r") |byte| buffer.feed(byte);
+
+    var messages = std.ArrayList(openai.Message).empty;
+    try messages.append(arena, .{ .user = "start" });
+    try messages.append(arena, .{ .tool = .{ .tool_call_id = "call_1", .content = "done" } });
+
+    const delivered = try injectTyped(arena, &messages, &output.writer, &buffer);
+
+    try std.testing.expectEqual(@as(usize, 2), delivered.len);
+    try std.testing.expectEqual(@as(usize, 4), messages.items.len);
+    try std.testing.expectEqualStrings("first", messages.items[2].user);
+    try std.testing.expectEqualStrings("second", messages.items[3].user);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Queued: first") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Queued: second") != null);
+}
+
+test "the loop finishes only when the model is done and nothing was delivered" {
+    try std.testing.expect(loopFinished(true, 0));
+    try std.testing.expect(!loopFinished(false, 0));
+    try std.testing.expect(!loopFinished(true, 1));
+    try std.testing.expect(!loopFinished(false, 2));
+}
+
+test "typed lines are injected into an ordinary chat loop" {
+    try std.testing.expect(injectsTyped(true, false, false, false));
+}
+
+test "typed lines are held for orchestrate phases, one-shot runs and reviews" {
+    try std.testing.expect(!injectsTyped(false, false, false, false));
+    try std.testing.expect(!injectsTyped(true, true, false, false));
+    try std.testing.expect(!injectsTyped(true, false, true, false));
+}
+
+test "typed lines are held when a cancel is pending" {
+    try std.testing.expect(!injectsTyped(true, false, false, true));
+}
+
+test "a line typed during a tool call reaches the model on the next request" {
+    const provider = @import("../providers/provider.zig");
+    var prov = provider.Provider{ .mock = mock.MockClient.init(std.testing.allocator, std.testing.io) };
+    defer prov.deinit();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
+    defer session_stats.deinit();
+    var random_source: std.Random.IoSource = .{ .io = std.testing.io };
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    var messages = std.ArrayList(openai.Message).empty;
+    try messages.append(arena, .{ .user = "read the file" });
+
+    const first = try chat.runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random_source.interface(), "mock-model", null, &messages, &.{}, null, null);
+    try std.testing.expect(!first.turn_complete);
+
+    for ("say fast\r") |byte| buffer.feed(byte);
+    _ = try injectTyped(arena, &messages, &output.writer, &buffer);
+    try std.testing.expectEqualStrings("say fast", messages.items[messages.items.len - 1].user);
+
+    const second = try chat.runTurn(&prov, arena, std.testing.io, &output.writer, &session_stats, false, random_source.interface(), "mock-model", null, &messages, &.{}, null, null);
+    try std.testing.expect(second.turn_complete);
+    try std.testing.expect(messages.items[messages.items.len - 1] == .assistant);
+}
+
+test "injectTyped leaves the conversation alone when nothing was typed" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var buffer = TypeAhead.init(std.testing.allocator);
+    defer buffer.deinit();
+    for ("unfinished") |byte| buffer.feed(byte);
+
+    var messages = std.ArrayList(openai.Message).empty;
+    try messages.append(arena, .{ .user = "start" });
+
+    const delivered = try injectTyped(arena, &messages, &output.writer, &buffer);
+
+    try std.testing.expectEqual(@as(usize, 0), delivered.len);
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    try std.testing.expectEqualStrings("", output.written());
 }
 
 test "printNotice writes a dim line with a single blank line above it" {

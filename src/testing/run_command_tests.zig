@@ -2,6 +2,7 @@
 //! suite (`zig build test-regression`) so that `zig build test` stays fast.
 const std = @import("std");
 const run_command = @import("../tools/run_command.zig");
+const cancel = @import("../core/cancel.zig");
 
 test "runCommandTimed returns output for a command that finishes within the deadline" {
     const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
@@ -61,6 +62,47 @@ test "runCommandTimed returns TimedOut and terminates a command that never exits
     try std.testing.expectEqual(before, run_command.test_run_command_worker_detached);
     // Must return long before the child could ever finish on its own.
     try std.testing.expect(elapsed < 10 * std.time.ns_per_s);
+}
+
+test "runCommandTimed stops a running command when the user cancels" {
+    const before = run_command.test_run_command_worker_detached;
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "powershell", "-NoProfile", "-Command", "while ($true) { 'x'; Start-Sleep -Milliseconds 10 }" }
+    else
+        &.{ "sh", "-c", "while true; do echo x; sleep 0.01; done" };
+    cancel.reset();
+    defer cancel.reset();
+    const canceller = try std.Thread.spawn(.{}, struct {
+        fn run() void {
+            std.testing.io.sleep(.{ .nanoseconds = 200 * std.time.ns_per_ms }, .awake) catch {};
+            cancel.setCancelled();
+        }
+    }.run, .{});
+    defer canceller.join();
+
+    const started = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    const output = try run_command.runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 60 * std.time.ns_per_s);
+    defer std.testing.allocator.free(output);
+    const elapsed = started.durationTo(std.Io.Clock.Timestamp.now(std.testing.io, .awake)).raw.nanoseconds;
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "cancelled") != null);
+    try std.testing.expectEqual(before, run_command.test_run_command_worker_detached);
+    try std.testing.expect(elapsed < 10 * std.time.ns_per_s);
+}
+
+test "runCommandTimed does not start a command once the user has cancelled" {
+    const argv: []const []const u8 = if (@import("builtin").os.tag == .windows)
+        &.{ "cmd", "/c", "echo hello" }
+    else
+        &.{ "sh", "-c", "echo hello" };
+    cancel.setCancelled();
+    defer cancel.reset();
+
+    const output = try run_command.runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "hello") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "cancelled") != null);
 }
 
 test "runCommand formats exit code and stdout" {
