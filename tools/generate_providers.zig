@@ -34,12 +34,15 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // 1. The shared runtime every provider client imports. No spec is read
-    //    for this one, hence the empty input path.
+    //    for this one, hence the empty input path. Its SSE limits are raised
+    //    right after.
     try openapi2zig.generateFromSpec(allocator, io, .{
         .input_path = "",
         .output_path = "src/providers/runtime.zig",
         .runtime_only = true,
     });
+
+    try patchRuntimeSseLimits(allocator, io, cwd);
 
     // Streaming clients must consume non-success response bodies before
     // notifying observers; provider regression tests guard this behavior.
@@ -86,6 +89,42 @@ pub fn main(init: std.process.Init) !void {
     try patchGoogleGeneratedFiles(allocator, io, cwd);
 
     std.log.info("regenerate-providers: done", .{});
+}
+
+/// The generator caps an SSE line at 256 KiB and an event at 1 MiB. Copilot's
+/// `response.completed` event carries the whole output array on one line and
+/// exceeds that, so raise both limits to match src/providers/client.zig.
+fn patchRuntimeSseLimits(allocator: std.mem.Allocator, io: std.Io, cwd: std.Io.Dir) !void {
+    const path = "src/providers/runtime.zig";
+    const replacements = [_][2][]const u8{
+        .{ "const max_sse_line_size = 256 * 1024;", "const max_sse_line_size = 16 * 1024 * 1024;" },
+        .{ "const max_sse_event_size = 1024 * 1024;", "const max_sse_event_size = 32 * 1024 * 1024;" },
+    };
+
+    var content = try cwd.readFileAlloc(io, path, allocator, .limited(4 * 1024 * 1024));
+    defer allocator.free(content);
+    var changed = false;
+    for (replacements) |replacement| {
+        // The generator leaves an unchanged runtime alone, so the file may
+        // already carry the raised limit.
+        if (std.mem.indexOf(u8, content, replacement[1]) != null) continue;
+        // A missing declaration means the generator changed; fail loudly
+        // instead of silently shipping the small limits.
+        if (std.mem.indexOf(u8, content, replacement[0]) == null) {
+            std.log.err("{s}: expected `{s}`", .{ path, replacement[0] });
+            return error.SseLimitNotFound;
+        }
+        const patched = try std.mem.replaceOwned(u8, allocator, content, replacement[0], replacement[1]);
+        allocator.free(content);
+        content = patched;
+        changed = true;
+    }
+    if (!changed) {
+        std.log.info("{s} already has the raised SSE limits, skipping", .{path});
+        return;
+    }
+    try cwd.writeFile(io, .{ .sub_path = path, .data = content });
+    std.log.info("patched {s} SSE limits", .{path});
 }
 
 fn patchGoogleGeneratedFiles(allocator: std.mem.Allocator, io: std.Io, cwd: std.Io.Dir) !void {
