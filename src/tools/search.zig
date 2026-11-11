@@ -1,6 +1,15 @@
 const std = @import("std");
 const tools = @import("root.zig");
 const helpers = @import("helpers.zig");
+const log_files = @import("../core/log_files.zig");
+
+/// Skip puny's own debug logs: they hold earlier tool output, so grepping
+/// them makes results snowball. The leading `/` anchors the glob to the cwd
+/// root, so a real `docs/puny_chat.log` stays searchable.
+const excluded_globs = [_][]const u8{
+    "!/" ++ log_files.http_log,
+    "!/" ++ log_files.chat_log,
+};
 
 const GrepSearchParams = struct {
     query: []const u8,
@@ -17,6 +26,10 @@ fn buildGrepArgv(allocator: std.mem.Allocator, params: GrepSearchParams) ![]cons
     try argv.append(allocator, "rg");
     try argv.append(allocator, "--line-number");
     try argv.append(allocator, "--with-filename");
+    for (excluded_globs) |glob| {
+        try argv.append(allocator, "--glob");
+        try argv.append(allocator, glob);
+    }
 
     if (params.case_sensitive) |case_sensitive| {
         if (!case_sensitive) {
@@ -94,6 +107,26 @@ test "buildGrepArgv puts query then path last" {
     try std.testing.expect(containsArg(argv, "--with-filename"));
     try std.testing.expectEqualStrings("needle", argv[argv.len - 2]);
     try std.testing.expectEqualStrings("src", argv[argv.len - 1]);
+}
+
+test "buildGrepArgv excludes puny's own debug logs at the cwd root" {
+    const alloc = std.testing.allocator;
+    const argv = try buildGrepArgv(alloc, .{ .query = "needle", .path = "src" });
+    defer alloc.free(argv);
+
+    try std.testing.expectEqualStrings("needle", argv[argv.len - 2]);
+    const query_idx = argv.len - 2;
+    for ([_][]const u8{ "!/puny_http.log", "!/puny_chat.log" }) |glob| {
+        var found = false;
+        for (argv[0..query_idx], 0..) |a, i| {
+            if (std.mem.eql(u8, a, glob)) {
+                try std.testing.expect(i > 0);
+                try std.testing.expectEqualStrings("--glob", argv[i - 1]);
+                found = true;
+            }
+        }
+        try std.testing.expect(found);
+    }
 }
 
 fn containsArg(argv: []const []const u8, arg: []const u8) bool {
