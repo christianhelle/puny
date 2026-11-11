@@ -60,7 +60,7 @@ fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams
 
 pub const grep_search = tools.defineTool(
     "grep_search",
-    "Search file contents using ripgrep. Returns matching lines with file names and line numbers.",
+    "Search file contents using ripgrep. Returns matching lines with file names and line numbers. Skips puny's own debug logs in the working directory.",
     GrepSearchParams,
     grepSearch,
 );
