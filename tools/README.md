@@ -38,7 +38,9 @@ the following:
 1. Deletes the four generated output directories, so files a spec no longer
    produces don't linger.
 2. Generates the shared runtime and each provider client.
-3. Applies the Google patches described in [step 3](#3-patch-the-google-client).
+3. Raises the SSE limits described in
+   [step 3](#3-raise-the-sse-limits-in-the-runtime).
+4. Applies the Google patches described in [step 4](#4-patch-the-google-client).
 
 ## Option 2: run openapi2zig manually
 
@@ -85,7 +87,20 @@ openapi2zig generate -i src/providers/openapi/anthropic.json -o src/providers/an
 openapi2zig generate -i src/providers/openapi/google.json -o src/providers/google/ --multiple-files --file-name models=contracts.zig --runtime-module ../runtime.zig --tag models
 ```
 
-### 3. Patch the Google client
+### 3. Raise the SSE limits in the runtime
+
+The build step does this automatically, but the CLI doesn't. The generator caps an
+SSE line at 256 KiB and an event at 1 MiB, which is too small for GitHub Copilot's
+`response.completed` event. In `src/providers/runtime.zig`, set:
+
+```zig
+const max_sse_line_size = 16 * 1024 * 1024;
+const max_sse_event_size = 32 * 1024 * 1024;
+```
+
+Keep both values equal to the ones in `src/providers/client.zig`.
+
+### 4. Patch the Google client
 
 The build step does this automatically, but the CLI doesn't. Without these patches
 the Google client is wrong:
@@ -122,7 +137,7 @@ zig build test
 
 If neither the specs nor the generator changed, the only difference in each client
 and contracts file is the timestamp in its header. Any other change means the spec
-changed, the generator version differs, or a Google patch was missed.
+changed, the generator version differs, or a patch was missed.
 
 ## Changing the configuration
 
