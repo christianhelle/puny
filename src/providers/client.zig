@@ -593,8 +593,8 @@ fn checkCancellation(token: ?*CancellationToken) !void {
 // Server-sent events parsing
 ///////////////////////////////////////////
 
-const max_sse_line_size = 256 * 1024;
-const max_sse_event_size = 1024 * 1024;
+const max_sse_line_size = 16 * 1024 * 1024;
+const max_sse_event_size = 32 * 1024 * 1024;
 
 pub fn parseSseBytes(allocator: std.mem.Allocator, bytes: []const u8, callback: anytype, cancellation_token: ?*CancellationToken) !void {
     var reader: std.Io.Reader = .fixed(bytes);
@@ -951,7 +951,7 @@ test "parseSseBytes tolerates CRLF line endings" {
     try std.testing.expectEqualStrings("x", events.items[0]);
 }
 
-test "parseSseBytes rejects oversized lines" {
+test "parseSseBytes accepts a 300 KiB data line" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -960,6 +960,28 @@ test "parseSseBytes rejects oversized lines" {
     var recorder = SseRecorder{ .allocator = allocator, .events = &events };
 
     const line = try allocator.alloc(u8, 300 * 1024);
+    @memset(line, 'a');
+
+    var bytes: std.Io.Writer.Allocating = .init(allocator);
+    defer bytes.deinit();
+    try bytes.writer.writeAll("data: ");
+    try bytes.writer.writeAll(line);
+    try bytes.writer.writeAll("\n\n");
+
+    try parseSseBytes(allocator, bytes.written(), &recorder, null);
+    try std.testing.expectEqual(@as(usize, 1), events.items.len);
+    try std.testing.expectEqual(@as(usize, 300 * 1024), events.items[0].len);
+}
+
+test "parseSseBytes rejects oversized lines" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var events = std.ArrayList([]u8).empty;
+    var recorder = SseRecorder{ .allocator = allocator, .events = &events };
+
+    const line = try allocator.alloc(u8, max_sse_line_size + 1);
     @memset(line, 'a');
 
     var bytes: std.Io.Writer.Allocating = .init(allocator);
@@ -979,12 +1001,12 @@ test "parseSseBytes rejects oversized events" {
     var events = std.ArrayList([]u8).empty;
     var recorder = SseRecorder{ .allocator = allocator, .events = &events };
 
-    const chunk = try allocator.alloc(u8, 250 * 1024);
+    const chunk = try allocator.alloc(u8, max_sse_line_size - 16);
     @memset(chunk, 'a');
 
     var bytes: std.Io.Writer.Allocating = .init(allocator);
     defer bytes.deinit();
-    for (0..5) |_| {
+    for (0..3) |_| {
         try bytes.writer.writeAll("data: ");
         try bytes.writer.writeAll(chunk);
         try bytes.writer.writeByte('\n');
