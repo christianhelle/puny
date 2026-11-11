@@ -8,9 +8,11 @@ const GrepSearchParams = struct {
     case_sensitive: ?bool = null,
 };
 
-fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams) ![]const u8 {
+/// Builds the ripgrep argv for `params`. Caller frees the returned slice;
+/// the strings themselves are borrowed from `params` or static.
+fn buildGrepArgv(allocator: std.mem.Allocator, params: GrepSearchParams) ![]const []const u8 {
     var argv: std.ArrayList([]const u8) = .empty;
-    defer argv.deinit(allocator);
+    errdefer argv.deinit(allocator);
 
     try argv.append(allocator, "rg");
     try argv.append(allocator, "--line-number");
@@ -30,7 +32,14 @@ fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams
         try argv.append(allocator, ".");
     }
 
-    return helpers.runCommandTimed(allocator, io, argv.items, null, helpers.run_command_timeout_ns) catch |err| switch (err) {
+    return argv.toOwnedSlice(allocator);
+}
+
+fn grepSearch(allocator: std.mem.Allocator, io: std.Io, params: GrepSearchParams) ![]const u8 {
+    const argv = try buildGrepArgv(allocator, params);
+    defer allocator.free(argv);
+
+    return helpers.runCommandTimed(allocator, io, argv, null, helpers.run_command_timeout_ns) catch |err| switch (err) {
         error.TimedOut => std.fmt.allocPrint(allocator, "Tool grep_search timed out after {d} seconds.", .{@divTrunc(helpers.run_command_timeout_ns, std.time.ns_per_s)}),
         else => return err,
     };
@@ -51,10 +60,45 @@ test "grepSearch runs ripgrep and returns matching lines" {
     return error.SkipZigTest;
 }
 
-test "grepSearch passes --ignore-case when case_sensitive is false" {
-    return error.SkipZigTest;
+test "buildGrepArgv passes --ignore-case only when case_sensitive is false" {
+    const alloc = std.testing.allocator;
+
+    const insensitive = try buildGrepArgv(alloc, .{ .query = "q", .case_sensitive = false });
+    defer alloc.free(insensitive);
+    try std.testing.expect(containsArg(insensitive, "--ignore-case"));
+
+    const sensitive = try buildGrepArgv(alloc, .{ .query = "q", .case_sensitive = true });
+    defer alloc.free(sensitive);
+    try std.testing.expect(!containsArg(sensitive, "--ignore-case"));
+
+    const unset = try buildGrepArgv(alloc, .{ .query = "q" });
+    defer alloc.free(unset);
+    try std.testing.expect(!containsArg(unset, "--ignore-case"));
 }
 
-test "grepSearch defaults to the current directory when no path is given" {
-    return error.SkipZigTest;
+test "buildGrepArgv defaults to the current directory when no path is given" {
+    const alloc = std.testing.allocator;
+    const argv = try buildGrepArgv(alloc, .{ .query = "needle" });
+    defer alloc.free(argv);
+    try std.testing.expectEqualStrings("rg", argv[0]);
+    try std.testing.expectEqualStrings("needle", argv[argv.len - 2]);
+    try std.testing.expectEqualStrings(".", argv[argv.len - 1]);
+}
+
+test "buildGrepArgv puts query then path last" {
+    const alloc = std.testing.allocator;
+    const argv = try buildGrepArgv(alloc, .{ .query = "needle", .path = "src", .case_sensitive = false });
+    defer alloc.free(argv);
+    try std.testing.expectEqualStrings("rg", argv[0]);
+    try std.testing.expect(containsArg(argv, "--line-number"));
+    try std.testing.expect(containsArg(argv, "--with-filename"));
+    try std.testing.expectEqualStrings("needle", argv[argv.len - 2]);
+    try std.testing.expectEqualStrings("src", argv[argv.len - 1]);
+}
+
+fn containsArg(argv: []const []const u8, arg: []const u8) bool {
+    for (argv) |a| {
+        if (std.mem.eql(u8, a, arg)) return true;
+    }
+    return false;
 }
