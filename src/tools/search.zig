@@ -37,7 +37,12 @@ fn buildGrepArgv(allocator: std.mem.Allocator, params: GrepSearchParams) ![]cons
         }
     }
 
+    // The query and path come from the model. `--regexp` and `--` keep a
+    // value starting with `-` from being read as a ripgrep option such as
+    // `--pre`, which would run an arbitrary command.
+    try argv.append(allocator, "--regexp");
     try argv.append(allocator, params.query);
+    try argv.append(allocator, "--");
 
     if (params.path) |path| {
         try argv.append(allocator, path);
@@ -94,7 +99,7 @@ test "buildGrepArgv defaults to the current directory when no path is given" {
     const argv = try buildGrepArgv(alloc, .{ .query = "needle" });
     defer alloc.free(argv);
     try std.testing.expectEqualStrings("rg", argv[0]);
-    try std.testing.expectEqualStrings("needle", argv[argv.len - 2]);
+    try std.testing.expectEqualStrings("needle", argv[argv.len - 3]);
     try std.testing.expectEqualStrings(".", argv[argv.len - 1]);
 }
 
@@ -105,7 +110,7 @@ test "buildGrepArgv puts query then path last" {
     try std.testing.expectEqualStrings("rg", argv[0]);
     try std.testing.expect(containsArg(argv, "--line-number"));
     try std.testing.expect(containsArg(argv, "--with-filename"));
-    try std.testing.expectEqualStrings("needle", argv[argv.len - 2]);
+    try std.testing.expectEqualStrings("needle", argv[argv.len - 3]);
     try std.testing.expectEqualStrings("src", argv[argv.len - 1]);
 }
 
@@ -114,8 +119,8 @@ test "buildGrepArgv excludes puny's own debug logs at the cwd root" {
     const argv = try buildGrepArgv(alloc, .{ .query = "needle", .path = "src" });
     defer alloc.free(argv);
 
-    try std.testing.expectEqualStrings("needle", argv[argv.len - 2]);
-    const query_idx = argv.len - 2;
+    try std.testing.expectEqualStrings("needle", argv[argv.len - 3]);
+    const query_idx = argv.len - 3;
     for ([_][]const u8{ "!/puny_http.log", "!/puny_chat.log" }) |glob| {
         var found = false;
         for (argv[0..query_idx], 0..) |a, i| {
@@ -127,6 +132,17 @@ test "buildGrepArgv excludes puny's own debug logs at the cwd root" {
         }
         try std.testing.expect(found);
     }
+}
+
+test "buildGrepArgv never lets the query or path be read as an option" {
+    const alloc = std.testing.allocator;
+    const argv = try buildGrepArgv(alloc, .{ .query = "--pre=sh", .path = "--files" });
+    defer alloc.free(argv);
+
+    try std.testing.expectEqualStrings("--regexp", argv[argv.len - 4]);
+    try std.testing.expectEqualStrings("--pre=sh", argv[argv.len - 3]);
+    try std.testing.expectEqualStrings("--", argv[argv.len - 2]);
+    try std.testing.expectEqualStrings("--files", argv[argv.len - 1]);
 }
 
 fn containsArg(argv: []const []const u8, arg: []const u8) bool {
