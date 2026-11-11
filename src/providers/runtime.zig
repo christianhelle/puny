@@ -60,8 +60,8 @@ pub const HttpObserver = struct {
     onError: ?*const fn (ctx: ?*anyopaque, method: std.http.Method, url: []const u8, err_name: []const u8) void,
 };
 
-const max_sse_line_size = 256 * 1024;
-const max_sse_event_size = 1024 * 1024;
+const max_sse_line_size = 16 * 1024 * 1024;
+const max_sse_event_size = 32 * 1024 * 1024;
 
 pub const CancellationToken = struct {
     cancelled: std.atomic.Value(bool),
