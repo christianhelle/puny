@@ -224,6 +224,9 @@ test "include tools.root tests" {
 test "include tools.schema tests" {
     _ = @import("../tools/schema.zig");
 }
+test "include tools.search tests" {
+    _ = @import("../tools/search.zig");
+}
 test "include tools.shell tests" {
     _ = @import("../tools/shell.zig");
 }

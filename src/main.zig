@@ -24,6 +24,7 @@ const core_sess = @import("core/session.zig");
 const crash = @import("core/crash.zig");
 const AgentMode = @import("core/mode.zig").AgentMode;
 const git_root = @import("core/git_root.zig");
+const log_files = @import("core/log_files.zig");
 const sessions = @import("sessions/sessions.zig");
 const prompt_history = @import("prompts/history.zig");
 const prompt_file = @import("prompts/prompt_file.zig");
@@ -172,9 +173,9 @@ fn run(init: std.process.Init) !u8 {
     var debug_buffer: [4096]u8 = undefined;
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
-        const file = try std.Io.Dir.cwd().createFile(init.io, "puny_http.log", .{});
+        const file = try std.Io.Dir.cwd().createFile(init.io, log_files.http_log, .{});
         if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_http.log", @fromBackingInt(0o600), .{}) catch {};
+            std.Io.Dir.cwd().setFilePermissions(init.io, log_files.http_log, @fromBackingInt(0o600), .{}) catch {};
         }
         debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
@@ -191,9 +192,9 @@ fn run(init: std.process.Init) !u8 {
     var chat_buffer: [4096]u8 = undefined;
     var chat_file_writer: std.Io.File.Writer = undefined;
     var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
-        const file = try std.Io.Dir.cwd().createFile(init.io, "puny_chat.log", .{});
+        const file = try std.Io.Dir.cwd().createFile(init.io, log_files.chat_log, .{});
         if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, "puny_chat.log", @fromBackingInt(0o600), .{}) catch {};
+            std.Io.Dir.cwd().setFilePermissions(init.io, log_files.chat_log, @fromBackingInt(0o600), .{}) catch {};
         }
         chat_file_writer = .init(file, init.io, &chat_buffer);
         break :blk ChatLog{
@@ -943,11 +944,12 @@ test "include all module tests" {
 test "http log file is hardened with 0600 permissions on posix" {
     const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(128 * 1024));
     defer std.testing.allocator.free(data);
-    try std.testing.expect(std.mem.indexOf(u8, data, "puny_http.log") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "log_files.http_log") != null);
     try std.testing.expect(std.mem.indexOf(u8, data, "setFilePermissions") != null);
     try std.testing.expect(std.mem.indexOf(u8, data, "0o600") != null);
     // ensure the http log path specifically is covered, not just chat log
-    try std.testing.expect(std.mem.indexOf(u8, data, "\"puny_http.log\", @fromBackingInt(0o600)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "log_files.http_log, @fromBackingInt(0o600)") != null);
+    try std.testing.expectEqualStrings("puny_http.log", log_files.http_log);
 }
 
 test "debug logging is always enabled for debug builds" {

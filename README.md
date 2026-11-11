@@ -1178,6 +1178,8 @@ puny --debug
 
 The debug log captures request payloads, response headers, and SSE chunks for troubleshooting. JSON bodies are pretty-printed for readability.
 
+The `grep_search` tool skips `puny_http.log` and `puny_chat.log` in the working directory so earlier tool output in the logs does not leak back into search results.
+
 ## License
 
 MIT
