@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Exclude puny's own debug logs from grep_search ([#241](https://github.com/christianhelle/puny/pull/241)) ([@christianhelle](https://github.com/christianhelle/))
+- Raise SSE line and event limits to fix SseLineTooLong ([#240](https://github.com/christianhelle/puny/pull/240)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.5.1](https://github.com/christianhelle/puny/releases/tag/v0.5.1) (2026-11-10)
 
 ### Features
