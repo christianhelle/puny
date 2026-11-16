@@ -43,6 +43,8 @@ pub const MockKeyword = enum {
     search,
     /// Trigger a tool call for shell execution.
     shell,
+    /// Trigger one write_file call, to see the diff shown under file changes.
+    edit,
     /// Ask a multiple choice question with the ask_user tool.
     choice,
     /// Save a deterministic merge-worthy branch review.
@@ -182,6 +184,16 @@ pub const MockClient = struct {
             try callback.emit(.{ .tool_call_delta = .{
                 .index = 0,
                 .arguments = "{\"question\":\"Which database should the app use?\",\"options\":[\"SQLite\",\"Postgres\",\"DuckDB\"],\"recommended\":\"Postgres\"}",
+            } });
+            try callback.emit(.{ .finish = "tool_calls" });
+            return;
+        }
+
+        if (isKeyword(last_content, .edit)) {
+            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_edit_call", .name = "write_file" } });
+            try callback.emit(.{ .tool_call_delta = .{
+                .index = 0,
+                .arguments = "{\"path\":\"puny-mock-edit.zig\",\"content\":\"const std = @import(\\\"std\\\");\\n// mock edit\\npub fn main() void {}\\n\"}",
             } });
             try callback.emit(.{ .finish = "tool_calls" });
             return;
@@ -336,6 +348,7 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .read => "read",
         .search => "search",
         .shell => "shell",
+        .edit => "mockedit",
         .choice => "choice",
         .review => "review",
         .table => "table",
@@ -1294,4 +1307,24 @@ test "chatStreaming slow keyword with empty mode skips delays" {
     try mock_client.chatStreaming(request, rec.callback());
     try std.testing.expectEqual(@as(usize, 1), rec.events.items.len);
     try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming emits one write_file call for mockedit" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "mockedit" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 1), countTag(rec.events.items, .tool_call_start));
+    switch (rec.events.items[0]) {
+        .tool_call_start => |tc| try std.testing.expectEqualStrings("write_file", tc.name),
+        else => return error.ExpectedToolCallStart,
+    }
+    try expectFinish(rec.events.items, "tool_calls");
 }
