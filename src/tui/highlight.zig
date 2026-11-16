@@ -20,6 +20,9 @@ pub const Language = struct {
     quotes: []const u8 = "\"",
     /// A delimiter that both opens and closes a string spanning lines.
     multiline_string: ?[]const u8 = null,
+    /// Whether a backslash inside a multiline string escapes what follows
+    /// it: true for JS template strings and Python, false for Go raw strings.
+    multiline_escapes: bool = false,
     keywords: []const []const u8 = &.{},
     case_insensitive_keywords: bool = false,
 };
@@ -92,6 +95,7 @@ const javascript_language = Language{
     .block_comment = .{ .open = "/*", .close = "*/" },
     .quotes = "\"'",
     .multiline_string = "`",
+    .multiline_escapes = true,
     .keywords = &.{ "async", "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "interface", "let", "new", "null", "of", "private", "protected", "public", "readonly", "return", "static", "super", "switch", "this", "throw", "true", "try", "type", "typeof", "undefined", "var", "void", "while", "with", "yield" },
 };
 
@@ -117,6 +121,7 @@ const python_language = Language{
     .line_comments = &.{"#"},
     .quotes = "\"'",
     .multiline_string = "\"\"\"",
+    .multiline_escapes = true,
     .keywords = &.{ "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "None", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield", "True", "False" },
 };
 
@@ -198,6 +203,23 @@ fn push(tokens: *std.ArrayList(Token), allocator: std.mem.Allocator, start: usiz
     try tokens.append(allocator, .{ .start = start, .end = end, .class = class });
 }
 
+/// Where `close` next starts in `line` at or after `from`, skipping any
+/// character a backslash escapes when `escapes` is set.
+fn findClose(line: []const u8, from: usize, close: []const u8, escapes: bool) ?usize {
+    if (!escapes) return std.mem.indexOfPos(u8, line, from, close);
+    var i = from;
+    while (i < line.len) {
+        if (line[i] == '\\') {
+            i += 2;
+        } else if (std.mem.startsWith(u8, line[i..], close)) {
+            return i;
+        } else {
+            i += 1;
+        }
+    }
+    return null;
+}
+
 fn isIdentStart(c: u8) bool {
     return std.ascii.isAlphabetic(c) or c == '_';
 }
@@ -251,7 +273,7 @@ pub fn tokenize(
                     current = .normal;
                     continue :scan;
                 };
-                if (std.mem.indexOfPos(u8, line, i, close)) |at| {
+                if (findClose(line, i, close, lang.multiline_escapes)) |at| {
                     try push(tokens, allocator, i, at + close.len, .string);
                     i = at + close.len;
                     current = .normal;
@@ -567,5 +589,38 @@ test "a Python docstring spans lines" {
     var tokens: std.ArrayList(Token) = .empty;
     defer tokens.deinit(std.testing.allocator);
     const state = try tokenize(std.testing.allocator, languageForPath("a.py"), "\"\"\"doc", .normal, &tokens);
+    try std.testing.expectEqual(State.multiline_string, state);
+}
+
+test "an escaped backtick does not end a JavaScript template string" {
+    try expectTokens(languageForPath("a.js"), "`a\\`b` x", &.{
+        .{ "`a\\`b`", .string },
+        .{ " x", .plain },
+    });
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+    const state = try tokenize(std.testing.allocator, languageForPath("a.ts"), "`a\\`", .normal, &tokens);
+    try std.testing.expectEqual(State.multiline_string, state);
+}
+
+test "an escaped triple quote does not end a Python docstring" {
+    try expectTokens(languageForPath("a.py"), "\"\"\"a\\\"\"\"b\"\"\" return", &.{
+        .{ "\"\"\"a\\\"\"\"b\"\"\"", .string },
+        .{ " ", .plain },
+        .{ "return", .keyword },
+    });
+}
+
+test "a backslash does not escape the closing backtick of a Go raw string" {
+    try expectTokens(languageForPath("a.go"), "`a\\` x", &.{
+        .{ "`a\\`", .string },
+        .{ " x", .plain },
+    });
+}
+
+test "an escape at the end of a line keeps the string open" {
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+    const state = try tokenize(std.testing.allocator, languageForPath("a.js"), "`a\\", .normal, &tokens);
     try std.testing.expectEqual(State.multiline_string, state);
 }
