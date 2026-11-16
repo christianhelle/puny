@@ -237,6 +237,10 @@ test "include tui.ansi tests" {
     _ = @import("../tui/ansi.zig");
 }
 
+test "include tui.highlight tests" {
+    _ = @import("../tui/highlight.zig");
+}
+
 test "include tui.diff tests" {
     _ = @import("../tui/diff.zig");
 }
