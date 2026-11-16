@@ -34,6 +34,7 @@ const resolver = @import("providers/resolver.zig");
 const session = @import("chat/session.zig");
 const compact = @import("chat/compact.zig");
 const display = @import("chat/display.zig");
+const diff_view = @import("chat/diff_view.zig");
 const sigint = @import("core/sigint.zig");
 const instructions = @import("agents/instructions.zig");
 const skills = @import("skills/skills.zig");
@@ -85,6 +86,7 @@ fn run(init: std.process.Init) !u8 {
     if (comptime @import("builtin").mode == .debug) {
         parsed.debug = true;
     }
+    diff_view.enabled = diff_view.resolveEnabled(parsed.diff, std.Io.File.stdout().isTty(init.io) catch false);
 
     if (parsed.upgrade) {
         try upgrade.runUpgrade(arena, init.io, init.environ_map, parsed.force_upgrade);

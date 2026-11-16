@@ -43,6 +43,10 @@ pub const MockKeyword = enum {
     search,
     /// Trigger a tool call for shell execution.
     shell,
+    /// Trigger one write_file call, to see the diff shown under file changes.
+    edit,
+    /// List the prompts the mock understands.
+    help,
     /// Ask a multiple choice question with the ask_user tool.
     choice,
     /// Save a deterministic merge-worthy branch review.
@@ -166,6 +170,14 @@ pub const MockClient = struct {
             return error.ResponseError;
         }
 
+        // An explicit request for help wins over the tool keywords it may
+        // mention ("help me read").
+        if (isKeyword(last_content, .help)) {
+            var speed: MockSpeed = .normal;
+            if (isKeyword(last_content, .fast)) speed = .instant;
+            return respondWithHelp(callback, speed, self.io);
+        }
+
         // Check for tool call keywords
         if (isKeyword(last_content, .review) and std.mem.eql(u8, last_content, review_request)) {
             try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_review_call", .name = "save_review_results" } });
@@ -182,6 +194,16 @@ pub const MockClient = struct {
             try callback.emit(.{ .tool_call_delta = .{
                 .index = 0,
                 .arguments = "{\"question\":\"Which database should the app use?\",\"options\":[\"SQLite\",\"Postgres\",\"DuckDB\"],\"recommended\":\"Postgres\"}",
+            } });
+            try callback.emit(.{ .finish = "tool_calls" });
+            return;
+        }
+
+        if (isKeyword(last_content, .edit)) {
+            try callback.emit(.{ .tool_call_start = .{ .index = 0, .id = "mock_edit_call", .name = "write_file" } });
+            try callback.emit(.{ .tool_call_delta = .{
+                .index = 0,
+                .arguments = "{\"path\":\"puny-mock-edit.zig\",\"content\":\"const std = @import(\\\"std\\\");\\n// mock edit\\npub fn main() void {}\\n\"}",
             } });
             try callback.emit(.{ .finish = "tool_calls" });
             return;
@@ -336,12 +358,56 @@ fn keywordToString(kw: MockKeyword) []const u8 {
         .read => "read",
         .search => "search",
         .shell => "shell",
+        .edit => "mockedit",
+        .help => "help",
         .choice => "choice",
         .review => "review",
         .table => "table",
         .markdown => "markdown",
         .reasoning => "reasoning",
     };
+}
+
+/// What a keyword makes the mock do, for the `help` listing. The switch has
+/// no else branch, so a new keyword can't be added without describing it.
+fn keywordHelp(kw: MockKeyword) []const u8 {
+    return switch (kw) {
+        .long => "Streams a long text response (about 1000 words)",
+        .fast => "Streams text instantly, without delays",
+        .slow => "Streams text slowly (about 10 tokens per second)",
+        .echo => "Echoes your message and the system prompt back",
+        .empty => "Returns an empty response",
+        .partial => "Returns a truncated response with no finish event",
+        .usage => "Includes mock token usage statistics",
+        .err => "Fails the request with a response error",
+        .timeout => "Fails the request as if it timed out",
+        .fail => "Fails the request",
+        .read => "Calls the `read_file` tool",
+        .search => "Calls the `grep_search` tool",
+        .shell => "Calls the `execute_shell` tool",
+        .edit => "Calls the `write_file` tool once, to see a file diff",
+        .help => "Shows this list",
+        .choice => "Asks a multiple-choice question with the `ask_user` tool",
+        .review => "Saves a merge-worthy review (only for the `--review` prompt)",
+        .table => "Renders a markdown table",
+        .markdown => "Renders complex markdown: headings, code, lists, quotes",
+        .reasoning => "Streams reasoning output before the answer (see `--show-thinking`)",
+    };
+}
+
+/// Lists every keyword the mock reacts to, as a markdown table.
+fn respondWithHelp(callback: openai.StreamCallback, speed: MockSpeed, io: std.Io) !void {
+    try callback.emit(.{ .content = "These prompts change what the mock provider does:\n\n" });
+    try emitDelay(speed, io);
+    try callback.emit(.{ .content = "| Prompt contains | What the mock does |\n" });
+    try callback.emit(.{ .content = "| --- | --- |\n" });
+    inline for (comptime std.meta.tags(MockKeyword)) |kw| {
+        const row = comptime ("| `" ++ keywordToString(kw) ++ "` | " ++ keywordHelp(kw) ++ " |\n");
+        try callback.emit(.{ .content = row });
+        try emitDelay(speed, io);
+    }
+    try callback.emit(.{ .content = "\nKeywords match whole words, in any case. Any other prompt gets a canned text reply, and a tool result gets a short completion.\n" });
+    try callback.emit(.{ .finish = "stop" });
 }
 
 fn respondWithContent(callback: openai.StreamCallback, user_message: []const u8, speed: MockSpeed, io: std.Io) !void {
@@ -1294,4 +1360,64 @@ test "chatStreaming slow keyword with empty mode skips delays" {
     try mock_client.chatStreaming(request, rec.callback());
     try std.testing.expectEqual(@as(usize, 1), rec.events.items.len);
     try expectFinish(rec.events.items, "stop");
+}
+
+test "chatStreaming emits one write_file call for mockedit" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "mockedit" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 1), countTag(rec.events.items, .tool_call_start));
+    switch (rec.events.items[0]) {
+        .tool_call_start => |tc| try std.testing.expectEqualStrings("write_file", tc.name),
+        else => return error.ExpectedToolCallStart,
+    }
+    try expectFinish(rec.events.items, "tool_calls");
+}
+
+test "chatStreaming lists every mock prompt with a description for help" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "help" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const content = try joinedContent(arena_state.allocator(), rec.events.items);
+    try std.testing.expect(std.mem.indexOf(u8, content, "| Prompt contains | What the mock does |") != null);
+    for (std.meta.tags(MockKeyword)) |kw| {
+        const row = try std.fmt.allocPrint(arena_state.allocator(), "| `{s}` | ", .{keywordToString(kw)});
+        try std.testing.expect(std.mem.indexOf(u8, content, row) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, content, "write_file") != null);
+    try expectFinish(rec.events.items, "stop");
+}
+
+test "help does not start a tool call" {
+    var mock_client = MockClient.init(std.testing.allocator, std.testing.io);
+    defer mock_client.deinit();
+    var rec = recorder(std.testing.allocator);
+    defer rec.events.deinit(std.testing.allocator);
+
+    const request = openai.ChatRequest{
+        .model = "mock-model",
+        .messages = &.{.{ .user = "Help me read this" }},
+        .tools = &.{},
+    };
+    try mock_client.chatStreaming(request, rec.callback());
+    try std.testing.expectEqual(@as(usize, 0), countTag(rec.events.items, .tool_call_start));
 }

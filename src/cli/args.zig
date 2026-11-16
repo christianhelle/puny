@@ -29,6 +29,8 @@ pub const Options = struct {
     debug: bool = false,
     chat_log: bool = false,
     show_thinking: bool = false,
+    /// Null means decide from whether stdout is a terminal.
+    diff: ?bool = null,
     no_skills: bool = false,
     prune: bool = false,
     upgrade: bool = false,
@@ -164,6 +166,10 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
             opts.reconfigure = true;
         } else if (std.mem.eql(u8, arg, "--show-thinking")) {
             opts.show_thinking = true;
+        } else if (std.mem.eql(u8, arg, "--diff")) {
+            opts.diff = true;
+        } else if (std.mem.eql(u8, arg, "--no-diff")) {
+            opts.diff = false;
         } else if (std.mem.eql(u8, arg, "--debug")) {
             opts.debug = true;
         } else if (std.mem.eql(u8, arg, "--chat-log")) {
@@ -242,6 +248,16 @@ pub fn parseArgs(io: std.Io, environ_map: *const std.process.Environ.Map, args: 
         }
     }
 
+    if (opts.diff == null) {
+        if (environ_map.get("PUNY_DIFF")) |value| {
+            if (std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true")) {
+                opts.diff = true;
+            } else if (std.mem.eql(u8, value, "0") or std.mem.eql(u8, value, "false")) {
+                opts.diff = false;
+            }
+        }
+    }
+
     if (!opts.chat_log) {
         if (environ_map.get("PUNY_CHAT_LOG")) |value| {
             opts.chat_log = std.mem.eql(u8, value, "1") or std.mem.eql(u8, value, "true");
@@ -300,6 +316,7 @@ pub fn writeHelp(writer: *std.Io.Writer) !void {
         \\  -M, --mock                   Use mock provider (no network calls, for testing)
         \\      --reconfigure            Re-run first-run setup and update config
         \\      --show-thinking          Show reasoning/thinking output from the model
+        \\      --diff, --no-diff        Show or hide a diff under file edits (default: shown in a terminal)
         \\      --session <id>           Resume a previous session by ID or prefix
         \\      --resume                 Resume the most recent session
         \\      --prune                  Delete old sessions (use --session to keep one)
@@ -934,4 +951,57 @@ test "parseArgs sets context_tier from flag" {
 
 test "validate rejects a zero max context" {
     try std.testing.expectError(error.InvalidMaxContext, validate(.{ .max_context = 0 }));
+}
+
+fn parseWith(allocator: std.mem.Allocator, env_value: ?[]const u8, args: []const [:0]const u8) !Options {
+    var env = std.process.Environ.Map.init(allocator);
+    defer env.deinit();
+    if (env_value) |value| try env.put("PUNY_DIFF", value);
+    return parseArgs(undefined, &env, args);
+}
+
+test "parseArgs leaves diff unset by default" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const opts = try parseWith(arena_state.allocator(), null, &[_][:0]const u8{"puny"});
+    try std.testing.expectEqual(@as(?bool, null), opts.diff);
+}
+
+test "parseArgs sets diff from --diff and --no-diff" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    const on = try parseWith(allocator, null, &[_][:0]const u8{ "puny", "--diff" });
+    try std.testing.expectEqual(@as(?bool, true), on.diff);
+    const off = try parseWith(allocator, null, &[_][:0]const u8{ "puny", "--no-diff" });
+    try std.testing.expectEqual(@as(?bool, false), off.diff);
+}
+
+test "parseArgs reads PUNY_DIFF" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    const args = &[_][:0]const u8{"puny"};
+    try std.testing.expectEqual(@as(?bool, true), (try parseWith(allocator, "1", args)).diff);
+    try std.testing.expectEqual(@as(?bool, true), (try parseWith(allocator, "true", args)).diff);
+    try std.testing.expectEqual(@as(?bool, false), (try parseWith(allocator, "0", args)).diff);
+    try std.testing.expectEqual(@as(?bool, false), (try parseWith(allocator, "false", args)).diff);
+    try std.testing.expectEqual(@as(?bool, null), (try parseWith(allocator, "maybe", args)).diff);
+}
+
+test "parseArgs lets --diff flags beat PUNY_DIFF" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    const off = try parseWith(allocator, "1", &[_][:0]const u8{ "puny", "--no-diff" });
+    try std.testing.expectEqual(@as(?bool, false), off.diff);
+    const on = try parseWith(allocator, "0", &[_][:0]const u8{ "puny", "--diff" });
+    try std.testing.expectEqual(@as(?bool, true), on.diff);
+}
+
+test "help text lists the diff flags" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHelp(&out.writer);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "--diff, --no-diff") != null);
 }

@@ -895,6 +895,23 @@ Tool-call status lines use concise action-oriented summaries instead of raw JSON
 
 Large payloads, such as file writes, are summarized rather than printed in full.
 
+### Diffs for file changes
+
+When the model writes or edits a file, Puny prints a small diff under the tool-call line, with syntax highlighting for common languages (Zig, C/C++, C#, Java, JavaScript/TypeScript, Go, Rust, Python, shell, PowerShell, JSON, YAML, TOML and SQL):
+
+```text
+🔧 Editing "src/app.zig"
+   41   const a = 1;
+   42 - const b = 2;
+   42 + const b = 3;
+   43   return a + b;
+      ⋮
+   90 + // new comment
+      … 12 more lines
+```
+
+Each change shows two lines of context, and a diff is cut off after 20 rows with a count of the lines left out. Diffs show when stdout is a terminal and stay off when output is piped, so scripts that read Puny's output are unaffected. Use `--diff` or `PUNY_DIFF=1` to force them on, and `--no-diff` or `PUNY_DIFF=0` to turn them off. Binary files and files over 1 MiB are not diffed.
+
 ### ⚠️ Safety warning - YOLO mode by default
 
 Tools execute **automatically without confirmation**. This includes file writes (which overwrite files) and shell commands (which run arbitrary commands). Only run Puny in directories where you are comfortable with the model making changes.
@@ -924,6 +941,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `--context-tier <tier>`         | `default` or `long`: budget the larger, pricier long-context window of GitHub Copilot models priced in tiers (overrides `context_tier` in config)                         |
 | `-M`, `--mock`                  | Use mock provider (no backend required)                                                                                                                                     |
 | `--reconfigure`                 | Re-run first-run setup and update config                                                                                                                                    |
+| `--diff`, `--no-diff`           | Show or hide a diff under file edits (default: shown in a terminal)                 
 | `--show-thinking`               | Show reasoning/thinking output from the model                                                                                                                               |
 | `--session <id>`                | Resume a previous session by UUID or unique prefix                                                                                                                          |
 | `--resume`                      | Resume the most recent session with a saved conversation                                                                                                                    |
@@ -947,6 +965,7 @@ Tools execute **automatically without confirmation**. This includes file writes 
 | `PUNY_MODEL`                 | Default model identifier (overrides config)                                                         |
 | `PUNY_MOCK`                  | Set to `1` or `true` to enable mock provider                                                        |
 | `PUNY_NO_SKILLS`             | Set to `1` or `true` to disable skill loading                                                       |
+| `PUNY_DIFF`                  | Set to `1`/`true` to always show file diffs, or `0`/`false` to hide them (default: shown in a terminal) |
 | `PUNY_SHOW_THINKING`         | Set to `1` or `true` to show reasoning output                                                       |
 | `GITHUB_COPILOT_OAUTH_TOKEN` | GitHub OAuth token for Copilot provider                                                             |
 
@@ -1107,13 +1126,15 @@ export PUNY_MOCK=1
 zig build run
 ```
 
-The mock provider returns canned responses and simulates tool calls based on keywords in your prompt:
+The mock provider returns canned responses and simulates tool calls based on keywords in your prompt. Send `help` to list them all:
 
 | Prompt contains            | Mock response                                 |
 | -------------------------- | --------------------------------------------- |
 | `read`, `file`, `code`     | Calls `read_file` tool                        |
 | `search`, `grep`, `find`   | Calls `grep_search` tool                      |
 | `shell`, `run`, `execute`  | Calls `execute_shell` tool                    |
+| `mockedit`                 | Calls `write_file` once, to see a file diff    |
+| `help`                     | Lists every prompt the mock understands, with descriptions |
 | `choice`                   | Calls `ask_user` tool with a database question |
 | `error`, `timeout`, `fail` | Simulates a network error                     |
 | _(after a tool result)_    | Returns a completion acknowledging the result (repeating your answer after `ask_user`) |

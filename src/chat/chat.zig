@@ -8,6 +8,7 @@ const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const tools = @import("../tools/root.zig");
 const tool_display = @import("display.zig");
+const diff_view = @import("diff_view.zig");
 const usage_estimator = @import("usage.zig");
 const accumulator = @import("accumulator.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
@@ -169,8 +170,9 @@ pub fn runTurnWithMode(
         for (assistant_content.tool_calls.?) |tc| {
             try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
-            const result = try executeTool(arena, io, tc, mode);
-            tool_output_lines += tool_display.toolCallRows(tc.function.name, result);
+            const run = try runTool(arena, io, stdout_writer, tc, mode, content_cursor_offset + tool_output_lines, terminal.terminalHeight());
+            const result = run.result;
+            tool_output_lines += tool_display.toolCallRows(tc.function.name, result) + run.diff_rows;
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
                 log.print("[TOOL_CALL]\n{s}\n{s}\n\n", .{ tc.function.name, tc.function.arguments }) catch {};
@@ -209,6 +211,55 @@ fn printToolCall(
     const columns = terminal.terminalWidth() orelse std.math.maxInt(usize);
     const rendered_tool_call = try tool_display.renderToolCallFitting(arena, tool_call, columns);
     try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
+}
+
+const ToolRun = struct { result: []const u8, diff_rows: usize };
+
+/// Runs a tool call and prints the diff of any file it changed. The result
+/// lives in `arena`, the conversation's, because it is kept in the history.
+/// Everything the diff needs, which can be several times the size of the
+/// file, lives in a scratch arena freed before returning.
+fn runTool(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    tool_call: openai.ToolCall,
+    mode: AgentMode,
+    rows_used: usize,
+    height: ?usize,
+) !ToolRun {
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const snapshot = diff_view.capture(scratch.allocator(), io, tool_call);
+    const result = try executeTool(arena, io, tool_call, mode);
+    const diff_rows = try printDiff(scratch.allocator(), io, stdout_writer, snapshot, rows_used, height);
+    return .{ .result = result, .diff_rows = diff_rows };
+}
+
+/// Prints the diff of the file a tool just changed under its tool-call line
+/// and returns how many rows it took, which the thinking indicator needs to
+/// find its own line again. `rows_used` is how many rows this turn already
+/// put on a screen `height` rows tall; the diff is shortened, or skipped, so
+/// the indicator line stays in view. A diff that can't be shown is skipped: it must
+/// never fail the turn.
+fn printDiff(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    snapshot: ?diff_view.Snapshot,
+    rows_used: usize,
+    height: ?usize,
+) !usize {
+    const before_change = snapshot orelse return 0;
+    const columns = terminal.terminalWidth() orelse 120;
+    const budget = diff_view.rowBudget(height, rows_used);
+    const rendered = diff_view.render(arena, io, before_change, columns, budget) catch return 0;
+    if (rendered.rows == 0) return 0;
+    // The tool has already run: a terminal that can't take the diff must not
+    // keep its result out of the history.
+    stdout_writer.writeAll(rendered.text) catch return 0;
+    stdout_writer.flush() catch return 0;
+    return rendered.rows;
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
@@ -797,4 +848,149 @@ test "runTurn estimates unreported input with the tool definitions" {
     try std.testing.expect(result.usage_estimated);
     try std.testing.expectEqual(@as(i64, 14), result.usage.?.input_tokens);
     try std.testing.expectEqual(@as(i64, 14), session_stats.models.items[0].stats.input_tokens);
+}
+
+test "printDiff writes the rows a write_file produced and returns their count" {
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-diff.txt\",\"content\":\"hi\\n\"}" } };
+    const snapshot = diff_view.capture(arena, std.testing.io, call);
+    _ = try executeTool(arena, std.testing.io, call, .build);
+    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot, 0, null);
+    try std.testing.expectEqual(@as(usize, 1), rows);
+    try std.testing.expectEqualStrings("\n   " ++ ansi.green ++ "1 +" ++ ansi.reset ++ " hi", output.written());
+}
+
+test "printDiff writes nothing when diffs are off or nothing changed" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    try std.testing.expectEqual(@as(usize, 0), try printDiff(arena, std.testing.io, &output.writer, null, 0, null));
+    try std.testing.expectEqualStrings("", output.written());
+}
+
+test "diff rows are cleared with the indicator and stay in order" {
+    const helpers = @import("../tools/helpers.zig");
+    const FakeScreen = @import("../tui/fake_screen.zig").FakeScreen;
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-screen.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try helpers.writeFile(std.testing.io, path, "a\nb\nc\n");
+    var output = std.Io.Writer.Allocating.init(arena);
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "edit_file", .arguments = "{\"path\":\"puny-test-chat-diff-screen.txt\",\"old_string\":\"b\",\"new_string\":\"X\"}" } };
+    var thinking = indicator.ThinkingIndicator.init(std.testing.io);
+    try output.writer.writeAll("\n> go\r\n");
+    try thinking.show(&output.writer);
+    try printToolCall(arena, &output.writer, call);
+    const snapshot = diff_view.capture(arena, std.testing.io, call);
+    _ = try executeTool(arena, std.testing.io, call, .build);
+    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot, 0, null);
+    try std.testing.expectEqual(@as(usize, 4), rows);
+    try thinking.finish(std.testing.io, &output.writer, 1 + rows, false, true, .done, null);
+
+    var screen = FakeScreen{ .width = 80 };
+    defer screen.deinit(arena);
+    try screen.feed(arena, output.written());
+    const text = try screen.toText(arena);
+    errdefer std.debug.print("screen:\n{s}\n", .{text});
+    try std.testing.expect(std.mem.indexOf(u8, text, "Thinking...") == null);
+    const tool = std.mem.indexOf(u8, text, "Editing") orelse return error.MissingToolLine;
+    const removed = std.mem.indexOf(u8, text, "2 - b") orelse return error.MissingRemoved;
+    const added = std.mem.indexOf(u8, text, "2 + X") orelse return error.MissingAdded;
+    try std.testing.expect(tool < removed and removed < added);
+}
+
+test "stacked diffs never push the indicator line off a short screen" {
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-budget.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+
+    var content: std.ArrayList(u8) = .empty;
+    for (0..40) |i| try content.print(arena, "line {d}\n", .{i});
+    const args = try std.json.Stringify.valueAlloc(arena, .{ .path = path, .content = content.items }, .{});
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = args } };
+
+    const height: usize = 24;
+    var rows_used: usize = 0;
+    var shown: usize = 0;
+    for (0..3) |_| {
+        // Each pass rewrites the file with different content, as two writes
+        // in one turn would.
+        std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+        const snapshot = diff_view.capture(arena, std.testing.io, call);
+        _ = try executeTool(arena, std.testing.io, call, .build);
+        const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot, rows_used, height);
+        if (rows > 0) {
+            shown += 1;
+            // The indicator must stay in view above this tool's line, the diff
+            // and the input bar.
+            try std.testing.expect(rows_used + 1 + rows <= height - 3);
+        }
+        rows_used += 1 + rows;
+    }
+    // The first diff fits; once the screen is nearly full the rest are skipped.
+    try std.testing.expectEqual(@as(usize, 1), shown);
+}
+
+test "diffing a large file does not grow the conversation arena" {
+    const helpers = @import("../tools/helpers.zig");
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-scratch.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    // About 600 KiB on disk, replaced by a two-line file: the diff has to
+    // read, split and prepare all of it.
+    var big: std.ArrayList(u8) = .empty;
+    defer big.deinit(std.testing.allocator);
+    for (0..40000) |i| try big.print(std.testing.allocator, "line number {d}\n", .{i});
+    try helpers.writeFile(std.testing.io, path, big.items);
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-diff-scratch.txt\",\"content\":\"a\\nb\\n\"}" } };
+    const before = arena_state.queryCapacity();
+    const run = try runTool(arena, std.testing.io, &output.writer, call, .build, 0, null);
+    try std.testing.expect(run.diff_rows > 0);
+    try std.testing.expectEqualStrings("File written successfully.", run.result);
+    // Only the tool result and its arguments belong to the conversation.
+    try std.testing.expect(arena_state.queryCapacity() - before < 64 * 1024);
+}
+
+test "printDiff leaves the turn alone when the terminal write fails" {
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-failing.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-diff-failing.txt\",\"content\":\"hi\\n\"}" } };
+    const snapshot = diff_view.capture(arena, std.testing.io, call);
+    _ = try executeTool(arena, std.testing.io, call, .build);
+    var failing = std.Io.Writer.failing;
+    // The tool already ran, so its result must still be recorded.
+    try std.testing.expectEqual(@as(usize, 0), try printDiff(arena, std.testing.io, &failing, snapshot, 0, null));
 }

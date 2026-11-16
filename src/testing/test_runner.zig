@@ -92,6 +92,10 @@ test "include chat.chat tests" {
 test "include chat.stats tests" {
     _ = @import("../chat/stats.zig");
 }
+test "include chat.diff_view tests" {
+    _ = @import("../chat/diff_view.zig");
+}
+
 test "include chat.display tests" {
     _ = @import("../chat/display.zig");
 }
@@ -235,6 +239,14 @@ test "include tools.web tests" {
 }
 test "include tui.ansi tests" {
     _ = @import("../tui/ansi.zig");
+}
+
+test "include tui.highlight tests" {
+    _ = @import("../tui/highlight.zig");
+}
+
+test "include tui.diff tests" {
+    _ = @import("../tui/diff.zig");
 }
 test "include tui.context_tier_picker tests" {
     _ = @import("../tui/context_tier_picker.zig");
