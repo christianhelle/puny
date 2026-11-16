@@ -170,10 +170,9 @@ pub fn runTurnWithMode(
         for (assistant_content.tool_calls.?) |tc| {
             try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
-            const snapshot = diff_view.capture(arena, io, tc);
-            const result = try executeTool(arena, io, tc, mode);
-            const diff_rows = try printDiff(arena, io, stdout_writer, snapshot, content_cursor_offset + tool_output_lines, terminal.terminalHeight());
-            tool_output_lines += tool_display.toolCallRows(tc.function.name, result) + diff_rows;
+            const run = try runTool(arena, io, stdout_writer, tc, mode, content_cursor_offset + tool_output_lines, terminal.terminalHeight());
+            const result = run.result;
+            tool_output_lines += tool_display.toolCallRows(tc.function.name, result) + run.diff_rows;
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
                 log.print("[TOOL_CALL]\n{s}\n{s}\n\n", .{ tc.function.name, tc.function.arguments }) catch {};
@@ -212,6 +211,29 @@ fn printToolCall(
     const columns = terminal.terminalWidth() orelse std.math.maxInt(usize);
     const rendered_tool_call = try tool_display.renderToolCallFitting(arena, tool_call, columns);
     try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
+}
+
+const ToolRun = struct { result: []const u8, diff_rows: usize };
+
+/// Runs a tool call and prints the diff of any file it changed. The result
+/// lives in `arena`, the conversation's, because it is kept in the history.
+/// Everything the diff needs, which can be several times the size of the
+/// file, lives in a scratch arena freed before returning.
+fn runTool(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    tool_call: openai.ToolCall,
+    mode: AgentMode,
+    rows_used: usize,
+    height: ?usize,
+) !ToolRun {
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const snapshot = diff_view.capture(scratch.allocator(), io, tool_call);
+    const result = try executeTool(arena, io, tool_call, mode);
+    const diff_rows = try printDiff(scratch.allocator(), io, stdout_writer, snapshot, rows_used, height);
+    return .{ .result = result, .diff_rows = diff_rows };
 }
 
 /// Prints the diff of the file a tool just changed under its tool-call line
@@ -924,4 +946,32 @@ test "stacked diffs never push the indicator line off a short screen" {
     }
     // The first diff fits; once the screen is nearly full the rest are skipped.
     try std.testing.expectEqual(@as(usize, 1), shown);
+}
+
+test "diffing a large file does not grow the conversation arena" {
+    const helpers = @import("../tools/helpers.zig");
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-scratch.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    // About 600 KiB on disk, replaced by a two-line file: the diff has to
+    // read, split and prepare all of it.
+    var big: std.ArrayList(u8) = .empty;
+    defer big.deinit(std.testing.allocator);
+    for (0..40000) |i| try big.print(std.testing.allocator, "line number {d}\n", .{i});
+    try helpers.writeFile(std.testing.io, path, big.items);
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-diff-scratch.txt\",\"content\":\"a\\nb\\n\"}" } };
+    const before = arena_state.queryCapacity();
+    const run = try runTool(arena, std.testing.io, &output.writer, call, .build, 0, null);
+    try std.testing.expect(run.diff_rows > 0);
+    try std.testing.expectEqualStrings("File written successfully.", run.result);
+    // Only the tool result and its arguments belong to the conversation.
+    try std.testing.expect(arena_state.queryCapacity() - before < 64 * 1024);
 }
