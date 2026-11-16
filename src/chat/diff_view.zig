@@ -140,12 +140,17 @@ fn writeNumber(writer: *std.Io.Writer, n: usize, width: usize) !void {
 /// a newline. Returns no rows when nothing changed.
 pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8, after: []const u8, columns: usize) !Rendered {
     if (isBinary(before) or isBinary(after)) return .{ .text = "", .rows = 0 };
-    const old = try prepareLines(arena, try diff.splitLines(arena, before));
-    const new = try prepareLines(arena, try diff.splitLines(arena, after));
+    // Compare the lines as written, so an edit that looks the same once tabs
+    // and control characters are replaced still shows. The prepared copies
+    // keep the same line numbers and are only used for drawing.
+    const raw_old = try diff.splitLines(arena, before);
+    const raw_new = try diff.splitLines(arena, after);
+    const old = try prepareLines(arena, raw_old);
+    const new = try prepareLines(arena, raw_new);
     const lang = highlight.languageForPath(path);
     const old_states = try startStates(arena, lang, old);
     const new_states = try startStates(arena, lang, new);
-    const script = try diff.diffLines(arena, old, new);
+    const script = try diff.diffLines(arena, raw_old, raw_new);
 
     var changed = false;
     for (script) |line| {
@@ -526,4 +531,18 @@ test "resolveEnabled follows the flag, else whether stdout is a terminal" {
     try std.testing.expect(!resolveEnabled(false, true));
     try std.testing.expect(resolveEnabled(null, true));
     try std.testing.expect(!resolveEnabled(null, false));
+}
+
+test "renderDiff shows an edit that only changes whitespace the screen can't tell apart" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // A Makefile recipe whose tab became four spaces looks the same once tabs
+    // are expanded, but the edit breaks it.
+    const tabs = try renderDiff(arena, "Makefile", "all:\n\tcc x\n", "all:\n    cc x\n", 80);
+    try std.testing.expect(tabs.rows > 0);
+    // Control characters are scrubbed to spaces, yet a change between two of
+    // them is still a change.
+    const controls = try renderDiff(arena, "a.txt", "a\x01b\n", "a\x02b\n", 80);
+    try std.testing.expectEqual(@as(usize, 2), controls.rows);
 }
