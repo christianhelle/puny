@@ -85,9 +85,10 @@ pub fn colorFor(class: TokenClass) []const u8 {
 
 fn push(tokens: *std.ArrayList(Token), allocator: std.mem.Allocator, start: usize, end: usize, class: TokenClass) !void {
     if (end <= start) return;
-    if (class == .plain and tokens.items.len > 0) {
+    const mergeable = class == .plain or class == .comment or class == .string;
+    if (mergeable and tokens.items.len > 0) {
         const last = &tokens.items[tokens.items.len - 1];
-        if (last.class == .plain and last.end == start) {
+        if (last.class == class and last.end == start) {
             last.end = end;
             return;
         }
@@ -124,13 +125,64 @@ pub fn tokenize(
         try push(tokens, allocator, 0, line.len, .plain);
         return .normal;
     };
-    _ = state;
+    var current = state;
     var i: usize = 0;
     scan: while (i < line.len) {
+        switch (current) {
+            .block_comment => {
+                const close = (lang.block_comment orelse {
+                    current = .normal;
+                    continue :scan;
+                }).close;
+                if (std.mem.indexOfPos(u8, line, i, close)) |at| {
+                    try push(tokens, allocator, i, at + close.len, .comment);
+                    i = at + close.len;
+                    current = .normal;
+                } else {
+                    try push(tokens, allocator, i, line.len, .comment);
+                    i = line.len;
+                }
+                continue :scan;
+            },
+            .multiline_string => {
+                const close = lang.multiline_string orelse {
+                    current = .normal;
+                    continue :scan;
+                };
+                if (std.mem.indexOfPos(u8, line, i, close)) |at| {
+                    try push(tokens, allocator, i, at + close.len, .string);
+                    i = at + close.len;
+                    current = .normal;
+                } else {
+                    try push(tokens, allocator, i, line.len, .string);
+                    i = line.len;
+                }
+                continue :scan;
+            },
+            .normal => {},
+        }
         for (lang.line_comments) |marker| {
             if (std.mem.startsWith(u8, line[i..], marker)) {
                 try push(tokens, allocator, i, line.len, .comment);
                 break :scan;
+            }
+        }
+        if (lang.block_comment) |block| {
+            if (std.mem.startsWith(u8, line[i..], block.open)) {
+                current = .block_comment;
+                const body = i + block.open.len;
+                try push(tokens, allocator, i, body, .comment);
+                i = body;
+                continue :scan;
+            }
+        }
+        if (lang.multiline_string) |delimiter| {
+            if (std.mem.startsWith(u8, line[i..], delimiter)) {
+                current = .multiline_string;
+                const body = i + delimiter.len;
+                try push(tokens, allocator, i, body, .string);
+                i = body;
+                continue :scan;
             }
         }
         const c = line[i];
@@ -168,7 +220,7 @@ pub fn tokenize(
         try push(tokens, allocator, i, i + 1, .plain);
         i += 1;
     }
-    return .normal;
+    return current;
 }
 
 fn expectTokens(lang: ?*const Language, line: []const u8, expected: []const struct { []const u8, TokenClass }) !void {
@@ -261,4 +313,85 @@ test "colorFor leaves plain text uncoloured" {
     try std.testing.expectEqualStrings("", colorFor(.plain));
     try std.testing.expect(colorFor(.keyword).len > 0);
     try std.testing.expect(colorFor(.comment).len > 0);
+}
+
+fn tokensAndState(lang: *const Language, line: []const u8, state: State, out: *std.ArrayList(Token)) !State {
+    return tokenize(std.testing.allocator, lang, line, state, out);
+}
+
+test "a block comment can open on one line and close on a later one" {
+    const sql = languageForPath("q.sql").?;
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+
+    var state = try tokensAndState(sql, "x /* open", .normal, &tokens);
+    try std.testing.expectEqual(State.block_comment, state);
+    try std.testing.expectEqual(@as(usize, 2), tokens.items.len);
+    try std.testing.expectEqual(TokenClass.comment, tokens.items[1].class);
+
+    tokens.clearRetainingCapacity();
+    state = try tokensAndState(sql, "still comment", .block_comment, &tokens);
+    try std.testing.expectEqual(State.block_comment, state);
+    try std.testing.expectEqual(@as(usize, 1), tokens.items.len);
+    try std.testing.expectEqual(TokenClass.comment, tokens.items[0].class);
+
+    tokens.clearRetainingCapacity();
+    state = try tokensAndState(sql, "close */ select", .block_comment, &tokens);
+    try std.testing.expectEqual(State.normal, state);
+    try std.testing.expectEqual(@as(usize, 3), tokens.items.len);
+    try std.testing.expectEqual(TokenClass.comment, tokens.items[0].class);
+    try std.testing.expectEqual(TokenClass.keyword, tokens.items[2].class);
+}
+
+test "a block comment that closes on its own line leaves the state normal" {
+    try expectTokens(languageForPath("q.sql"), "/* a */ b", &.{
+        .{ "/* a */", .comment },
+        .{ " b", .plain },
+    });
+}
+
+const test_backtick = Language{ .extensions = &.{"x"}, .multiline_string = "`" };
+const test_triple = Language{ .extensions = &.{"y"}, .quotes = "\"'", .multiline_string = "\"\"\"" };
+
+test "a multiline string can span lines" {
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+
+    var state = try tokensAndState(&test_backtick, "a `b", .normal, &tokens);
+    try std.testing.expectEqual(State.multiline_string, state);
+    try std.testing.expectEqual(TokenClass.string, tokens.items[tokens.items.len - 1].class);
+
+    tokens.clearRetainingCapacity();
+    state = try tokensAndState(&test_backtick, "c` d", .multiline_string, &tokens);
+    try std.testing.expectEqual(State.normal, state);
+    try std.testing.expectEqual(@as(usize, 2), tokens.items.len);
+    try std.testing.expectEqual(TokenClass.string, tokens.items[0].class);
+    try std.testing.expectEqual(TokenClass.plain, tokens.items[1].class);
+}
+
+test "a triple quote opens a multiline string before a plain quote does" {
+    try expectTokens(&test_triple, "\"\"\"x\"\"\" y", &.{
+        .{ "\"\"\"x\"\"\"", .string },
+        .{ " y", .plain },
+    });
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+    const state = try tokensAndState(&test_triple, "z = \"\"\"doc", .normal, &tokens);
+    try std.testing.expectEqual(State.multiline_string, state);
+}
+
+test "tokens cover the whole line without gaps in every state" {
+    const line = "a /* b */ \"c\" 1 // d";
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+    for ([_]State{ .normal, .block_comment }) |state| {
+        tokens.clearRetainingCapacity();
+        _ = try tokensAndState(languageForPath("q.sql").?, line, state, &tokens);
+        var pos: usize = 0;
+        for (tokens.items) |t| {
+            try std.testing.expectEqual(pos, t.start);
+            pos = t.end;
+        }
+        try std.testing.expectEqual(line.len, pos);
+    }
 }
