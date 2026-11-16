@@ -5,6 +5,9 @@ const diff = @import("../tui/diff.zig");
 /// Unchanged lines shown on each side of a change.
 pub const context_lines = 2;
 
+/// Rows of diff shown per tool call; a footer row may follow.
+pub const max_rows = 20;
+
 pub const Rendered = struct { text: []const u8, rows: usize };
 
 fn digits(n: usize) usize {
@@ -50,6 +53,18 @@ pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8
     var last_shown: ?usize = null;
     for (script, 0..) |line, i| {
         if (!visible[i]) continue;
+        const needs_separator = if (last_shown) |previous| i > previous + 1 else false;
+        if (rows + @as(usize, if (needs_separator) 2 else 1) > max_rows) {
+            var remaining: usize = 0;
+            for (visible[i..]) |shown| {
+                if (shown) remaining += 1;
+            }
+            try writer.writeAll("\n   ");
+            for (0..width + 1) |_| try writer.writeByte(' ');
+            try writer.print(ansi.dim ++ "… {d} more {s}" ++ ansi.reset, .{ remaining, if (remaining == 1) "line" else "lines" });
+            rows += 1;
+            break;
+        }
         if (last_shown) |previous| {
             if (i > previous + 1) {
                 try writer.writeAll("\n   ");
@@ -176,4 +191,35 @@ test "renderDiff joins hunks whose context touches" {
     const after = try numberedLines(arena, 10, &.{ 2, 6 });
     const rendered = try renderDiff(arena, "a.txt", before, after, 80);
     try std.testing.expect(std.mem.indexOf(u8, rendered.text, "⋮") == null);
+}
+
+test "renderDiff caps the rows and counts the lines left out" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const after = try numberedLines(arena, 30, &.{});
+    const rendered = try renderDiff(arena, "a.txt", "", after, 80);
+    try std.testing.expectEqual(@as(usize, 21), rendered.rows);
+    try std.testing.expect(std.mem.endsWith(u8, rendered.text, "\n      " ++ dim ++ "… 10 more lines" ++ reset));
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "line20") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "line21") == null);
+}
+
+test "renderDiff footer says line when one is left out" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const after = try numberedLines(arena, 21, &.{});
+    const rendered = try renderDiff(arena, "a.txt", "", after, 80);
+    try std.testing.expect(std.mem.endsWith(u8, rendered.text, "… 1 more line" ++ reset));
+}
+
+test "renderDiff shows exactly the cap without a footer" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const after = try numberedLines(arena, 20, &.{});
+    const rendered = try renderDiff(arena, "a.txt", "", after, 80);
+    try std.testing.expectEqual(@as(usize, 20), rendered.rows);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "more line") == null);
 }
