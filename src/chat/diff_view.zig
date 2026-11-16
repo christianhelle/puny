@@ -2,6 +2,9 @@ const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const diff = @import("../tui/diff.zig");
 
+/// Unchanged lines shown on each side of a change.
+pub const context_lines = 2;
+
 pub const Rendered = struct { text: []const u8, rows: usize };
 
 fn digits(n: usize) usize {
@@ -31,11 +34,31 @@ pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8
     }
     if (!changed) return .{ .text = "", .rows = 0 };
 
+    const visible = try arena.alloc(bool, script.len);
+    @memset(visible, false);
+    for (script, 0..) |line, i| {
+        if (line.kind == .context) continue;
+        const first = i -| context_lines;
+        const last = @min(script.len - 1, i + context_lines);
+        @memset(visible[first .. last + 1], true);
+    }
+
     const width = digits(@max(old.len, new.len));
     var out = std.Io.Writer.Allocating.init(arena);
     const writer = &out.writer;
     var rows: usize = 0;
-    for (script) |line| {
+    var last_shown: ?usize = null;
+    for (script, 0..) |line, i| {
+        if (!visible[i]) continue;
+        if (last_shown) |previous| {
+            if (i > previous + 1) {
+                try writer.writeAll("\n   ");
+                for (0..width + 1) |_| try writer.writeByte(' ');
+                try writer.writeAll(ansi.dim ++ "⋮" ++ ansi.reset);
+                rows += 1;
+            }
+        }
+        last_shown = i;
         try writer.writeAll("\n   ");
         switch (line.kind) {
             .context => {
@@ -109,4 +132,48 @@ test "renderDiff pads line numbers to the widest number" {
     for (1..11) |i| try before.print(arena, "l{d}\n", .{i});
     const rendered = try renderDiff(arena, "a.txt", "", before.items, 80);
     try std.testing.expect(std.mem.startsWith(u8, rendered.text, "\n   " ++ green ++ " 1 +" ++ reset ++ " l1"));
+}
+
+fn numberedLines(arena: std.mem.Allocator, count: usize, replace: []const usize) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (1..count + 1) |i| {
+        const changed = std.mem.indexOfScalar(usize, replace, i) != null;
+        try out.print(arena, "{s}{d}\n", .{ if (changed) "NEW" else "line", i });
+    }
+    return out.items;
+}
+
+test "renderDiff shows two lines of context around a change" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const before = try numberedLines(arena, 10, &.{});
+    const after = try numberedLines(arena, 10, &.{5});
+    const rendered = try renderDiff(arena, "a.txt", before, after, 80);
+    try std.testing.expectEqual(@as(usize, 6), rendered.rows);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "line2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "line3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "line7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "line8") == null);
+}
+
+test "renderDiff separates distant changes with a vertical ellipsis" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const before = try numberedLines(arena, 20, &.{});
+    const after = try numberedLines(arena, 20, &.{ 2, 19 });
+    const rendered = try renderDiff(arena, "a.txt", before, after, 80);
+    try std.testing.expectEqual(@as(usize, 11), rendered.rows);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "\n      " ++ dim ++ "⋮" ++ reset) != null);
+}
+
+test "renderDiff joins hunks whose context touches" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const before = try numberedLines(arena, 10, &.{});
+    const after = try numberedLines(arena, 10, &.{ 2, 6 });
+    const rendered = try renderDiff(arena, "a.txt", before, after, 80);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "⋮") == null);
 }
