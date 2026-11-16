@@ -19,6 +19,12 @@ pub const Rendered = struct { text: []const u8, rows: usize };
 /// Set once at startup; capture does nothing while it is false.
 pub var enabled: bool = false;
 
+/// An explicit `--diff` / `--no-diff` wins; otherwise diffs show only when
+/// stdout is a terminal, so piped output stays as it was.
+pub fn resolveEnabled(flag: ?bool, stdout_is_tty: bool) bool {
+    return flag orelse stdout_is_tty;
+}
+
 const max_file_bytes = 1024 * 1024;
 
 /// A file as it was before a tool changed it.
@@ -513,4 +519,11 @@ test "render is empty when the file is missing afterwards" {
     defer arena_state.deinit();
     const rendered = try render(arena_state.allocator(), std.testing.io, .{ .path = "puny-test-diff-view-missing.txt", .before = "a\n" }, 80);
     try std.testing.expectEqual(@as(usize, 0), rendered.rows);
+}
+
+test "resolveEnabled follows the flag, else whether stdout is a terminal" {
+    try std.testing.expect(resolveEnabled(true, false));
+    try std.testing.expect(!resolveEnabled(false, true));
+    try std.testing.expect(resolveEnabled(null, true));
+    try std.testing.expect(!resolveEnabled(null, false));
 }
