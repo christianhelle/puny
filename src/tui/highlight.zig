@@ -54,7 +54,109 @@ const sql_language = Language{
     },
 };
 
-const languages = [_]*const Language{ &zig_language, &sql_language };
+const c_language = Language{
+    .extensions = &.{ "c", "h" },
+    .line_comments = &.{"//"},
+    .block_comment = .{ .open = "/*", .close = "*/" },
+    .quotes = "\"'",
+    .keywords = &.{ "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void", "volatile", "while", "bool", "true", "false", "NULL" },
+};
+
+const cpp_language = Language{
+    .extensions = &.{ "cpp", "hpp", "cc" },
+    .line_comments = &.{"//"},
+    .block_comment = .{ .open = "/*", .close = "*/" },
+    .quotes = "\"'",
+    .keywords = &.{ "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void", "volatile", "while", "bool", "true", "false", "NULL", "class", "namespace", "template", "typename", "public", "private", "protected", "virtual", "new", "delete", "this", "using", "try", "catch", "throw", "nullptr", "constexpr", "override" },
+};
+
+const csharp_language = Language{
+    .extensions = &.{"cs"},
+    .line_comments = &.{"//"},
+    .block_comment = .{ .open = "/*", .close = "*/" },
+    .quotes = "\"'",
+    .keywords = &.{ "abstract", "as", "base", "bool", "break", "case", "catch", "char", "class", "const", "continue", "default", "delegate", "do", "double", "else", "enum", "event", "false", "finally", "float", "for", "foreach", "if", "in", "int", "interface", "internal", "is", "namespace", "new", "null", "object", "override", "private", "protected", "public", "readonly", "ref", "return", "sealed", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "using", "var", "virtual", "void", "while", "async", "await" },
+};
+
+const java_language = Language{
+    .extensions = &.{"java"},
+    .line_comments = &.{"//"},
+    .block_comment = .{ .open = "/*", .close = "*/" },
+    .quotes = "\"'",
+    .keywords = &.{ "abstract", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float", "for", "if", "implements", "import", "instanceof", "int", "interface", "long", "new", "null", "package", "private", "protected", "public", "return", "short", "static", "super", "switch", "this", "throw", "throws", "true", "false", "try", "void", "volatile", "while", "var" },
+};
+
+const javascript_language = Language{
+    .extensions = &.{ "js", "jsx", "mjs", "cjs", "ts", "tsx" },
+    .line_comments = &.{"//"},
+    .block_comment = .{ .open = "/*", .close = "*/" },
+    .quotes = "\"'",
+    .multiline_string = "`",
+    .keywords = &.{ "async", "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "interface", "let", "new", "null", "of", "private", "protected", "public", "readonly", "return", "static", "super", "switch", "this", "throw", "true", "try", "type", "typeof", "undefined", "var", "void", "while", "with", "yield" },
+};
+
+const go_language = Language{
+    .extensions = &.{"go"},
+    .line_comments = &.{"//"},
+    .block_comment = .{ .open = "/*", .close = "*/" },
+    .quotes = "\"'",
+    .multiline_string = "`",
+    .keywords = &.{ "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range", "return", "select", "struct", "switch", "type", "var", "true", "false", "nil" },
+};
+
+const rust_language = Language{
+    .extensions = &.{"rs"},
+    .line_comments = &.{"//"},
+    .block_comment = .{ .open = "/*", .close = "*/" },
+    .quotes = "\"",
+    .keywords = &.{ "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while" },
+};
+
+const python_language = Language{
+    .extensions = &.{"py"},
+    .line_comments = &.{"#"},
+    .quotes = "\"'",
+    .multiline_string = "\"\"\"",
+    .keywords = &.{ "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "None", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield", "True", "False" },
+};
+
+const shell_language = Language{
+    .extensions = &.{ "sh", "bash", "zsh" },
+    .line_comments = &.{"#"},
+    .quotes = "\"'",
+    .keywords = &.{ "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "in", "function", "select", "return", "exit", "local", "export", "readonly", "break", "continue" },
+};
+
+const powershell_language = Language{
+    .extensions = &.{ "ps1", "psm1" },
+    .line_comments = &.{"#"},
+    .block_comment = .{ .open = "<#", .close = "#>" },
+    .quotes = "\"'",
+    .case_insensitive_keywords = true,
+    .keywords = &.{ "begin", "break", "catch", "class", "continue", "data", "do", "dynamicparam", "else", "elseif", "end", "exit", "filter", "finally", "for", "foreach", "from", "function", "if", "in", "param", "process", "return", "switch", "throw", "trap", "try", "until", "using", "var", "while" },
+};
+
+const json_language = Language{
+    .extensions = &.{"json"},
+    .quotes = "\"",
+    .keywords = &.{ "true", "false", "null" },
+};
+
+const yaml_language = Language{
+    .extensions = &.{ "yml", "yaml" },
+    .line_comments = &.{"#"},
+    .quotes = "\"'",
+    .keywords = &.{ "true", "false", "null" },
+};
+
+const toml_language = Language{
+    .extensions = &.{"toml"},
+    .line_comments = &.{"#"},
+    .quotes = "\"'",
+    .keywords = &.{ "true", "false" },
+};
+
+const languages = [_]*const Language{ &zig_language, &sql_language, &c_language, &cpp_language, &csharp_language, &java_language, &javascript_language, &go_language, &rust_language, &python_language, &shell_language, &powershell_language, &json_language, &yaml_language, &toml_language };
 
 /// The language for a path's extension, case-insensitively, or null.
 pub fn languageForPath(path: []const u8) ?*const Language {
@@ -394,4 +496,76 @@ test "tokens cover the whole line without gaps in every state" {
         }
         try std.testing.expectEqual(line.len, pos);
     }
+}
+
+fn expectFirstKeyword(path: []const u8, line: []const u8, word: []const u8) !void {
+    const lang = languageForPath(path) orelse return error.UnknownLanguage;
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+    _ = try tokenize(std.testing.allocator, lang, line, .normal, &tokens);
+    for (tokens.items) |t| {
+        if (t.class == .keyword) {
+            try std.testing.expectEqualStrings(word, line[t.start..t.end]);
+            return;
+        }
+    }
+    return error.NoKeyword;
+}
+
+test "every supported language highlights a keyword" {
+    try expectFirstKeyword("a.c", "int main() { return 0; }", "int");
+    try expectFirstKeyword("a.h", "static int x;", "static");
+    try expectFirstKeyword("a.cpp", "class A {};", "class");
+    try expectFirstKeyword("a.hpp", "namespace n {}", "namespace");
+    try expectFirstKeyword("a.cc", "template <class T>", "template");
+    try expectFirstKeyword("a.cs", "public class A {}", "public");
+    try expectFirstKeyword("a.java", "public class A {}", "public");
+    try expectFirstKeyword("a.js", "const x = 1;", "const");
+    try expectFirstKeyword("a.jsx", "function f() {}", "function");
+    try expectFirstKeyword("a.mjs", "export default 1;", "export");
+    try expectFirstKeyword("a.cjs", "let a;", "let");
+    try expectFirstKeyword("a.ts", "interface A {}", "interface");
+    try expectFirstKeyword("a.tsx", "type A = number;", "type");
+    try expectFirstKeyword("a.go", "func main() {}", "func");
+    try expectFirstKeyword("a.rs", "fn main() {}", "fn");
+    try expectFirstKeyword("a.py", "def f(): pass", "def");
+    try expectFirstKeyword("a.sh", "if [ -f x ]; then", "if");
+    try expectFirstKeyword("a.bash", "for i in 1; do", "for");
+    try expectFirstKeyword("a.zsh", "while true; do", "while");
+    try expectFirstKeyword("a.ps1", "function Get-X {}", "function");
+    try expectFirstKeyword("a.psm1", "param($x)", "param");
+    try expectFirstKeyword("a.json", "{\"a\": true}", "true");
+    try expectFirstKeyword("a.yml", "a: true", "true");
+    try expectFirstKeyword("a.yaml", "a: null", "null");
+    try expectFirstKeyword("a.toml", "a = false", "false");
+    try expectFirstKeyword("a.sql", "SELECT 1", "SELECT");
+    try expectFirstKeyword("a.zon", ".x = null", "null");
+}
+
+test "hash comments are comments in Python and shell" {
+    try expectTokens(languageForPath("a.py"), "x = 1  # c", &.{
+        .{ "x = ", .plain },
+        .{ "1", .number },
+        .{ "  ", .plain },
+        .{ "# c", .comment },
+    });
+    try expectTokens(languageForPath("a.sh"), "# c", &.{.{ "# c", .comment }});
+}
+
+test "a Rust lifetime quote is not a string" {
+    try expectTokens(languageForPath("a.rs"), "&'a str", &.{.{ "&'a str", .plain }});
+}
+
+test "a Go raw string spans lines" {
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+    const state = try tokenize(std.testing.allocator, languageForPath("a.go"), "s := `abc", .normal, &tokens);
+    try std.testing.expectEqual(State.multiline_string, state);
+}
+
+test "a Python docstring spans lines" {
+    var tokens: std.ArrayList(Token) = .empty;
+    defer tokens.deinit(std.testing.allocator);
+    const state = try tokenize(std.testing.allocator, languageForPath("a.py"), "\"\"\"doc", .normal, &tokens);
+    try std.testing.expectEqual(State.multiline_string, state);
 }
