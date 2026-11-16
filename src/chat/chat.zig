@@ -255,8 +255,10 @@ fn printDiff(
     const budget = diff_view.rowBudget(height, rows_used);
     const rendered = diff_view.render(arena, io, before_change, columns, budget) catch return 0;
     if (rendered.rows == 0) return 0;
-    try stdout_writer.writeAll(rendered.text);
-    try stdout_writer.flush();
+    // The tool has already run: a terminal that can't take the diff must not
+    // keep its result out of the history.
+    stdout_writer.writeAll(rendered.text) catch return 0;
+    stdout_writer.flush() catch return 0;
     return rendered.rows;
 }
 
@@ -974,4 +976,21 @@ test "diffing a large file does not grow the conversation arena" {
     try std.testing.expectEqualStrings("File written successfully.", run.result);
     // Only the tool result and its arguments belong to the conversation.
     try std.testing.expect(arena_state.queryCapacity() - before < 64 * 1024);
+}
+
+test "printDiff leaves the turn alone when the terminal write fails" {
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-failing.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-diff-failing.txt\",\"content\":\"hi\\n\"}" } };
+    const snapshot = diff_view.capture(arena, std.testing.io, call);
+    _ = try executeTool(arena, std.testing.io, call, .build);
+    var failing = std.Io.Writer.failing;
+    // The tool already ran, so its result must still be recorded.
+    try std.testing.expectEqual(@as(usize, 0), try printDiff(arena, std.testing.io, &failing, snapshot, 0, null));
 }
