@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const diff = @import("../tui/diff.zig");
+const highlight = @import("../tui/highlight.zig");
 const text_width = @import("../tui/markdown/width.zig");
 
 /// Unchanged lines shown on each side of a change.
@@ -17,20 +18,64 @@ fn isBinary(text: []const u8) bool {
     return std.mem.indexOfScalar(u8, text, 0) != null or !std.unicode.utf8ValidateSlice(text);
 }
 
-/// Writes one line of file content: tabs become spaces, control characters
-/// are scrubbed so the file can't drive the terminal, and the text is cut to
-/// `avail` cells so the row never wraps.
-fn writeCode(arena: std.mem.Allocator, writer: *std.Io.Writer, line: []const u8, avail: usize) !void {
-    var copy: std.ArrayList(u8) = .empty;
-    for (line) |byte| {
-        if (byte == 0x09) {
-            try copy.appendNTimes(arena, ' ', tab_width);
+/// Tabs become spaces and control characters are scrubbed, so file content
+/// can't drive the terminal.
+fn prepareLines(arena: std.mem.Allocator, lines: []const []const u8) ![]const []const u8 {
+    const prepared = try arena.alloc([]const u8, lines.len);
+    for (lines, prepared) |line, *slot| {
+        var copy: std.ArrayList(u8) = .empty;
+        for (line) |byte| {
+            if (byte == 0x09) {
+                try copy.appendNTimes(arena, ' ', tab_width);
+            } else {
+                try copy.append(arena, byte);
+            }
+        }
+        ansi.scrubControls(copy.items);
+        slot.* = copy.items;
+    }
+    return prepared;
+}
+
+/// The lexer state at the start of each line, so a line inside a comment
+/// that opened above it still shows as one.
+fn startStates(arena: std.mem.Allocator, lang: ?*const highlight.Language, lines: []const []const u8) ![]highlight.State {
+    const states = try arena.alloc(highlight.State, lines.len);
+    var scratch: std.ArrayList(highlight.Token) = .empty;
+    var state: highlight.State = .normal;
+    for (lines, states) |line, *slot| {
+        slot.* = state;
+        scratch.clearRetainingCapacity();
+        state = try highlight.tokenize(arena, lang, line, state, &scratch);
+    }
+    return states;
+}
+
+/// Writes one prepared line, coloured by token and cut to `avail` cells so
+/// the row never wraps.
+fn writeCode(
+    arena: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    lang: ?*const highlight.Language,
+    line: []const u8,
+    state: highlight.State,
+    avail: usize,
+) !void {
+    const cut = text_width.prefixFitting(line, avail);
+    var tokens: std.ArrayList(highlight.Token) = .empty;
+    _ = try highlight.tokenize(arena, lang, line, state, &tokens);
+    for (tokens.items) |token| {
+        if (token.start >= cut.len) break;
+        const text = line[token.start..@min(token.end, cut.len)];
+        const color = highlight.colorFor(token.class);
+        if (color.len == 0) {
+            try writer.writeAll(text);
         } else {
-            try copy.append(arena, byte);
+            try writer.writeAll(color);
+            try writer.writeAll(text);
+            try writer.writeAll(ansi.reset);
         }
     }
-    ansi.scrubControls(copy.items);
-    try writer.writeAll(text_width.prefixFitting(copy.items, avail));
 }
 
 fn digits(n: usize) usize {
@@ -48,10 +93,12 @@ fn writeNumber(writer: *std.Io.Writer, n: usize, width: usize) !void {
 /// Renders the change from `before` to `after` as rows that each start with
 /// a newline. Returns no rows when nothing changed.
 pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8, after: []const u8, columns: usize) !Rendered {
-    _ = path;
     if (isBinary(before) or isBinary(after)) return .{ .text = "", .rows = 0 };
-    const old = try diff.splitLines(arena, before);
-    const new = try diff.splitLines(arena, after);
+    const old = try prepareLines(arena, try diff.splitLines(arena, before));
+    const new = try prepareLines(arena, try diff.splitLines(arena, after));
+    const lang = highlight.languageForPath(path);
+    const old_states = try startStates(arena, lang, old);
+    const new_states = try startStates(arena, lang, new);
     const script = try diff.diffLines(arena, old, new);
 
     var changed = false;
@@ -106,19 +153,19 @@ pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8
                 try writer.writeAll(ansi.dim);
                 try writeNumber(writer, line.new_index.? + 1, width);
                 try writer.writeAll(ansi.reset ++ "   ");
-                try writeCode(arena, writer, new[line.new_index.?], avail);
+                try writeCode(arena, writer, lang, new[line.new_index.?], new_states[line.new_index.?], avail);
             },
             .remove => {
                 try writer.writeAll(ansi.red);
                 try writeNumber(writer, line.old_index.? + 1, width);
                 try writer.writeAll(" -" ++ ansi.reset ++ " ");
-                try writeCode(arena, writer, old[line.old_index.?], avail);
+                try writeCode(arena, writer, lang, old[line.old_index.?], old_states[line.old_index.?], avail);
             },
             .add => {
                 try writer.writeAll(ansi.green);
                 try writeNumber(writer, line.new_index.? + 1, width);
                 try writer.writeAll(" +" ++ ansi.reset ++ " ");
-                try writeCode(arena, writer, new[line.new_index.?], avail);
+                try writeCode(arena, writer, lang, new[line.new_index.?], new_states[line.new_index.?], avail);
             },
         }
         rows += 1;
@@ -303,4 +350,50 @@ test "renderDiff row count matches the newlines in the text" {
     const after = try numberedLines(arena, 20, &.{ 2, 19 });
     const rendered = try renderDiff(arena, "a.txt", before, after, 80);
     try std.testing.expectEqual(rendered.rows, std.mem.count(u8, rendered.text, "\n"));
+}
+
+test "renderDiff highlights keywords for a known language" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const rendered = try renderDiff(arena_state.allocator(), "a.zig", "", "const x = 1; // hi\n", 80);
+    try std.testing.expectEqualStrings(
+        "\n   " ++ green ++ "1 +" ++ reset ++ " " ++
+            ansi.magenta ++ "const" ++ reset ++ " x = " ++ ansi.cyan ++ "1" ++ reset ++ "; " ++ ansi.dim ++ "// hi" ++ reset,
+        rendered.text,
+    );
+}
+
+test "renderDiff leaves unknown languages uncoloured" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const rendered = try renderDiff(arena_state.allocator(), "a.txt", "", "const x = 1;\n", 80);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, ansi.magenta) == null);
+}
+
+test "renderDiff dims context lines inside a multi-line comment" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const rendered = try renderDiff(
+        arena_state.allocator(),
+        "q.sql",
+        "/* start\nmiddle\nend */\nx\ny\n",
+        "/* start\nmiddle\nend */\nX\ny\n",
+        80,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "   " ++ dim ++ "middle" ++ reset) != null);
+}
+
+test "renderDiff colours removed lines with the old side's lexer state" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    // The old file is inside a comment on line 2; the new file closes it first.
+    const rendered = try renderDiff(
+        arena_state.allocator(),
+        "q.sql",
+        "/* a\nselect\n*/\nz\n",
+        "/* a */\nselect x\nz\n",
+        80,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "-" ++ reset ++ " " ++ dim ++ "select" ++ reset) != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "+" ++ reset ++ " " ++ ansi.magenta ++ "select" ++ reset) != null);
 }
