@@ -1126,7 +1126,7 @@ export PUNY_MOCK=1
 zig build run
 ```
 
-The mock provider returns canned responses and simulates tool calls based on keywords in your prompt:
+The mock provider returns canned responses and simulates tool calls based on keywords in your prompt. Send `help` to list them all:
 
 | Prompt contains            | Mock response                                 |
 | -------------------------- | --------------------------------------------- |
@@ -1134,6 +1134,7 @@ The mock provider returns canned responses and simulates tool calls based on key
 | `search`, `grep`, `find`   | Calls `grep_search` tool                      |
 | `shell`, `run`, `execute`  | Calls `execute_shell` tool                    |
 | `mockedit`                 | Calls `write_file` once, to see a file diff    |
+| `help`                     | Lists every prompt the mock understands, with descriptions |
 | `choice`                   | Calls `ask_user` tool with a database question |
 | `error`, `timeout`, `fail` | Simulates a network error                     |
 | _(after a tool result)_    | Returns a completion acknowledging the result (repeating your answer after `ask_user`) |
