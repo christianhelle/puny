@@ -170,7 +170,11 @@ pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8
     const width = digits(@max(old.len, new.len));
     // Gutter: three spaces, the number, then " m ". One cell stays free so a
     // full row never wraps.
-    const avail = (columns -| 1) -| (3 + width + 3);
+    const gutter = 3 + width + 3;
+    // A gutter that doesn't fit would wrap every row, and the rows are
+    // counted one each, so show nothing rather than a broken diff.
+    if (columns -| 1 < gutter) return .{ .text = "", .rows = 0 };
+    const avail = (columns -| 1) - gutter;
     var out = std.Io.Writer.Allocating.init(arena);
     const writer = &out.writer;
     var rows: usize = 0;
@@ -185,7 +189,10 @@ pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8
             }
             try writer.writeAll("\n   ");
             for (0..width + 1) |_| try writer.writeByte(' ');
-            try writer.print(ansi.dim ++ "… {d} more {s}" ++ ansi.reset, .{ remaining, if (remaining == 1) "line" else "lines" });
+            const footer = try std.fmt.allocPrint(arena, "… {d} more {s}", .{ remaining, if (remaining == 1) "line" else "lines" });
+            try writer.writeAll(ansi.dim);
+            try writer.writeAll(text_width.prefixFitting(footer, (columns -| 1) -| (3 + width + 1)));
+            try writer.writeAll(ansi.reset);
             rows += 1;
             break;
         }
@@ -545,4 +552,37 @@ test "renderDiff shows an edit that only changes whitespace the screen can't tel
     // them is still a change.
     const controls = try renderDiff(arena, "a.txt", "a\x01b\n", "a\x02b\n", 80);
     try std.testing.expectEqual(@as(usize, 2), controls.rows);
+}
+
+fn expectNoRowWraps(text: []const u8, columns: usize) !void {
+    if (text.len == 0) return;
+    var it = std.mem.splitScalar(u8, text[1..], '\n');
+    while (it.next()) |row| {
+        try std.testing.expect(text_width.ansiVisibleWidth(row) <= columns - 1);
+    }
+}
+
+test "renderDiff clips the footer to a narrow terminal" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const after = try numberedLines(arena, 30, &.{});
+    const rendered = try renderDiff(arena, "a.txt", "", after, 20);
+    try std.testing.expect(rendered.rows > 0);
+    try expectNoRowWraps(rendered.text, 20);
+    try std.testing.expect(std.mem.indexOf(u8, rendered.text, "more") != null);
+}
+
+test "renderDiff shows nothing when the gutter alone would wrap" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const after = try numberedLines(arena, 30, &.{});
+    // Two-digit numbers need a gutter of eight cells plus the spare one.
+    const rendered = try renderDiff(arena, "a.txt", "", after, 8);
+    try std.testing.expectEqual(@as(usize, 0), rendered.rows);
+    try std.testing.expectEqualStrings("", rendered.text);
+    const just_fits = try renderDiff(arena, "a.txt", "", after, 9);
+    try std.testing.expect(just_fits.rows > 0);
+    try expectNoRowWraps(just_fits.text, 9);
 }
