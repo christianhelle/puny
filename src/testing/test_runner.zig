@@ -92,6 +92,10 @@ test "include chat.chat tests" {
 test "include chat.stats tests" {
     _ = @import("../chat/stats.zig");
 }
+test "include chat.diff_view tests" {
+    _ = @import("../chat/diff_view.zig");
+}
+
 test "include chat.display tests" {
     _ = @import("../chat/display.zig");
 }
