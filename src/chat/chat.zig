@@ -172,7 +172,7 @@ pub fn runTurnWithMode(
             try stdout_writer.flush();
             const snapshot = diff_view.capture(arena, io, tc);
             const result = try executeTool(arena, io, tc, mode);
-            const diff_rows = try printDiff(arena, io, stdout_writer, snapshot);
+            const diff_rows = try printDiff(arena, io, stdout_writer, snapshot, content_cursor_offset + tool_output_lines, terminal.terminalHeight());
             tool_output_lines += tool_display.toolCallRows(tc.function.name, result) + diff_rows;
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
@@ -216,17 +216,22 @@ fn printToolCall(
 
 /// Prints the diff of the file a tool just changed under its tool-call line
 /// and returns how many rows it took, which the thinking indicator needs to
-/// find its own line again. A diff that can't be shown is skipped: it must
+/// find its own line again. `rows_used` is how many rows this turn already
+/// put on a screen `height` rows tall; the diff is shortened, or skipped, so
+/// the indicator line stays in view. A diff that can't be shown is skipped: it must
 /// never fail the turn.
 fn printDiff(
     arena: std.mem.Allocator,
     io: std.Io,
     stdout_writer: *std.Io.Writer,
     snapshot: ?diff_view.Snapshot,
+    rows_used: usize,
+    height: ?usize,
 ) !usize {
     const before_change = snapshot orelse return 0;
     const columns = terminal.terminalWidth() orelse 120;
-    const rendered = diff_view.render(arena, io, before_change, columns) catch return 0;
+    const budget = diff_view.rowBudget(height, rows_used);
+    const rendered = diff_view.render(arena, io, before_change, columns, budget) catch return 0;
     if (rendered.rows == 0) return 0;
     try stdout_writer.writeAll(rendered.text);
     try stdout_writer.flush();
@@ -834,7 +839,7 @@ test "printDiff writes the rows a write_file produced and returns their count" {
     const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-diff.txt\",\"content\":\"hi\\n\"}" } };
     const snapshot = diff_view.capture(arena, std.testing.io, call);
     _ = try executeTool(arena, std.testing.io, call, .build);
-    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot);
+    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot, 0, null);
     try std.testing.expectEqual(@as(usize, 1), rows);
     try std.testing.expectEqualStrings("\n   " ++ ansi.green ++ "1 +" ++ ansi.reset ++ " hi", output.written());
 }
@@ -844,7 +849,7 @@ test "printDiff writes nothing when diffs are off or nothing changed" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var output = std.Io.Writer.Allocating.init(arena);
-    try std.testing.expectEqual(@as(usize, 0), try printDiff(arena, std.testing.io, &output.writer, null));
+    try std.testing.expectEqual(@as(usize, 0), try printDiff(arena, std.testing.io, &output.writer, null, 0, null));
     try std.testing.expectEqualStrings("", output.written());
 }
 
@@ -868,7 +873,7 @@ test "diff rows are cleared with the indicator and stay in order" {
     try printToolCall(arena, &output.writer, call);
     const snapshot = diff_view.capture(arena, std.testing.io, call);
     _ = try executeTool(arena, std.testing.io, call, .build);
-    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot);
+    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot, 0, null);
     try std.testing.expectEqual(@as(usize, 4), rows);
     try thinking.finish(std.testing.io, &output.writer, 1 + rows, false, true, .done, null);
 
@@ -882,4 +887,41 @@ test "diff rows are cleared with the indicator and stay in order" {
     const removed = std.mem.indexOf(u8, text, "2 - b") orelse return error.MissingRemoved;
     const added = std.mem.indexOf(u8, text, "2 + X") orelse return error.MissingAdded;
     try std.testing.expect(tool < removed and removed < added);
+}
+
+test "stacked diffs never push the indicator line off a short screen" {
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-budget.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+
+    var content: std.ArrayList(u8) = .empty;
+    for (0..40) |i| try content.print(arena, "line {d}\n", .{i});
+    const args = try std.json.Stringify.valueAlloc(arena, .{ .path = path, .content = content.items }, .{});
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = args } };
+
+    const height: usize = 24;
+    var rows_used: usize = 0;
+    var shown: usize = 0;
+    for (0..3) |_| {
+        // Each pass rewrites the file with different content, as two writes
+        // in one turn would.
+        std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+        const snapshot = diff_view.capture(arena, std.testing.io, call);
+        _ = try executeTool(arena, std.testing.io, call, .build);
+        const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot, rows_used, height);
+        if (rows > 0) {
+            shown += 1;
+            // The indicator must stay in view above this tool's line, the diff
+            // and the input bar.
+            try std.testing.expect(rows_used + 1 + rows <= height - 3);
+        }
+        rows_used += 1 + rows;
+    }
+    // The first diff fits; once the screen is nearly full the rest are skipped.
+    try std.testing.expectEqual(@as(usize, 1), shown);
 }

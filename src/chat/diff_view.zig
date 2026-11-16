@@ -55,9 +55,21 @@ pub fn capture(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall)
 
 /// Diffs the snapshot against the file as it is now. Empty when the file
 /// can't be read or didn't change, which covers a failed or blocked tool.
-pub fn render(arena: std.mem.Allocator, io: std.Io, snapshot: Snapshot, columns: usize) !Rendered {
+pub fn render(arena: std.mem.Allocator, io: std.Io, snapshot: Snapshot, columns: usize, row_cap: usize) !Rendered {
     const after = helpers.readFileAlloc(arena, io, snapshot.path, max_file_bytes) catch return .{ .text = "", .rows = 0 };
-    return renderDiff(arena, snapshot.path, snapshot.before, after, columns);
+    return renderDiffCapped(arena, snapshot.path, snapshot.before, after, columns, row_cap);
+}
+
+/// The rows a diff may take on a screen `height` rows tall when `rows_used`
+/// rows of this turn are already on it. The thinking indicator is cleared by
+/// moving up a counted number of rows, and the terminal stops that move at
+/// the top of the screen, so the diff must leave the indicator in view: one
+/// row for the tool line, two for the input bar, one for the footer, one spare.
+pub fn rowBudget(height: ?usize, rows_used: usize) usize {
+    const room = (height orelse std.math.maxInt(usize)) -| (rows_used + 5);
+    const budget = @min(max_rows, room);
+    // Fewer rows than this show too little to be worth the space.
+    return if (budget < 3) 0 else budget;
 }
 
 fn isBinary(text: []const u8) bool {
@@ -139,6 +151,12 @@ fn writeNumber(writer: *std.Io.Writer, n: usize, width: usize) !void {
 /// Renders the change from `before` to `after` as rows that each start with
 /// a newline. Returns no rows when nothing changed.
 pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8, after: []const u8, columns: usize) !Rendered {
+    return renderDiffCapped(arena, path, before, after, columns, max_rows);
+}
+
+/// Like `renderDiff`, with at most `row_cap` rows before the footer.
+pub fn renderDiffCapped(arena: std.mem.Allocator, path: []const u8, before: []const u8, after: []const u8, columns: usize, row_cap: usize) !Rendered {
+    if (row_cap == 0) return .{ .text = "", .rows = 0 };
     if (isBinary(before) or isBinary(after)) return .{ .text = "", .rows = 0 };
     // Compare the lines as written, so an edit that looks the same once tabs
     // and control characters are replaced still shows. The prepared copies
@@ -182,7 +200,7 @@ pub fn renderDiff(arena: std.mem.Allocator, path: []const u8, before: []const u8
     for (script, 0..) |line, i| {
         if (!visible[i]) continue;
         const needs_separator = if (last_shown) |previous| i > previous + 1 else false;
-        if (rows + @as(usize, if (needs_separator) 2 else 1) > max_rows) {
+        if (rows + @as(usize, if (needs_separator) 2 else 1) > row_cap) {
             var remaining: usize = 0;
             for (visible[i..]) |shown| {
                 if (shown) remaining += 1;
@@ -490,7 +508,7 @@ test "render shows a new file as added lines" {
     const snapshot = capture(arena, std.testing.io, toolCall("write_file", "{\"path\":\"" ++ path ++ "\",\"content\":\"hi\"}")).?;
     try std.testing.expectEqualStrings("", snapshot.before);
     try helpers.writeFile(std.testing.io, path, "hi\n");
-    const rendered = try render(arena, std.testing.io, snapshot, 80);
+    const rendered = try render(arena, std.testing.io, snapshot, 80, max_rows);
     try std.testing.expectEqual(@as(usize, 1), rendered.rows);
     try std.testing.expectEqualStrings("\n   " ++ green ++ "1 +" ++ reset ++ " hi", rendered.text);
 }
@@ -507,7 +525,7 @@ test "render shows what an edit changed" {
     try helpers.writeFile(std.testing.io, path, "a\nb\n");
     const snapshot = capture(arena, std.testing.io, toolCall("edit_file", "{\"path\":\"" ++ path ++ "\"}")).?;
     try helpers.writeFile(std.testing.io, path, "a\nX\n");
-    const rendered = try render(arena, std.testing.io, snapshot, 80);
+    const rendered = try render(arena, std.testing.io, snapshot, 80, max_rows);
     try std.testing.expectEqual(@as(usize, 3), rendered.rows);
 }
 
@@ -522,14 +540,14 @@ test "render is empty when the file did not change" {
 
     try helpers.writeFile(std.testing.io, path, "a\n");
     const snapshot = capture(arena, std.testing.io, toolCall("edit_file", "{\"path\":\"" ++ path ++ "\"}")).?;
-    const rendered = try render(arena, std.testing.io, snapshot, 80);
+    const rendered = try render(arena, std.testing.io, snapshot, 80, max_rows);
     try std.testing.expectEqual(@as(usize, 0), rendered.rows);
 }
 
 test "render is empty when the file is missing afterwards" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
-    const rendered = try render(arena_state.allocator(), std.testing.io, .{ .path = "puny-test-diff-view-missing.txt", .before = "a\n" }, 80);
+    const rendered = try render(arena_state.allocator(), std.testing.io, .{ .path = "puny-test-diff-view-missing.txt", .before = "a\n" }, 80, max_rows);
     try std.testing.expectEqual(@as(usize, 0), rendered.rows);
 }
 
@@ -585,4 +603,25 @@ test "renderDiff shows nothing when the gutter alone would wrap" {
     const just_fits = try renderDiff(arena, "a.txt", "", after, 9);
     try std.testing.expect(just_fits.rows > 0);
     try expectNoRowWraps(just_fits.text, 9);
+}
+
+test "rowBudget leaves room for the screen the diff scrolls over" {
+    try std.testing.expectEqual(@as(usize, 19), rowBudget(24, 0));
+    try std.testing.expectEqual(@as(usize, max_rows), rowBudget(60, 0));
+    try std.testing.expectEqual(@as(usize, max_rows), rowBudget(null, 100));
+    // Too little room left for a diff worth showing.
+    try std.testing.expectEqual(@as(usize, 0), rowBudget(24, 17));
+    try std.testing.expectEqual(@as(usize, 0), rowBudget(24, 40));
+}
+
+test "renderDiffCapped stops at the row cap it is given" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const after = try numberedLines(arena, 30, &.{});
+    const capped = try renderDiffCapped(arena, "a.txt", "", after, 80, 5);
+    try std.testing.expectEqual(@as(usize, 6), capped.rows);
+    try std.testing.expect(std.mem.endsWith(u8, capped.text, "… 25 more lines" ++ reset));
+    const none = try renderDiffCapped(arena, "a.txt", "", after, 80, 0);
+    try std.testing.expectEqual(@as(usize, 0), none.rows);
 }
