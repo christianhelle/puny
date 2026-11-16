@@ -8,6 +8,7 @@ const openai = @import("../providers/openai.zig");
 const provider = @import("../providers/provider.zig");
 const tools = @import("../tools/root.zig");
 const tool_display = @import("display.zig");
+const diff_view = @import("diff_view.zig");
 const usage_estimator = @import("usage.zig");
 const accumulator = @import("accumulator.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
@@ -169,8 +170,10 @@ pub fn runTurnWithMode(
         for (assistant_content.tool_calls.?) |tc| {
             try printToolCall(arena, stdout_writer, tc);
             try stdout_writer.flush();
+            const snapshot = diff_view.capture(arena, io, tc);
             const result = try executeTool(arena, io, tc, mode);
-            tool_output_lines += tool_display.toolCallRows(tc.function.name, result);
+            const diff_rows = try printDiff(arena, io, stdout_writer, snapshot);
+            tool_output_lines += tool_display.toolCallRows(tc.function.name, result) + diff_rows;
             try messages.append(arena, .{ .tool = .{ .tool_call_id = tc.id, .content = result } });
             if (chat_log) |log| {
                 log.print("[TOOL_CALL]\n{s}\n{s}\n\n", .{ tc.function.name, tc.function.arguments }) catch {};
@@ -209,6 +212,25 @@ fn printToolCall(
     const columns = terminal.terminalWidth() orelse std.math.maxInt(usize);
     const rendered_tool_call = try tool_display.renderToolCallFitting(arena, tool_call, columns);
     try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
+}
+
+/// Prints the diff of the file a tool just changed under its tool-call line
+/// and returns how many rows it took, which the thinking indicator needs to
+/// find its own line again. A diff that can't be shown is skipped: it must
+/// never fail the turn.
+fn printDiff(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    stdout_writer: *std.Io.Writer,
+    snapshot: ?diff_view.Snapshot,
+) !usize {
+    const before_change = snapshot orelse return 0;
+    const columns = terminal.terminalWidth() orelse 120;
+    const rendered = diff_view.render(arena, io, before_change, columns) catch return 0;
+    if (rendered.rows == 0) return 0;
+    try stdout_writer.writeAll(rendered.text);
+    try stdout_writer.flush();
+    return rendered.rows;
 }
 
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
@@ -797,4 +819,67 @@ test "runTurn estimates unreported input with the tool definitions" {
     try std.testing.expect(result.usage_estimated);
     try std.testing.expectEqual(@as(i64, 14), result.usage.?.input_tokens);
     try std.testing.expectEqual(@as(i64, 14), session_stats.models.items[0].stats.input_tokens);
+}
+
+test "printDiff writes the rows a write_file produced and returns their count" {
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "write_file", .arguments = "{\"path\":\"puny-test-chat-diff.txt\",\"content\":\"hi\\n\"}" } };
+    const snapshot = diff_view.capture(arena, std.testing.io, call);
+    _ = try executeTool(arena, std.testing.io, call, .build);
+    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot);
+    try std.testing.expectEqual(@as(usize, 1), rows);
+    try std.testing.expectEqualStrings("\n   " ++ ansi.green ++ "1 +" ++ ansi.reset ++ " hi", output.written());
+}
+
+test "printDiff writes nothing when diffs are off or nothing changed" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var output = std.Io.Writer.Allocating.init(arena);
+    try std.testing.expectEqual(@as(usize, 0), try printDiff(arena, std.testing.io, &output.writer, null));
+    try std.testing.expectEqualStrings("", output.written());
+}
+
+test "diff rows are cleared with the indicator and stay in order" {
+    const helpers = @import("../tools/helpers.zig");
+    const FakeScreen = @import("../tui/fake_screen.zig").FakeScreen;
+    diff_view.enabled = true;
+    defer diff_view.enabled = false;
+    const path = "puny-test-chat-diff-screen.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try helpers.writeFile(std.testing.io, path, "a\nb\nc\n");
+    var output = std.Io.Writer.Allocating.init(arena);
+
+    const call = openai.ToolCall{ .id = "call_1", .function = .{ .name = "edit_file", .arguments = "{\"path\":\"puny-test-chat-diff-screen.txt\",\"old_string\":\"b\",\"new_string\":\"X\"}" } };
+    var thinking = indicator.ThinkingIndicator.init(std.testing.io);
+    try output.writer.writeAll("\n> go\r\n");
+    try thinking.show(&output.writer);
+    try printToolCall(arena, &output.writer, call);
+    const snapshot = diff_view.capture(arena, std.testing.io, call);
+    _ = try executeTool(arena, std.testing.io, call, .build);
+    const rows = try printDiff(arena, std.testing.io, &output.writer, snapshot);
+    try std.testing.expectEqual(@as(usize, 4), rows);
+    try thinking.finish(std.testing.io, &output.writer, 1 + rows, false, true, .done, null);
+
+    var screen = FakeScreen{ .width = 80 };
+    defer screen.deinit(arena);
+    try screen.feed(arena, output.written());
+    const text = try screen.toText(arena);
+    errdefer std.debug.print("screen:\n{s}\n", .{text});
+    try std.testing.expect(std.mem.indexOf(u8, text, "Thinking...") == null);
+    const tool = std.mem.indexOf(u8, text, "Editing") orelse return error.MissingToolLine;
+    const removed = std.mem.indexOf(u8, text, "2 - b") orelse return error.MissingRemoved;
+    const added = std.mem.indexOf(u8, text, "2 + X") orelse return error.MissingAdded;
+    try std.testing.expect(tool < removed and removed < added);
 }
