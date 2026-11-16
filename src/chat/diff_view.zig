@@ -2,6 +2,8 @@ const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
 const diff = @import("../tui/diff.zig");
 const highlight = @import("../tui/highlight.zig");
+const openai = @import("../providers/openai.zig");
+const helpers = @import("../tools/helpers.zig");
 const text_width = @import("../tui/markdown/width.zig");
 
 /// Unchanged lines shown on each side of a change.
@@ -13,6 +15,44 @@ pub const max_rows = 20;
 const tab_width = 4;
 
 pub const Rendered = struct { text: []const u8, rows: usize };
+
+/// Set once at startup; capture does nothing while it is false.
+pub var enabled: bool = false;
+
+const max_file_bytes = 1024 * 1024;
+
+/// A file as it was before a tool changed it.
+pub const Snapshot = struct { path: []const u8, before: []const u8 };
+
+/// Reads the file a write_file or edit_file call is about to change. Returns
+/// null when diffs are off, the call is for another tool or its arguments
+/// have no path, or the file exists but can't be read. A missing file is a
+/// new file: its content before is empty.
+pub fn capture(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall) ?Snapshot {
+    if (!enabled) return null;
+    const name = tool_call.function.name;
+    if (!std.mem.eql(u8, name, "write_file") and !std.mem.eql(u8, name, "edit_file")) return null;
+
+    const parsed = std.json.parseFromSlice(std.json.Value, arena, tool_call.function.arguments, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const path_value = parsed.value.object.get("path") orelse return null;
+    if (path_value != .string) return null;
+    const path = arena.dupe(u8, path_value.string) catch return null;
+
+    const before = helpers.readFileAlloc(arena, io, path, max_file_bytes) catch |err| switch (err) {
+        error.FileNotFound => "",
+        else => return null,
+    };
+    return .{ .path = path, .before = before };
+}
+
+/// Diffs the snapshot against the file as it is now. Empty when the file
+/// can't be read or didn't change, which covers a failed or blocked tool.
+pub fn render(arena: std.mem.Allocator, io: std.Io, snapshot: Snapshot, columns: usize) !Rendered {
+    const after = helpers.readFileAlloc(arena, io, snapshot.path, max_file_bytes) catch return .{ .text = "", .rows = 0 };
+    return renderDiff(arena, snapshot.path, snapshot.before, after, columns);
+}
 
 fn isBinary(text: []const u8) bool {
     return std.mem.indexOfScalar(u8, text, 0) != null or !std.unicode.utf8ValidateSlice(text);
@@ -396,4 +436,81 @@ test "renderDiff colours removed lines with the old side's lexer state" {
     );
     try std.testing.expect(std.mem.indexOf(u8, rendered.text, "-" ++ reset ++ " " ++ dim ++ "select" ++ reset) != null);
     try std.testing.expect(std.mem.indexOf(u8, rendered.text, "+" ++ reset ++ " " ++ ansi.magenta ++ "select" ++ reset) != null);
+}
+
+fn toolCall(name: []const u8, arguments: []const u8) openai.ToolCall {
+    return .{ .id = "call_1", .function = .{ .name = name, .arguments = arguments } };
+}
+
+test "capture returns null while diffs are disabled" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    try std.testing.expect(capture(arena_state.allocator(), std.testing.io, toolCall("write_file", "{\"path\":\"x\",\"content\":\"\"}")) == null);
+}
+
+test "capture ignores tools that do not change files" {
+    enabled = true;
+    defer enabled = false;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try std.testing.expect(capture(arena, std.testing.io, toolCall("read_file", "{\"path\":\"build.zig\"}")) == null);
+    try std.testing.expect(capture(arena, std.testing.io, toolCall("write_file", "not json")) == null);
+    try std.testing.expect(capture(arena, std.testing.io, toolCall("write_file", "{\"content\":\"x\"}")) == null);
+    try std.testing.expect(capture(arena, std.testing.io, toolCall("write_file", "{\"path\":3}")) == null);
+}
+
+test "render shows a new file as added lines" {
+    enabled = true;
+    defer enabled = false;
+    const path = "puny-test-diff-view-new.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const snapshot = capture(arena, std.testing.io, toolCall("write_file", "{\"path\":\"" ++ path ++ "\",\"content\":\"hi\"}")).?;
+    try std.testing.expectEqualStrings("", snapshot.before);
+    try helpers.writeFile(std.testing.io, path, "hi\n");
+    const rendered = try render(arena, std.testing.io, snapshot, 80);
+    try std.testing.expectEqual(@as(usize, 1), rendered.rows);
+    try std.testing.expectEqualStrings("\n   " ++ green ++ "1 +" ++ reset ++ " hi", rendered.text);
+}
+
+test "render shows what an edit changed" {
+    enabled = true;
+    defer enabled = false;
+    const path = "puny-test-diff-view-edit.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try helpers.writeFile(std.testing.io, path, "a\nb\n");
+    const snapshot = capture(arena, std.testing.io, toolCall("edit_file", "{\"path\":\"" ++ path ++ "\"}")).?;
+    try helpers.writeFile(std.testing.io, path, "a\nX\n");
+    const rendered = try render(arena, std.testing.io, snapshot, 80);
+    try std.testing.expectEqual(@as(usize, 3), rendered.rows);
+}
+
+test "render is empty when the file did not change" {
+    enabled = true;
+    defer enabled = false;
+    const path = "puny-test-diff-view-same.txt";
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try helpers.writeFile(std.testing.io, path, "a\n");
+    const snapshot = capture(arena, std.testing.io, toolCall("edit_file", "{\"path\":\"" ++ path ++ "\"}")).?;
+    const rendered = try render(arena, std.testing.io, snapshot, 80);
+    try std.testing.expectEqual(@as(usize, 0), rendered.rows);
+}
+
+test "render is empty when the file is missing afterwards" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const rendered = try render(arena_state.allocator(), std.testing.io, .{ .path = "puny-test-diff-view-missing.txt", .before = "a\n" }, 80);
+    try std.testing.expectEqual(@as(usize, 0), rendered.rows);
 }
