@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Show syntax-highlighted diffs for file edits ([#242](https://github.com/christianhelle/puny/pull/242)) ([@christianhelle](https://github.com/christianhelle/))
 - Exclude puny's own debug logs from grep_search ([#241](https://github.com/christianhelle/puny/pull/241)) ([@christianhelle](https://github.com/christianhelle/))
 - Raise SSE line and event limits to fix SseLineTooLong ([#240](https://github.com/christianhelle/puny/pull/240)) ([@christianhelle](https://github.com/christianhelle/))
 
