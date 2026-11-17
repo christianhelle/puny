@@ -3,6 +3,8 @@ const ansi = @import("../tui/ansi.zig");
 const config = @import("../config/config.zig");
 const context_tier_picker = @import("../tui/context_tier_picker.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
+const FakeScreen = @import("../tui/fake_screen.zig").FakeScreen;
+const list_picker = @import("../tui/list_picker.zig");
 const client = @import("../providers/client.zig");
 const model_picker = @import("../tui/model_picker.zig");
 const openai = @import("../providers/openai.zig");
@@ -474,4 +476,42 @@ test "switchModel switches when only the effort matches" {
     const result = try switchModel(&prov, "mock-model", "mock-model", .medium, .default, arena.allocator(), std.testing.io, undefined, true, &output.writer, null, .mock, undefined, testRandom());
     try std.testing.expect(result != null);
     try std.testing.expectEqualStrings("mock-model", result.?.model_key);
+}
+
+test "switchModel picks interactively without blank rows before the switch line" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    // Second model, then the fifth effort (high).
+    var script = list_picker.Script{ .keys = &.{ .down, .enter, .down, .down, .down, .down, .enter }, .out = &output.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    try output.writer.writeAll("> /model\r\n");
+    const result = try switchModel(&prov, null, "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    try std.testing.expectEqualStrings("mock-model-fast", result.?.model_key);
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), result.?.reasoning_effort);
+
+    var screen = FakeScreen{ .width = 80 };
+    try screen.feed(arena.allocator(), output.written());
+    try std.testing.expect(std.mem.startsWith(u8, try screen.toText(arena.allocator()), "> /model\n\n\nSwitched to model mock-model-fast"));
+}
+
+test "switchModel stays quiet when the model picker is dismissed" {
+    var prov = provider.Provider{ .mock = .{ .allocator = std.testing.allocator, .io = std.testing.io } };
+    defer prov.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    var script = list_picker.Script{ .keys = &.{.escape}, .out = &output.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    const result = try switchModel(&prov, null, "mock-model", null, .default, arena.allocator(), std.testing.io, undefined, false, &output.writer, null, .mock, undefined, testRandom());
+    try std.testing.expect(result == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "Switched") == null);
 }
