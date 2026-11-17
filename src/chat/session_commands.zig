@@ -8,6 +8,7 @@ const context_breakdown = @import("context_breakdown.zig");
 const debug_log = @import("debug_log.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const input = @import("../tui/input.zig");
+const list_picker = @import("../tui/list_picker.zig");
 const openai = @import("../providers/openai.zig");
 const model_selection = @import("../models/select.zig");
 const provider = @import("../providers/provider.zig");
@@ -1149,4 +1150,42 @@ test "handleContextCommand breaks the context down by part" {
         \\  Messages              3 tokens (0.3%)
         \\
     , out.written());
+}
+
+test "handleSwitchEffortCommand opens the picker when no level is given" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+    var script = list_picker.Script{ .keys = &.{ .down, .down, .down, .enter }, .out = &out.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    try handleSwitchEffortCommand(&ctx, null);
+
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .medium), reasoning_effort);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Switched to reasoning effort") != null);
+}
+
+test "handleSwitchEffortCommand reports a dismissed picker as cancelled" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var reasoning_effort: ?openai.ReasoningEffort = .high;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+    var script = list_picker.Script{ .keys = &.{.escape}, .out = &out.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    try handleSwitchEffortCommand(&ctx, null);
+
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), reasoning_effort);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Cancelled.") != null);
 }
