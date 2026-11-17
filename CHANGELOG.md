@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Stop pickers leaving blank lines behind ([#243](https://github.com/christianhelle/puny/pull/243)) ([@christianhelle](https://github.com/christianhelle/))
 - Show syntax-highlighted diffs for file edits ([#242](https://github.com/christianhelle/puny/pull/242)) ([@christianhelle](https://github.com/christianhelle/))
 - Exclude puny's own debug logs from grep_search ([#241](https://github.com/christianhelle/puny/pull/241)) ([@christianhelle](https://github.com/christianhelle/))
 - Raise SSE line and event limits to fix SseLineTooLong ([#240](https://github.com/christianhelle/puny/pull/240)) ([@christianhelle](https://github.com/christianhelle/))
