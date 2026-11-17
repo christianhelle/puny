@@ -865,3 +865,76 @@ test "readKeyPosix buffers leftover bytes after an escape sequence" {
     try std.testing.expectEqual(@as(u8, 'q'), pending_buf[0]);
     pending_len = 0;
 }
+
+const FakeScreen = @import("fake_screen.zig").FakeScreen;
+
+const test_items = [_]Item{
+    .{ .value = "a", .label = "Alpha" },
+    .{ .value = "b", .label = "Beta" },
+    .{ .value = "c", .label = "Gamma" },
+};
+
+/// Runs a picker with `keys` pressed, appending what it draws to `out`.
+fn pickScripted(arena: std.mem.Allocator, out: *std.Io.Writer, keys: []const Key, width: usize, start: Start, title: []const u8) !?[]const u8 {
+    var s = Script{ .keys = keys, .out = out, .width = width };
+    script = &s;
+    defer script = null;
+    return selectFromListAt(arena, std.testing.io, start, title, &test_items);
+}
+
+test "picker returns the item the arrow keys move to" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    try std.testing.expectEqualStrings("b", (try pickScripted(arena, &out.writer, &.{ .down, .enter }, 80, .new_row, "Pick")).?);
+    try std.testing.expectEqualStrings("c", (try pickScripted(arena, &out.writer, &.{ .up, .enter }, 80, .new_row, "Pick")).?);
+    try std.testing.expectEqualStrings("a", (try pickScripted(arena, &out.writer, &.{ .down, .unknown, .up, .enter }, 80, .new_row, "Pick")).?);
+}
+
+test "picker returns null when dismissed" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    try std.testing.expect(try pickScripted(arena, &out.writer, &.{.quit}, 80, .new_row, "Pick") == null);
+    try std.testing.expect(try pickScripted(arena, &out.writer, &.{.escape}, 80, .new_row, "Pick") == null);
+    // Running out of scripted keys dismisses the picker.
+    try std.testing.expect(try pickScripted(arena, &out.writer, &.{.down}, 80, .new_row, "Pick") == null);
+}
+
+test "pickers shown back to back leave one row between the command and what follows" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    try out.writer.writeAll("> /model\r\n");
+    _ = try pickScripted(arena, &out.writer, &.{.enter}, 80, .new_row, "Select a model");
+    _ = try pickScripted(arena, &out.writer, &.{ .down, .enter }, 80, .after_picker, "Select reasoning effort");
+    _ = try pickScripted(arena, &out.writer, &.{.escape}, 80, .after_picker, "Select context size");
+    try out.writer.writeAll("\nSwitched to model a.");
+
+    var screen = FakeScreen{ .width = 80 };
+    try screen.feed(arena, out.written());
+    try std.testing.expectEqualStrings("> /model\n\n\nSwitched to model a.", try screen.toText(arena));
+}
+
+test "picker erases every row of a title that wraps" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    const title: [61]u8 = @splat('x');
+    try out.writer.writeAll("> /effort");
+    _ = try pickScripted(arena, &out.writer, &.{.enter}, 20, .new_row, &title);
+
+    var screen = FakeScreen{ .width = 20 };
+    try screen.feed(arena, out.written());
+    try std.testing.expectEqualStrings("> /effort", try screen.toText(arena));
+    // The cursor waits on the blank row under the command's row.
+    try std.testing.expectEqual(@as(usize, 1), screen.cur_row);
+}
