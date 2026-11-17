@@ -11,7 +11,7 @@ pub const Item = struct {
     label: []const u8,
 };
 
-const Key = enum {
+pub const Key = enum {
     up,
     down,
     left,
@@ -268,12 +268,44 @@ pub fn selectFromListAt(
     title: []const u8,
     items: []const Item,
 ) !?[]const u8 {
-    const title_rows = rowsFor(title, terminal.terminalWidth() orelse default_terminal_width);
-    return selectFromListFrom(arena, io, start, title, title_rows, items);
+    const width = if (scripted()) |s| s.width else terminal.terminalWidth() orelse default_terminal_width;
+    return selectFromListFrom(arena, io, start, title, rowsFor(title, width), items);
 }
 
-/// Shows the picker from `start`. Every exit erases what the picker drew
-/// and leaves the cursor at the start of the blank row above its title.
+/// Keys a test presses in place of the keyboard, and the screen the picker
+/// draws on, so tests can drive pickers that callers open themselves.
+pub const Script = struct {
+    keys: []const Key,
+    out: *std.Io.Writer,
+    width: usize = default_terminal_width,
+    height: ?usize = 24,
+    next: usize = 0,
+
+    /// The next scripted key; Esc once they run out, so a test that
+    /// scripts too few keys ends instead of hanging.
+    fn read(self: *Script) Key {
+        if (self.next >= self.keys.len) return .escape;
+        defer self.next += 1;
+        return self.keys[self.next];
+    }
+};
+
+/// The script pickers follow in tests; see `Script`.
+pub var script: ?*Script = null;
+
+fn scripted() ?*Script {
+    return if (builtin.is_test) script else null;
+}
+
+const KeyboardKeys = struct {
+    io: std.Io,
+
+    fn read(self: KeyboardKeys) Key {
+        return readKey(self.io) catch .unknown;
+    }
+};
+
+/// Shows the picker from `start` on the terminal, or on the test script.
 fn selectFromListFrom(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -283,6 +315,7 @@ fn selectFromListFrom(
     items: []const Item,
 ) !?[]const u8 {
     if (items.len == 0) return null;
+    if (scripted()) |s| return runPicker(arena, s.out, s, s.width, s.height, start, title, title_rows, items);
 
     cancel.setRawMode(true) catch {
         return try selectText(arena, io, title, items);
@@ -293,21 +326,36 @@ fn selectFromListFrom(
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
+    const width = terminal.terminalWidth() orelse default_terminal_width;
+    return runPicker(arena, &stdout_file_writer.interface, KeyboardKeys{ .io = io }, width, terminal.terminalHeight(), start, title, title_rows, items);
+}
 
+/// Draws the picker on `out` and moves through it with keys from `keys`.
+/// Every exit erases what the picker drew and leaves the cursor at the
+/// start of the blank row above its title.
+fn runPicker(
+    arena: std.mem.Allocator,
+    out: *std.Io.Writer,
+    keys: anytype,
+    terminal_width: usize,
+    terminal_height: ?usize,
+    start: Start,
+    title: []const u8,
+    title_rows: usize,
+    items: []const Item,
+) !?[]const u8 {
     var selected: usize = 0;
 
-    const available_rows = if (terminal.terminalHeight()) |height| usableRowsUnder(height, title_rows) else default_available_rows;
-    const terminal_width = terminal.terminalWidth() orelse default_terminal_width;
+    const available_rows = if (terminal_height) |height| usableRowsUnder(height, title_rows) else default_available_rows;
     const column_width = computeColumnWidth(items);
     const grid = computeGrid(items.len, available_rows, terminal_width, column_width);
 
-    try stdout_writer.print("{s}{s}\r\n", .{ headerPrefix(start), title });
-    try renderGrid(stdout_writer, items, grid, selected, column_width, true);
-    try stdout_writer.flush();
+    try out.print("{s}{s}\r\n", .{ headerPrefix(start), title });
+    try renderGrid(out, items, grid, selected, column_width, true);
+    try out.flush();
 
     while (true) {
-        const key = readKey(io) catch .unknown;
+        const key = keys.read();
         const dir: ?GridDir = switch (key) {
             .up => .up,
             .down => .down,
@@ -317,14 +365,14 @@ fn selectFromListFrom(
         };
         if (dir) |d| {
             selected = gridStep(selected, items.len, grid, d);
-            try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up, .{grid.rows});
-            try renderGrid(stdout_writer, items, grid, selected, column_width, true);
+            try out.print(terminal.move_to_line_start ++ terminal.cursor_up, .{grid.rows});
+            try renderGrid(out, items, grid, selected, column_width, true);
             continue;
         }
         switch (key) {
             .enter, .quit, .escape => {
-                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{eraseRows(grid.rows, title_rows)});
-                try stdout_writer.flush();
+                try out.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{eraseRows(grid.rows, title_rows)});
+                try out.flush();
                 if (key != .enter) return null;
                 return try arena.dupe(u8, items[selected].value);
             },
