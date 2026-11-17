@@ -58,3 +58,23 @@ test "tierItems offers nothing for a model with one window" {
 
     try std.testing.expectEqual(@as(usize, 0), (try tierItems(arena_state.allocator(), model)).len);
 }
+
+test "pickTier returns the tier the keys pick" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const model = client.Model{
+        .id = "gpt-6-luna",
+        .display_name = "GPT-6 Luna",
+        .provider = "OpenAI",
+        .context_length = 272000,
+        .long_context_length = 872000,
+        .context_window = 400000,
+        .long_context_window = 1000000,
+    };
+    var out = std.Io.Writer.Allocating.init(arena_state.allocator());
+    var script = list_picker.Script{ .keys = &.{ .down, .enter }, .out = &out.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    try std.testing.expectEqual(@as(?client.ContextTier, .long_context), try pickTier(arena_state.allocator(), std.testing.io, .after_picker, model));
+}
