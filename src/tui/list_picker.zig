@@ -142,6 +142,24 @@ test "computeColumnWidth accounts for the longest label" {
 /// cursor's row and a blank line.
 const header_rows = 2;
 
+/// Set when a picker has just erased itself, leaving the cursor at the start
+/// of an empty line, so the next picker need not end the row first. Without
+/// it, pickers shown one after another (model, effort, context size) each
+/// left a blank line behind.
+var cursor_on_fresh_line = false;
+
+/// What the picker prints before its title: the end of the cursor's row,
+/// unless a picker just left it on a fresh line, then a blank line.
+fn headerPrefix(fresh_line: bool) []const u8 {
+    return if (fresh_line) "\r\n" else "\r\n\r\n";
+}
+
+/// Rows to move up from below the list to reach the blank line above the
+/// title, so erasing from there removes everything the picker drew.
+fn eraseRows(grid_rows: usize, title_rows: usize) usize {
+    return grid_rows + title_rows + 1;
+}
+
 /// Rows actually available to the list once the picker's header and a
 /// one-row title are accounted for, never less than one.
 pub fn usableRows(terminal_height: usize) usize {
@@ -162,6 +180,16 @@ test "usableRows never drops below one row" {
     try std.testing.expectEqual(@as(usize, 1), usableRows(3));
     try std.testing.expectEqual(@as(usize, 1), usableRows(1));
     try std.testing.expectEqual(@as(usize, 1), usableRows(0));
+}
+
+test "eraseRows reaches back over the blank line above the title" {
+    try std.testing.expectEqual(@as(usize, 7), eraseRows(5, 1));
+    try std.testing.expectEqual(@as(usize, 9), eraseRows(5, 3));
+}
+
+test "header ends the cursor's row unless a picker just left it on a fresh line" {
+    try std.testing.expectEqualStrings("\r\n\r\n", headerPrefix(false));
+    try std.testing.expectEqualStrings("\r\n", headerPrefix(true));
 }
 
 test "usableRowsUnder leaves room for a title that takes several rows" {
@@ -213,7 +241,8 @@ pub fn selectFromListUnder(
     const column_width = computeColumnWidth(items);
     const grid = computeGrid(items.len, available_rows, terminal_width, column_width);
 
-    try stdout_writer.print("\r\n\r\n{s}\r\n", .{title});
+    try stdout_writer.print("{s}{s}\r\n", .{ headerPrefix(cursor_on_fresh_line), title });
+    cursor_on_fresh_line = false;
     try renderGrid(stdout_writer, items, grid, selected, column_width, true);
     try stdout_writer.flush();
 
@@ -233,15 +262,12 @@ pub fn selectFromListUnder(
             continue;
         }
         switch (key) {
-            .enter => {
-                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
+            .enter, .quit, .escape => {
+                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{eraseRows(grid.rows, title_rows)});
                 try stdout_writer.flush();
+                cursor_on_fresh_line = true;
+                if (key != .enter) return null;
                 return try arena.dupe(u8, items[selected].value);
-            },
-            .quit, .escape => {
-                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
-                try stdout_writer.flush();
-                return null;
             },
             else => {},
         }
