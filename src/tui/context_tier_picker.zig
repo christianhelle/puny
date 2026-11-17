@@ -9,7 +9,7 @@ const token_stats = @import("token_stats.zig");
 pub fn pickTier(arena: std.mem.Allocator, io: std.Io, start: list_picker.Start, model: client.Model) !?client.ContextTier {
     const items = try tierItems(arena, model);
     if (items.len == 0) return null;
-    const selected = (try list_picker.selectFromListAt(arena, io, start, "Select context size (Use arrow keys to navigate, Enter to select, 'q' to quit):", 1, items)) orelse return null;
+    const selected = (try list_picker.selectFromListAt(arena, io, start, "Select context size (Use arrow keys to navigate, Enter to select, 'q' to quit):", items)) orelse return null;
     return std.meta.stringToEnum(client.ContextTier, selected);
 }
 

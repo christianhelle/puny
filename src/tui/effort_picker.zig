@@ -25,7 +25,7 @@ pub fn pickEffort(
         });
     }
 
-    const selected = (try list_picker.selectFromListAt(arena, io, start, "Select reasoning effort (Use arrow keys to navigate, Enter to select, 'q' to quit):", 1, items.items)) orelse return null;
+    const selected = (try list_picker.selectFromListAt(arena, io, start, "Select reasoning effort (Use arrow keys to navigate, Enter to select, 'q' to quit):", items.items)) orelse return null;
 
     return std.meta.stringToEnum(openai.ReasoningEffort, selected);
 }

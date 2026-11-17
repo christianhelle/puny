@@ -179,26 +179,8 @@ fn readTypedAnswer(comptime C: type, arena: std.mem.Allocator, io: std.Io, stdou
     return if (text.len == 0) .cancelled else .{ .typed = text };
 }
 
-/// Terminal rows that one line of `text` occupies at `width` columns,
-/// counted in display cells. A wide character that doesn't fit the cell left
-/// on a row wraps whole onto the next one, as terminals do.
-pub fn rowsFor(text: []const u8, width: usize) usize {
-    const columns = @max(width, 1);
-    var rows: usize = 1;
-    var column: usize = 0;
-    var i: usize = 0;
-    while (i < text.len) {
-        const decoded = text_width.decodeAt(text, i);
-        const cells = if (decoded.cp) |cp| text_width.codePointWidth(cp) else 1;
-        i += decoded.len;
-        if (column + cells > columns) {
-            rows += 1;
-            column = 0;
-        }
-        column += cells;
-    }
-    return rows;
-}
+/// Terminal rows that one line of `text` occupies at `width` columns.
+pub const rowsFor = list_picker.rowsFor;
 
 /// The answer as echoed under the question, cut to at most `max_bytes` so
 /// it never wraps: the indicator rewinds a counted number of rows.

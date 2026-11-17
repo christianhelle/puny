@@ -4,6 +4,7 @@ const is_windows = builtin.os.tag == .windows;
 const cancel = @import("../core/cancel.zig");
 const terminal = @import("terminal.zig");
 const ansi = @import("ansi.zig");
+const text_width = @import("markdown/width.zig");
 
 pub const Item = struct {
     value: []const u8,
@@ -167,6 +168,27 @@ fn eraseRows(grid_rows: usize, title_rows: usize) usize {
     return grid_rows + title_rows + 1;
 }
 
+/// Terminal rows that one line of `text` occupies at `width` columns,
+/// counted in display cells. A wide character that doesn't fit the cell left
+/// on a row wraps whole onto the next one, as terminals do.
+pub fn rowsFor(text: []const u8, width: usize) usize {
+    const columns = @max(width, 1);
+    var rows: usize = 1;
+    var column: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const decoded = text_width.decodeAt(text, i);
+        const cells = if (decoded.cp) |cp| text_width.codePointWidth(cp) else 1;
+        i += decoded.len;
+        if (column + cells > columns) {
+            rows += 1;
+            column = 0;
+        }
+        column += cells;
+    }
+    return rows;
+}
+
 /// Rows actually available to the list once the picker's header and a
 /// one-row title are accounted for, never less than one.
 pub fn usableRows(terminal_height: usize) usize {
@@ -199,6 +221,12 @@ test "header ends the cursor's row unless the picker follows another picker" {
     try std.testing.expectEqualStrings("\r\n", headerPrefix(.after_picker));
 }
 
+test "rowsFor counts the rows a plain title wraps onto" {
+    const title: [61]u8 = @splat('x');
+    try std.testing.expectEqual(@as(usize, 4), rowsFor(&title, 20));
+    try std.testing.expectEqual(@as(usize, 1), rowsFor(&title, 80));
+}
+
 test "usableRowsUnder leaves room for a title that takes several rows" {
     try std.testing.expectEqual(@as(usize, 21), usableRowsUnder(24, 1));
     try std.testing.expectEqual(@as(usize, 18), usableRowsUnder(24, 4));
@@ -216,7 +244,7 @@ pub fn selectFromList(
     title: []const u8,
     items: []const Item,
 ) !?[]const u8 {
-    return selectFromListAt(arena, io, .new_row, title, 1, items);
+    return selectFromListAt(arena, io, .new_row, title, items);
 }
 
 /// `selectFromList` for a title that takes `title_rows` terminal rows, so
@@ -228,13 +256,25 @@ pub fn selectFromListUnder(
     title_rows: usize,
     items: []const Item,
 ) !?[]const u8 {
-    return selectFromListAt(arena, io, .new_row, title, title_rows, items);
+    return selectFromListFrom(arena, io, .new_row, title, title_rows, items);
 }
 
-/// `selectFromListUnder` opening from `start`. Every exit erases what the
-/// picker drew and leaves the cursor at the start of the blank row above
-/// its title.
+/// `selectFromList` opening from `start`. The title is plain text on one
+/// line, so its height is measured at the terminal's width.
 pub fn selectFromListAt(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    start: Start,
+    title: []const u8,
+    items: []const Item,
+) !?[]const u8 {
+    const title_rows = rowsFor(title, terminal.terminalWidth() orelse default_terminal_width);
+    return selectFromListFrom(arena, io, start, title, title_rows, items);
+}
+
+/// Shows the picker from `start`. Every exit erases what the picker drew
+/// and leaves the cursor at the start of the blank row above its title.
+fn selectFromListFrom(
     arena: std.mem.Allocator,
     io: std.Io,
     start: Start,
