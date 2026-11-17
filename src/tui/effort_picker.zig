@@ -5,6 +5,7 @@ const openai = @import("../providers/openai.zig");
 pub fn pickEffort(
     arena: std.mem.Allocator,
     io: std.Io,
+    start: list_picker.Start,
 ) !?openai.ReasoningEffort {
     var items: std.ArrayList(list_picker.Item) = .empty;
     defer items.deinit(arena);
@@ -24,7 +25,7 @@ pub fn pickEffort(
         });
     }
 
-    const selected = (try list_picker.selectFromList(arena, io, "Select reasoning effort (Use arrow keys to navigate, Enter to select, 'q' to quit):", items.items)) orelse return null;
+    const selected = (try list_picker.selectFromListAt(arena, io, start, "Select reasoning effort (Use arrow keys to navigate, Enter to select, 'q' to quit):", items.items)) orelse return null;
 
     return std.meta.stringToEnum(openai.ReasoningEffort, selected);
 }
@@ -73,4 +74,28 @@ test "pickEffort maps every pickable label back to its enum value" {
         const tag = @tagName(effort);
         try std.testing.expectEqual(effort, std.meta.stringToEnum(openai.ReasoningEffort, tag).?);
     }
+}
+
+test "pickEffort returns the effort the keys pick" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var out = std.Io.Writer.Allocating.init(arena_state.allocator());
+    var script = list_picker.Script{ .keys = &.{ .down, .down, .enter }, .out = &out.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, .low), try pickEffort(arena_state.allocator(), std.testing.io, .after_picker));
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\r\nSelect reasoning effort"));
+}
+
+test "pickEffort returns null when dismissed" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var out = std.Io.Writer.Allocating.init(arena_state.allocator());
+    var script = list_picker.Script{ .keys = &.{.quit}, .out = &out.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    try std.testing.expectEqual(@as(?openai.ReasoningEffort, null), try pickEffort(arena_state.allocator(), std.testing.io, .new_row));
+    try std.testing.expect(std.mem.startsWith(u8, out.written(), "\r\n\r\nSelect reasoning effort"));
 }

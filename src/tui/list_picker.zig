@@ -4,13 +4,14 @@ const is_windows = builtin.os.tag == .windows;
 const cancel = @import("../core/cancel.zig");
 const terminal = @import("terminal.zig");
 const ansi = @import("ansi.zig");
+const text_width = @import("markdown/width.zig");
 
 pub const Item = struct {
     value: []const u8,
     label: []const u8,
 };
 
-const Key = enum {
+pub const Key = enum {
     up,
     down,
     left,
@@ -142,6 +143,52 @@ test "computeColumnWidth accounts for the longest label" {
 /// cursor's row and a blank line.
 const header_rows = 2;
 
+/// Where the cursor is when a picker opens.
+pub const Start = enum {
+    /// Anywhere, so the picker ends the cursor's row first.
+    new_row,
+    /// Where the previous picker left it, at the start of an empty row,
+    /// with nothing printed since. Pickers shown one after another (model,
+    /// effort, context size) would each leave a blank row behind otherwise.
+    after_picker,
+};
+
+/// What the picker prints before its title: the end of the cursor's row,
+/// unless it already starts an empty row, then a blank line.
+fn headerPrefix(start: Start) []const u8 {
+    return switch (start) {
+        .new_row => "\r\n\r\n",
+        .after_picker => "\r\n",
+    };
+}
+
+/// Rows to move up from below the list to reach the blank line above the
+/// title, so erasing from there removes everything the picker drew.
+fn eraseRows(grid_rows: usize, title_rows: usize) usize {
+    return grid_rows + title_rows + 1;
+}
+
+/// Terminal rows that one line of `text` occupies at `width` columns,
+/// counted in display cells. A wide character that doesn't fit the cell left
+/// on a row wraps whole onto the next one, as terminals do.
+pub fn rowsFor(text: []const u8, width: usize) usize {
+    const columns = @max(width, 1);
+    var rows: usize = 1;
+    var column: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const decoded = text_width.decodeAt(text, i);
+        const cells = if (decoded.cp) |cp| text_width.codePointWidth(cp) else 1;
+        i += decoded.len;
+        if (column + cells > columns) {
+            rows += 1;
+            column = 0;
+        }
+        column += cells;
+    }
+    return rows;
+}
+
 /// Rows actually available to the list once the picker's header and a
 /// one-row title are accounted for, never less than one.
 pub fn usableRows(terminal_height: usize) usize {
@@ -164,6 +211,22 @@ test "usableRows never drops below one row" {
     try std.testing.expectEqual(@as(usize, 1), usableRows(0));
 }
 
+test "eraseRows reaches back over the blank line above the title" {
+    try std.testing.expectEqual(@as(usize, 7), eraseRows(5, 1));
+    try std.testing.expectEqual(@as(usize, 9), eraseRows(5, 3));
+}
+
+test "header ends the cursor's row unless the picker follows another picker" {
+    try std.testing.expectEqualStrings("\r\n\r\n", headerPrefix(.new_row));
+    try std.testing.expectEqualStrings("\r\n", headerPrefix(.after_picker));
+}
+
+test "rowsFor counts the rows a plain title wraps onto" {
+    const title: [61]u8 = @splat('x');
+    try std.testing.expectEqual(@as(usize, 4), rowsFor(&title, 20));
+    try std.testing.expectEqual(@as(usize, 1), rowsFor(&title, 80));
+}
+
 test "usableRowsUnder leaves room for a title that takes several rows" {
     try std.testing.expectEqual(@as(usize, 21), usableRowsUnder(24, 1));
     try std.testing.expectEqual(@as(usize, 18), usableRowsUnder(24, 4));
@@ -181,7 +244,7 @@ pub fn selectFromList(
     title: []const u8,
     items: []const Item,
 ) !?[]const u8 {
-    return selectFromListUnder(arena, io, title, 1, items);
+    return selectFromListAt(arena, io, .new_row, title, items);
 }
 
 /// `selectFromList` for a title that takes `title_rows` terminal rows, so
@@ -193,7 +256,66 @@ pub fn selectFromListUnder(
     title_rows: usize,
     items: []const Item,
 ) !?[]const u8 {
+    return selectFromListFrom(arena, io, .new_row, title, title_rows, items);
+}
+
+/// `selectFromList` opening from `start`. The title is plain text on one
+/// line, so its height is measured at the terminal's width.
+pub fn selectFromListAt(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    start: Start,
+    title: []const u8,
+    items: []const Item,
+) !?[]const u8 {
+    const width = if (scripted()) |s| s.width else terminal.terminalWidth() orelse default_terminal_width;
+    return selectFromListFrom(arena, io, start, title, rowsFor(title, width), items);
+}
+
+/// Keys a test presses in place of the keyboard, and the screen the picker
+/// draws on, so tests can drive pickers that callers open themselves.
+pub const Script = struct {
+    keys: []const Key,
+    out: *std.Io.Writer,
+    width: usize = default_terminal_width,
+    height: ?usize = 24,
+    next: usize = 0,
+
+    /// The next scripted key; Esc once they run out, so a test that
+    /// scripts too few keys ends instead of hanging.
+    fn read(self: *Script) Key {
+        if (self.next >= self.keys.len) return .escape;
+        defer self.next += 1;
+        return self.keys[self.next];
+    }
+};
+
+/// The script pickers follow in tests; see `Script`.
+pub var script: ?*Script = null;
+
+fn scripted() ?*Script {
+    return if (builtin.is_test) script else null;
+}
+
+const KeyboardKeys = struct {
+    io: std.Io,
+
+    fn read(self: KeyboardKeys) Key {
+        return readKey(self.io) catch .unknown;
+    }
+};
+
+/// Shows the picker from `start` on the terminal, or on the test script.
+fn selectFromListFrom(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    start: Start,
+    title: []const u8,
+    title_rows: usize,
+    items: []const Item,
+) !?[]const u8 {
     if (items.len == 0) return null;
+    if (scripted()) |s| return runPicker(arena, s.out, s, s.width, s.height, start, title, title_rows, items);
 
     cancel.setRawMode(true) catch {
         return try selectText(arena, io, title, items);
@@ -204,21 +326,36 @@ pub fn selectFromListUnder(
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
+    const width = terminal.terminalWidth() orelse default_terminal_width;
+    return runPicker(arena, &stdout_file_writer.interface, KeyboardKeys{ .io = io }, width, terminal.terminalHeight(), start, title, title_rows, items);
+}
 
+/// Draws the picker on `out` and moves through it with keys from `keys`.
+/// Every exit erases what the picker drew and leaves the cursor at the
+/// start of the blank row above its title.
+fn runPicker(
+    arena: std.mem.Allocator,
+    out: *std.Io.Writer,
+    keys: anytype,
+    terminal_width: usize,
+    terminal_height: ?usize,
+    start: Start,
+    title: []const u8,
+    title_rows: usize,
+    items: []const Item,
+) !?[]const u8 {
     var selected: usize = 0;
 
-    const available_rows = if (terminal.terminalHeight()) |height| usableRowsUnder(height, title_rows) else default_available_rows;
-    const terminal_width = terminal.terminalWidth() orelse default_terminal_width;
+    const available_rows = if (terminal_height) |height| usableRowsUnder(height, title_rows) else default_available_rows;
     const column_width = computeColumnWidth(items);
     const grid = computeGrid(items.len, available_rows, terminal_width, column_width);
 
-    try stdout_writer.print("\r\n\r\n{s}\r\n", .{title});
-    try renderGrid(stdout_writer, items, grid, selected, column_width, true);
-    try stdout_writer.flush();
+    try out.print("{s}{s}\r\n", .{ headerPrefix(start), title });
+    try renderGrid(out, items, grid, selected, column_width, true);
+    try out.flush();
 
     while (true) {
-        const key = readKey(io) catch .unknown;
+        const key = keys.read();
         const dir: ?GridDir = switch (key) {
             .up => .up,
             .down => .down,
@@ -228,20 +365,16 @@ pub fn selectFromListUnder(
         };
         if (dir) |d| {
             selected = gridStep(selected, items.len, grid, d);
-            try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up, .{grid.rows});
-            try renderGrid(stdout_writer, items, grid, selected, column_width, true);
+            try out.print(terminal.move_to_line_start ++ terminal.cursor_up, .{grid.rows});
+            try renderGrid(out, items, grid, selected, column_width, true);
             continue;
         }
         switch (key) {
-            .enter => {
-                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
-                try stdout_writer.flush();
+            .enter, .quit, .escape => {
+                try out.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{eraseRows(grid.rows, title_rows)});
+                try out.flush();
+                if (key != .enter) return null;
                 return try arena.dupe(u8, items[selected].value);
-            },
-            .quit, .escape => {
-                try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{grid.rows + 1});
-                try stdout_writer.flush();
-                return null;
             },
             else => {},
         }
@@ -632,6 +765,12 @@ test "selectFromList returns null for empty list" {
     try std.testing.expect(result == null);
 }
 
+test "selectFromListAt returns null for empty list from either start" {
+    const items: [0]Item = .{};
+    try std.testing.expect(try selectFromListAt(std.testing.allocator, std.testing.io, .new_row, "Title", &items) == null);
+    try std.testing.expect(try selectFromListAt(std.testing.allocator, std.testing.io, .after_picker, "Title", &items) == null);
+}
+
 test "Item struct has expected fields" {
     const item = Item{ .value = "test", .label = "Test Item" };
     try std.testing.expectEqualStrings("test", item.value);
@@ -725,4 +864,77 @@ test "readKeyPosix buffers leftover bytes after an escape sequence" {
     try std.testing.expectEqual(@as(usize, 1), pending_len);
     try std.testing.expectEqual(@as(u8, 'q'), pending_buf[0]);
     pending_len = 0;
+}
+
+const FakeScreen = @import("fake_screen.zig").FakeScreen;
+
+const test_items = [_]Item{
+    .{ .value = "a", .label = "Alpha" },
+    .{ .value = "b", .label = "Beta" },
+    .{ .value = "c", .label = "Gamma" },
+};
+
+/// Runs a picker with `keys` pressed, appending what it draws to `out`.
+fn pickScripted(arena: std.mem.Allocator, out: *std.Io.Writer, keys: []const Key, width: usize, start: Start, title: []const u8) !?[]const u8 {
+    var s = Script{ .keys = keys, .out = out, .width = width };
+    script = &s;
+    defer script = null;
+    return selectFromListAt(arena, std.testing.io, start, title, &test_items);
+}
+
+test "picker returns the item the arrow keys move to" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    try std.testing.expectEqualStrings("b", (try pickScripted(arena, &out.writer, &.{ .down, .enter }, 80, .new_row, "Pick")).?);
+    try std.testing.expectEqualStrings("c", (try pickScripted(arena, &out.writer, &.{ .up, .enter }, 80, .new_row, "Pick")).?);
+    try std.testing.expectEqualStrings("a", (try pickScripted(arena, &out.writer, &.{ .down, .unknown, .up, .enter }, 80, .new_row, "Pick")).?);
+}
+
+test "picker returns null when dismissed" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    try std.testing.expect(try pickScripted(arena, &out.writer, &.{.quit}, 80, .new_row, "Pick") == null);
+    try std.testing.expect(try pickScripted(arena, &out.writer, &.{.escape}, 80, .new_row, "Pick") == null);
+    // Running out of scripted keys dismisses the picker.
+    try std.testing.expect(try pickScripted(arena, &out.writer, &.{.down}, 80, .new_row, "Pick") == null);
+}
+
+test "pickers shown back to back leave one row between the command and what follows" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    try out.writer.writeAll("> /model\r\n");
+    _ = try pickScripted(arena, &out.writer, &.{.enter}, 80, .new_row, "Select a model");
+    _ = try pickScripted(arena, &out.writer, &.{ .down, .enter }, 80, .after_picker, "Select reasoning effort");
+    _ = try pickScripted(arena, &out.writer, &.{.escape}, 80, .after_picker, "Select context size");
+    try out.writer.writeAll("\nSwitched to model a.");
+
+    var screen = FakeScreen{ .width = 80 };
+    try screen.feed(arena, out.written());
+    try std.testing.expectEqualStrings("> /model\n\n\nSwitched to model a.", try screen.toText(arena));
+}
+
+test "picker erases every row of a title that wraps" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var out = std.Io.Writer.Allocating.init(arena);
+
+    const title: [61]u8 = @splat('x');
+    try out.writer.writeAll("> /effort");
+    _ = try pickScripted(arena, &out.writer, &.{.enter}, 20, .new_row, &title);
+
+    var screen = FakeScreen{ .width = 20 };
+    try screen.feed(arena, out.written());
+    try std.testing.expectEqualStrings("> /effort", try screen.toText(arena));
+    // The cursor waits on the blank row under the command's row.
+    try std.testing.expectEqual(@as(usize, 1), screen.cur_row);
 }

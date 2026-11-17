@@ -148,15 +148,15 @@ fn askOn(
     else
         .cancelled;
 
-    // The picker leaves the cursor on the last row of its title, which sits
-    // one blank row below the tool call line. The echo takes that blank row.
-    try stdout_writer.print(terminal.cursor_up ++ terminal.move_to_line_start ++ terminal.erase_display, .{title_rows});
+    // The picker leaves the cursor on the blank row above its title, just
+    // below the tool call line. The echo takes that row.
+    try stdout_writer.writeAll(terminal.move_to_line_start ++ terminal.erase_display);
     try stdout_writer.print("{s}↳ {s}{s}", .{ ansi.dim, try oneLine(arena, echoText(answer, width -| 4)), ansi.reset });
     try stdout_writer.flush();
     return answer;
 }
 
-/// Reads one line typed on the picker's last title row and returns the
+/// Reads one line typed on the row the picker left the cursor on and returns the
 /// cursor to the start of that row. An empty line dismisses the question.
 fn readTypedAnswer(comptime C: type, arena: std.mem.Allocator, io: std.Io, stdout_writer: *std.Io.Writer, width: usize) !Answer {
     try stdout_writer.print(terminal.clear_line ++ "{s}", .{typed_prompt});
@@ -179,26 +179,8 @@ fn readTypedAnswer(comptime C: type, arena: std.mem.Allocator, io: std.Io, stdou
     return if (text.len == 0) .cancelled else .{ .typed = text };
 }
 
-/// Terminal rows that one line of `text` occupies at `width` columns,
-/// counted in display cells. A wide character that doesn't fit the cell left
-/// on a row wraps whole onto the next one, as terminals do.
-pub fn rowsFor(text: []const u8, width: usize) usize {
-    const columns = @max(width, 1);
-    var rows: usize = 1;
-    var column: usize = 0;
-    var i: usize = 0;
-    while (i < text.len) {
-        const decoded = text_width.decodeAt(text, i);
-        const cells = if (decoded.cp) |cp| text_width.codePointWidth(cp) else 1;
-        i += decoded.len;
-        if (column + cells > columns) {
-            rows += 1;
-            column = 0;
-        }
-        column += cells;
-    }
-    return rows;
-}
+/// Terminal rows that one line of `text` occupies at `width` columns.
+pub const rowsFor = list_picker.rowsFor;
 
 /// The answer as echoed under the question, cut to at most `max_bytes` so
 /// it never wraps: the indicator rewinds a counted number of rows.
@@ -343,7 +325,7 @@ const FakeConsole = struct {
             widest_label = @max(widest_label, text_width.displayWidth(item.label));
             try stdout_writer.print("  {s}\r\n", .{item.label});
         }
-        try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{items.len + 1});
+        try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{items.len + rows + 1});
         return picked;
     }
 
