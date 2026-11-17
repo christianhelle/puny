@@ -717,6 +717,12 @@ test "selectFromList returns null for empty list" {
     try std.testing.expect(result == null);
 }
 
+test "selectFromListAt returns null for empty list from either start" {
+    const items: [0]Item = .{};
+    try std.testing.expect(try selectFromListAt(std.testing.allocator, std.testing.io, .new_row, "Title", &items) == null);
+    try std.testing.expect(try selectFromListAt(std.testing.allocator, std.testing.io, .after_picker, "Title", &items) == null);
+}
+
 test "Item struct has expected fields" {
     const item = Item{ .value = "test", .label = "Test Item" };
     try std.testing.expectEqualStrings("test", item.value);
