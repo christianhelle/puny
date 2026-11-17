@@ -142,16 +142,23 @@ test "computeColumnWidth accounts for the longest label" {
 /// cursor's row and a blank line.
 const header_rows = 2;
 
-/// Set when a picker has just erased itself, leaving the cursor at the start
-/// of an empty line, so the next picker need not end the row first. Without
-/// it, pickers shown one after another (model, effort, context size) each
-/// left a blank line behind.
-var cursor_on_fresh_line = false;
+/// Where the cursor is when a picker opens.
+pub const Start = enum {
+    /// Anywhere, so the picker ends the cursor's row first.
+    new_row,
+    /// Where the previous picker left it, at the start of an empty row,
+    /// with nothing printed since. Pickers shown one after another (model,
+    /// effort, context size) would each leave a blank row behind otherwise.
+    after_picker,
+};
 
 /// What the picker prints before its title: the end of the cursor's row,
-/// unless a picker just left it on a fresh line, then a blank line.
-fn headerPrefix(fresh_line: bool) []const u8 {
-    return if (fresh_line) "\r\n" else "\r\n\r\n";
+/// unless it already starts an empty row, then a blank line.
+fn headerPrefix(start: Start) []const u8 {
+    return switch (start) {
+        .new_row => "\r\n\r\n",
+        .after_picker => "\r\n",
+    };
 }
 
 /// Rows to move up from below the list to reach the blank line above the
@@ -187,9 +194,9 @@ test "eraseRows reaches back over the blank line above the title" {
     try std.testing.expectEqual(@as(usize, 9), eraseRows(5, 3));
 }
 
-test "header ends the cursor's row unless a picker just left it on a fresh line" {
-    try std.testing.expectEqualStrings("\r\n\r\n", headerPrefix(false));
-    try std.testing.expectEqualStrings("\r\n", headerPrefix(true));
+test "header ends the cursor's row unless the picker follows another picker" {
+    try std.testing.expectEqualStrings("\r\n\r\n", headerPrefix(.new_row));
+    try std.testing.expectEqualStrings("\r\n", headerPrefix(.after_picker));
 }
 
 test "usableRowsUnder leaves room for a title that takes several rows" {
@@ -209,7 +216,7 @@ pub fn selectFromList(
     title: []const u8,
     items: []const Item,
 ) !?[]const u8 {
-    return selectFromListUnder(arena, io, title, 1, items);
+    return selectFromListAt(arena, io, .new_row, title, 1, items);
 }
 
 /// `selectFromList` for a title that takes `title_rows` terminal rows, so
@@ -217,6 +224,20 @@ pub fn selectFromList(
 pub fn selectFromListUnder(
     arena: std.mem.Allocator,
     io: std.Io,
+    title: []const u8,
+    title_rows: usize,
+    items: []const Item,
+) !?[]const u8 {
+    return selectFromListAt(arena, io, .new_row, title, title_rows, items);
+}
+
+/// `selectFromListUnder` opening from `start`. Every exit erases what the
+/// picker drew and leaves the cursor at the start of the blank row above
+/// its title.
+pub fn selectFromListAt(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    start: Start,
     title: []const u8,
     title_rows: usize,
     items: []const Item,
@@ -241,8 +262,7 @@ pub fn selectFromListUnder(
     const column_width = computeColumnWidth(items);
     const grid = computeGrid(items.len, available_rows, terminal_width, column_width);
 
-    try stdout_writer.print("{s}{s}\r\n", .{ headerPrefix(cursor_on_fresh_line), title });
-    cursor_on_fresh_line = false;
+    try stdout_writer.print("{s}{s}\r\n", .{ headerPrefix(start), title });
     try renderGrid(stdout_writer, items, grid, selected, column_width, true);
     try stdout_writer.flush();
 
@@ -265,7 +285,6 @@ pub fn selectFromListUnder(
             .enter, .quit, .escape => {
                 try stdout_writer.print(terminal.move_to_line_start ++ terminal.cursor_up ++ terminal.erase_display, .{eraseRows(grid.rows, title_rows)});
                 try stdout_writer.flush();
-                cursor_on_fresh_line = true;
                 if (key != .enter) return null;
                 return try arena.dupe(u8, items[selected].value);
             },

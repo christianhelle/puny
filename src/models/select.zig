@@ -86,11 +86,11 @@ pub fn select(
     defer models.deinit();
     model_picker.setModels(models.value().models);
     const key = (try selectModelInteractive(models.value().models, arena, io, init)) orelse return null;
-    const effort = (try effort_picker.pickEffort(arena, io)) orelse return null;
+    const effort = (try effort_picker.pickEffort(arena, io, .after_picker)) orelse return null;
     const context = ModelContext.of(models.value().models, key);
     const context_tier: ?client.ContextTier = if (findModel(models.value().models, key)) |model|
         if (model.long_context_length > 0)
-            (try context_tier_picker.pickTier(arena, io, model)) orelse return null
+            (try context_tier_picker.pickTier(arena, io, .after_picker, model)) orelse return null
         else
             null
     else

@@ -5,6 +5,7 @@ const openai = @import("../providers/openai.zig");
 pub fn pickEffort(
     arena: std.mem.Allocator,
     io: std.Io,
+    start: list_picker.Start,
 ) !?openai.ReasoningEffort {
     var items: std.ArrayList(list_picker.Item) = .empty;
     defer items.deinit(arena);
@@ -24,7 +25,7 @@ pub fn pickEffort(
         });
     }
 
-    const selected = (try list_picker.selectFromList(arena, io, "Select reasoning effort (Use arrow keys to navigate, Enter to select, 'q' to quit):", items.items)) orelse return null;
+    const selected = (try list_picker.selectFromListAt(arena, io, start, "Select reasoning effort (Use arrow keys to navigate, Enter to select, 'q' to quit):", 1, items.items)) orelse return null;
 
     return std.meta.stringToEnum(openai.ReasoningEffort, selected);
 }

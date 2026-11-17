@@ -79,7 +79,7 @@ pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8)
         try ctx.stdout_writer.print("\nUnknown reasoning effort '{s}'. Valid levels: default, none, low, medium, high, xhigh, max.\n", .{trimmed});
         try ctx.stdout_writer.flush();
         return;
-    } else (try effort_picker.pickEffort(ctx.arena, ctx.io)) orelse {
+    } else (try effort_picker.pickEffort(ctx.arena, ctx.io, .new_row)) orelse {
         try ctx.stdout_writer.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
         try ctx.stdout_writer.flush();
         return;
