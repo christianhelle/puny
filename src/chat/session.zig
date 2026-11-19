@@ -181,6 +181,14 @@ pub const ChatSession = struct {
                     }
                     continue;
                 },
+                .edit_conversation => {
+                    if (try session_commands.handleEditCommand(ctx)) {
+                        try persistence.saveMessages(ctx);
+                        try persistence.saveSessionMeta(ctx);
+                        upsertCurrentSession(ctx);
+                    }
+                    continue;
+                },
                 .set_context => |argument| {
                     try session_commands.handleContextCommand(ctx, argument);
                     if (ctx.parsed.oneshot) {

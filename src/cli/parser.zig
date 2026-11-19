@@ -5,6 +5,7 @@ pub const Command = union(enum) {
     reset,
     stats,
     compact,
+    edit,
     context: ?[]const u8,
     config,
     plan: ?[]const u8,
@@ -33,6 +34,7 @@ pub const command_tokens = [_][]const u8{
     "/new",
     "/stats",
     "/compact",
+    "/edit",
     "/context",
     "/config",
     "/plan",
@@ -75,6 +77,9 @@ pub fn parse(user_message: []const u8) Command {
 
     if (eqlIgnoreCase(user_message, "/compact") or eqlIgnoreCase(user_message, ":compact"))
         return .compact;
+
+    if (eqlIgnoreCase(user_message, "/edit") or eqlIgnoreCase(user_message, ":edit"))
+        return .edit;
 
     if (eqlIgnoreCase(user_message, "/context") or std.mem.startsWith(u8, user_message, "/context ")) {
         if (user_message.len > "/context ".len) {
@@ -273,6 +278,12 @@ test "every registered command token parses as a command" {
         try std.testing.expect(cmd != .prompt);
         try std.testing.expect(cmd != .skill);
     }
+}
+
+test "parse recognizes the edit command before the skill fallback" {
+    try std.testing.expectEqual(Command.edit, parse("/edit"));
+    try std.testing.expectEqual(Command.edit, parse(":edit"));
+    try std.testing.expectEqual(Command.edit, parse("/EDIT"));
 }
 
 test "parse recognizes the compact and context commands before the skill fallback" {
