@@ -5,6 +5,8 @@ const config = @import("../config/config.zig");
 const context = @import("context.zig");
 const compact = @import("compact.zig");
 const context_breakdown = @import("context_breakdown.zig");
+const conversation_edit = @import("conversation_edit.zig");
+const edit_picker = @import("../tui/edit_picker.zig");
 const debug_log = @import("debug_log.zig");
 const effort_picker = @import("../tui/effort_picker.zig");
 const input = @import("../tui/input.zig");
@@ -69,6 +71,54 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
         .invalid => try w.print("\nUsage: /context [tokens|off|default|long]\n", .{}),
     }
     try w.flush();
+}
+
+/// `/edit`: picks a user prompt or assistant reply, then removes it or
+/// rewinds the conversation to it. Returns whether the conversation changed.
+pub fn handleEditCommand(ctx: *ChatLoopContext) !bool {
+    const w = ctx.stdout_writer;
+    // Labels and picker items are only needed while the command runs.
+    var scratch_state = std.heap.ArenaAllocator.init(ctx.arena);
+    defer scratch_state.deinit();
+    const scratch = scratch_state.allocator();
+    const indices = try conversation_edit.editableIndices(scratch, ctx.messages.items);
+    if (indices.len == 0) {
+        try w.print("\n{s}Nothing to edit.{s}\n", .{ ansi.dim, ansi.reset });
+        try w.flush();
+        return false;
+    }
+
+    const labels = try scratch.alloc([]const u8, indices.len);
+    const width = list_picker.screenWidth();
+    for (indices, labels) |index, *label| label.* = try conversation_edit.itemLabel(scratch, ctx.messages.items[index], width);
+
+    const picked = (try edit_picker.pickMessage(scratch, ctx.io, labels)) orelse return cancelled(w);
+    const action = (try edit_picker.pickAction(scratch, ctx.io)) orelse return cancelled(w);
+    const index = indices[picked];
+
+    switch (action) {
+        .remove => {
+            const related = conversation_edit.remove(ctx.messages, index) - 1;
+            if (related == 0) {
+                try w.print("\nRemoved {s}.\n", .{labels[picked]});
+            } else {
+                try w.print("\nRemoved {s} (with {d} related message{s}).\n", .{ labels[picked], related, if (related == 1) "" else "s" });
+            }
+        },
+        .rewind => {
+            const dropped = conversation_edit.rewind(ctx.messages, index);
+            try w.print("\nRewound to {s} ({d} later message{s} removed).\n", .{ labels[picked], dropped, if (dropped == 1) "" else "s" });
+        },
+    }
+    ctx.context_budget.resetUsage();
+    try w.flush();
+    return true;
+}
+
+fn cancelled(w: *std.Io.Writer) !bool {
+    try w.print("\n{s}Cancelled.{s}\n", .{ ansi.dim, ansi.reset });
+    try w.flush();
+    return false;
 }
 
 pub fn handleSwitchEffortCommand(ctx: *ChatLoopContext, effort_arg: ?[]const u8) !void {
@@ -1189,4 +1239,98 @@ test "handleSwitchEffortCommand reports a dismissed picker as cancelled" {
 
     try std.testing.expectEqual(@as(?openai.ReasoningEffort, .high), reasoning_effort);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Cancelled.") != null);
+}
+
+fn runEditScripted(keys: []const list_picker.Key, messages: *std.ArrayList(openai.Message), out: *std.Io.Writer.Allocating) !bool {
+    var reasoning_effort: ?openai.ReasoningEffort = null;
+    var model_provider: ModelProvider = .mock;
+    var cfg = config.Config.default();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ctx = testChatLoopContext(arena_state.allocator(), &out.writer, &reasoning_effort, &model_provider, &cfg);
+    var budget = compact.ContextBudget.init(1000, null);
+    budget.recordPrompt(500, messages.items.len);
+    ctx.messages = messages;
+    ctx.context_budget = &budget;
+    var script = list_picker.Script{ .keys = keys, .out = &out.writer };
+    list_picker.script = &script;
+    defer list_picker.script = null;
+
+    const changed = try handleEditCommand(&ctx);
+    if (changed) try std.testing.expect(budget.last_prompt_tokens == null);
+    return changed;
+}
+
+fn editTestConversation(allocator: std.mem.Allocator) !std.ArrayList(openai.Message) {
+    var messages: std.ArrayList(openai.Message) = .empty;
+    try messages.appendSlice(allocator, &.{
+        .{ .system = "base" },
+        .{ .user = "first" },
+        .{ .assistant = .{ .content = "one" } },
+        .{ .user = "second" },
+        .{ .assistant = .{ .content = "two" } },
+    });
+    return messages;
+}
+
+test "handleEditCommand removes the picked message" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var messages = try editTestConversation(std.testing.allocator);
+    defer messages.deinit(std.testing.allocator);
+
+    try std.testing.expect(try runEditScripted(&.{ .down, .enter, .enter }, &messages, &out));
+
+    try std.testing.expectEqual(@as(usize, 4), messages.items.len);
+    try std.testing.expectEqualStrings("second", messages.items[2].user);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Removed Puny: one.") != null);
+}
+
+test "handleEditCommand rewinds to the picked message" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var messages = try editTestConversation(std.testing.allocator);
+    defer messages.deinit(std.testing.allocator);
+
+    try std.testing.expect(try runEditScripted(&.{ .down, .enter, .down, .enter }, &messages, &out));
+
+    try std.testing.expectEqual(@as(usize, 3), messages.items.len);
+    try std.testing.expectEqualStrings("one", messages.items[2].assistant.content.?);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Rewound to Puny: one (2 later messages removed).") != null);
+}
+
+test "handleEditCommand leaves the conversation alone when cancelled" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var messages = try editTestConversation(std.testing.allocator);
+    defer messages.deinit(std.testing.allocator);
+
+    try std.testing.expect(!try runEditScripted(&.{ .enter, .escape }, &messages, &out));
+
+    try std.testing.expectEqual(@as(usize, 5), messages.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Cancelled.") != null);
+}
+
+test "handleEditCommand reports an empty conversation" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(std.testing.allocator);
+    try messages.append(std.testing.allocator, .{ .system = "base" });
+
+    try std.testing.expect(!try runEditScripted(&.{}, &messages, &out));
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Nothing to edit.") != null);
+}
+
+test "handleEditCommand reports the replies removed with the first prompt" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var messages = try editTestConversation(std.testing.allocator);
+    defer messages.deinit(std.testing.allocator);
+
+    try std.testing.expect(try runEditScripted(&.{ .enter, .enter }, &messages, &out));
+
+    try std.testing.expectEqual(@as(usize, 3), messages.items.len);
+    try std.testing.expectEqualStrings("second", messages.items[1].user);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Removed You: first (with 1 related message).") != null);
 }

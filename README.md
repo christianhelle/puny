@@ -983,6 +983,7 @@ While in a chat session:
 - `/new` or `/reset` — clear the conversation, start a new session, and unload all skills
 - `/stats` — show session statistics (turns, requests, and tokens summed over every request) and memory usage; with GitHub Copilot it also shows the [AI Credits](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) each model and the whole session used, as Copilot reports them per request, and with OpenCode Zen it shows the US dollars each model and the session cost, priced from Zen's published rates
 - `/compact` — summarize the conversation so far into one message to free context
+- `/edit` — pick a prompt or reply from the conversation, then remove it or rewind to it (removing everything after it); removing a reply also removes its tool calls and results, and the edited conversation is saved to the session
 - `/context [tokens|off|default|long]` — show how full the context is and a breakdown of what fills it (system prompt, tools, skills, messages), set the context limit for this conversation, pick a [context tier](#context-tiers), or turn auto compaction off
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker
 - `/plan [task]` — enter planning mode (optionally with a task description); the resulting PRD is saved to the session folder as `plan.md`

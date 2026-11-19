@@ -39,6 +39,9 @@ test "include chat session tests" {
 test "include chat.session_commands tests" {
     _ = @import("../chat/session_commands.zig");
 }
+test "include chat.conversation_edit tests" {
+    _ = @import("../chat/conversation_edit.zig");
+}
 test "include chat.persistence tests" {
     _ = @import("../chat/persistence.zig");
     _ = @import("../chat/orchestrate.zig");
@@ -256,6 +259,9 @@ test "include tui.diff tests" {
 }
 test "include tui.context_tier_picker tests" {
     _ = @import("../tui/context_tier_picker.zig");
+}
+test "include tui.edit_picker tests" {
+    _ = @import("../tui/edit_picker.zig");
 }
 test "include tui.effort_picker tests" {
     _ = @import("../tui/effort_picker.zig");

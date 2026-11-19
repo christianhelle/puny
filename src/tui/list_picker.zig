@@ -297,6 +297,17 @@ fn scripted() ?*Script {
     return if (builtin.is_test) script else null;
 }
 
+/// Columns pickers draw in: the test script's, else the terminal's.
+pub fn screenWidth() usize {
+    return if (scripted()) |s| s.width else terminal.terminalWidth() orelse default_terminal_width;
+}
+
+/// Rows pickers draw in, or null when unknown: the test script's, else the
+/// terminal's.
+pub fn screenHeight() ?usize {
+    return if (scripted()) |s| s.height else terminal.terminalHeight();
+}
+
 const KeyboardKeys = struct {
     io: std.Io,
 
