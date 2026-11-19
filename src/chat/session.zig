@@ -701,6 +701,8 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_out: i64 = 0;
     var turn_credits: ?token_stats.AiCredits = null;
     var turn_credits_missing = false;
+    var turn_usd: ?token_stats.Usd = null;
+    var turn_usd_missing = false;
     var compaction_failed = false;
 
     // A one-shot run has no next prompt to type towards.
@@ -714,6 +716,10 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     }
 
     while (!turn_complete) {
+        // Zen prices are fetched once per model; every request this turn makes
+        // is then priced, the compaction summary included.
+        ctx.session_stats.setPricing(try ctx.pricing_book.forModel(ctx.model_key.*));
+
         if (!compaction_failed) {
             if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
                 if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions()), limit)) {
@@ -792,6 +798,15 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
 
+        if (ctx.prov.* == .opencode) {
+            if (ctx.session_stats.lastRequestUsd()) |cost| {
+                const so_far: i64 = if (turn_usd) |u| u.nano else 0;
+                turn_usd = .{ .nano = so_far + cost };
+            } else {
+                turn_usd_missing = true;
+            }
+        }
+
         // Tool results are in place by now, so every tool call stays paired.
         var delivered: []const []const u8 = &.{};
         if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
@@ -806,11 +821,14 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     }
 
     if (turn_complete and !turn_cancelled and !turn_had_error) {
-        // Only Copilot bills in AI Credits; after switching away, /stats keeps
-        // the session's credits but the footer goes back to tokens alone.
+        // Only Copilot bills in AI Credits and only Zen bills in US dollars;
+        // after switching away, /stats keeps the session's costs but the
+        // footer goes back to tokens alone.
         const session_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalAiCredits() else null;
+        const session_usd = if (ctx.prov.* == .opencode) ctx.session_stats.totalUsd() else null;
         if (turn_credits) |*c| c.partial = turn_credits_missing;
-        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits, null, null);
+        if (turn_usd) |*u| u.partial = turn_usd_missing;
+        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits, turn_usd, session_usd);
     }
 
     if (branch_review.isActive()) {

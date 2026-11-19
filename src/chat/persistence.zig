@@ -148,6 +148,7 @@ fn testContext(
         .review_outcome = undefined,
         .session = session,
         .session_stats = undefined,
+        .pricing_book = undefined,
         .debug_log = null,
         .chat_log = null,
         .skill_registry = undefined,

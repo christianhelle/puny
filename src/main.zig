@@ -33,6 +33,7 @@ const provider = @import("providers/provider.zig");
 const resolver = @import("providers/resolver.zig");
 const session = @import("chat/session.zig");
 const compact = @import("chat/compact.zig");
+const pricing = @import("chat/pricing.zig");
 const display = @import("chat/display.zig");
 const diff_view = @import("chat/diff_view.zig");
 const sigint = @import("core/sigint.zig");
@@ -433,6 +434,8 @@ fn run(init: std.process.Init) !u8 {
     var session_stats = stats.SessionStats.init(arena, init.io);
     session_stats.session_id = current_session.id;
     defer session_stats.deinit();
+    var pricing_book = pricing.PricingBook.init(arena, &prov);
+    defer pricing_book.deinit();
     sigint.register() catch {};
 
     const ctx = session.ChatLoopContext{
@@ -459,6 +462,7 @@ fn run(init: std.process.Init) !u8 {
         .restore_incomplete = restore_incomplete,
         .session = &current_session,
         .session_stats = &session_stats,
+        .pricing_book = &pricing_book,
         .debug_log = if (debug_log) |*log| log else null,
         .chat_log = if (chat_log) |*log| log else null,
         .skill_registry = &skill_registry,
