@@ -198,6 +198,9 @@ test "include providers.google client tests" {
 test "include providers.provider tests" {
     _ = @import("../providers/provider.zig");
 }
+test "include providers.pricing tests" {
+    _ = @import("../providers/pricing.zig");
+}
 
 test "include providers.resolver tests" {
     _ = @import("../providers/resolver.zig");
