@@ -174,11 +174,16 @@ pub fn parsePricing(
 /// Fetches the Zen model list once to price `model_id`, or null when the
 /// list cannot be read or the model has no prices. Zen is the only source,
 /// so a failed fetch quietly leaves costs out rather than guessing them.
-pub fn fetchPricing(client: *http_client.Client, model_id: []const u8) ?pricing.ModelPricing {
+/// Prices are allocated from `allocator`, which should outlive the session.
+pub fn fetchPricing(
+    client: *http_client.Client,
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+) ?pricing.ModelPricing {
     var raw = listModelsRaw(client) catch return null;
     defer raw.deinit();
     if (raw.status.class() != .success) return null;
-    return parsePricing(client.allocator, raw.body, model_id) catch null;
+    return parsePricing(allocator, raw.body, model_id) catch null;
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -488,8 +493,8 @@ test "fetchPricing fetches the model list and reads the model's cost" {
     var c = try clientForServer(ctx, arena);
     defer c.deinit();
 
-    const found = fetchPricing(&c, "big-pickle").?;
-    defer found.deinit(c.allocator);
+    const found = fetchPricing(&c, arena, "big-pickle").?;
+    defer found.deinit(arena);
 
     try std.testing.expectEqual(@as(i64, 2_000_000_000), found.base.input);
     try std.testing.expectEqual(@as(i64, 8_000_000_000), found.base.output);
@@ -506,5 +511,5 @@ test "fetchPricing returns null when the model list cannot be read" {
     var c = try clientForServer(ctx, arena);
     defer c.deinit();
 
-    try std.testing.expect(fetchPricing(&c, "big-pickle") == null);
+    try std.testing.expect(fetchPricing(&c, arena, "big-pickle") == null);
 }

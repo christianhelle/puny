@@ -121,10 +121,11 @@ pub const Provider = union(enum) {
 
     /// The prices OpenCode Zen lists for `model_key`, or null when the
     /// provider does not bill in USD (the rest are subscriptions or flat
-    /// plans) or the model lists no prices. The caller owns the tiers.
-    pub fn modelPricing(self: *Provider, model_key: []const u8) ?pricing.ModelPricing {
+    /// plans) or the model lists no prices. Prices are allocated from
+    /// `allocator`, which should outlive the session.
+    pub fn modelPricing(self: *Provider, allocator: std.mem.Allocator, model_key: []const u8) ?pricing.ModelPricing {
         return switch (self.*) {
-            .opencode => |*c| opencode_zen.fetchPricing(c, model_key),
+            .opencode => |*c| opencode_zen.fetchPricing(c, allocator, model_key),
             else => null,
         };
     }
@@ -696,8 +697,11 @@ test "Provider.modelPricing reads OpenCode Zen prices for the model" {
     defer prov.deinit();
     prov.setConfig(.{ .base_url = url });
 
-    const found = prov.modelPricing("deepseek-v4-pro").?;
-    defer found.deinit(std.testing.allocator);
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const found = prov.modelPricing(arena, "deepseek-v4-pro").?;
 
     try std.testing.expectEqual(@as(i64, 1_740_000_000), found.base.input);
     try std.testing.expectEqual(@as(i64, 3_480_000_000), found.base.output);
@@ -709,7 +713,7 @@ test "Provider.modelPricing says nothing for providers that do not bill in USD" 
     defer prov.deinit();
     prov.setConfig(.{ .base_url = "http://127.0.0.1:1" });
 
-    try std.testing.expect(prov.modelPricing("deepseek-v4-pro") == null);
+    try std.testing.expect(prov.modelPricing(std.testing.allocator, "deepseek-v4-pro") == null);
 }
 
 test "Provider.listModels records the HTTP status on a server error" {
