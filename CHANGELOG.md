@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.6.0](https://github.com/christianhelle/puny/releases/tag/v0.6.0) (2026-11-19)
 
 ### Features
 - Add /edit command to remove or rewind conversation messages ([#245](https://github.com/christianhelle/puny/pull/245)) ([@christianhelle](https://github.com/christianhelle/))
