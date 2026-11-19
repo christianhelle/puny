@@ -118,6 +118,7 @@ const AnthropicSseCallback = struct {
     block_types: std.ArrayList(BlockType),
     input_tokens: i64 = 0,
     cached_input_tokens: i64 = 0,
+    cache_write_input_tokens: i64 = 0,
     observer: ?http_client.HttpObserver = null,
 
     pub fn event(self: *@This(), data: []const u8) !void {
@@ -140,6 +141,7 @@ const AnthropicSseCallback = struct {
                     const cache_reads = integerField(usage, "cache_read_input_tokens");
                     self.input_tokens = uncached + cache_writes + cache_reads;
                     self.cached_input_tokens = cache_reads;
+                    self.cache_write_input_tokens = cache_writes;
                 }
             }
             return;
@@ -218,6 +220,7 @@ const AnthropicSseCallback = struct {
                 .input_tokens = self.input_tokens,
                 .output_tokens = output_tokens,
                 .cached_input_tokens = self.cached_input_tokens,
+                .cache_write_input_tokens = if (self.cache_write_input_tokens > 0) self.cache_write_input_tokens else null,
             } });
         }
     }
@@ -634,6 +637,7 @@ test "AnthropicSseCallback counts cache reads and writes as input tokens" {
     try std.testing.expectEqual(@as(usize, 2), events.items.len);
     try std.testing.expectEqual(@as(i64, 1000), events.items[1].usage.input_tokens);
     try std.testing.expectEqual(@as(i64, 900), events.items[1].usage.cached_input_tokens.?);
+    try std.testing.expectEqual(@as(i64, 90), events.items[1].usage.cache_write_input_tokens.?);
 }
 
 test "AnthropicSseCallback emits tool call events" {

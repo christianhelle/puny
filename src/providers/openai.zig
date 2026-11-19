@@ -15,6 +15,9 @@ pub const TurnUsage = struct {
     reasoning_output_tokens: ?i64 = null,
     /// Portion of input_tokens served from the provider's prompt cache.
     cached_input_tokens: ?i64 = null,
+    /// Portion of input_tokens written to the provider's prompt cache, when
+    /// the provider reports writes apart from reads.
+    cache_write_input_tokens: ?i64 = null,
     tokens_per_second: ?f64 = null,
     time_to_first_token_seconds: ?f64 = null,
     /// AI Credits GitHub Copilot billed for this request, in the billionths
