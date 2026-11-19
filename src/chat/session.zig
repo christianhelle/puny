@@ -183,6 +183,7 @@ pub const ChatSession = struct {
                 },
                 .edit_conversation => {
                     if (try session_commands.handleEditCommand(ctx)) {
+                        forgetUnloadedSkills(&loaded_skills, ctx.messages.items);
                         try persistence.saveMessages(ctx);
                         try persistence.saveSessionMeta(ctx);
                         upsertCurrentSession(ctx);
@@ -609,6 +610,45 @@ fn maybeLoadTriggeredSkills(
         try printNotice(ctx.stdout_writer, "Skill: {s}", .{r.name});
         loaded_skills.put(ctx.arena, r.name, {}) catch {};
     }
+}
+
+/// Drops skills from `loaded_skills` whose instructions are no longer in
+/// `messages`, as after `/edit` rewinds past them, so their triggers can load
+/// them again.
+fn forgetUnloadedSkills(loaded_skills: *std.StringHashMapUnmanaged(void), messages: []const openai.Message) void {
+    var names = loaded_skills.keyIterator();
+    while (names.next()) |name| {
+        if (!hasLoadedSkill(messages, name.*)) {
+            loaded_skills.removeByPtr(name);
+            // Removal leaves the slot as a tombstone, so iteration goes on.
+        }
+    }
+}
+
+fn hasLoadedSkill(messages: []const openai.Message, name: []const u8) bool {
+    for (messages) |msg| {
+        if (msg != .system) continue;
+        const loaded = skills.loadedName(msg.system) orelse continue;
+        if (std.mem.eql(u8, loaded, name)) return true;
+    }
+    return false;
+}
+
+test "forgetUnloadedSkills keeps only skills still in the conversation" {
+    const allocator = std.testing.allocator;
+    var loaded_skills: std.StringHashMapUnmanaged(void) = .{};
+    defer loaded_skills.deinit(allocator);
+    try loaded_skills.put(allocator, "kept", {});
+    try loaded_skills.put(allocator, "rewound", {});
+    const kept = try skills.formatLoaded(allocator, "kept", "instructions");
+    defer allocator.free(kept);
+    const messages = [_]openai.Message{ .{ .system = "base" }, .{ .system = kept }, .{ .user = "hi" } };
+
+    forgetUnloadedSkills(&loaded_skills, &messages);
+
+    try std.testing.expect(loaded_skills.contains("kept"));
+    try std.testing.expect(!loaded_skills.contains("rewound"));
+    try std.testing.expectEqual(@as(u32, 1), loaded_skills.count());
 }
 
 /// Lists skills for `/skills`. A described skill gets a blank line above it,
