@@ -68,17 +68,40 @@ const picker_row_cells = 3;
 /// with it, since providers reject results whose call is missing. Only the
 /// results right after the reply are its own: some providers reuse call ids
 /// such as `call_0` in every response.
-pub fn remove(messages: *std.ArrayList(openai.Message), index: usize) void {
-    const removed = messages.orderedRemove(index);
-    const calls = switch (removed) {
-        .assistant => |assistant| assistant.tool_calls orelse return,
-        else => return,
-    };
-    while (index < messages.items.len) {
-        const msg = messages.items[index];
-        if (msg != .tool or !callsInclude(calls, msg.tool.tool_call_id)) break;
-        _ = messages.orderedRemove(index);
+///
+/// Removing the first user prompt also removes the replies to it, up to the
+/// next prompt: Anthropic and Gemini reject a conversation whose first turn
+/// is the model's. System messages stay. Returns how many messages went.
+pub fn remove(messages: *std.ArrayList(openai.Message), index: usize) usize {
+    const before = messages.items.len;
+    switch (messages.orderedRemove(index)) {
+        .assistant => |assistant| if (assistant.tool_calls) |calls| {
+            while (index < messages.items.len) {
+                const msg = messages.items[index];
+                if (msg != .tool or !callsInclude(calls, msg.tool.tool_call_id)) break;
+                _ = messages.orderedRemove(index);
+            }
+        },
+        .user => if (!hasUserBefore(messages.items, index)) {
+            var i = index;
+            while (i < messages.items.len and messages.items[i] != .user) {
+                if (messages.items[i] == .system) {
+                    i += 1;
+                } else {
+                    _ = messages.orderedRemove(i);
+                }
+            }
+        },
+        else => {},
     }
+    return before - messages.items.len;
+}
+
+fn hasUserBefore(messages: []const openai.Message, index: usize) bool {
+    for (messages[0..index]) |msg| {
+        if (msg == .user) return true;
+    }
+    return false;
 }
 
 fn callsInclude(calls: []const openai.ToolCall, id: []const u8) bool {
@@ -178,7 +201,7 @@ test "remove drops a user prompt alone" {
     var messages = try sampleConversation(allocator);
     defer messages.deinit(allocator);
 
-    remove(&messages, 6);
+    try std.testing.expectEqual(@as(usize, 1), remove(&messages, 6));
     try std.testing.expectEqual(@as(usize, 9), messages.items.len);
     try std.testing.expect(messages.items[6] == .assistant);
 }
@@ -188,7 +211,7 @@ test "remove drops an assistant reply with its tool results" {
     var messages = try sampleConversation(allocator);
     defer messages.deinit(allocator);
 
-    remove(&messages, 2);
+    try std.testing.expectEqual(@as(usize, 3), remove(&messages, 2));
     try std.testing.expectEqual(@as(usize, 7), messages.items.len);
     try std.testing.expectEqualStrings("done", messages.items[2].assistant.content.?);
     for (messages.items) |msg| {
@@ -240,7 +263,30 @@ test "remove leaves later results that reuse the reply's call ids" {
         .{ .tool = .{ .tool_call_id = "call_0", .content = "late" } },
     });
 
-    remove(&messages, 1);
+    try std.testing.expectEqual(@as(usize, 2), remove(&messages, 1));
     try std.testing.expectEqual(@as(usize, 4), messages.items.len);
     try std.testing.expectEqualStrings("late", messages.items[3].tool.content);
+}
+
+test "remove of the first prompt takes its replies so a prompt still leads" {
+    const allocator = std.testing.allocator;
+    var messages = try sampleConversation(allocator);
+    defer messages.deinit(allocator);
+    try messages.insert(allocator, 3, .{ .system = "skill" });
+
+    try std.testing.expectEqual(@as(usize, 5), remove(&messages, 1));
+    try std.testing.expectEqual(@as(usize, 6), messages.items.len);
+    try std.testing.expectEqualStrings("base", messages.items[0].system);
+    try std.testing.expectEqualStrings("skill", messages.items[1].system);
+    try std.testing.expectEqualStrings("second", messages.items[2].user);
+}
+
+test "remove of the only prompt takes every reply" {
+    const allocator = std.testing.allocator;
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(allocator);
+    try messages.appendSlice(allocator, &.{ .{ .system = "base" }, .{ .user = "hi" }, .{ .assistant = .{ .content = "hello" } } });
+
+    try std.testing.expectEqual(@as(usize, 2), remove(&messages, 1));
+    try std.testing.expectEqual(@as(usize, 1), messages.items.len);
 }

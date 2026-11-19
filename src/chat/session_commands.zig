@@ -94,8 +94,12 @@ pub fn handleEditCommand(ctx: *ChatLoopContext) !bool {
 
     switch (action) {
         .remove => {
-            conversation_edit.remove(ctx.messages, index);
-            try w.print("\nRemoved {s}.\n", .{labels[picked]});
+            const related = conversation_edit.remove(ctx.messages, index) - 1;
+            if (related == 0) {
+                try w.print("\nRemoved {s}.\n", .{labels[picked]});
+            } else {
+                try w.print("\nRemoved {s} (with {d} related message{s}).\n", .{ labels[picked], related, if (related == 1) "" else "s" });
+            }
         },
         .rewind => {
             const dropped = conversation_edit.rewind(ctx.messages, index);
@@ -1312,4 +1316,17 @@ test "handleEditCommand reports an empty conversation" {
 
     try std.testing.expect(!try runEditScripted(&.{}, &messages, &out));
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Nothing to edit.") != null);
+}
+
+test "handleEditCommand reports the replies removed with the first prompt" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var messages = try editTestConversation(std.testing.allocator);
+    defer messages.deinit(std.testing.allocator);
+
+    try std.testing.expect(try runEditScripted(&.{ .enter, .enter }, &messages, &out));
+
+    try std.testing.expectEqual(@as(usize, 3), messages.items.len);
+    try std.testing.expectEqualStrings("second", messages.items[1].user);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Removed You: first (with 1 related message).") != null);
 }
