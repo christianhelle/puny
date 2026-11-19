@@ -79,6 +79,16 @@ fn roundDiv(numerator: i128, denominator: i128) i64 {
     return std.math.cast(i64, rounded) orelse std.math.maxInt(i64);
 }
 
+/// What a session knows about the US dollar prices of the model it is calling.
+pub const ModelPrices = union(enum) {
+    /// The provider does not bill in USD, so costs stay quiet.
+    not_billed,
+    /// The provider bills in USD but the model's price is not known, so its
+    /// cost can only be reported as missing.
+    unknown,
+    priced: ModelPricing,
+};
+
 /// The largest price, in US dollars per million tokens, whose nano-USD value
 /// still fits in an i64.
 const max_price_usd = 9.0e9;

@@ -718,7 +718,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     while (!turn_complete) {
         // Zen prices are fetched once per model; every request this turn makes
         // is then priced, the compaction summary included.
-        ctx.session_stats.setPricing(ctx.pricing_book.pricesFor(ctx.model_key.*));
+        ctx.session_stats.setPrices(ctx.pricing_book.pricesFor(ctx.model_key.*));
 
         if (!compaction_failed) {
             if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
@@ -825,7 +825,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         // after switching away, /stats keeps the session's costs but the
         // footer goes back to tokens alone.
         const session_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalAiCredits() else null;
-        const session_usd = if (ctx.prov.* == .opencode) ctx.session_stats.totalUsd() else null;
+        const session_usd = if (ctx.session_stats.billsUsd()) ctx.session_stats.totalUsd() else null;
         if (turn_credits) |*c| c.partial = turn_credits_missing;
         if (turn_usd) |*u| u.partial = turn_usd_missing;
         try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits, turn_usd, session_usd);
@@ -893,7 +893,7 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
     // `/compact` runs outside the turn loop, so pick up the current model's
     // prices here too: after a model or provider switch the summary must not
     // be charged at the previous model's rates.
-    ctx.session_stats.setPricing(ctx.pricing_book.pricesFor(ctx.model_key.*));
+    ctx.session_stats.setPrices(ctx.pricing_book.pricesFor(ctx.model_key.*));
 
     const split = compact.planSplit(ctx.messages.items, mode) orelse return .nothing_to_compact;
     const before = ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());

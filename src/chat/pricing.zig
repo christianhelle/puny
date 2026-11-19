@@ -60,11 +60,13 @@ pub const PricingBook = struct {
         return null;
     }
 
-    /// The prices to charge `model_key`, or null when they are unknown or the
-    /// provider does not bill in USD. Best effort: a failed lookup leaves the
-    /// cost out rather than interrupting a turn.
-    pub fn pricesFor(self: *PricingBook, model_key: []const u8) ?pricing.ModelPricing {
-        return self.forModel(model_key) catch null;
+    /// The prices to charge `model_key`, or an unknown answer when they cannot
+    /// be read. Best effort: a failed lookup leaves the cost out rather than
+    /// interrupting a turn, and is retried later.
+    pub fn pricesFor(self: *PricingBook, model_key: []const u8) pricing.ModelPrices {
+        if (self.prov.* != .opencode) return .not_billed;
+        const found = self.forModel(model_key) catch return .unknown;
+        return if (found) |prices| .{ .priced = prices } else .unknown;
     }
 };
 
@@ -224,7 +226,10 @@ test "PricingBook retries a model after a failed price fetch" {
     try std.testing.expectEqual(@as(usize, 0), book.unpriced.items.len);
 
     // A later lookup retries and succeeds, then sticks.
-    const found = book.pricesFor("deepseek-v4-pro").?;
+    const found = switch (book.pricesFor("deepseek-v4-pro")) {
+        .priced => |prices| prices,
+        .unknown, .not_billed => return error.ExpectedPrices,
+    };
     try std.testing.expectEqual(@as(i64, 1_740_000_000), found.base.input);
     const reused = (try book.forModel("deepseek-v4-pro")).?;
     try std.testing.expectEqual(found.base.input, reused.base.input);
@@ -265,5 +270,5 @@ test "PricingBook says nothing for providers that do not bill in USD" {
     defer book.deinit();
 
     try std.testing.expect((try book.forModel("deepseek-v4-pro")) == null);
-    try std.testing.expect(book.pricesFor("deepseek-v4-pro") == null);
+    try std.testing.expect(std.meta.activeTag(book.pricesFor("deepseek-v4-pro")) == .not_billed);
 }

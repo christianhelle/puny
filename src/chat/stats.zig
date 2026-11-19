@@ -25,8 +25,11 @@ pub const PerModelStats = struct {
     ai_credit_requests: usize = 0,
     /// US dollars the priced requests cost, in billionths of a dollar.
     nano_usd: i64 = 0,
-    /// Requests priced in US dollars (OpenCode Zen only).
+    /// Requests priced in US dollars.
     priced_requests: usize = 0,
+    /// Requests whose provider bills in US dollars (OpenCode Zen only),
+    /// priced or not.
+    usd_requests: usize = 0,
 };
 
 pub const ModelEntry = struct {
@@ -48,8 +51,8 @@ pub const SessionStats = struct {
     current_turn_ttft: ?f64 = null,
     current_turn_tps: ?f64 = null,
 
-    /// Prices of the model being called, when the provider bills in USD.
-    current_pricing: ?pricing.ModelPricing = null,
+    /// What is known about the USD prices of the model being called.
+    current_prices: pricing.ModelPrices = .not_billed,
     /// What the last finalized request cost, in billionths of a dollar, or
     /// null when it was not priced.
     last_request_usd: ?i64 = null,
@@ -66,11 +69,17 @@ pub const SessionStats = struct {
         self.models.deinit(self.allocator);
     }
 
-    /// Set the prices of the model about to be called. Null leaves the
-    /// requests unpriced, which is how providers that do not bill in USD stay
-    /// quiet.
-    pub fn setPricing(self: *@This(), model_pricing: ?pricing.ModelPricing) void {
-        self.current_pricing = model_pricing;
+    /// Set what is known about the prices of the model about to be called.
+    /// `.not_billed` leaves costs quiet, which is how providers that do not
+    /// bill in USD behave.
+    pub fn setPrices(self: *@This(), prices: pricing.ModelPrices) void {
+        self.current_prices = prices;
+    }
+
+    /// Whether the model being called bills in US dollars, whether or not its
+    /// price is known.
+    pub fn billsUsd(self: *const @This()) bool {
+        return std.meta.activeTag(self.current_prices) != .not_billed;
     }
 
     /// What the last finalized request cost, in billionths of a dollar, or
@@ -133,6 +142,8 @@ pub const SessionStats = struct {
     pub fn finalizeTurn(self: *@This(), usage: ?openai.TurnUsage, turn_complete: bool) void {
         const stats = self.activeModelStats();
         self.last_request_usd = null;
+        // A USD-billed request with no usage reported cannot be priced either.
+        if (usage == null and self.billsUsd()) stats.usd_requests += 1;
         if (usage) |u| {
             stats.input_tokens += u.input_tokens - self.current_turn_input;
             stats.cached_input_tokens += u.cached_input_tokens orelse 0;
@@ -140,16 +151,21 @@ pub const SessionStats = struct {
                 stats.nano_ai_credits += nano;
                 stats.ai_credit_requests += 1;
             }
-            if (self.current_pricing) |rates| {
-                const cost = rates.cost(
-                    u.input_tokens,
-                    u.cached_input_tokens orelse 0,
-                    u.cache_write_input_tokens orelse 0,
-                    u.output_tokens,
-                );
-                stats.nano_usd += cost;
-                stats.priced_requests += 1;
-                self.last_request_usd = cost;
+            switch (self.current_prices) {
+                .not_billed => {},
+                .unknown => stats.usd_requests += 1,
+                .priced => |rates| {
+                    const cost = rates.cost(
+                        u.input_tokens,
+                        u.cached_input_tokens orelse 0,
+                        u.cache_write_input_tokens orelse 0,
+                        u.output_tokens,
+                    );
+                    stats.usd_requests += 1;
+                    stats.nano_usd += cost;
+                    stats.priced_requests += 1;
+                    self.last_request_usd = cost;
+                },
             }
 
             // Providers count reasoning tokens inside the output total; track
@@ -220,18 +236,27 @@ pub const SessionStats = struct {
     }
 
     /// US dollars billed this session across all models, or null when no
-    /// request was priced (every provider but OpenCode Zen). Partial when a
-    /// priced model has requests that could not be priced.
+    /// request was billed in USD (every provider but OpenCode Zen). Partial
+    /// when a USD-billed model has requests that could not be priced, even if
+    /// none of its requests were priced at all.
     pub fn totalUsd(self: *const @This()) ?token_stats.Usd {
         var total: token_stats.Usd = .{ .nano = 0 };
         var reported = false;
         for (self.models.items) |entry| {
-            if (entry.stats.priced_requests == 0) continue;
+            if (entry.stats.usd_requests == 0) continue;
             total.nano += entry.stats.nano_usd;
-            total.partial = total.partial or entry.stats.priced_requests < entry.stats.request_count;
+            total.partial = total.partial or entry.stats.priced_requests < entry.stats.usd_requests;
             reported = true;
         }
         return if (reported) total else null;
+    }
+
+    /// Whether any request this session could be priced in US dollars.
+    fn anyPricedUsd(self: *const @This()) bool {
+        for (self.models.items) |entry| {
+            if (entry.stats.priced_requests > 0) return true;
+        }
+        return false;
     }
 
     pub fn print(self: *const @This(), io: std.Io, writer: *std.Io.Writer) !void {
@@ -253,8 +278,10 @@ pub const SessionStats = struct {
         }
         if (self.totalUsd()) |usd| {
             var usd_buf: [40]u8 = undefined;
+            // Without a single priced request the total is unknown, not free.
+            const amount = if (self.anyPricedUsd()) token_stats.formatUsd(&usd_buf, usd.nano) else "n/a";
             try writer.print("  Cost (USD):          {s}{s}\n", .{
-                token_stats.formatUsd(&usd_buf, usd.nano),
+                amount,
                 if (usd.partial) "+" else "",
             });
         }
@@ -302,11 +329,14 @@ pub const SessionStats = struct {
                     try writer.print("  AI credits:          {s}\n", .{credits});
                 }
             }
-            if (stats.priced_requests > 0) {
+            if (stats.usd_requests > 0) {
                 var usd_buf: [40]u8 = undefined;
-                const usd = token_stats.formatUsd(&usd_buf, stats.nano_usd);
-                if (stats.priced_requests < stats.request_count) {
-                    try writer.print("  Cost (USD):          {s} (reported for {d} of {d} requests)\n", .{ usd, stats.priced_requests, stats.request_count });
+                const usd = if (stats.priced_requests > 0)
+                    token_stats.formatUsd(&usd_buf, stats.nano_usd)
+                else
+                    "n/a";
+                if (stats.priced_requests < stats.usd_requests) {
+                    try writer.print("  Cost (USD):          {s} (reported for {d} of {d} requests)\n", .{ usd, stats.priced_requests, stats.usd_requests });
                 } else {
                     try writer.print("  Cost (USD):          {s}\n", .{usd});
                 }
@@ -705,7 +735,7 @@ const cheap_pricing = pricing.ModelPricing{
 test "SessionStats prices a request with the rates set for the model" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.setPricing(cheap_pricing);
+    stats.setPrices(.{ .priced = cheap_pricing });
     stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
@@ -720,13 +750,13 @@ test "SessionStats prices a long prompt with the rates above its tier" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     // $1/M below 200K tokens, $3/M above it.
-    stats.setPricing(.{
+    stats.setPrices(.{ .priced = .{
         .base = .{ .input = 1_000_000_000, .output = 2_000_000_000 },
         .tiers = &.{.{
             .prompt_tokens_gt = 200_000,
             .rate = .{ .input = 3_000_000_000, .output = 2_000_000_000 },
         }},
-    });
+    } });
     stats.beginTurn("model-a", 300_000);
     stats.finalizeTurn(.{ .input_tokens = 300_000, .output_tokens = 0 }, true);
 
@@ -749,7 +779,7 @@ test "SessionStats leaves costs out when the model has no prices" {
 test "SessionStats.totalUsd sums priced requests and marks a partial total" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.setPricing(cheap_pricing);
+    stats.setPrices(.{ .priced = cheap_pricing });
     stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
     stats.beginTurn("model-a", 1_000);
@@ -758,10 +788,43 @@ test "SessionStats.totalUsd sums priced requests and marks a partial total" {
     try std.testing.expectEqual(token_stats.Usd{ .nano = 2_000_000, .partial = true }, stats.totalUsd().?);
 }
 
+test "SessionStats marks a total partial when a USD model has no prices" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.setPrices(.unknown);
+    stats.beginTurn("model-a", 1_000);
+    stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
+
+    try std.testing.expect(stats.billsUsd());
+    try std.testing.expectEqual(@as(?i64, null), stats.lastRequestUsd());
+    const model_stats = &stats.models.items[0].stats;
+    try std.testing.expectEqual(@as(usize, 1), model_stats.usd_requests);
+    try std.testing.expectEqual(@as(usize, 0), model_stats.priced_requests);
+    // Zen billed the request even though its price is unknown, so the zero
+    // total must not read as complete.
+    try std.testing.expectEqual(token_stats.Usd{ .nano = 0, .partial = true }, stats.totalUsd().?);
+}
+
+test "SessionStats.print shows an unknown cost as n/a with a plus" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.setPrices(.unknown);
+    stats.beginTurn("model-a", 1_000);
+    stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try stats.print(std.testing.io, &output.writer);
+
+    const written = output.written();
+    try std.testing.expect(std.mem.indexOf(u8, written, "  Cost (USD):          n/a+\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "  Cost (USD):          n/a (reported for 0 of 1 requests)\n") != null);
+}
+
 test "SessionStats.print shows the cost per model and for the session" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.setPricing(.{ .base = .{ .input = 1_000_000_000, .output = 2_000_000_000 } });
+    stats.setPrices(.{ .priced = .{ .base = .{ .input = 1_000_000_000, .output = 2_000_000_000 } } });
     stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
@@ -777,7 +840,7 @@ test "SessionStats.print shows the cost per model and for the session" {
 test "SessionStats.print says when some requests were unpriced" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.setPricing(cheap_pricing);
+    stats.setPrices(.{ .priced = cheap_pricing });
     stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
     stats.beginTurn("model-a", 1_000);
