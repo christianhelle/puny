@@ -1,5 +1,6 @@
 const std = @import("std");
 const http_client = @import("client.zig");
+const pricing = @import("pricing.zig");
 
 pub const anthropic = @import("anthropic.zig");
 pub const anthropic_version = anthropic.anthropic_version;
@@ -133,8 +134,7 @@ fn listModelsResult(client: *http_client.Client) !http_client.ApiResult(ModelsLi
     return .{ .ok = result };
 }
 
-pub fn listModels(client: *http_client.Client) !http_client.Owned(ModelsList) {
-    var result = try listModelsResult(client);
+pub fn listModels(client: *http_client.Client) !http_client.Owned(ModelsList) {    var result = try listModelsResult(client);
     switch (result) {
         .ok => |ok| return ok,
         .api_error => |*err| {
@@ -147,6 +147,38 @@ pub fn listModels(client: *http_client.Client) !http_client.Owned(ModelsList) {
             return error.ResponseParseError;
         },
     }
+}
+
+/// Reads the prices of one model out of a Zen model list. Null when the
+/// model is missing or lists no text prices; the caller owns the tiers.
+pub fn parsePricing(
+    allocator: std.mem.Allocator,
+    response_json: []const u8,
+    model_id: []const u8,
+) !?pricing.ModelPricing {
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const data = parsed.value.object.get("data") orelse return null;
+    if (data != .array) return null;
+
+    for (data.array.items) |item| {
+        const id = item.object.get("id") orelse continue;
+        if (id != .string or !std.mem.eql(u8, id.string, model_id)) continue;
+        const cost = item.object.get("cost") orelse return null;
+        return try pricing.parseCost(allocator, cost);
+    }
+    return null;
+}
+
+/// Fetches the Zen model list once to price `model_id`, or null when the
+/// list cannot be read or the model has no prices. Zen is the only source,
+/// so a failed fetch quietly leaves costs out rather than guessing them.
+pub fn fetchPricing(client: *http_client.Client, model_id: []const u8) ?pricing.ModelPricing {
+    var raw = listModelsRaw(client) catch return null;
+    defer raw.deinit();
+    if (raw.status.class() != .success) return null;
+    return parsePricing(client.allocator, raw.body, model_id) catch null;
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -407,4 +439,72 @@ test "listModels returns ResponseError on unauthorized" {
     defer c.deinit();
 
     try std.testing.expectError(error.ResponseError, listModels(&c));
+}
+
+// ── fetchPricing tests ───────────────────────────────────────────────
+
+test "parsePricing reads the selected model's cost" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"data":[
+        \\  {"id":"free-model","cost":{"text":null}},
+        \\  {"id":"deepseek-v4-pro","cost":{"text":{
+        \\    "input":{"price":1.74,"cache":{"read":0.145}},
+        \\    "output":{"price":3.48}}}}
+        \\]}
+    ;
+
+    const found = (try parsePricing(allocator, json, "deepseek-v4-pro")).?;
+    defer found.deinit(allocator);
+
+    try std.testing.expectEqual(@as(i64, 1_740_000_000), found.base.input);
+    try std.testing.expectEqual(@as(i64, 3_480_000_000), found.base.output);
+    try std.testing.expectEqual(@as(?i64, 145_000_000), found.base.cache_read);
+}
+
+test "parsePricing returns null for an unknown or unpriced model" {
+    const allocator = std.testing.allocator;
+    const json =
+        \\{"data":[{"id":"alphafree","cost":null},{"id":"beta"}]}
+    ;
+
+    try std.testing.expect((try parsePricing(allocator, json, "gamma")) == null);
+    try std.testing.expect((try parsePricing(allocator, json, "alphafree")) == null);
+    try std.testing.expect((try parsePricing(allocator, json, "beta")) == null);
+}
+
+test "fetchPricing fetches the model list and reads the model's cost" {
+    const body =
+        \\{"data":[{"id":"big-pickle","cost":{"text":{
+        \\  "input":{"price":2},"output":{"price":8}}}}]}
+    ;
+    const ctx = try startModelsServer(.ok, body);
+    defer stopModelsServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try clientForServer(ctx, arena);
+    defer c.deinit();
+
+    const found = fetchPricing(&c, "big-pickle").?;
+    defer found.deinit(c.allocator);
+
+    try std.testing.expectEqual(@as(i64, 2_000_000_000), found.base.input);
+    try std.testing.expectEqual(@as(i64, 8_000_000_000), found.base.output);
+}
+
+test "fetchPricing returns null when the model list cannot be read" {
+    const ctx = try startModelsServer(.internal_server_error, "nope");
+    defer stopModelsServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var c = try clientForServer(ctx, arena);
+    defer c.deinit();
+
+    try std.testing.expect(fetchPricing(&c, "big-pickle") == null);
 }
