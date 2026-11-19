@@ -160,10 +160,13 @@ pub fn parsePricing(
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
-    const data = parsed.value.object.get("data") orelse return null;
+    const root = parsed.value;
+    if (root != .object) return null;
+    const data = root.object.get("data") orelse return null;
     if (data != .array) return null;
 
     for (data.array.items) |item| {
+        if (item != .object) continue;
         const id = item.object.get("id") orelse continue;
         if (id != .string or !std.mem.eql(u8, id.string, model_id)) continue;
         const cost = item.object.get("cost") orelse return null;
@@ -477,6 +480,16 @@ test "parsePricing returns null for an unknown or unpriced model" {
     try std.testing.expect((try parsePricing(allocator, json, "gamma")) == null);
     try std.testing.expect((try parsePricing(allocator, json, "alphafree")) == null);
     try std.testing.expect((try parsePricing(allocator, json, "beta")) == null);
+}
+
+test "parsePricing survives JSON that is not a model list" {
+    const allocator = std.testing.allocator;
+    try std.testing.expect((try parsePricing(allocator, "null", "deepseek-v4-pro")) == null);
+    try std.testing.expect((try parsePricing(allocator, "[]", "deepseek-v4-pro")) == null);
+    try std.testing.expect((try parsePricing(allocator,
+        \\{"data":[null,"odd",{"id":7},{"id":"deepseek-v4-pro","cost":{"text":{
+        \\  "input":{"price":2},"output":{"price":8}}}}]}
+    , "deepseek-v4-pro")) != null);
 }
 
 test "fetchPricing fetches the model list and reads the model's cost" {

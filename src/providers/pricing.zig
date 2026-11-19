@@ -79,15 +79,21 @@ fn roundDiv(numerator: i128, denominator: i128) i64 {
     return std.math.cast(i64, rounded) orelse std.math.maxInt(i64);
 }
 
+/// The largest price, in US dollars per million tokens, whose nano-USD value
+/// still fits in an i64.
+const max_price_usd = 9.0e9;
+
 /// Reads a USD-per-million-token price into nano-USD. Null when the model
-/// has no such price.
+/// has no such price or the value cannot be represented, so one odd number in
+/// a remote model list cannot abort the CLI.
 fn readPrice(value: std.json.Value) ?i64 {
     const usd = switch (value) {
         .integer => |n| @as(f64, @floatFromInt(n)),
         .float => |n| n,
         else => return null,
     };
-    if (usd < 0) return null;
+    // Also rejects NaN and infinity, which would make the cast illegal.
+    if (!(usd >= 0 and usd < max_price_usd)) return null;
     return @intFromFloat(@round(usd * @as(f64, @floatFromInt(nano_usd_per_million_tokens))));
 }
 
@@ -120,8 +126,9 @@ fn overrideThreshold(override: std.json.Value) ?i64 {
     const context = objectField(when, "context") orelse return null;
     const gt = objectField(context, "gt") orelse return null;
     return switch (gt) {
-        .integer => |n| n,
-        .float => |n| @intFromFloat(n),
+        .integer => |n| if (n > 0) n else null,
+        // A threshold outside the i64 range can never be exceeded.
+        .float => |n| if (n > 0 and n < 9.0e18) @as(i64, @intFromFloat(n)) else null,
         else => null,
     };
 }
@@ -246,6 +253,35 @@ test "cost falls back to the input price when a cache price is missing" {
 test "cost is free for a free model" {
     const pricing = ModelPricing{ .base = .{ .input = 0, .output = 0 } };
     try std.testing.expectEqual(@as(i64, 0), pricing.cost(1_000_000, 500_000, 0, 100_000));
+}
+
+test "parseCost ignores prices that cannot be represented" {
+    const allocator = std.testing.allocator;
+    // A price far outside the i64 nano-USD range leaves the model unpriced
+    // instead of aborting on the cast.
+    try std.testing.expect((try parseOne(allocator,
+        \\{"text":{"input":{"price":1e30},"output":{"price":1}}}
+    )) == null);
+    try std.testing.expect((try parseOne(allocator,
+        \\{"text":{"input":{"price":1},"output":{"price":1e30}}}
+    )) == null);
+    // Negative prices are not prices either.
+    try std.testing.expect((try parseOne(allocator,
+        \\{"text":{"input":{"price":-1},"output":{"price":1}}}
+    )) == null);
+}
+
+test "parseCost ignores an override threshold that cannot be represented" {
+    const allocator = std.testing.allocator;
+    const pricing = (try parseOne(allocator,
+        \\{"text":{
+        \\  "input":{"price":1,"overrides":[{"when":{"context":{"gt":1e30}},"price":2}]},
+        \\  "output":{"price":2}
+        \\}}
+    )).?;
+    defer pricing.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 0), pricing.tiers.len);
 }
 
 test "cost uses the long-context tier only above its threshold" {
