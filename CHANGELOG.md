@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Add /edit command to remove or rewind conversation messages ([#245](https://github.com/christianhelle/puny/pull/245)) ([@christianhelle](https://github.com/christianhelle/))
 - Show OpenCode Zen session costs in USD ([#244](https://github.com/christianhelle/puny/pull/244)) ([@christianhelle](https://github.com/christianhelle/))
 - Stop pickers leaving blank lines behind ([#243](https://github.com/christianhelle/puny/pull/243)) ([@christianhelle](https://github.com/christianhelle/))
 - Show syntax-highlighted diffs for file edits ([#242](https://github.com/christianhelle/puny/pull/242)) ([@christianhelle](https://github.com/christianhelle/))
