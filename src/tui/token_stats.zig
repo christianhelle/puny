@@ -81,8 +81,68 @@ pub const AiCredits = struct {
     partial: bool = false,
 };
 
-fn partialMark(credits: AiCredits) []const u8 {
-    return if (credits.partial) "+" else "";
+/// US dollars billed, in billionths of a dollar (nano-USD), and whether some
+/// requests were unpriced, so the total is only a lower bound.
+pub const Usd = struct {
+    nano: i64,
+    partial: bool = false,
+};
+
+fn partialMark(partial: bool) []const u8 {
+    return if (partial) "+" else "";
+}
+
+/// Billionths of a dollar in one cent, and in one ten-thousandth of a dollar.
+const nano_usd_per_cent = 10_000_000;
+const nano_usd_per_ten_thousandth = 100_000;
+
+/// US dollars, given in billionths, rounded half up. Totals of a cent and up
+/// read with two decimals and grouped thousands (`$1,234.57`); smaller
+/// charges keep four decimals (`$0.0012`) so a real cost never reads as free,
+/// and anything below a ten-thousandth reads `<$0.0001`.
+pub fn formatUsd(buf: *[40]u8, nano_usd: i64) []const u8 {
+    const nano: u64 = @intCast(@max(nano_usd, 0));
+    if (nano == 0) return std.fmt.bufPrint(buf, "$0.00", .{}) catch buf[0..0];
+    if (nano < nano_usd_per_cent) {
+        const units = (nano + nano_usd_per_ten_thousandth / 2) / nano_usd_per_ten_thousandth;
+        if (units == 0) return std.fmt.bufPrint(buf, "<$0.0001", .{}) catch buf[0..0];
+        return std.fmt.bufPrint(buf, "$0.{d:0>4}", .{units}) catch buf[0..0];
+    }
+    const cents = (nano + nano_usd_per_cent / 2) / nano_usd_per_cent;
+    var whole_buf: [32]u8 = undefined;
+    const whole = formatGrouped(&whole_buf, cents / 100);
+    return std.fmt.bufPrint(buf, "${s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
+}
+
+test "formatUsd shows cents from a cent up" {
+    var buf: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("$0.00", formatUsd(&buf, 0));
+    try std.testing.expectEqualStrings("$0.01", formatUsd(&buf, 10_000_000));
+    try std.testing.expectEqualStrings("$1.23", formatUsd(&buf, 1_230_000_000));
+    try std.testing.expectEqualStrings("$1,234.57", formatUsd(&buf, 1_234_567_000_000));
+}
+
+test "formatUsd keeps four decimals below a cent" {
+    var buf: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("$0.0012", formatUsd(&buf, 1_200_000));
+    try std.testing.expectEqualStrings("$0.0099", formatUsd(&buf, 9_900_000));
+    try std.testing.expectEqualStrings("$0.0001", formatUsd(&buf, 100_000));
+}
+
+test "formatUsd marks fractions below a ten-thousandth instead of showing free" {
+    var buf: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("<$0.0001", formatUsd(&buf, 49_999));
+    try std.testing.expectEqualStrings("<$0.0001", formatUsd(&buf, 1));
+}
+
+test "formatUsd rounds half up" {
+    var buf: [40]u8 = undefined;
+    // Half a cent stays visible as four decimals rather than rounding away.
+    try std.testing.expectEqualStrings("$0.0050", formatUsd(&buf, 5_000_000));
+    // Half a ten-thousandth rounds up to it.
+    try std.testing.expectEqualStrings("$0.0001", formatUsd(&buf, 50_000));
+    // Cents round up, carrying into the dollars.
+    try std.testing.expectEqualStrings("$2.00", formatUsd(&buf, 1_995_000_000));
 }
 
 /// Prints the per-response token footer as a single dim line, e.g.
@@ -122,9 +182,9 @@ pub fn printTokenFooter(
         // A turn whose requests reported no cost is unknown, not free.
         try writer.print(" | AI credits {s}{s} (session {s}{s})", .{
             if (turn_credits) |turn| formatCredits(&turn_credits_buf, turn.nano) else "n/a",
-            if (turn_credits) |turn| partialMark(turn) else "",
+            if (turn_credits) |turn| partialMark(turn.partial) else "",
             formatCredits(&session_credits_buf, session.nano),
-            partialMark(session),
+            partialMark(session.partial),
         });
     }
     try writer.print("{s}\n", .{ansi.reset});
