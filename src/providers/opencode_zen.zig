@@ -134,7 +134,8 @@ fn listModelsResult(client: *http_client.Client) !http_client.ApiResult(ModelsLi
     return .{ .ok = result };
 }
 
-pub fn listModels(client: *http_client.Client) !http_client.Owned(ModelsList) {    var result = try listModelsResult(client);
+pub fn listModels(client: *http_client.Client) !http_client.Owned(ModelsList) {
+    var result = try listModelsResult(client);
     switch (result) {
         .ok => |ok| return ok,
         .api_error => |*err| {
