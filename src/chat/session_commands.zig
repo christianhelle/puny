@@ -85,7 +85,8 @@ pub fn handleEditCommand(ctx: *ChatLoopContext) !bool {
     }
 
     const labels = try ctx.arena.alloc([]const u8, indices.len);
-    for (indices, labels) |index, *label| label.* = try conversation_edit.itemLabel(ctx.arena, ctx.messages.items[index]);
+    const width = list_picker.screenWidth();
+    for (indices, labels) |index, *label| label.* = try conversation_edit.itemLabel(ctx.arena, ctx.messages.items[index], width);
 
     const picked = (try edit_picker.pickMessage(ctx.arena, ctx.io, labels)) orelse return cancelled(w);
     const action = (try edit_picker.pickAction(ctx.arena, ctx.io)) orelse return cancelled(w);

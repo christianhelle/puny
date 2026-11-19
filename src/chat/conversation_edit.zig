@@ -1,9 +1,7 @@
 const std = @import("std");
 const openai = @import("../providers/openai.zig");
 const text_width = @import("../tui/markdown/width.zig");
-
-/// Display cells of message text shown in a picker label.
-pub const label_cells = 70;
+const ansi = @import("../tui/ansi.zig");
 
 /// What `/edit` does to the picked message.
 pub const Action = enum { remove, rewind };
@@ -28,28 +26,43 @@ fn isEditable(msg: openai.Message) bool {
     };
 }
 
-/// One-line picker label: who wrote the message and its text, whitespace
-/// collapsed and cut to `label_cells` cells.
-pub fn itemLabel(allocator: std.mem.Allocator, msg: openai.Message) ![]const u8 {
+/// One-line picker label: who wrote the message and its text, with control
+/// characters scrubbed and whitespace collapsed, cut so the whole picker row
+/// fits a `width` column terminal. The picker can't redraw a row that wraps,
+/// and model-written escapes must not reach the terminal.
+pub fn itemLabel(allocator: std.mem.Allocator, msg: openai.Message, width: usize) ![]const u8 {
     const who, const content = switch (msg) {
-        .user => |content| .{ "You", content },
-        .assistant => |assistant| .{ "Puny", assistant.content orelse "" },
-        .system => |content| .{ "System", content },
-        .tool => |tool| .{ "Tool", tool.content },
+        .user => |content| .{ "You: ", content },
+        .assistant => |assistant| .{ "Puny: ", assistant.content orelse "" },
+        .system => |content| .{ "System: ", content },
+        .tool => |tool| .{ "Tool: ", tool.content },
     };
+
+    const scrubbed = try allocator.dupe(u8, content);
+    defer allocator.free(scrubbed);
+    ansi.scrubControls(scrubbed);
 
     var flat: std.ArrayList(u8) = .empty;
     defer flat.deinit(allocator);
-    var words = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
+    var words = std.mem.tokenizeAny(u8, scrubbed, &std.ascii.whitespace);
     while (words.next()) |word| {
         if (flat.items.len > 0) try flat.append(allocator, ' ');
         try flat.appendSlice(allocator, word);
     }
 
-    const shown = text_width.prefixFitting(flat.items, label_cells);
-    const ellipsis = if (shown.len < flat.items.len) "..." else "";
-    return std.fmt.allocPrint(allocator, "{s}: {s}{s}", .{ who, shown, ellipsis });
+    // The picker puts "> " before the selected label, and one spare cell
+    // keeps a full row from wrapping.
+    const text_cells = (width -| picker_row_cells) -| who.len;
+    if (text_width.displayWidth(flat.items) <= text_cells) {
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ who, flat.items });
+    }
+    const shown = text_width.prefixFitting(flat.items, text_cells -| 1);
+    return std.fmt.allocPrint(allocator, "{s}{s}…", .{ who, shown });
 }
+
+/// Cells of a picker row that aren't the label: the "> " selection marker
+/// and one spare cell.
+const picker_row_cells = 3;
 
 /// Removes the message at `index`. An assistant reply takes its tool results
 /// with it, since providers reject results whose call is missing.
@@ -125,22 +138,41 @@ test "editableIndices lists user prompts and assistant replies with text" {
 
 test "itemLabel names the author and flattens whitespace" {
     const allocator = std.testing.allocator;
-    const user = try itemLabel(allocator, .{ .user = "fix\n\n  the   bug" });
+    const user = try itemLabel(allocator, .{ .user = "fix\n\n  the   bug" }, 80);
     defer allocator.free(user);
     try std.testing.expectEqualStrings("You: fix the bug", user);
 
-    const reply = try itemLabel(allocator, .{ .assistant = .{ .content = "Done." } });
+    const reply = try itemLabel(allocator, .{ .assistant = .{ .content = "Done." } }, 80);
     defer allocator.free(reply);
     try std.testing.expectEqualStrings("Puny: Done.", reply);
 }
 
-test "itemLabel cuts long text with an ellipsis" {
+test "itemLabel scrubs terminal control sequences" {
     const allocator = std.testing.allocator;
-    const long: [label_cells + 10]u8 = @splat('x');
-    const label = try itemLabel(allocator, .{ .user = &long });
+    const label = try itemLabel(allocator, .{ .assistant = .{ .content = "a\x1b[2Jb\x1b[Hc" } }, 80);
     defer allocator.free(label);
-    try std.testing.expectEqual(@as(usize, "You: ".len + label_cells + "...".len), label.len);
-    try std.testing.expect(std.mem.endsWith(u8, label, "x..."));
+    try std.testing.expect(std.mem.indexOfScalar(u8, label, 0x1b) == null);
+    try std.testing.expectEqualStrings("Puny: a [2Jb [Hc", label);
+}
+
+test "itemLabel fits the whole picker row in the terminal width" {
+    const allocator = std.testing.allocator;
+    const long: [200]u8 = @splat('x');
+    for ([_]usize{ 40, 80, 120 }) |width| {
+        const label = try itemLabel(allocator, .{ .assistant = .{ .content = &long } }, width);
+        defer allocator.free(label);
+        // "> " marker plus label must leave a spare cell.
+        try std.testing.expectEqual(width - 1, 2 + text_width.displayWidth(label));
+        try std.testing.expect(std.mem.endsWith(u8, label, "x…"));
+    }
+}
+
+test "itemLabel keeps text that just fits uncut" {
+    const allocator = std.testing.allocator;
+    const fits: [80 - 3 - "You: ".len]u8 = @splat('x');
+    const label = try itemLabel(allocator, .{ .user = &fits }, 80);
+    defer allocator.free(label);
+    try std.testing.expect(!std.mem.endsWith(u8, label, "…"));
 }
 
 test "remove drops a user prompt alone" {
@@ -195,3 +227,4 @@ test "rewind to an assistant reply drops its tool calls" {
     try std.testing.expectEqualStrings("looking", messages.items[2].assistant.content.?);
     try std.testing.expect(messages.items[2].assistant.tool_calls == null);
 }
+
