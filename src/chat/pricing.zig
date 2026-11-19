@@ -5,20 +5,19 @@ const provider = @import("../providers/provider.zig");
 
 const ProviderKind = std.meta.Tag(provider.Provider);
 
-/// Remembers the current model's USD prices for a session, fetching them at
-/// most once per model. Prices are allocated from the allocator given at
-/// init, which should be the session's arena.
+/// Remembers the USD prices of the models a session calls, fetching each model
+/// at most once. Prices are allocated from the allocator given at init, which
+/// should be the session's arena.
 pub const PricingBook = struct {
     allocator: std.mem.Allocator,
     prov: *provider.Provider,
-    /// The provider kind and model the cached prices belong to.
-    kind: ?ProviderKind = null,
-    model_key: []const u8 = "",
-    current: ?pricing.ModelPricing = null,
+    /// Models whose prices were read.
+    priced: std.ArrayList(Priced) = .empty,
     /// Models already looked up without prices, so a free model is not
     /// fetched again every turn.
     unpriced: std.ArrayList(Unpriced) = .empty,
 
+    const Priced = struct { kind: ProviderKind, model_key: []const u8, prices: pricing.ModelPricing };
     const Unpriced = struct { kind: ProviderKind, model_key: []const u8 };
 
     pub fn init(allocator: std.mem.Allocator, prov: *provider.Provider) PricingBook {
@@ -26,15 +25,17 @@ pub const PricingBook = struct {
     }
 
     pub fn deinit(self: *PricingBook) void {
+        self.priced.deinit(self.allocator);
         self.unpriced.deinit(self.allocator);
     }
 
     /// The prices for `model_key`, or null when the provider does not bill in
-    /// USD or the model lists none. Fetches only when the model changes.
+    /// USD or the model lists none. Fetches only the first time a model is
+    /// seen, so switching back to an earlier model reuses its prices.
     pub fn forModel(self: *PricingBook, model_key: []const u8) !?pricing.ModelPricing {
         const kind = std.meta.activeTag(self.prov.*);
-        if (self.current) |found| {
-            if (self.kind == kind and std.mem.eql(u8, self.model_key, model_key)) return found;
+        for (self.priced.items) |entry| {
+            if (entry.kind == kind and std.mem.eql(u8, entry.model_key, model_key)) return entry.prices;
         }
         for (self.unpriced.items) |entry| {
             if (entry.kind == kind and std.mem.eql(u8, entry.model_key, model_key)) return null;
@@ -47,9 +48,11 @@ pub const PricingBook = struct {
             });
             return null;
         };
-        self.current = fetched;
-        self.kind = kind;
-        self.model_key = try self.allocator.dupe(u8, model_key);
+        try self.priced.append(self.allocator, .{
+            .kind = kind,
+            .model_key = try self.allocator.dupe(u8, model_key),
+            .prices = fetched,
+        });
         return fetched;
     }
 };
@@ -153,6 +156,30 @@ test "PricingBook fetches again when the model changes" {
     _ = try book.forModel("deepseek-v4-pro");
     _ = try book.forModel("free-model");
 
+    try std.testing.expectEqual(@as(usize, 2), ctx.hits.load(.monotonic));
+}
+
+test "PricingBook reuses the prices when a model is revisited" {
+    const ctx = try startTestServer(zen_models, 2);
+    defer stopTestServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var prov: provider.Provider = undefined;
+    try zenProviderFor(ctx, arena, &prov);
+    defer prov.deinit();
+
+    var book = PricingBook.init(arena, &prov);
+    defer book.deinit();
+
+    // A → B → A fetches each model once, not the last one twice.
+    const first = (try book.forModel("deepseek-v4-pro")).?;
+    try std.testing.expect((try book.forModel("free-model")) == null);
+    const again = (try book.forModel("deepseek-v4-pro")).?;
+
+    try std.testing.expectEqual(first.base.input, again.base.input);
     try std.testing.expectEqual(@as(usize, 2), ctx.hits.load(.monotonic));
 }
 
