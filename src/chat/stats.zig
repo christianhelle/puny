@@ -53,9 +53,11 @@ pub const SessionStats = struct {
 
     /// What is known about the USD prices of the model being called.
     current_prices: pricing.ModelPrices = .not_billed,
-    /// What the last finalized request cost, in billionths of a dollar, or
-    /// null when it was not priced.
-    last_request_usd: ?i64 = null,
+    /// Nano-USD charged since the turn began, or null when none of its
+    /// requests were priced.
+    turn_usd: ?i64 = null,
+    /// Whether a USD-billed request in the turn could not be priced.
+    turn_usd_missing: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io) SessionStats {
         return .{
@@ -82,10 +84,18 @@ pub const SessionStats = struct {
         return std.meta.activeTag(self.current_prices) != .not_billed;
     }
 
-    /// What the last finalized request cost, in billionths of a dollar, or
-    /// null when it was not priced.
-    pub fn lastRequestUsd(self: *const @This()) ?i64 {
-        return self.last_request_usd;
+    /// What the last turn cost in US dollars, or null when none of its
+    /// requests were priced. Partial when a request in it could not be priced.
+    pub fn turnUsd(self: *const @This()) ?token_stats.Usd {
+        const nano = self.turn_usd orelse return null;
+        return .{ .nano = nano, .partial = self.turn_usd_missing };
+    }
+
+    /// Start a new turn's USD accumulator. Every request the turn makes,
+    /// compaction summaries included, adds to it.
+    pub fn beginUsdTurn(self: *@This()) void {
+        self.turn_usd = null;
+        self.turn_usd_missing = false;
     }
 
     fn activeModelStats(self: *@This()) *PerModelStats {
@@ -141,9 +151,11 @@ pub const SessionStats = struct {
     /// if the turn loop iteration is complete, increment the turn counter.
     pub fn finalizeTurn(self: *@This(), usage: ?openai.TurnUsage, turn_complete: bool) void {
         const stats = self.activeModelStats();
-        self.last_request_usd = null;
         // A USD-billed request with no usage reported cannot be priced either.
-        if (usage == null and self.billsUsd()) stats.usd_requests += 1;
+        if (usage == null and self.billsUsd()) {
+            stats.usd_requests += 1;
+            self.turn_usd_missing = true;
+        }
         if (usage) |u| {
             stats.input_tokens += u.input_tokens - self.current_turn_input;
             stats.cached_input_tokens += u.cached_input_tokens orelse 0;
@@ -153,7 +165,10 @@ pub const SessionStats = struct {
             }
             switch (self.current_prices) {
                 .not_billed => {},
-                .unknown => stats.usd_requests += 1,
+                .unknown => {
+                    stats.usd_requests += 1;
+                    self.turn_usd_missing = true;
+                },
                 .priced => |rates| {
                     const cost = rates.cost(
                         u.input_tokens,
@@ -164,7 +179,7 @@ pub const SessionStats = struct {
                     stats.usd_requests += 1;
                     stats.nano_usd += cost;
                     stats.priced_requests += 1;
-                    self.last_request_usd = cost;
+                    self.turn_usd = (self.turn_usd orelse 0) + cost;
                 },
             }
 
@@ -740,7 +755,7 @@ test "SessionStats prices a request with the rates set for the model" {
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     // 1,000 in * $1/M + 500 out * $2/M = $0.002.
-    try std.testing.expectEqual(@as(?i64, 2_000_000), stats.lastRequestUsd());
+    try std.testing.expectEqual(token_stats.Usd{ .nano = 2_000_000 }, stats.turnUsd().?);
     const model_stats = &stats.models.items[0].stats;
     try std.testing.expectEqual(@as(i64, 2_000_000), model_stats.nano_usd);
     try std.testing.expectEqual(@as(usize, 1), model_stats.priced_requests);
@@ -761,7 +776,38 @@ test "SessionStats prices a long prompt with the rates above its tier" {
     stats.finalizeTurn(.{ .input_tokens = 300_000, .output_tokens = 0 }, true);
 
     // 300,000 * $3/M = $0.90.
-    try std.testing.expectEqual(@as(?i64, 900_000_000), stats.lastRequestUsd());
+    try std.testing.expectEqual(token_stats.Usd{ .nano = 900_000_000 }, stats.turnUsd().?);
+}
+
+test "SessionStats adds every request in a turn to its cost" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.setPrices(.{ .priced = cheap_pricing });
+    stats.beginUsdTurn();
+    stats.beginTurn("model-a", 1_000);
+    stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
+    // A compaction summary between requests is charged the same way.
+    stats.beginTurn("model-a", 1_000);
+    stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
+
+    try std.testing.expectEqual(token_stats.Usd{ .nano = 4_000_000 }, stats.turnUsd().?);
+
+    stats.beginUsdTurn();
+    try std.testing.expectEqual(@as(?token_stats.Usd, null), stats.turnUsd());
+}
+
+test "SessionStats marks a turn partial when one request was unpriced" {
+    var stats = SessionStats.init(std.testing.allocator, std.testing.io);
+    defer stats.deinit();
+    stats.setPrices(.{ .priced = cheap_pricing });
+    stats.beginUsdTurn();
+    stats.beginTurn("model-a", 1_000);
+    stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
+    stats.setPrices(.unknown);
+    stats.beginTurn("model-a", 1_000);
+    stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
+
+    try std.testing.expectEqual(token_stats.Usd{ .nano = 2_000_000, .partial = true }, stats.turnUsd().?);
 }
 
 test "SessionStats leaves costs out when the model has no prices" {
@@ -770,7 +816,7 @@ test "SessionStats leaves costs out when the model has no prices" {
     stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
-    try std.testing.expectEqual(@as(?i64, null), stats.lastRequestUsd());
+    try std.testing.expectEqual(@as(?token_stats.Usd, null), stats.turnUsd());
     try std.testing.expectEqual(@as(i64, 0), stats.models.items[0].stats.nano_usd);
     try std.testing.expectEqual(@as(usize, 0), stats.models.items[0].stats.priced_requests);
     try std.testing.expectEqual(@as(?token_stats.Usd, null), stats.totalUsd());
@@ -796,7 +842,7 @@ test "SessionStats marks a total partial when a USD model has no prices" {
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     try std.testing.expect(stats.billsUsd());
-    try std.testing.expectEqual(@as(?i64, null), stats.lastRequestUsd());
+    try std.testing.expectEqual(@as(?token_stats.Usd, null), stats.turnUsd());
     const model_stats = &stats.models.items[0].stats;
     try std.testing.expectEqual(@as(usize, 1), model_stats.usd_requests);
     try std.testing.expectEqual(@as(usize, 0), model_stats.priced_requests);

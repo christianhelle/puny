@@ -701,8 +701,6 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_out: i64 = 0;
     var turn_credits: ?token_stats.AiCredits = null;
     var turn_credits_missing = false;
-    var turn_usd: ?token_stats.Usd = null;
-    var turn_usd_missing = false;
     var compaction_failed = false;
 
     // A one-shot run has no next prompt to type towards.
@@ -714,6 +712,10 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         ctx.stdout_writer.flush() catch {};
         cancel.endLoop();
     }
+
+    // Every request this turn makes, the compaction summary included, adds to
+    // its cost; the session counter resets it.
+    ctx.session_stats.beginUsdTurn();
 
     while (!turn_complete) {
         // Zen prices are fetched once per model; every request this turn makes
@@ -798,15 +800,6 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
 
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
 
-        if (ctx.prov.* == .opencode) {
-            if (ctx.session_stats.lastRequestUsd()) |cost| {
-                const so_far: i64 = if (turn_usd) |u| u.nano else 0;
-                turn_usd = .{ .nano = so_far + cost };
-            } else {
-                turn_usd_missing = true;
-            }
-        }
-
         // Tool results are in place by now, so every tool call stays paired.
         var delivered: []const []const u8 = &.{};
         if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
@@ -826,8 +819,8 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         // footer goes back to tokens alone.
         const session_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalAiCredits() else null;
         const session_usd = if (ctx.session_stats.billsUsd()) ctx.session_stats.totalUsd() else null;
+        const turn_usd = if (ctx.session_stats.billsUsd()) ctx.session_stats.turnUsd() else null;
         if (turn_credits) |*c| c.partial = turn_credits_missing;
-        if (turn_usd) |*u| u.partial = turn_usd_missing;
         try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits, turn_usd, session_usd);
     }
 
