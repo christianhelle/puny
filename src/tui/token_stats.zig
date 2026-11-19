@@ -92,21 +92,31 @@ fn partialMark(partial: bool) []const u8 {
     return if (partial) "+" else "";
 }
 
-/// Billionths of a dollar in one cent, and in one ten-thousandth of a dollar.
+/// Billionths of a dollar in one dollar, one cent, and one ten-thousandth of
+/// a dollar.
+const nano_usd_per_usd = 1_000_000_000;
 const nano_usd_per_cent = 10_000_000;
 const nano_usd_per_ten_thousandth = 100_000;
 
-/// US dollars, given in billionths, rounded half up. Totals of a cent and up
-/// read with two decimals and grouped thousands (`$1,234.57`); smaller
-/// charges keep four decimals (`$0.0012`) so a real cost never reads as free,
-/// and anything below a ten-thousandth reads `<$0.0001`.
+/// US dollars, given in billionths, rounded half up. Totals of a dollar and up
+/// read with two decimals and grouped thousands (`$1,234.57`); smaller charges
+/// keep up to four decimals with trailing zeros dropped (`$0.0123`, `$0.50`),
+/// so a real cost never reads as free. Anything below a ten-thousandth reads
+/// `<$0.0001`.
 pub fn formatUsd(buf: *[40]u8, nano_usd: i64) []const u8 {
     const nano: u64 = @intCast(@max(nano_usd, 0));
     if (nano == 0) return std.fmt.bufPrint(buf, "$0.00", .{}) catch buf[0..0];
-    if (nano < nano_usd_per_cent) {
+    if (nano < nano_usd_per_usd) {
         const units = (nano + nano_usd_per_ten_thousandth / 2) / nano_usd_per_ten_thousandth;
         if (units == 0) return std.fmt.bufPrint(buf, "<$0.0001", .{}) catch buf[0..0];
-        return std.fmt.bufPrint(buf, "$0.{d:0>4}", .{units}) catch buf[0..0];
+        if (units < 10_000) {
+            var digits: [4]u8 = undefined;
+            _ = std.fmt.bufPrint(&digits, "{d:0>4}", .{units}) catch return buf[0..0];
+            var end: usize = digits.len;
+            while (end > 2 and digits[end - 1] == '0') end -= 1;
+            return std.fmt.bufPrint(buf, "$0.{s}", .{digits[0..end]}) catch buf[0..0];
+        }
+        // Just under a dollar, rounding to four decimals reaches one.
     }
     const cents = (nano + nano_usd_per_cent / 2) / nano_usd_per_cent;
     var whole_buf: [32]u8 = undefined;
@@ -114,16 +124,18 @@ pub fn formatUsd(buf: *[40]u8, nano_usd: i64) []const u8 {
     return std.fmt.bufPrint(buf, "${s}.{d:0>2}", .{ whole, cents % 100 }) catch buf[0..0];
 }
 
-test "formatUsd shows cents from a cent up" {
+test "formatUsd shows cents from a dollar up" {
     var buf: [40]u8 = undefined;
     try std.testing.expectEqualStrings("$0.00", formatUsd(&buf, 0));
-    try std.testing.expectEqualStrings("$0.01", formatUsd(&buf, 10_000_000));
+    try std.testing.expectEqualStrings("$1.00", formatUsd(&buf, 1_000_000_000));
     try std.testing.expectEqualStrings("$1.23", formatUsd(&buf, 1_230_000_000));
     try std.testing.expectEqualStrings("$1,234.57", formatUsd(&buf, 1_234_567_000_000));
 }
 
-test "formatUsd keeps four decimals below a cent" {
+test "formatUsd keeps up to four decimals below a dollar" {
     var buf: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("$0.50", formatUsd(&buf, 500_000_000));
+    try std.testing.expectEqualStrings("$0.01", formatUsd(&buf, 10_000_000));
     try std.testing.expectEqualStrings("$0.0012", formatUsd(&buf, 1_200_000));
     try std.testing.expectEqualStrings("$0.0099", formatUsd(&buf, 9_900_000));
     try std.testing.expectEqualStrings("$0.0001", formatUsd(&buf, 100_000));
@@ -137,8 +149,8 @@ test "formatUsd marks fractions below a ten-thousandth instead of showing free" 
 
 test "formatUsd rounds half up" {
     var buf: [40]u8 = undefined;
-    // Half a cent stays visible as four decimals rather than rounding away.
-    try std.testing.expectEqualStrings("$0.0050", formatUsd(&buf, 5_000_000));
+    // Half a cent reads as five thousandths rather than rounding away.
+    try std.testing.expectEqualStrings("$0.005", formatUsd(&buf, 5_000_000));
     // Half a ten-thousandth rounds up to it.
     try std.testing.expectEqualStrings("$0.0001", formatUsd(&buf, 50_000));
     // Cents round up, carrying into the dollars.
@@ -151,7 +163,9 @@ test "formatUsd rounds half up" {
 /// usage; the session total is an aggregate and carries no marker. When the
 /// session was billed in AI Credits (GitHub Copilot), the line ends with the
 /// turn's credits and the session's, e.g. `| AI credits 0.09 (session 1.23)`.
-/// A total that misses some requests' costs ends in `+`.
+/// When it was billed in US dollars (OpenCode Zen), it ends with those
+/// instead, e.g. `| cost $0.0012 (session $0.0123)`. A total that misses some
+/// requests' costs ends in `+`.
 pub fn printTokenFooter(
     writer: *std.Io.Writer,
     turn_in: i64,
@@ -160,6 +174,8 @@ pub fn printTokenFooter(
     session_total: i64,
     turn_credits: ?AiCredits,
     session_credits: ?AiCredits,
+    turn_usd: ?Usd,
+    session_usd: ?Usd,
 ) !void {
     const tilde = if (turn_estimated) "~" else "";
     var in_buf: [24]u8 = undefined;
@@ -184,6 +200,16 @@ pub fn printTokenFooter(
             if (turn_credits) |turn| formatCredits(&turn_credits_buf, turn.nano) else "n/a",
             if (turn_credits) |turn| partialMark(turn.partial) else "",
             formatCredits(&session_credits_buf, session.nano),
+            partialMark(session.partial),
+        });
+    }
+    if (session_usd) |session| {
+        var turn_usd_buf: [40]u8 = undefined;
+        var session_usd_buf: [40]u8 = undefined;
+        try writer.print(" | cost {s}{s} (session {s}{s})", .{
+            if (turn_usd) |turn| formatUsd(&turn_usd_buf, turn.nano) else "n/a",
+            if (turn_usd) |turn| partialMark(turn.partial) else "",
+            formatUsd(&session_usd_buf, session.nano),
             partialMark(session.partial),
         });
     }
@@ -248,7 +274,7 @@ test "formatTokens prints absolute value for negative numbers" {
 test "printTokenFooter renders exact numbers on a single dim line" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, null);
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, null, null, null);
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234)" ++ ansi.reset ++ "\n",
         out.written(),
@@ -258,7 +284,7 @@ test "printTokenFooter renders exact numbers on a single dim line" {
 test "printTokenFooter prefixes tilde when the turn was estimated" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, true, 1234, null, null);
+    try printTokenFooter(&out.writer, 140, 120, true, 1234, null, null, null, null);
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in ~140 | out ~120 | total ~260 (session 1234)" ++ ansi.reset ++ "\n",
         out.written(),
@@ -268,7 +294,7 @@ test "printTokenFooter prefixes tilde when the turn was estimated" {
 test "printTokenFooter ends with the AI Credits billed for the turn and the session" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 90_000_000 }, .{ .nano = 1_230_000_000 });
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 90_000_000 }, .{ .nano = 1_230_000_000 }, null, null);
     try std.testing.expectEqualStrings(
         "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234) | AI credits 0.09 (session 1.23)" ++ ansi.reset ++ "\n",
         out.written(),
@@ -278,35 +304,59 @@ test "printTokenFooter ends with the AI Credits billed for the turn and the sess
 test "printTokenFooter marks a turn with no reported cost as unknown, not free" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, .{ .nano = 1_230_000_000 });
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, .{ .nano = 1_230_000_000 }, null, null);
     try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits n/a (session 1.23)" ++ ansi.reset ++ "\n"));
 }
 
 test "printTokenFooter marks totals that miss some requests' costs with a plus" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 50_000_000, .partial = true }, .{ .nano = 1_230_000_000, .partial = true });
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 50_000_000, .partial = true }, .{ .nano = 1_230_000_000, .partial = true }, null, null);
     try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.05+ (session 1.23+)" ++ ansi.reset ++ "\n"));
 }
 
 test "printTokenFooter shows a reported zero-cost turn as 0.00" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 0 }, .{ .nano = 1_230_000_000 });
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, .{ .nano = 0 }, .{ .nano = 1_230_000_000 }, null, null);
     try std.testing.expect(std.mem.endsWith(u8, out.written(), "| AI credits 0.00 (session 1.23)" ++ ansi.reset ++ "\n"));
+}
+
+test "printTokenFooter ends with the USD cost of the turn and the session" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, null, .{ .nano = 1_200_000 }, .{ .nano = 12_300_000 });
+    try std.testing.expectEqualStrings(
+        "\n" ++ ansi.dim ++ "⏱ tokens: in 140 | out 120 | total 260 (session 1234) | cost $0.0012 (session $0.0123)" ++ ansi.reset ++ "\n",
+        out.written(),
+    );
+}
+
+test "printTokenFooter marks a turn with no known price as n/a" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, null, null, .{ .nano = 12_300_000 });
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| cost n/a (session $0.0123)" ++ ansi.reset ++ "\n"));
+}
+
+test "printTokenFooter marks USD totals that miss some requests with a plus" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printTokenFooter(&out.writer, 140, 120, false, 1234, null, null, .{ .nano = 500_000, .partial = true }, .{ .nano = 12_300_000, .partial = true });
+    try std.testing.expect(std.mem.endsWith(u8, out.written(), "| cost $0.0005+ (session $0.0123+)" ++ ansi.reset ++ "\n"));
 }
 
 test "printTokenFooter renders session total in k notation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printTokenFooter(&out.writer, 140, 120, false, 12400, null, null);
+    try printTokenFooter(&out.writer, 140, 120, false, 12400, null, null, null, null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "session 12.4k") != null);
 }
 
 test "printTokenFooter renders large turns in k notation" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try @call(.never_inline, printTokenFooter, .{ &out.writer, 10000, 23000, false, 90000, null, null });
+    try @call(.never_inline, printTokenFooter, .{ &out.writer, 10000, 23000, false, 90000, null, null, null, null });
     const text = out.written();
     try std.testing.expect(std.mem.indexOf(u8, text, "in 10.0k") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "out 23.0k") != null);

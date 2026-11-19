@@ -810,7 +810,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         // the session's credits but the footer goes back to tokens alone.
         const session_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalAiCredits() else null;
         if (turn_credits) |*c| c.partial = turn_credits_missing;
-        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits);
+        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits, null, null);
     }
 
     if (branch_review.isActive()) {
