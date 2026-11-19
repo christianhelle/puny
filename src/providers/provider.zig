@@ -15,6 +15,7 @@ const responses = @import("responses.zig");
 const ollama = @import("ollama.zig");
 const ollama_cloud = @import("ollama_cloud.zig");
 const models_dev = @import("models_dev.zig");
+const pricing = @import("pricing.zig");
 const cancel = @import("../core/cancel.zig");
 
 pub const ModelProvider = enum {
@@ -116,6 +117,16 @@ pub const Provider = union(enum) {
         var models = self.listModels() catch return .not_loaded;
         defer models.deinit();
         return windowInList(models.value().models, model_key, tier);
+    }
+
+    /// The prices OpenCode Zen lists for `model_key`, or null when the
+    /// provider does not bill in USD (the rest are subscriptions or flat
+    /// plans) or the model lists no prices. The caller owns the tiers.
+    pub fn modelPricing(self: *Provider, model_key: []const u8) ?pricing.ModelPricing {
+        return switch (self.*) {
+            .opencode => |*c| opencode_zen.fetchPricing(c, model_key),
+            else => null,
+        };
     }
 
     fn listModelsInner(self: *Provider) !client.Owned(client.ModelsList) {
@@ -668,6 +679,37 @@ test "Provider.listModels dispatches to the opencode provider" {
     defer owned.deinit();
     try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
     try expectModelIds(&owned, &.{"deepseek-v4-pro"});
+}
+
+test "Provider.modelPricing reads OpenCode Zen prices for the model" {
+    const body =
+        \\{"data":[{"id":"deepseek-v4-pro","cost":{"text":{
+        \\  "input":{"price":1.74,"cache":{"read":0.145}},
+        \\  "output":{"price":3.48}}}}]}
+    ;
+    const ctx = try startProviderTestServer(.ok, body);
+    defer stopProviderTestServer(ctx);
+    const url = try providerTestUrl(ctx);
+    defer std.testing.allocator.free(url);
+
+    var prov = Provider{ .opencode = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = url });
+
+    const found = prov.modelPricing("deepseek-v4-pro").?;
+    defer found.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(i64, 1_740_000_000), found.base.input);
+    try std.testing.expectEqual(@as(i64, 3_480_000_000), found.base.output);
+    try std.testing.expectEqualStrings("/v1/models", ctx.getRequestPath());
+}
+
+test "Provider.modelPricing says nothing for providers that do not bill in USD" {
+    var prov = Provider{ .opencode_go = client.Client.init(std.testing.allocator, std.testing.io, "") };
+    defer prov.deinit();
+    prov.setConfig(.{ .base_url = "http://127.0.0.1:1" });
+
+    try std.testing.expect(prov.modelPricing("deepseek-v4-pro") == null);
 }
 
 test "Provider.listModels records the HTTP status on a server error" {
