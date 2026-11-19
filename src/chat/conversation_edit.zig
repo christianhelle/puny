@@ -65,21 +65,19 @@ pub fn itemLabel(allocator: std.mem.Allocator, msg: openai.Message, width: usize
 const picker_row_cells = 3;
 
 /// Removes the message at `index`. An assistant reply takes its tool results
-/// with it, since providers reject results whose call is missing.
+/// with it, since providers reject results whose call is missing. Only the
+/// results right after the reply are its own: some providers reuse call ids
+/// such as `call_0` in every response.
 pub fn remove(messages: *std.ArrayList(openai.Message), index: usize) void {
     const removed = messages.orderedRemove(index);
     const calls = switch (removed) {
         .assistant => |assistant| assistant.tool_calls orelse return,
         else => return,
     };
-    var i = index;
-    while (i < messages.items.len) {
-        const msg = messages.items[i];
-        if (msg == .tool and callsInclude(calls, msg.tool.tool_call_id)) {
-            _ = messages.orderedRemove(i);
-        } else {
-            i += 1;
-        }
+    while (index < messages.items.len) {
+        const msg = messages.items[index];
+        if (msg != .tool or !callsInclude(calls, msg.tool.tool_call_id)) break;
+        _ = messages.orderedRemove(index);
     }
 }
 
@@ -228,3 +226,21 @@ test "rewind to an assistant reply drops its tool calls" {
     try std.testing.expect(messages.items[2].assistant.tool_calls == null);
 }
 
+test "remove leaves later results that reuse the reply's call ids" {
+    const allocator = std.testing.allocator;
+    var messages: std.ArrayList(openai.Message) = .empty;
+    defer messages.deinit(allocator);
+    const reused = [_]openai.ToolCall{testCall("call_0")};
+    try messages.appendSlice(allocator, &.{
+        .{ .user = "first" },
+        .{ .assistant = .{ .content = "looking", .tool_calls = &reused } },
+        .{ .tool = .{ .tool_call_id = "call_0", .content = "early" } },
+        .{ .user = "second" },
+        .{ .assistant = .{ .tool_calls = &reused } },
+        .{ .tool = .{ .tool_call_id = "call_0", .content = "late" } },
+    });
+
+    remove(&messages, 1);
+    try std.testing.expectEqual(@as(usize, 4), messages.items.len);
+    try std.testing.expectEqualStrings("late", messages.items[3].tool.content);
+}
