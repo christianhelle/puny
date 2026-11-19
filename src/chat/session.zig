@@ -718,7 +718,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     while (!turn_complete) {
         // Zen prices are fetched once per model; every request this turn makes
         // is then priced, the compaction summary included.
-        ctx.session_stats.setPricing(try ctx.pricing_book.forModel(ctx.model_key.*));
+        ctx.session_stats.setPricing(ctx.pricing_book.pricesFor(ctx.model_key.*));
 
         if (!compaction_failed) {
             if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
@@ -890,6 +890,11 @@ const CompactOutcome = enum { compacted, nothing_to_compact, cancelled, failed }
 /// Summarizes older messages into one system message. A cancelled or failed
 /// summary leaves the conversation untouched.
 fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactOutcome {
+    // `/compact` runs outside the turn loop, so pick up the current model's
+    // prices here too: after a model or provider switch the summary must not
+    // be charged at the previous model's rates.
+    ctx.session_stats.setPricing(ctx.pricing_book.pricesFor(ctx.model_key.*));
+
     const split = compact.planSplit(ctx.messages.items, mode) orelse return .nothing_to_compact;
     const before = ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());
 

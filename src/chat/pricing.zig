@@ -31,7 +31,8 @@ pub const PricingBook = struct {
 
     /// The prices for `model_key`, or null when the provider does not bill in
     /// USD or the model lists none. Fetches only the first time a model is
-    /// seen, so switching back to an earlier model reuses its prices.
+    /// seen, so switching back to an earlier model reuses its prices. A model
+    /// is only remembered after the fetch answers.
     pub fn forModel(self: *PricingBook, model_key: []const u8) !?pricing.ModelPricing {
         const kind = std.meta.activeTag(self.prov.*);
         for (self.priced.items) |entry| {
@@ -41,19 +42,29 @@ pub const PricingBook = struct {
             if (entry.kind == kind and std.mem.eql(u8, entry.model_key, model_key)) return null;
         }
 
-        const fetched = self.prov.modelPricing(self.allocator, model_key) orelse {
-            try self.unpriced.append(self.allocator, .{
+        // A failed fetch says nothing about the model, so it is not cached and
+        // a later turn can try again.
+        const fetched = try self.prov.modelPricing(self.allocator, model_key);
+        if (fetched) |prices| {
+            try self.priced.append(self.allocator, .{
                 .kind = kind,
                 .model_key = try self.allocator.dupe(u8, model_key),
+                .prices = prices,
             });
-            return null;
-        };
-        try self.priced.append(self.allocator, .{
+            return prices;
+        }
+        try self.unpriced.append(self.allocator, .{
             .kind = kind,
             .model_key = try self.allocator.dupe(u8, model_key),
-            .prices = fetched,
         });
-        return fetched;
+        return null;
+    }
+
+    /// The prices to charge `model_key`, or null when they are unknown or the
+    /// provider does not bill in USD. Best effort: a failed lookup leaves the
+    /// cost out rather than interrupting a turn.
+    pub fn pricesFor(self: *PricingBook, model_key: []const u8) ?pricing.ModelPricing {
+        return self.forModel(model_key) catch null;
     }
 };
 
@@ -65,6 +76,9 @@ const TestServer = struct {
     body: []const u8,
     /// Connections still to answer; accept panics once the server closes.
     remaining: usize,
+    /// Statuses to answer with in order; the last one repeats.
+    statuses: []const std.http.Status = &.{.ok},
+    served: usize = 0,
     hits: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     thread: std.Thread = undefined,
 
@@ -81,17 +95,23 @@ const TestServer = struct {
             var http_server = std.http.Server.init(&reader.interface, &writer.interface);
             var request = http_server.receiveHead() catch continue;
             _ = self.hits.fetchAdd(1, .monotonic);
-            request.respond(self.body, .{ .status = .ok, .keep_alive = false }) catch continue;
+            const status = self.statuses[@min(self.served, self.statuses.len - 1)];
+            self.served += 1;
+            request.respond(self.body, .{ .status = status, .keep_alive = false }) catch continue;
         }
     }
 };
 
 fn startTestServer(body: []const u8, requests: usize) !*TestServer {
+    return startTestServerStatuses(body, &.{.ok}, requests);
+}
+
+fn startTestServerStatuses(body: []const u8, statuses: []const std.http.Status, requests: usize) !*TestServer {
     const address: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
     const server = std.Io.net.IpAddress.listen(&address, std.testing.io, .{}) catch return error.ListenFailed;
     const ctx = try std.testing.allocator.create(TestServer);
     errdefer std.testing.allocator.destroy(ctx);
-    ctx.* = .{ .io = std.testing.io, .server = server, .body = body, .remaining = requests };
+    ctx.* = .{ .io = std.testing.io, .server = server, .body = body, .remaining = requests, .statuses = statuses };
     errdefer ctx.server.deinit(std.testing.io);
     ctx.thread = try std.Thread.spawn(.{}, TestServer.serve, .{ctx});
     return ctx;
@@ -183,6 +203,34 @@ test "PricingBook reuses the prices when a model is revisited" {
     try std.testing.expectEqual(@as(usize, 2), ctx.hits.load(.monotonic));
 }
 
+test "PricingBook retries a model after a failed price fetch" {
+    const statuses = [_]std.http.Status{ .internal_server_error, .ok };
+    const ctx = try startTestServerStatuses(zen_models, &statuses, 2);
+    defer stopTestServer(ctx);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var prov: provider.Provider = undefined;
+    try zenProviderFor(ctx, arena, &prov);
+    defer prov.deinit();
+
+    var book = PricingBook.init(arena, &prov);
+    defer book.deinit();
+
+    // The failed fetch is not remembered as "this model has no prices".
+    try std.testing.expectError(error.ResponseError, book.forModel("deepseek-v4-pro"));
+    try std.testing.expectEqual(@as(usize, 0), book.unpriced.items.len);
+
+    // A later lookup retries and succeeds, then sticks.
+    const found = book.pricesFor("deepseek-v4-pro").?;
+    try std.testing.expectEqual(@as(i64, 1_740_000_000), found.base.input);
+    const reused = (try book.forModel("deepseek-v4-pro")).?;
+    try std.testing.expectEqual(found.base.input, reused.base.input);
+    try std.testing.expectEqual(@as(usize, 2), ctx.hits.load(.monotonic));
+}
+
 test "PricingBook remembers a model that lists no prices" {
     const ctx = try startTestServer(zen_models, 1);
     defer stopTestServer(ctx);
@@ -217,4 +265,5 @@ test "PricingBook says nothing for providers that do not bill in USD" {
     defer book.deinit();
 
     try std.testing.expect((try book.forModel("deepseek-v4-pro")) == null);
+    try std.testing.expect(book.pricesFor("deepseek-v4-pro") == null);
 }
