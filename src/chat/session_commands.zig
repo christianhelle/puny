@@ -77,19 +77,23 @@ pub fn handleContextCommand(ctx: *ChatLoopContext, argument: ?[]const u8) !void 
 /// rewinds the conversation to it. Returns whether the conversation changed.
 pub fn handleEditCommand(ctx: *ChatLoopContext) !bool {
     const w = ctx.stdout_writer;
-    const indices = try conversation_edit.editableIndices(ctx.arena, ctx.messages.items);
+    // Labels and picker items are only needed while the command runs.
+    var scratch_state = std.heap.ArenaAllocator.init(ctx.arena);
+    defer scratch_state.deinit();
+    const scratch = scratch_state.allocator();
+    const indices = try conversation_edit.editableIndices(scratch, ctx.messages.items);
     if (indices.len == 0) {
         try w.print("\n{s}Nothing to edit.{s}\n", .{ ansi.dim, ansi.reset });
         try w.flush();
         return false;
     }
 
-    const labels = try ctx.arena.alloc([]const u8, indices.len);
+    const labels = try scratch.alloc([]const u8, indices.len);
     const width = list_picker.screenWidth();
-    for (indices, labels) |index, *label| label.* = try conversation_edit.itemLabel(ctx.arena, ctx.messages.items[index], width);
+    for (indices, labels) |index, *label| label.* = try conversation_edit.itemLabel(scratch, ctx.messages.items[index], width);
 
-    const picked = (try edit_picker.pickMessage(ctx.arena, ctx.io, labels)) orelse return cancelled(w);
-    const action = (try edit_picker.pickAction(ctx.arena, ctx.io)) orelse return cancelled(w);
+    const picked = (try edit_picker.pickMessage(scratch, ctx.io, labels)) orelse return cancelled(w);
+    const action = (try edit_picker.pickAction(scratch, ctx.io)) orelse return cancelled(w);
     const index = indices[picked];
 
     switch (action) {
