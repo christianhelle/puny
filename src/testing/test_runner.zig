@@ -92,6 +92,9 @@ test "include chat.chat tests" {
 test "include chat.stats tests" {
     _ = @import("../chat/stats.zig");
 }
+test "include chat.pricing tests" {
+    _ = @import("../chat/pricing.zig");
+}
 test "include chat.diff_view tests" {
     _ = @import("../chat/diff_view.zig");
 }
@@ -197,6 +200,9 @@ test "include providers.google client tests" {
 }
 test "include providers.provider tests" {
     _ = @import("../providers/provider.zig");
+}
+test "include providers.pricing tests" {
+    _ = @import("../providers/pricing.zig");
 }
 
 test "include providers.resolver tests" {

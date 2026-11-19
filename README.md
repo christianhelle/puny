@@ -279,6 +279,12 @@ Puny chooses the streaming transport from the model ID:
 - `gemini-*` uses Google's `/v1/models/<model>:streamGenerateContent`.
 - All other model IDs use the OpenAI-compatible `/v1/chat/completions` endpoint.
 
+Because Zen bills in US dollars, Puny reads the model's prices from the Zen
+model list and shows what each turn and the whole session cost, e.g.
+`| cost $0.0012 (session $0.0123)`, and in `/stats`. Prices come from the
+model list fetched once per model, so long-context rates and cache prices are
+included; a model that lists no prices shows no cost instead of a guess.
+
 ### OpenCode Go
 
 Sign in to [OpenCode Zen](https://opencode.ai/zen), subscribe to Go, copy your
@@ -975,7 +981,7 @@ While in a chat session:
 
 - `/quit` or `/exit` — exit Puny
 - `/new` or `/reset` — clear the conversation, start a new session, and unload all skills
-- `/stats` — show session statistics (turns, requests, and tokens summed over every request) and memory usage; with GitHub Copilot it also shows the [AI Credits](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) each model and the whole session used, as Copilot reports them per request
+- `/stats` — show session statistics (turns, requests, and tokens summed over every request) and memory usage; with GitHub Copilot it also shows the [AI Credits](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) each model and the whole session used, as Copilot reports them per request, and with OpenCode Zen it shows the US dollars each model and the session cost, priced from Zen's published rates
 - `/compact` — summarize the conversation so far into one message to free context
 - `/context [tokens|off|default|long]` — show how full the context is and a breakdown of what fills it (system prompt, tools, skills, messages), set the context limit for this conversation, pick a [context tier](#context-tiers), or turn auto compaction off
 - `/config` — reconfigure provider, URL, and API key mid-session; changing the provider rebuilds the connection and re-opens the model picker

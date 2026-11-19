@@ -10,6 +10,7 @@ const AgentMode = @import("../core/mode.zig").AgentMode;
 const review = @import("../review/review.zig");
 const stats = @import("stats.zig");
 const compact = @import("compact.zig");
+const pricing = @import("pricing.zig");
 const skills = @import("../skills/skills.zig");
 
 const ModelProvider = provider.ModelProvider;
@@ -48,6 +49,9 @@ pub const ChatLoopContext = struct {
     restore_incomplete: bool = false,
     session: *core_session.Session,
     session_stats: *stats.SessionStats,
+    /// The USD prices of the model being called, when the provider bills in
+    /// USD (OpenCode Zen).
+    pricing_book: *pricing.PricingBook,
     debug_log: ?*DebugLog,
     chat_log: ?*ChatLog,
     skill_registry: *skills.Registry,

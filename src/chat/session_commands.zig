@@ -552,6 +552,7 @@ fn testChatLoopContext(
         .review_outcome = undefined,
         .session = undefined,
         .session_stats = undefined,
+        .pricing_book = undefined,
         .debug_log = null,
         .chat_log = null,
         .skill_registry = undefined,
