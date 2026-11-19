@@ -22,6 +22,23 @@ pub fn formatLoaded(allocator: std.mem.Allocator, name: []const u8, content: []c
     return std.fmt.allocPrint(allocator, loaded_open ++ "{s}\">\n{s}\n</skill>", .{ name, content });
 }
 
+/// Name of the skill whose instructions `text` carries, or null when `text`
+/// is not a loaded skill's system message.
+pub fn loadedName(text: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, text, loaded_open)) return null;
+    const rest = text[loaded_open.len..];
+    const end = std.mem.indexOf(u8, rest, "\">") orelse return null;
+    return rest[0..end];
+}
+
+test "loadedName reads the name formatLoaded wrote" {
+    const tagged = try formatLoaded(std.testing.allocator, "grill-me", "Ask hard questions.");
+    defer std.testing.allocator.free(tagged);
+    try std.testing.expectEqualStrings("grill-me", loadedName(tagged).?);
+    try std.testing.expect(loadedName("<available_skills>") == null);
+    try std.testing.expect(loadedName("plain prompt") == null);
+}
+
 /// True when a system message was put in the context by the skills feature.
 pub fn isSkillContext(text: []const u8) bool {
     return std.mem.startsWith(u8, text, listing_open) or std.mem.startsWith(u8, text, loaded_open);
