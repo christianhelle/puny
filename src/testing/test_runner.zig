@@ -260,6 +260,9 @@ test "include tui.diff tests" {
 test "include tui.context_tier_picker tests" {
     _ = @import("../tui/context_tier_picker.zig");
 }
+test "include tui.edit_picker tests" {
+    _ = @import("../tui/edit_picker.zig");
+}
 test "include tui.effort_picker tests" {
     _ = @import("../tui/effort_picker.zig");
 }
