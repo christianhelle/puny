@@ -724,9 +724,18 @@ fn injectTyped(
     return lines;
 }
 
+/// Upper bound on model requests within one agentic turn. A model that keeps
+/// calling tools would otherwise loop, and bill, without end. Ordinary turns
+/// stay far below this; reaching it ends the turn with a notice, and because
+/// every tool call already has its result, the next prompt carries on cleanly.
+const max_model_requests_per_turn: u32 = 256;
+
 /// A line delivered as the model finished still needs an answer, so the loop
-/// goes round again.
-fn loopFinished(model_done: bool, delivered: usize) bool {
+/// goes round again, unless the turn has used its whole request budget.
+fn loopFinished(model_done: bool, delivered: usize, model_requests: u32) bool {
+    std.debug.assert(model_requests >= 1);
+    std.debug.assert(model_requests <= max_model_requests_per_turn);
+    if (model_requests == max_model_requests_per_turn) return true;
     return model_done and delivered == 0;
 }
 
@@ -765,7 +774,12 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     // its cost; the session counter resets it.
     ctx.session_stats.beginUsdTurn();
 
+    var model_requests: u32 = 0;
     while (!turn_complete) {
+        model_requests += 1;
+        std.debug.assert(model_requests <= max_model_requests_per_turn);
+        const at_request_limit = model_requests == max_model_requests_per_turn;
+
         // Zen prices are fetched once per model; every request this turn makes
         // is then priced, the compaction summary included.
         ctx.session_stats.setPrices(ctx.pricing_book.pricesFor(ctx.model_key.*));
@@ -849,8 +863,10 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
 
         // Tool results are in place by now, so every tool call stays paired.
+        // At the request limit, typed lines wait for the next prompt rather
+        // than joining a turn that cannot answer them.
         var delivered: []const []const u8 = &.{};
-        if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
+        if (!at_request_limit and injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
             delivered = try injectTyped(ctx.messages_arena.allocator(), ctx.messages, ctx.stdout_writer, &cancel.typed);
             for (delivered) |line| {
                 if (ctx.chat_log) |log| log.print("[USER]\n{s}\n\n", .{line});
@@ -858,7 +874,14 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
                 try ctx.history.save(ctx.io);
             }
         }
-        turn_complete = loopFinished(result.turn_complete, delivered.len);
+        turn_complete = loopFinished(result.turn_complete, delivered.len, model_requests);
+        if (at_request_limit and !result.turn_complete) {
+            try printNotice(
+                ctx.stdout_writer,
+                "Stopped after {d} model requests this turn. Send a message to continue.",
+                .{max_model_requests_per_turn},
+            );
+        }
     }
 
     if (turn_complete and !turn_cancelled and !turn_had_error) {
@@ -1552,10 +1575,19 @@ test "injectTyped appends queued lines after the tool results and announces them
 }
 
 test "the loop finishes only when the model is done and nothing was delivered" {
-    try std.testing.expect(loopFinished(true, 0));
-    try std.testing.expect(!loopFinished(false, 0));
-    try std.testing.expect(!loopFinished(true, 1));
-    try std.testing.expect(!loopFinished(false, 2));
+    try std.testing.expect(loopFinished(true, 0, 1));
+    try std.testing.expect(!loopFinished(false, 0, 1));
+    try std.testing.expect(!loopFinished(true, 1, 1));
+    try std.testing.expect(!loopFinished(false, 2, 1));
+}
+
+test "the loop finishes once the turn reaches its model request limit" {
+    const limit = max_model_requests_per_turn;
+    try std.testing.expect(!loopFinished(false, 0, limit - 1));
+    try std.testing.expect(!loopFinished(true, 1, limit - 1));
+    try std.testing.expect(loopFinished(false, 0, limit));
+    try std.testing.expect(loopFinished(true, 1, limit));
+    try std.testing.expect(loopFinished(true, 0, limit));
 }
 
 test "typed lines are injected into an ordinary chat loop" {
