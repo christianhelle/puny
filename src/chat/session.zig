@@ -727,10 +727,11 @@ fn injectTyped(
     return lines;
 }
 
-/// Upper bound on model requests within one agentic turn. A model that keeps
-/// calling tools would otherwise loop, and bill, without end. Ordinary turns
-/// stay far below this; reaching it ends the turn with a notice, and because
-/// every tool call already has its result, the next prompt carries on cleanly.
+/// Upper bound on model requests within one agentic turn, compaction
+/// summaries included. A model that keeps calling tools would otherwise loop,
+/// and bill, without end. Ordinary turns stay far below this; reaching it ends
+/// the turn with a notice, and because every tool call already has its result,
+/// the next prompt carries on cleanly.
 const max_model_requests_per_turn: u32 = 256;
 
 /// A line delivered as the model finished still needs an answer, so the loop
@@ -800,14 +801,13 @@ const TurnTally = struct {
 };
 
 /// Compacts the conversation when the next request would come near the
-/// context limit. Returns true when compaction failed or was cancelled, so the
-/// caller stops trying for the rest of the turn.
-fn compactIfNearLimit(ctx: *ChatLoopContext) !bool {
-    const limit = ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*) orelse return false;
+/// context limit. Returns null when no compaction was needed. A `failed` or
+/// `cancelled` outcome means the caller stops trying for the rest of the turn.
+fn compactIfNearLimit(ctx: *ChatLoopContext) !?CompactOutcome {
+    const limit = ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*) orelse return null;
     const estimate = ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());
-    if (!compact.shouldCompact(estimate, limit)) return false;
-    const outcome = try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) });
-    return outcome == .failed or outcome == .cancelled;
+    if (!compact.shouldCompact(estimate, limit)) return null;
+    return try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) });
 }
 
 /// Delivers lines the user typed while the model worked, recording each in
@@ -923,15 +923,22 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
 
     var model_requests: u32 = 0;
     while (!turn_complete) {
-        model_requests += 1;
-        std.debug.assert(model_requests <= max_model_requests_per_turn);
-        const at_request_limit = model_requests == max_model_requests_per_turn;
-
         // Zen prices are fetched once per model; every request this turn makes
         // is then priced, the compaction summary included.
         ctx.session_stats.setPrices(ctx.pricing_book.pricesFor(ctx.model_key.*));
 
-        if (!compaction_failed) compaction_failed = try compactIfNearLimit(ctx);
+        // A compaction summary spends the turn's request budget too, and is
+        // skipped when only the turn's last request is left.
+        if (!compaction_failed and model_requests + 2 <= max_model_requests_per_turn) {
+            if (try compactIfNearLimit(ctx)) |outcome| {
+                if (outcome != .nothing_to_compact) model_requests += 1;
+                compaction_failed = outcome == .failed or outcome == .cancelled;
+            }
+        }
+
+        model_requests += 1;
+        std.debug.assert(model_requests <= max_model_requests_per_turn);
+        const at_request_limit = model_requests == max_model_requests_per_turn;
 
         const request_message_count = ctx.messages.items.len;
         const result = try requestModel(ctx);
