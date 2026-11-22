@@ -1070,7 +1070,7 @@ fn installBaseContext(ctx: *ChatLoopContext) !void {
 /// stats, same prompt history. That is what separates a phase boundary from
 /// `/reset`, which mints a whole new session.
 fn resetContextForPhase(ctx: *ChatLoopContext) anyerror!void {
-    persistence.saveMessages(ctx) catch {};
+    persistence.saveMessages(ctx) catch |err| warnSaveFailed("conversation", err);
     try recycleMessagesArena(ctx);
     ctx.context_budget.resetUsage();
     try installBaseContext(ctx);
@@ -1090,8 +1090,8 @@ fn runOrchestrate(ctx: *ChatLoopContext, spec: orchestrate.Spec) !orchestrate.St
         .reset_context = resetContextForPhase,
     });
     ctx.review_outcome.* = status.toOutcome();
-    persistence.saveMessages(ctx) catch {};
-    persistence.saveSessionMeta(ctx) catch {};
+    persistence.saveMessages(ctx) catch |err| warnSaveFailed("conversation", err);
+    persistence.saveSessionMeta(ctx) catch |err| warnSaveFailed("session metadata", err);
     upsertCurrentSession(ctx);
     return status;
 }
@@ -1347,6 +1347,13 @@ fn shouldRemoveSessionDir(restore_incomplete: bool, messages: []const openai.Mes
     return !restore_incomplete and !sessionHasContent(messages) and !core_session.sessionHasPlan(io, dir);
 }
 
+/// For saves that must not stop the caller: a phase boundary, the end of a
+/// run, exit. The writes log their own failures; this covers the rest, such as
+/// running out of memory while serializing.
+fn warnSaveFailed(what: []const u8, err: anyerror) void {
+    std.log.warn("failed to save the {s}: {s}", .{ what, @errorName(err) });
+}
+
 fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
     while (messages.items.len > 0) {
         switch (messages.items[messages.items.len - 1]) {
@@ -1519,8 +1526,8 @@ test "prompt-file prompts persist in history as /file commands end to end" {
 }
 
 fn finalizeSession(ctx: *ChatLoopContext) void {
-    persistence.saveMessages(ctx) catch {};
-    persistence.saveSessionMeta(ctx) catch {};
+    persistence.saveMessages(ctx) catch |err| warnSaveFailed("conversation", err);
+    persistence.saveSessionMeta(ctx) catch |err| warnSaveFailed("session metadata", err);
     if (shouldRemoveSessionDir(ctx.restore_incomplete, ctx.messages.items, ctx.io, ctx.session.dir)) {
         core_session.removeSessionDir(ctx.io, ctx.session.dir);
         sessions.removeSessionFromIndex(ctx.arena, ctx.io, ctx.session.base, ctx.session.id) catch {};
