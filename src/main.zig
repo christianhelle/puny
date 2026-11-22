@@ -106,17 +106,7 @@ fn run(init: std.process.Init) !u8 {
     }
 
     if (parsed.prune) {
-        var buf: [1024]u8 = undefined;
-        var out: std.Io.File.Writer = .init(.stdout(), init.io, &buf);
-        const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
-        const keep_id = parsed.session orelse "";
-        try sessions.pruneSessions(arena, init.io, base_dir, keep_id);
-        if (keep_id.len > 0) {
-            try out.interface.print("Pruned all sessions except '{s}'.\n", .{keep_id});
-        } else {
-            try out.interface.print("Pruned all sessions.\n", .{});
-        }
-        try out.interface.flush();
+        try runPrune(arena, init.io, init.environ_map, parsed.session orelse "");
         return 0;
     }
 
@@ -124,50 +114,15 @@ fn run(init: std.process.Init) !u8 {
     // before any provider/model initialization work happens. The loaded
     // content becomes the pending prompt, exactly like `--prompt`.
     if (parsed.prompt_file) |source| {
-        const outcome = prompt_file.load(arena, init.io, source);
-        switch (outcome) {
-            .ok => |content| {
-                if (content.len == 0) {
-                    printStartupError(init.io, source, "prompt file is empty");
-                    std.process.exit(1);
-                }
-                parsed.prompt = content;
-            },
-            .err => |e| {
-                defer if (e.owned) arena.free(e.message);
-                printStartupError(init.io, source, e.message);
-                std.process.exit(1);
-            },
-        }
+        parsed.prompt = loadPromptFileOrExit(arena, init.io, source);
     }
 
     var startup_review_scope: ?branch_review.Scope = null;
     if (parsed.review) {
-        const prepared = try branch_review.prepare(arena, init.io);
-        switch (prepared) {
-            .invalid => |failure| {
-                printStandaloneReviewError(init.io, failure.message);
-                return 2;
-            },
-            .operational_failure => |failure| {
-                const saved = branch_review.writeOperationalFailure(arena, init.io, failure) catch |err| {
-                    printStandaloneReviewWriteError(init.io, err);
-                    return 2;
-                };
-                printStandaloneReviewResult(init.io, saved);
-                return saved.outcome.exitCode();
-            },
-            .no_changes => |scope| {
-                const saved = branch_review.writeNoChanges(arena, init.io, scope) catch |err| {
-                    printStandaloneReviewWriteError(init.io, err);
-                    return 2;
-                };
-                printStandaloneReviewResult(init.io, saved);
-                return saved.outcome.exitCode();
-            },
+        switch (try prepareStartupReview(arena, init.io)) {
+            .exit => |code| return code,
             .ready => |scope| {
                 startup_review_scope = scope;
-                branch_review.begin(scope);
                 parsed.prompt = branch_review.request_prompt;
             },
         }
@@ -176,10 +131,7 @@ fn run(init: std.process.Init) !u8 {
     var debug_buffer: [4096]u8 = undefined;
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
-        const file = try std.Io.Dir.cwd().createFile(init.io, log_files.http_log, .{});
-        if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, log_files.http_log, @fromBackingInt(0o600), .{}) catch {};
-        }
+        const file = try createLogFile(init.io, log_files.http_log);
         debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
             .file = file,
@@ -195,10 +147,7 @@ fn run(init: std.process.Init) !u8 {
     var chat_buffer: [4096]u8 = undefined;
     var chat_file_writer: std.Io.File.Writer = undefined;
     var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
-        const file = try std.Io.Dir.cwd().createFile(init.io, log_files.chat_log, .{});
-        if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, log_files.chat_log, @fromBackingInt(0o600), .{}) catch {};
-        }
+        const file = try createLogFile(init.io, log_files.chat_log);
         chat_file_writer = .init(file, init.io, &chat_buffer);
         break :blk ChatLog{
             .file = file,
@@ -243,30 +192,7 @@ fn run(init: std.process.Init) !u8 {
 
     const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
 
-    var restore_target: ?sessions.SessionInfo = null;
-    if (parsed.session) |sid| {
-        if (sessions.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
-            if (maybe_s) |s| {
-                if (s.has_conversation) {
-                    restore_target = s;
-                } else {
-                    try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{sid});
-                    try stdout_writer.flush();
-                }
-            } else {
-                try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
-                try stdout_writer.flush();
-            }
-        } else |_| {}
-    } else if (parsed.do_resume) {
-        if (sessions.findLatestSession(arena, init.io, base_dir)) |maybe_latest| {
-            restore_target = maybe_latest;
-            if (maybe_latest == null) {
-                try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
-                try stdout_writer.flush();
-            }
-        } else |_| {}
-    }
+    const restore_target = try findRestoreTarget(arena, init.io, base_dir, parsed, stdout_writer);
 
     // The session id is generated before the provider so every request,
     // the model list included, is attributed to this conversation.
@@ -309,20 +235,7 @@ fn run(init: std.process.Init) !u8 {
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
-    var current_session: core_sess.Session = undefined;
-    if (restore_target) |s| {
-        const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", s.id });
-        current_session = try core_sess.Session.fromDir(
-            arena,
-            s.id,
-            base_dir,
-            dir,
-            try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
-            try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
-        );
-    } else {
-        current_session = try core_sess.Session.initWithId(arena, base_dir, session_id, init.io);
-    }
+    var current_session = try openCurrentSession(arena, messages_arena, init.io, base_dir, restore_target, session_id);
 
     var context_budget = compact.ContextBudget.init(parsed.max_context, cfg.max_context_tokens);
     context_budget.setStartupTier(parsed.context_tier orelse cfg.context_tier);
@@ -486,6 +399,145 @@ fn run(init: std.process.Init) !u8 {
         if (review_outcome) |outcome| return outcome.exitCode();
     }
     return 0;
+}
+
+/// `--prune`: deletes every saved session except `keep_id`, when given.
+fn runPrune(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map, keep_id: []const u8) !void {
+    var buf: [1024]u8 = undefined;
+    var out: std.Io.File.Writer = .init(.stdout(), io, &buf);
+    const base_dir = try core_sess.sessionBaseDir(arena, environ_map);
+    try sessions.pruneSessions(arena, io, base_dir, keep_id);
+    if (keep_id.len > 0) {
+        try out.interface.print("Pruned all sessions except '{s}'.\n", .{keep_id});
+    } else {
+        try out.interface.print("Pruned all sessions.\n", .{});
+    }
+    try out.interface.flush();
+}
+
+/// Returns the prompt `--prompt-file` names, or explains the failure and
+/// exits: a run with no prompt to send has nothing to do.
+fn loadPromptFileOrExit(arena: std.mem.Allocator, io: std.Io, source: []const u8) []const u8 {
+    switch (prompt_file.load(arena, io, source)) {
+        .ok => |content| {
+            if (content.len == 0) {
+                printStartupError(io, source, "prompt file is empty");
+                std.process.exit(1);
+            }
+            return content;
+        },
+        .err => |e| {
+            defer if (e.owned) arena.free(e.message);
+            printStartupError(io, source, e.message);
+            std.process.exit(1);
+        },
+    }
+}
+
+const StartupReview = union(enum) {
+    /// The review was settled without a model: exit with this code.
+    exit: u8,
+    /// The review has begun and the model runs on this scope.
+    ready: branch_review.Scope,
+};
+
+/// `--review`: settles a branch that cannot be reviewed or has no changes on
+/// the spot, and otherwise begins the review the model will run.
+fn prepareStartupReview(arena: std.mem.Allocator, io: std.Io) !StartupReview {
+    switch (try branch_review.prepare(arena, io)) {
+        .invalid => |failure| {
+            printStandaloneReviewError(io, failure.message);
+            return .{ .exit = 2 };
+        },
+        .operational_failure => |failure| {
+            const saved = branch_review.writeOperationalFailure(arena, io, failure) catch |err| {
+                printStandaloneReviewWriteError(io, err);
+                return .{ .exit = 2 };
+            };
+            printStandaloneReviewResult(io, saved);
+            return .{ .exit = saved.outcome.exitCode() };
+        },
+        .no_changes => |scope| {
+            const saved = branch_review.writeNoChanges(arena, io, scope) catch |err| {
+                printStandaloneReviewWriteError(io, err);
+                return .{ .exit = 2 };
+            };
+            printStandaloneReviewResult(io, saved);
+            return .{ .exit = saved.outcome.exitCode() };
+        },
+        .ready => |scope| {
+            branch_review.begin(scope);
+            return .{ .ready = scope };
+        },
+    }
+}
+
+/// Creates (or truncates) a debug log in the working directory, owner-only
+/// where the platform allows: it records prompts and provider traffic.
+fn createLogFile(io: std.Io, path: []const u8) !std.Io.File {
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    if (comptime @import("builtin").os.tag != .windows) {
+        std.Io.Dir.cwd().setFilePermissions(io, path, @fromBackingInt(0o600), .{}) catch |err| {
+            std.log.warn("failed to restrict permissions on {s}: {s}", .{ path, @errorName(err) });
+        };
+    }
+    return file;
+}
+
+/// The saved session `--session` or `--resume` asks for, or null for a fresh
+/// one. A session that cannot be found or has nothing to restore is
+/// explained, and the run starts fresh.
+fn findRestoreTarget(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    parsed: cli.Options,
+    stdout_writer: *std.Io.Writer,
+) !?sessions.SessionInfo {
+    if (parsed.session) |sid| {
+        const maybe_found = sessions.findSessionByPrefix(arena, io, base_dir, sid) catch return null;
+        const found = maybe_found orelse {
+            try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
+            try stdout_writer.flush();
+            return null;
+        };
+        if (found.has_conversation) return found;
+        try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{sid});
+        try stdout_writer.flush();
+        return null;
+    }
+    if (parsed.do_resume) {
+        const latest = sessions.findLatestSession(arena, io, base_dir) catch return null;
+        if (latest == null) {
+            try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
+            try stdout_writer.flush();
+        }
+        return latest;
+    }
+    return null;
+}
+
+/// The session this run writes to: the restored one's directory, or a new
+/// one under `session_id`.
+fn openCurrentSession(
+    arena: std.mem.Allocator,
+    messages_arena: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    restore_target: ?sessions.SessionInfo,
+    session_id: []const u8,
+) !core_sess.Session {
+    const restored = restore_target orelse return core_sess.Session.initWithId(arena, base_dir, session_id, io);
+    std.debug.assert(std.mem.eql(u8, restored.id, session_id));
+    const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", restored.id });
+    return core_sess.Session.fromDir(
+        arena,
+        restored.id,
+        base_dir,
+        dir,
+        try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
+        try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
+    );
 }
 
 fn printStandaloneReviewError(io: std.Io, message: []const u8) void {
