@@ -305,7 +305,12 @@ fn boundToolResult(arena: std.mem.Allocator, result: []const u8) ![]const u8 {
     return bounded;
 }
 
-fn executeToolUnbounded(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
+fn executeToolUnbounded(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    tool_call: openai.ToolCall,
+    mode: AgentMode,
+) ![]const u8 {
     const tool = tools.dispatchForMode(tool_call.function.name, mode) orelse {
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
     };
@@ -361,7 +366,11 @@ test "boundToolResult keeps a result at the limit and cuts a longer one" {
     const over_limit = try arena.alloc(u8, max_tool_result_bytes + 1);
     @memset(over_limit, 'b');
     const bounded = try boundToolResult(arena, over_limit);
-    try std.testing.expect(std.mem.endsWith(u8, bounded, "\n[tool result truncated after 2097152 bytes]"));
+    try std.testing.expect(std.mem.endsWith(
+        u8,
+        bounded,
+        "\n[tool result truncated after 2097152 bytes]",
+    ));
     try std.testing.expect(std.mem.allEqual(u8, bounded[0..max_tool_result_bytes], 'b'));
 }
 

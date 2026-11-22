@@ -780,11 +780,22 @@ const TurnTally = struct {
         // Only Copilot bills in AI Credits and only Zen bills in US dollars;
         // after switching away, /stats keeps the session's costs but the
         // footer goes back to tokens alone.
-        const session_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalAiCredits() else null;
-        const session_usd = if (ctx.session_stats.billsUsd()) ctx.session_stats.totalUsd() else null;
-        const turn_usd = if (ctx.session_stats.billsUsd()) ctx.session_stats.turnUsd() else null;
+        const stats_now = ctx.session_stats;
+        const session_credits = if (ctx.prov.* == .copilot) stats_now.totalAiCredits() else null;
+        const session_usd = if (stats_now.billsUsd()) stats_now.totalUsd() else null;
+        const turn_usd = if (stats_now.billsUsd()) stats_now.turnUsd() else null;
         if (self.credits) |*c| c.partial = self.credits_missing;
-        try token_stats.printTokenFooter(ctx.stdout_writer, self.input_tokens, self.output_tokens, self.estimated, ctx.session_stats.totalTokens(), self.credits, session_credits, turn_usd, session_usd);
+        try token_stats.printTokenFooter(
+            ctx.stdout_writer,
+            self.input_tokens,
+            self.output_tokens,
+            self.estimated,
+            ctx.session_stats.totalTokens(),
+            self.credits,
+            session_credits,
+            turn_usd,
+            session_usd,
+        );
     }
 };
 
@@ -802,7 +813,12 @@ fn compactIfNearLimit(ctx: *ChatLoopContext) !bool {
 /// Delivers lines the user typed while the model worked, recording each in
 /// the chat log and prompt history. Returns the lines delivered.
 fn deliverTypedLines(ctx: *ChatLoopContext) ![]const []const u8 {
-    const delivered = try injectTyped(ctx.messages_arena.allocator(), ctx.messages, ctx.stdout_writer, &cancel.typed);
+    const delivered = try injectTyped(
+        ctx.messages_arena.allocator(),
+        ctx.messages,
+        ctx.stdout_writer,
+        &cancel.typed,
+    );
     for (delivered) |line| {
         if (ctx.chat_log) |log| log.print("[USER]\n{s}\n\n", .{line});
         try ctx.history.add(line);
@@ -818,7 +834,10 @@ fn finishActiveReview(ctx: *ChatLoopContext, cancelled: bool, had_error: bool) !
         try branch_review.failActive(
             ctx.messages_arena.allocator(),
             ctx.io,
-            if (cancelled) "Review execution was cancelled." else "The provider failed before the review completed.",
+            if (cancelled)
+                "Review execution was cancelled."
+            else
+                "The provider failed before the review completed.",
         )
     else
         try branch_review.finish(
@@ -940,7 +959,12 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         // At the request limit, typed lines wait for the next prompt rather
         // than joining a turn that cannot answer them.
         var delivered: []const []const u8 = &.{};
-        if (!at_request_limit and injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
+        if (!at_request_limit and injectsTyped(
+            honor_oneshot,
+            ctx.parsed.oneshot,
+            branch_review.isActive(),
+            cancel.isCancelled(),
+        )) {
             delivered = try deliverTypedLines(ctx);
         }
         turn_complete = loopFinished(result.turn_complete, delivered.len, model_requests);
@@ -1125,7 +1149,11 @@ pub fn appendBaseContext(
         if (try instructions.load(scratch, io, repo_root)) |result| {
             defer scratch.free(result.filename);
             defer scratch.free(result.content);
-            const labeled = try std.fmt.allocPrint(messages_alloc, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
+            const labeled = try std.fmt.allocPrint(
+                messages_alloc,
+                "Instructions from {s}:\n{s}",
+                .{ result.filename, result.content },
+            );
             try messages.append(messages_alloc, .{ .system = labeled });
         }
     }

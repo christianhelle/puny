@@ -28,7 +28,14 @@ fn writeSessionFile(ctx: *ChatLoopContext, filename: []const u8, contents: []con
     };
     // Scratch paths come from the page allocator so repeated saves do not
     // grow the messages arena, which lives as long as the conversation.
-    atomic_write.writeAtomically(ctx.io, std.heap.page_allocator, dir, filename, contents, .{}) catch |err| {
+    atomic_write.writeAtomically(
+        ctx.io,
+        std.heap.page_allocator,
+        dir,
+        filename,
+        contents,
+        .{},
+    ) catch |err| {
         std.log.warn("failed to save {s}: {s}", .{ filename, @errorName(err) });
     };
 }

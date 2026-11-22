@@ -70,7 +70,12 @@ pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]con
     return httpGetLimited(allocator, io, url, max_response_body_bytes);
 }
 
-fn httpGetLimited(allocator: std.mem.Allocator, io: std.Io, url: []const u8, max_body_bytes: usize) ![]const u8 {
+fn httpGetLimited(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    max_body_bytes: usize,
+) ![]const u8 {
     std.debug.assert(max_body_bytes > 0);
     const uri = try std.Uri.parse(url);
     var client = std.http.Client{ .allocator = allocator, .io = io };

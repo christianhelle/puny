@@ -106,7 +106,11 @@ pub const SessionStats = struct {
 
     /// Begin tracking a new model call. Input tokens are known up front and are
     /// added to the running total immediately so cancellation still records them.
-    pub fn beginTurn(self: *@This(), model_key: []const u8, input_tokens: i64) std.mem.Allocator.Error!void {
+    pub fn beginTurn(
+        self: *@This(),
+        model_key: []const u8,
+        input_tokens: i64,
+    ) std.mem.Allocator.Error!void {
         for (self.models.items, 0..) |entry, i| {
             if (std.mem.eql(u8, entry.model_key, model_key)) {
                 self.active_model_index = i;
@@ -116,7 +120,11 @@ pub const SessionStats = struct {
             try self.models.append(self.allocator, .{ .model_key = model_key, .stats = .{} });
             self.active_model_index = self.models.items.len - 1;
         }
-        std.debug.assert(std.mem.eql(u8, self.models.items[self.active_model_index.?].model_key, model_key));
+        std.debug.assert(std.mem.eql(
+            u8,
+            self.models.items[self.active_model_index.?].model_key,
+            model_key,
+        ));
 
         self.activeModelStats().request_count += 1;
         self.current_turn_input = input_tokens;

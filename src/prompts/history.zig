@@ -80,10 +80,14 @@ pub const History = struct {
         // Replaced through an owner-only staging file, so prompts are never
         // readable by other users and an interrupted write never empties the
         // history. The rename also drops whatever mode an older file had.
-        atomic_write.writeAtomically(io, self.allocator, dir, std.fs.path.basename(self.path), buffer, .{
+        const filename = std.fs.path.basename(self.path);
+        atomic_write.writeAtomically(io, self.allocator, dir, filename, buffer, .{
             .restrict_permissions = true,
         }) catch |err| {
-            std.log.warn("failed to save prompt history to {s}: {s}. history will not be saved.", .{ self.path, @errorName(err) });
+            std.log.warn(
+                "failed to save prompt history to {s}: {s}. history will not be saved.",
+                .{ self.path, @errorName(err) },
+            );
         };
     }
 

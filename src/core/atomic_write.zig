@@ -124,7 +124,10 @@ pub fn writeAtomically(
     if (options.restrict_permissions) {
         if (comptime builtin.os.tag != .windows) {
             cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{}) catch |err| {
-                std.log.warn("failed to restrict permissions on {s}: {s}", .{ tmp_path, @errorName(err) });
+                std.log.warn(
+                    "failed to restrict permissions on {s}: {s}",
+                    .{ tmp_path, @errorName(err) },
+                );
                 return err;
             };
         }
@@ -332,11 +335,23 @@ test "writeAtomically writes contents exactly without the trailing newline" {
     const dir = try testDir(std.testing.allocator, &tmp, "atomic-raw");
     defer std.testing.allocator.free(dir);
 
-    try writeAtomically(std.testing.io, std.testing.allocator, dir, "key", "\x00\x01\x02", .{ .trailing_newline = false });
+    try writeAtomically(
+        std.testing.io,
+        std.testing.allocator,
+        dir,
+        "key",
+        "\x00\x01\x02",
+        .{ .trailing_newline = false },
+    );
 
     const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "key" });
     defer std.testing.allocator.free(path);
-    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    const data = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        path,
+        std.testing.allocator,
+        std.Io.Limit.limited(1024),
+    );
     defer std.testing.allocator.free(data);
     try std.testing.expectEqualSlices(u8, "\x00\x01\x02", data);
 }
@@ -345,12 +360,20 @@ test "writeAtomically accepts a directory relative to the working directory" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    const dir = try std.fs.path.join(
+        std.testing.allocator,
+        &.{ ".zig-cache", "tmp", &tmp.sub_path },
+    );
     defer std.testing.allocator.free(dir);
 
     try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "{}", .{});
 
-    const data = try tmp.dir.readFileAlloc(std.testing.io, "out.json", std.testing.allocator, std.Io.Limit.limited(1024));
+    const data = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        "out.json",
+        std.testing.allocator,
+        std.Io.Limit.limited(1024),
+    );
     defer std.testing.allocator.free(data);
     try std.testing.expectEqualStrings("{}\n", data);
 }

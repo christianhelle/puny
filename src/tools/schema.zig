@@ -97,7 +97,12 @@ pub fn ToolDefinition(comptime name: []const u8, comptime description: []const u
                 @memcpy(&result, buf[0..len]);
                 break :build result;
             };
-            return std.json.parseFromSliceLeaky(std.json.Value, allocator, &json, .{}) catch |err| switch (err) {
+            return std.json.parseFromSliceLeaky(
+                std.json.Value,
+                allocator,
+                &json,
+                .{},
+            ) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 // `json` is built at comptime from `Params`, so only running
                 // out of memory can fail here.

@@ -235,7 +235,14 @@ fn run(init: std.process.Init) !u8 {
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
-    var current_session = try openCurrentSession(arena, messages_arena, init.io, base_dir, restore_target, session_id);
+    var current_session = try openCurrentSession(
+        arena,
+        messages_arena,
+        init.io,
+        base_dir,
+        restore_target,
+        session_id,
+    );
 
     var context_budget = compact.ContextBudget.init(parsed.max_context, cfg.max_context_tokens);
     context_budget.setStartupTier(parsed.context_tier orelse cfg.context_tier);
@@ -275,7 +282,15 @@ fn run(init: std.process.Init) !u8 {
     }, stdout_writer);
 
     if (restore_target) |s| {
-        const restore_result = try restoreAndShowSession(messages_arena, init.io, base_dir, s, &agent_mode, &messages, stdout_writer);
+        const restore_result = try restoreAndShowSession(
+            messages_arena,
+            init.io,
+            base_dir,
+            s,
+            &agent_mode,
+            &messages,
+            stdout_writer,
+        );
         session_restored = restore_result.restored;
         restore_incomplete = restore_result.incomplete;
     }
@@ -298,7 +313,14 @@ fn run(init: std.process.Init) !u8 {
     skills.setGlobalRegistry(&skill_registry);
 
     if (!session_restored) {
-        try session.appendBaseContext(messages_arena, arena, init.io, cfg, &skill_registry, &messages);
+        try session.appendBaseContext(
+            messages_arena,
+            arena,
+            init.io,
+            cfg,
+            &skill_registry,
+            &messages,
+        );
         if (startup_review_scope) |scope| {
             core_sess.setWriteBlocked(true);
             const review_prompt = try cfg.resolvePrompt(messages_arena, "review", prompts.review);
@@ -359,7 +381,12 @@ fn run(init: std.process.Init) !u8 {
 
 /// Loads skills from the user's and the repository's `.agents/skills`.
 /// Skills are optional: a full scan that fails keeps the ones found so far.
-fn scanSkills(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map, registry: *skills.Registry) !void {
+fn scanSkills(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    registry: *skills.Registry,
+) !void {
     if (try skills.homeDir(arena, environ_map)) |home| {
         const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
         try registry.lightScan(io, global_path);
@@ -385,12 +412,23 @@ fn restoreAndShowSession(
     stdout_writer: *std.Io.Writer,
 ) !RestoreResult {
     const load_start = std.Io.Clock.Timestamp.now(io, .awake);
-    const result = try loadRestoredSession(messages_arena, io, base_dir, target, agent_mode, messages, stdout_writer);
+    const result = try loadRestoredSession(
+        messages_arena,
+        io,
+        base_dir,
+        target,
+        agent_mode,
+        messages,
+        stdout_writer,
+    );
     const now = std.Io.Clock.Timestamp.now(io, .awake);
     const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
     if (result.restored) {
         var header_buf: [256]u8 = undefined;
-        try stdout_writer.print("\n{s}\n", .{formatRestoreHeader(&header_buf, target.id, messages.items.len, elapsed_ns)});
+        try stdout_writer.print(
+            "\n{s}\n",
+            .{formatRestoreHeader(&header_buf, target.id, messages.items.len, elapsed_ns)},
+        );
         try display.printConversation(stdout_writer, messages.items);
         try stdout_writer.flush();
     }
@@ -426,7 +464,12 @@ fn exitCode(parsed: cli.Options, review_outcome: ?branch_review.Outcome) u8 {
 }
 
 /// `--prune`: deletes every saved session except `keep_id`, when given.
-fn runPrune(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map, keep_id: []const u8) !void {
+fn runPrune(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    keep_id: []const u8,
+) !void {
     var buf: [1024]u8 = undefined;
     var out: std.Io.File.Writer = .init(.stdout(), io, &buf);
     const base_dir = try core_sess.sessionBaseDir(arena, environ_map);
@@ -519,14 +562,22 @@ fn findRestoreTarget(
     stdout_writer: *std.Io.Writer,
 ) !?sessions.SessionInfo {
     if (parsed.session) |sid| {
-        const maybe_found = sessions.findSessionByPrefix(arena, io, base_dir, sid) catch return null;
+        const maybe_found = sessions.findSessionByPrefix(
+            arena,
+            io,
+            base_dir,
+            sid,
+        ) catch return null;
         const found = maybe_found orelse {
             try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
             try stdout_writer.flush();
             return null;
         };
         if (found.has_conversation) return found;
-        try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{sid});
+        try stdout_writer.print(
+            "Session '{s}' has no saved conversation. Starting fresh.\n",
+            .{sid},
+        );
         try stdout_writer.flush();
         return null;
     }
@@ -551,7 +602,12 @@ fn openCurrentSession(
     restore_target: ?sessions.SessionInfo,
     session_id: []const u8,
 ) !core_sess.Session {
-    const restored = restore_target orelse return core_sess.Session.initWithId(arena, base_dir, session_id, io);
+    const restored = restore_target orelse return core_sess.Session.initWithId(
+        arena,
+        base_dir,
+        session_id,
+        io,
+    );
     std.debug.assert(std.mem.eql(u8, restored.id, session_id));
     const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", restored.id });
     return core_sess.Session.fromDir(

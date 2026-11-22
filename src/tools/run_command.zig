@@ -87,12 +87,20 @@ const CapturedStream = struct {
 
     /// Writes the kept bytes in the order the child wrote them, with a marker
     /// where the middle was dropped.
-    fn writeTo(self: *const CapturedStream, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) !void {
+    fn writeTo(
+        self: *const CapturedStream,
+        allocator: std.mem.Allocator,
+        out: *std.ArrayList(u8),
+    ) !void {
         try out.appendSlice(allocator, self.head.items);
         if (self.omitted_bytes > 0) {
             var marker: [64]u8 = undefined;
             // 64 bytes holds the fixed text plus a u64 in decimal (20 digits).
-            const text = std.fmt.bufPrint(&marker, "\n[... {d} bytes omitted ...]\n", .{self.omitted_bytes}) catch unreachable;
+            const text = std.fmt.bufPrint(
+                &marker,
+                "\n[... {d} bytes omitted ...]\n",
+                .{self.omitted_bytes},
+            ) catch unreachable;
             try out.appendSlice(allocator, text);
         }
         try out.appendSlice(allocator, self.tail.items[self.tail_start..]);
@@ -576,11 +584,17 @@ test "CapturedStream drops the middle of output past the limit" {
     const rendered = try testRendered(&stream);
     defer std.testing.allocator.free(rendered);
     const marker = "\n[... 1000 bytes omitted ...]\n";
-    try std.testing.expectEqual(max_kept_head_bytes + marker.len + max_kept_tail_bytes, rendered.len);
+    try std.testing.expectEqual(
+        max_kept_head_bytes + marker.len + max_kept_tail_bytes,
+        rendered.len,
+    );
     try std.testing.expectEqualStrings(marker, rendered[max_kept_head_bytes..][0..marker.len]);
     // The tail is the last bytes written, oldest first.
     const tail = rendered[max_kept_head_bytes + marker.len ..];
-    for (tail, total - max_kept_tail_bytes..) |byte, i| try std.testing.expectEqual(@as(u8, @intCast(i % 251)), byte);
+    for (tail, total - max_kept_tail_bytes..) |byte, i| try std.testing.expectEqual(
+        @as(u8, @intCast(i % 251)),
+        byte,
+    );
 }
 
 test "CapturedStream is empty until the child writes" {

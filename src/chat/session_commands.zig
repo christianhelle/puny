@@ -331,7 +331,10 @@ fn restoreProvider(
     // The switch saved this same config moments ago; if that write now fails,
     // the next startup explains the unreachable provider instead.
     config.save(ctx.arena, ctx.io, ctx.cfg.*, ctx.init.environ_map) catch |err| {
-        std.log.warn("failed to restore the previous provider in the config: {s}", .{@errorName(err)});
+        std.log.warn(
+            "failed to restore the previous provider in the config: {s}",
+            .{@errorName(err)},
+        );
     };
 }
 

@@ -469,11 +469,20 @@ test "ensureKeyFile writes exactly the key and leaves no staging file behind" {
 
     const path = try keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
-    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, .limited(key_length + 1));
+    const data = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        path,
+        std.testing.allocator,
+        .limited(key_length + 1),
+    );
     defer std.testing.allocator.free(data);
     try std.testing.expectEqualSlices(u8, &key, data);
 
-    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, std.fs.path.dirname(path).?, .{ .iterate = true });
+    var dir = try std.Io.Dir.cwd().openDir(
+        std.testing.io,
+        std.fs.path.dirname(path).?,
+        .{ .iterate = true },
+    );
     defer dir.close(std.testing.io);
     var it = dir.iterate();
     while (try it.next(std.testing.io)) |entry| {
