@@ -16,6 +16,9 @@ test "include core.event_wait tests" {
 test "include core.job_control tests" {
     _ = @import("../core/job_control.zig");
 }
+test "include core.utf8 tests" {
+    _ = @import("../core/utf8.zig");
+}
 test "include core.git_root tests" {
     _ = @import("../core/git_root.zig");
 }

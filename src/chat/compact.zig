@@ -7,6 +7,7 @@ const stats = @import("stats.zig");
 const accumulator = @import("accumulator.zig");
 const chat_retry = @import("retry.zig");
 const context_breakdown = @import("context_breakdown.zig");
+const utf8 = @import("../core/utf8.zig");
 
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
@@ -144,9 +145,8 @@ pub fn buildSummaryRequest(allocator: std.mem.Allocator, messages: []const opena
             },
             .tool => |t| {
                 if (t.content.len > max_tool_result_chars) {
-                    var cut: usize = max_tool_result_chars;
-                    while (cut > 0 and t.content[cut] & 0xC0 == 0x80) cut -= 1;
-                    try w.print("Tool result:\n{s}\n[truncated]\n\n", .{t.content[0..cut]});
+                    const kept = utf8.prefix(t.content, max_tool_result_chars);
+                    try w.print("Tool result:\n{s}\n[truncated]\n\n", .{kept});
                 } else {
                     try w.print("Tool result:\n{s}\n\n", .{t.content});
                 }
