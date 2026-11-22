@@ -104,7 +104,14 @@ pub fn writeAtomically(
     // next write rather than accumulating in the directory forever.
     sweepStaleStagingFiles(io, scratch, dir_path, filename);
 
-    var file = cwd.createFile(io, tmp_path, .{}) catch |err| {
+    // Created owner-only, so a restricted file never exists, even briefly,
+    // with the wider mode the umask would otherwise leave it.
+    const create_options: std.Io.Dir.CreateFileOptions =
+        if (options.restrict_permissions and comptime builtin.os.tag != .windows)
+            .{ .permissions = @fromBackingInt(0o600) }
+        else
+            .{};
+    var file = cwd.createFile(io, tmp_path, create_options) catch |err| {
         std.log.warn("failed to create temp file {s}: {s}", .{ tmp_path, @errorName(err) });
         return err;
     };
@@ -119,8 +126,9 @@ pub fn writeAtomically(
         };
     }
 
-    // Before any contents are written, so they are never readable by others,
-    // even briefly. A file that cannot be restricted is not written at all.
+    // Creation already used 0600; this also clears any bits a staging file
+    // reused across a crash kept. A file that cannot be restricted is not
+    // written at all.
     if (options.restrict_permissions) {
         if (comptime builtin.os.tag != .windows) {
             cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{}) catch |err| {
