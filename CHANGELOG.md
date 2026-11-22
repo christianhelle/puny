@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Harden bound loops and buffers, assertions, atomic saves ([#246](https://github.com/christianhelle/puny/pull/246)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.6.0](https://github.com/christianhelle/puny/releases/tag/v0.6.0) (2026-11-19)
 
 ### Features
