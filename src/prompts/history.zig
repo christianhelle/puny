@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const atomic_write = @import("../core/atomic_write.zig");
 const prompt_file = @import("prompt_file.zig");
 
 pub const History = struct {
@@ -69,20 +70,6 @@ pub const History = struct {
             return;
         };
 
-        // Tighten an existing history file to owner-only before overwriting it
-        // so prompts are never left group/other-readable after a rewrite.
-        if (comptime builtin.os.tag != .windows) {
-            if (cwd.statFile(io, self.path, .{})) |st| {
-                if (st.permissions.toMode() & 0o077 != 0) {
-                    std.log.warn(
-                        "prompt history file {s} is readable or writable by other users; tightening to owner-only.",
-                        .{self.path},
-                    );
-                    cwd.setFilePermissions(io, self.path, @fromBackingInt(0o600), .{}) catch {};
-                }
-            } else |_| {}
-        }
-
         const buffer = try std.json.Stringify.valueAlloc(
             self.allocator,
             self.entries.items,
@@ -90,26 +77,13 @@ pub const History = struct {
         );
         defer self.allocator.free(buffer);
 
-        var file = cwd.createFile(io, self.path, .{}) catch |err| {
-            std.log.warn(
-                "failed to create prompt history file {s}: {s}. history will not be saved.",
-                .{ self.path, @errorName(err) },
-            );
-            return;
-        };
-        defer file.close(io);
-        // A freshly created file can inherit a permissive umask, and truncating
-        // an existing file keeps its previous mode; force owner-only either way.
-        if (comptime builtin.os.tag != .windows) {
-            cwd.setFilePermissions(io, self.path, @fromBackingInt(0o600), .{}) catch {};
-        }
-        file.writeStreamingAll(io, buffer) catch |err| {
-            std.log.warn("failed to write prompt history to {s}: {s}.", .{ self.path, @errorName(err) });
-            return;
-        };
-        file.writeStreamingAll(io, "\n") catch |err| {
-            std.log.warn("failed to write prompt history to {s}: {s}.", .{ self.path, @errorName(err) });
-            return;
+        // Replaced through an owner-only staging file, so prompts are never
+        // readable by other users and an interrupted write never empties the
+        // history. The rename also drops whatever mode an older file had.
+        atomic_write.writeAtomically(io, self.allocator, dir, std.fs.path.basename(self.path), buffer, .{
+            .restrict_permissions = true,
+        }) catch |err| {
+            std.log.warn("failed to save prompt history to {s}: {s}. history will not be saved.", .{ self.path, @errorName(err) });
         };
     }
 
