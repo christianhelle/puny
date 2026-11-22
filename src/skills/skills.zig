@@ -182,21 +182,44 @@ pub fn getGlobalRegistry() ?*Registry {
 
 const PendingSkill = struct { name: []const u8, content: []const u8 };
 
-var pending_queue: std.ArrayList(PendingSkill) = .empty;
+/// A queued skill owns its copies, made with `allocator`, until taken.
+const QueuedSkill = struct {
+    name: []const u8,
+    content: []const u8,
+    allocator: std.mem.Allocator,
+};
 
+/// The list itself lives in `page_allocator`: it outlives any one caller.
+var pending_queue: std.ArrayList(QueuedSkill) = .empty;
+
+/// Removes the oldest queued skill, copying it into `allocator` and freeing
+/// the queue's copies. A skill that cannot be copied is dropped.
 pub fn takePendingSkill(allocator: std.mem.Allocator) ?PendingSkill {
     if (pending_queue.items.len == 0) return null;
     const item = pending_queue.orderedRemove(0);
-    return .{
-        .name = allocator.dupe(u8, item.name) catch return null,
-        .content = allocator.dupe(u8, item.content) catch return null,
+    defer {
+        item.allocator.free(item.name);
+        item.allocator.free(item.content);
+    }
+    const name = allocator.dupe(u8, item.name) catch return null;
+    const content = allocator.dupe(u8, item.content) catch {
+        allocator.free(name);
+        return null;
     };
+    return .{ .name = name, .content = content };
 }
 
 pub fn setPendingSkill(name: []const u8, content: []const u8, allocator: std.mem.Allocator) void {
     const dup_name = allocator.dupe(u8, name) catch return;
-    const dup_content = allocator.dupe(u8, content) catch return;
-    pending_queue.append(allocator, .{ .name = dup_name, .content = dup_content }) catch {
+    const dup_content = allocator.dupe(u8, content) catch {
+        allocator.free(dup_name);
+        return;
+    };
+    pending_queue.append(std.heap.page_allocator, .{
+        .name = dup_name,
+        .content = dup_content,
+        .allocator = allocator,
+    }) catch {
         allocator.free(dup_name);
         allocator.free(dup_content);
         return;
@@ -582,10 +605,9 @@ test "recordMatchesTrigger matches whole words only" {
 }
 
 test "setPendingSkill and takePendingSkill round trip" {
-    // The pending queue dups the strings with the given allocator and owns
-    // them until drained; page_allocator is never leak-checked, matching the
-    // production call sites where the queue outlives the tool call.
-    setPendingSkill("my-skill", "skill body", std.heap.page_allocator);
+    // The queue frees its copies when a skill is taken, so the leak-checking
+    // allocator sees every byte returned.
+    setPendingSkill("my-skill", "skill body", std.testing.allocator);
 
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -606,9 +628,7 @@ test "setPendingSkill ignores an allocation failure without queueing" {
 }
 
 test "setPendingSkill drops the payload on a partial allocation failure" {
-    // BUG: production leaks dup_name when the content dupe fails; page_allocator
-    // backing keeps the leak invisible so the no-queue behavior stays testable.
-    var failing = std.testing.FailingAllocator.init(std.heap.page_allocator, .{ .fail_index = 1 });
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
     setPendingSkill("my-skill", "skill body", failing.allocator());
 
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -617,7 +637,7 @@ test "setPendingSkill drops the payload on a partial allocation failure" {
 }
 
 test "takePendingSkill returns null when it cannot duplicate the payload" {
-    setPendingSkill("my-skill", "skill body", std.heap.page_allocator);
+    setPendingSkill("my-skill", "skill body", std.testing.allocator);
 
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expect(takePendingSkill(failing.allocator()) == null);

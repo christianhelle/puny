@@ -7,6 +7,7 @@ const stats = @import("stats.zig");
 const accumulator = @import("accumulator.zig");
 const chat_retry = @import("retry.zig");
 const context_breakdown = @import("context_breakdown.zig");
+const utf8 = @import("../core/utf8.zig");
 
 /// Share of the limit a request may reach before it is compacted.
 pub const threshold_percent = 80;
@@ -57,7 +58,7 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
     while (end > start) : (end -= 1) {
         if (!isExchangeBoundary(messages, end)) continue;
         switch (mode) {
-            .forced => return .{ .start = start, .end = end },
+            .forced => return checkedSplit(messages, .{ .start = start, .end = end }),
             .auto => |keep_budget| {
                 // The newest exchange is always kept, however large.
                 if (end == messages.len) continue;
@@ -68,7 +69,16 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
         }
     }
     const split_end = chosen orelse return null;
-    return .{ .start = start, .end = split_end };
+    return checkedSplit(messages, .{ .start = start, .end = split_end });
+}
+
+/// A split never cuts into the leading system context and always ends where
+/// an exchange begins, so no tool call is parted from its results.
+fn checkedSplit(messages: []const openai.Message, split: Split) Split {
+    std.debug.assert(split.start < split.end);
+    std.debug.assert(split.end <= messages.len);
+    std.debug.assert(isExchangeBoundary(messages, split.end));
+    return split;
 }
 
 fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
@@ -144,9 +154,8 @@ pub fn buildSummaryRequest(allocator: std.mem.Allocator, messages: []const opena
             },
             .tool => |t| {
                 if (t.content.len > max_tool_result_chars) {
-                    var cut: usize = max_tool_result_chars;
-                    while (cut > 0 and t.content[cut] & 0xC0 == 0x80) cut -= 1;
-                    try w.print("Tool result:\n{s}\n[truncated]\n\n", .{t.content[0..cut]});
+                    const kept = utf8.prefix(t.content, max_tool_result_chars);
+                    try w.print("Tool result:\n{s}\n[truncated]\n\n", .{kept});
                 } else {
                     try w.print("Tool result:\n{s}\n\n", .{t.content});
                 }
@@ -180,6 +189,13 @@ pub fn apply(
     try messages.replaceRange(allocator, split.start, split.end - split.start, replacement.items);
 }
 
+/// What a summary request used: the provider's report, or an estimate from
+/// the request and reply text when it sent none.
+pub const SummaryUsage = struct {
+    usage: ?openai.TurnUsage = null,
+    estimated: bool = false,
+};
+
 pub const SummaryOutcome = union(enum) {
     ok: []const u8,
     cancelled,
@@ -188,7 +204,8 @@ pub const SummaryOutcome = union(enum) {
 
 /// Sends a summarization request built by `buildSummaryRequest`, without
 /// tools and without streaming the reply to the terminal. The tokens it uses
-/// are still counted in the session statistics.
+/// are still counted in the session statistics, and reported in `usage_out`
+/// for the turn that asked for it.
 pub fn summarize(
     prov: *provider.Provider,
     allocator: std.mem.Allocator,
@@ -198,8 +215,9 @@ pub fn summarize(
     session_stats: *stats.SessionStats,
     model_key: []const u8,
     request: []const openai.Message,
+    usage_out: *SummaryUsage,
 ) !SummaryOutcome {
-    session_stats.beginTurn(model_key, usage.estimateUsage(request, 0).input_tokens);
+    try session_stats.beginTurn(model_key, usage.estimateUsage(request, 0).input_tokens);
     var acc = accumulator.OpenAiAccumulator.init(allocator, io, null, session_stats);
     defer acc.deinit();
 
@@ -210,6 +228,10 @@ pub fn summarize(
         .stream = true,
     }, acc.streamCallback(), io, random, stdout_writer);
     session_stats.finalizeTurn(acc.usage, false);
+    usage_out.* = if (acc.usage) |reported|
+        .{ .usage = reported }
+    else
+        .{ .usage = usage.estimateUsage(request, acc.estimatedOutputChars()), .estimated = true };
 
     return switch (outcome) {
         .cancelled => .cancelled,
@@ -638,7 +660,18 @@ fn runSummarizeForTest(arena: std.mem.Allocator, request: []const openai.Message
     var output = std.Io.Writer.Allocating.init(arena);
     var session_stats = stats.SessionStats.init(arena, std.testing.io);
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
-    return summarize(&prov, arena, std.testing.io, random_source.interface(), &output.writer, &session_stats, "mock-model", request);
+    var summary_usage: SummaryUsage = .{};
+    return summarize(
+        &prov,
+        arena,
+        std.testing.io,
+        random_source.interface(),
+        &output.writer,
+        &session_stats,
+        "mock-model",
+        request,
+        &summary_usage,
+    );
 }
 
 test "summarize returns the model's reply without streaming it" {

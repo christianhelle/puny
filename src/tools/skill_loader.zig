@@ -19,7 +19,9 @@ fn loadSkill(allocator: std.mem.Allocator, io: std.Io, params: LoadSkillParams) 
     const content = reg.loadContent(io, params.skill_name, allocator) catch |err|
         return try std.fmt.allocPrint(allocator, "Error loading skill '{s}': {}", .{ params.skill_name, err });
 
-    skills.setPendingSkill(params.skill_name, content, allocator);
+    // The queue outlives this call, and `allocator` may be scratch memory
+    // freed as soon as the tool returns.
+    skills.setPendingSkill(params.skill_name, content, std.heap.page_allocator);
     return try std.fmt.allocPrint(allocator, "Skill '{s}' loaded.", .{params.skill_name});
 }
 

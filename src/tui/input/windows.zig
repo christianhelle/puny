@@ -20,6 +20,8 @@ pub fn readLineWindows(
     var first_esc_ts: ?std.Io.Timestamp = null;
     var pending_high: ?u16 = null;
 
+    // One console event per pass until Enter submits, Ctrl+C interrupts, a
+    // double Esc or Ctrl+D on an empty line cancels, or a read fails.
     while (true) {
         var record: windows.INPUT_RECORD = undefined;
         var events_read: windows.DWORD = 0;

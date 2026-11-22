@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const version = @import("../version.zig");
+const runtime = @import("runtime.zig");
 
 ///////////////////////////////////////////
 // Shared app model-list types
@@ -518,21 +519,9 @@ pub fn printAuthHint(c: *const Client) void {
 // Cancellation
 ///////////////////////////////////////////
 
-pub const CancellationToken = struct {
-    cancelled: std.atomic.Value(bool),
-
-    pub fn init() CancellationToken {
-        return .{ .cancelled = std.atomic.Value(bool).init(false) };
-    }
-
-    pub fn cancel(self: *CancellationToken) void {
-        self.cancelled.store(true, .seq_cst);
-    }
-
-    pub fn isCancelled(self: *CancellationToken) bool {
-        return self.cancelled.load(.seq_cst);
-    }
-};
+/// The generated runtime's token, so a token made here is the one its SSE
+/// parser checks.
+pub const CancellationToken = runtime.CancellationToken;
 
 pub const CancelWatcher = struct {
     connection: ?*std.http.Client.Connection,
@@ -583,87 +572,17 @@ pub const CancelWatcher = struct {
     }
 };
 
-fn checkCancellation(token: ?*CancellationToken) !void {
-    if (token) |t| {
-        if (t.isCancelled()) return error.Cancelled;
-    }
-}
-
 ///////////////////////////////////////////
 // Server-sent events parsing
 ///////////////////////////////////////////
 
+// One SSE parser serves both the generated clients and the hand-written
+// providers, so a fix to its limits or framing reaches every stream.
+pub const parseSseBytes = runtime.parseSseBytes;
+pub const parseSseReader = runtime.parseSseReader;
+
+// Mirrors runtime.zig's private line limit, for the tests that probe it.
 const max_sse_line_size = 16 * 1024 * 1024;
-const max_sse_event_size = 32 * 1024 * 1024;
-
-pub fn parseSseBytes(allocator: std.mem.Allocator, bytes: []const u8, callback: anytype, cancellation_token: ?*CancellationToken) !void {
-    var reader: std.Io.Reader = .fixed(bytes);
-    try parseSseReader(allocator, &reader, callback, cancellation_token);
-}
-
-pub fn parseSseReader(allocator: std.mem.Allocator, reader: *std.Io.Reader, callback: anytype, cancellation_token: ?*CancellationToken) !void {
-    var line_buf: std.Io.Writer.Allocating = .init(allocator);
-    defer line_buf.deinit();
-
-    var event_data: std.Io.Writer.Allocating = .init(allocator);
-    defer event_data.deinit();
-
-    while (true) {
-        try checkCancellation(cancellation_token);
-        line_buf.clearRetainingCapacity();
-
-        _ = reader.streamDelimiterLimit(&line_buf.writer, '\n', .limited(max_sse_line_size)) catch |err| switch (err) {
-            error.StreamTooLong => return error.SseLineTooLong,
-            error.ReadFailed => return err,
-            error.WriteFailed => return err,
-        };
-
-        const ended_with_delimiter = blk: {
-            const byte = reader.peekByte() catch |err| switch (err) {
-                error.EndOfStream => break :blk false,
-                error.ReadFailed => return err,
-            };
-            if (byte == '\n') {
-                _ = try reader.takeByte();
-                break :blk true;
-            }
-            break :blk false;
-        };
-
-        if (try processSseLine(&event_data, line_buf.written(), callback)) return;
-        if (!ended_with_delimiter) break;
-    }
-
-    _ = try dispatchSseEvent(&event_data, callback);
-}
-
-fn processSseLine(event_data: *std.Io.Writer.Allocating, raw_line: []const u8, callback: anytype) !bool {
-    const line = std.mem.trimEnd(u8, raw_line, "\r");
-    if (line.len == 0) return try dispatchSseEvent(event_data, callback);
-    if (line[0] == ':') return false;
-
-    const colon = std.mem.indexOfScalar(u8, line, ':') orelse return false;
-    const field = line[0..colon];
-    if (!std.mem.eql(u8, field, "data")) return false;
-
-    var value = line[colon + 1 ..];
-    if (value.len > 0 and value[0] == ' ') value = value[1..];
-    const separator_len: usize = if (event_data.written().len == 0) 0 else 1;
-    if (event_data.written().len + separator_len + value.len > max_sse_event_size) return error.SseEventTooLong;
-    if (separator_len != 0) try event_data.writer.writeByte('\n');
-    try event_data.writer.writeAll(value);
-    return false;
-}
-
-fn dispatchSseEvent(event_data: *std.Io.Writer.Allocating, callback: anytype) !bool {
-    const data = event_data.written();
-    if (data.len == 0) return false;
-    defer event_data.clearRetainingCapacity();
-
-    if (std.mem.eql(u8, data, "[DONE]")) return true;
-    try callback.event(data);
-    return false;
-}
 
 ///////////////////////////////////////////
 // Tests

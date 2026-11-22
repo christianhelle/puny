@@ -1,4 +1,5 @@
 const std = @import("std");
+const utf8 = @import("../core/utf8.zig");
 
 const first_prompt_limit = 1024;
 
@@ -6,14 +7,7 @@ const first_prompt_limit = 1024;
 /// splitting a UTF-8 code point. Prompts already within the limit are copied
 /// unchanged.
 pub fn truncateFirstPrompt(arena: std.mem.Allocator, prompt: []const u8) ![]const u8 {
-    var end = @min(prompt.len, first_prompt_limit);
-    // Never cut a UTF-8 code point in half: if the limit lands on a
-    // continuation byte, back up to the nearest leading byte so the truncated
-    // slice stays valid. Prompts already within the limit are untouched.
-    while (end < prompt.len and end > 0 and (prompt[end] & 0xC0) == 0x80) {
-        end -= 1;
-    }
-    return arena.dupe(u8, prompt[0..end]);
+    return arena.dupe(u8, utf8.prefix(prompt, first_prompt_limit));
 }
 
 /// A session id must be a non-empty path-safe component that is neither "."

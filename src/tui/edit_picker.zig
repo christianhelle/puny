@@ -19,6 +19,8 @@ pub fn pickMessage(arena: std.mem.Allocator, io: std.Io, labels: []const []const
     const page_size = pageSize(labels.len);
     var end = labels.len;
     var start: list_picker.Start = .new_row;
+    // One page per pass: picking a message or backing out returns, and the
+    // older and newer items only change the page.
     while (true) {
         const first = end -| page_size;
         var items: std.ArrayList(list_picker.Item) = .empty;

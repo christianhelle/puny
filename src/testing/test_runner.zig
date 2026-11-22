@@ -16,6 +16,9 @@ test "include core.event_wait tests" {
 test "include core.job_control tests" {
     _ = @import("../core/job_control.zig");
 }
+test "include core.utf8 tests" {
+    _ = @import("../core/utf8.zig");
+}
 test "include core.git_root tests" {
     _ = @import("../core/git_root.zig");
 }
@@ -27,7 +30,7 @@ test "include review module tests" {
 test "include sessions module tests" {
     _ = @import("../sessions/sessions.zig");
     _ = @import("../sessions/index.zig");
-    _ = @import("../sessions/atomic_write.zig");
+    _ = @import("../core/atomic_write.zig");
     _ = @import("../sessions/query.zig");
     _ = @import("../sessions/types.zig");
     _ = @import("../sessions/validate.zig");

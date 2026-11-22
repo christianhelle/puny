@@ -2,6 +2,7 @@ const std = @import("std");
 const event_wait = @import("../core/event_wait.zig");
 const retry = @import("../core/retry.zig");
 const version = @import("../version.zig");
+const utf8 = @import("../core/utf8.zig");
 
 /// Default timeout applied to web_fetch when the model does not provide one.
 pub const web_fetch_timeout_ns: i96 = 15 * std.time.ns_per_s;
@@ -58,20 +59,52 @@ pub fn httpDownloadFile(allocator: std.mem.Allocator, io: std.Io, url: []const u
     file.close(io);
 }
 
+/// Most bytes of a response body web_fetch keeps, the same as read_file's
+/// limit. A larger or endless body would otherwise grow memory until the
+/// timeout and then go to the model whole.
+pub const max_response_body_bytes: usize = 1024 * 1024;
+
+/// Fetches `url` and returns its body, cut to `max_response_body_bytes` with
+/// a note saying so when it is longer. The returned body is caller-owned.
 pub fn httpGet(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ![]const u8 {
+    return httpGetLimited(allocator, io, url, max_response_body_bytes);
+}
+
+fn httpGetLimited(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    max_body_bytes: usize,
+) ![]const u8 {
+    std.debug.assert(max_body_bytes > 0);
     const uri = try std.Uri.parse(url);
     var client = std.http.Client{ .allocator = allocator, .io = io };
     defer client.deinit();
-    var response_body: std.Io.Writer.Allocating = .init(allocator);
-    defer response_body.deinit();
-    _ = try client.fetch(.{
+
+    // One byte more than the limit: a body that fills the buffer is known to
+    // be longer than the limit. Writing past the buffer fails the fetch with
+    // WriteFailed, which ends the read instead of draining the rest.
+    const buffer = try allocator.alloc(u8, max_body_bytes + 1);
+    defer allocator.free(buffer);
+    var body_writer: std.Io.Writer = .fixed(buffer);
+    _ = client.fetch(.{
         .location = .{ .uri = uri },
         .method = .GET,
         .headers = .{ .user_agent = .{ .override = version.user_agent } },
-        .response_writer = &response_body.writer,
+        .response_writer = &body_writer,
+    }) catch |err| switch (err) {
+        error.WriteFailed => if (body_writer.end != buffer.len) return err,
+        else => return err,
+    };
+
+    const body = body_writer.buffered();
+    std.debug.assert(body.len <= buffer.len);
+    if (body.len == 0) return "";
+    if (body.len <= max_body_bytes) return allocator.dupe(u8, body);
+    return std.fmt.allocPrint(allocator, "{s}\n[response truncated after {d} bytes]", .{
+        utf8.prefix(body, max_body_bytes),
+        max_body_bytes,
     });
-    if (response_body.written().len == 0) return "";
-    return response_body.toOwnedSlice();
 }
 
 const HttpGetShared = struct {
@@ -288,6 +321,38 @@ test "httpGet returns the response body from a local server" {
     const body = try httpGet(std.testing.allocator, std.testing.io, url);
     defer std.testing.allocator.free(body);
     try std.testing.expectEqualStrings("get body", body);
+
+    waitForHttpGetTestServer(&ctx, thread, &server);
+}
+
+test "httpGet keeps a body exactly at the limit whole" {
+    var server = try listenForHttpGetTest(std.testing.io);
+    var ctx = HttpGetTestCtx{ .io = std.testing.io, .server = server, .body = "12345678" };
+    const thread = try std.Thread.spawn(.{}, HttpGetTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/get", .{port});
+    defer std.testing.allocator.free(url);
+
+    const body = try httpGetLimited(std.testing.allocator, std.testing.io, url, 8);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualStrings("12345678", body);
+
+    waitForHttpGetTestServer(&ctx, thread, &server);
+}
+
+test "httpGet cuts a body longer than the limit and says so" {
+    var server = try listenForHttpGetTest(std.testing.io);
+    var ctx = HttpGetTestCtx{ .io = std.testing.io, .server = server, .body = "1234567890abcdef" };
+    const thread = try std.Thread.spawn(.{}, HttpGetTestCtx.serve, .{&ctx});
+
+    const port = server.socket.address.getPort();
+    const url = try std.fmt.allocPrint(std.testing.allocator, "http://127.0.0.1:{d}/get", .{port});
+    defer std.testing.allocator.free(url);
+
+    const body = try httpGetLimited(std.testing.allocator, std.testing.io, url, 8);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualStrings("12345678\n[response truncated after 8 bytes]", body);
 
     waitForHttpGetTestServer(&ctx, thread, &server);
 }

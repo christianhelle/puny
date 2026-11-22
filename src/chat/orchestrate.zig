@@ -279,6 +279,9 @@ pub fn resolveTask(
 pub const TurnReport = struct {
     cancelled: bool = false,
     had_error: bool = false,
+    /// The turn stopped at its model request limit with the model's work
+    /// unfinished, so what it left behind is partial.
+    incomplete: bool = false,
     exited: bool = false,
 };
 
@@ -447,6 +450,8 @@ fn runBuildPhase(
     const report = hooks.run_turn(ctx) catch return .{ .failed = "the model turn failed" };
     if (report.cancelled or sigint.isTriggered()) return .aborted;
     if (report.had_error) return .{ .failed = "the provider failed during the turn" };
+    // Partial work is neither committed nor handed to the next phase.
+    if (report.incomplete) return .{ .failed = "the turn reached its model request limit" };
 
     sweepWorktree(ctx, repo_root, phase, iteration) catch |err| {
         return .{ .failed = switch (err) {

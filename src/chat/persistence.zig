@@ -4,60 +4,45 @@ const context = @import("context.zig");
 const core_session = @import("../core/session.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
 const openai = @import("../providers/openai.zig");
+const atomic_write = @import("../core/atomic_write.zig");
 
 const ChatLoopContext = context.ChatLoopContext;
 
 /// Writes the current conversation to `messages.json` in the session
-/// directory through a temp file plus an atomic rename, so an interrupted
-/// write never leaves a truncated conversation on disk.
+/// directory through a staging file and an atomic rename, so an interrupted
+/// write never leaves a truncated conversation on disk. A write failure is
+/// logged and swallowed so it cannot abort the turn.
 pub fn saveMessages(ctx: *ChatLoopContext) !void {
-    const dir = ctx.session.dir;
-    const cwd = std.Io.Dir.cwd();
-    cwd.createDirPath(ctx.io, dir) catch {};
-
-    const tmp_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json.tmp" });
-    defer ctx.messages_arena.allocator().free(tmp_path);
-    const msg_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "messages.json" });
-    defer ctx.messages_arena.allocator().free(msg_path);
     const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), ctx.messages.items, .{ .whitespace = .indent_2 });
     defer ctx.messages_arena.allocator().free(buffer);
-
-    var file = cwd.createFile(ctx.io, tmp_path, .{}) catch |err| {
-        std.log.warn("failed to create temp file: {s}", .{@errorName(err)});
-        return;
-    };
-
-    // A write failure is reported and swallowed so it cannot abort the turn.
-    // No error is returned once the staging file exists, so an errdefer from
-    // here on would never run; its handle and file are released inline.
-    writeConversation(ctx.io, &file, buffer) catch |err| {
-        std.log.warn("failed to write messages: {s}", .{@errorName(err)});
-        file.close(ctx.io);
-        cwd.deleteFile(ctx.io, tmp_path) catch {};
-        return;
-    };
-    file.close(ctx.io);
-
-    std.Io.Dir.renameAbsolute(tmp_path, msg_path, ctx.io) catch |err| {
-        std.log.warn("failed to rename messages file: {s}", .{@errorName(err)});
-        std.Io.Dir.cwd().deleteFile(ctx.io, tmp_path) catch {};
-    };
+    writeSessionFile(ctx, "messages.json", buffer);
 }
 
-/// Writes the serialized conversation plus the trailing newline that the
-/// loader and the project's other JSON writers expect.
-fn writeConversation(io: std.Io, file: *std.Io.File, buffer: []const u8) !void {
-    try file.writeStreamingAll(io, buffer);
-    try file.writeStreamingAll(io, "\n");
+/// Atomically replaces `filename` in the session directory, creating the
+/// directory first. `writeAtomically` logs the cause of any failure.
+fn writeSessionFile(ctx: *ChatLoopContext, filename: []const u8, contents: []const u8) void {
+    const dir = ctx.session.dir;
+    std.Io.Dir.cwd().createDirPath(ctx.io, dir) catch |err| {
+        std.log.warn("failed to create session directory {s}: {s}", .{ dir, @errorName(err) });
+        return;
+    };
+    // Scratch paths come from the page allocator so repeated saves do not
+    // grow the messages arena, which lives as long as the conversation.
+    atomic_write.writeAtomically(
+        ctx.io,
+        std.heap.page_allocator,
+        dir,
+        filename,
+        contents,
+        .{},
+    ) catch |err| {
+        std.log.warn("failed to save {s}: {s}", .{ filename, @errorName(err) });
+    };
 }
 
 /// Persists the session metadata (`session.json`) with the current planning
 /// mode and the first user prompt, used as the sessions-index preview.
 pub fn saveSessionMeta(ctx: *ChatLoopContext) !void {
-    const dir = ctx.session.dir;
-    const meta_path = try std.fs.path.join(ctx.messages_arena.allocator(), &.{ dir, "session.json" });
-    defer ctx.messages_arena.allocator().free(meta_path);
-
     const first_prompt = firstUserPrompt(ctx.messages.items);
 
     const MetaStruct = struct {
@@ -73,14 +58,7 @@ pub fn saveSessionMeta(ctx: *ChatLoopContext) !void {
 
     const buffer = try std.json.Stringify.valueAlloc(ctx.messages_arena.allocator(), meta, .{ .whitespace = .indent_2 });
     defer ctx.messages_arena.allocator().free(buffer);
-    const cwd = std.Io.Dir.cwd();
-    var file = cwd.createFile(ctx.io, meta_path, .{}) catch |err| {
-        std.log.warn("failed to save session meta: {s}", .{@errorName(err)});
-        return;
-    };
-    defer file.close(ctx.io);
-    file.writeStreamingAll(ctx.io, buffer) catch {};
-    file.writeStreamingAll(ctx.io, "\n") catch {};
+    writeSessionFile(ctx, "session.json", buffer);
 }
 
 /// Loads `messages.json` from `dir` into `ctx.messages`. A missing file is
@@ -460,9 +438,12 @@ test "saveMessages round-trips an empty conversation and cleans up the temp file
     defer std.testing.allocator.free(msg_path);
     _ = try std.Io.Dir.cwd().statFile(std.testing.io, msg_path, .{});
 
-    const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "messages.json.tmp" });
-    defer std.testing.allocator.free(tmp_path);
-    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, tmp_path, .{}));
+    var session_dir = try std.Io.Dir.cwd().openDir(std.testing.io, dir, .{ .iterate = true });
+    defer session_dir.close(std.testing.io);
+    var it = session_dir.iterate();
+    while (try it.next(std.testing.io)) |entry| {
+        try std.testing.expect(!std.mem.endsWith(u8, entry.name, ".tmp"));
+    }
 
     var loaded_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer loaded_arena.deinit();

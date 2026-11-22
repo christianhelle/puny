@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const atomic_write = @import("../core/atomic_write.zig");
 
 pub const XChaCha20Poly1305 = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 pub const key_length = XChaCha20Poly1305.key_length;
@@ -260,29 +261,13 @@ pub fn ensureKeyFile(
     var key: [key_length]u8 = undefined;
     random.bytes(&key);
 
-    // Stage the key in a sibling temp file, harden it to 0600 before any
-    // secret bytes are written, then atomically rename it over the target.
-    // A partial/interrupted write can never leave a malformed key at the
-    // final path, and the key is never world-readable during the chmod window.
-    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
-    defer allocator.free(tmp_path);
-
-    var file = try cwd.createFile(io, tmp_path, .{});
-    var file_open = true;
-    defer {
-        if (file_open) file.close(io);
-        cwd.deleteFile(io, tmp_path) catch {};
-    }
-
-    if (comptime builtin.os.tag != .windows) {
-        try cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{});
-    }
-
-    try file.writeStreamingAll(io, &key);
-    file.close(io);
-    file_open = false;
-
-    try cwd.rename(tmp_path, cwd, path, io);
+    // Staged in a sibling file that is owner-only before any secret byte is
+    // written, then renamed over the target: an interrupted write never
+    // leaves a malformed key, and the key is never readable by others.
+    try atomic_write.writeAtomically(io, allocator, dir, std.fs.path.basename(path), &key, .{
+        .restrict_permissions = true,
+        .trailing_newline = false,
+    });
     return key;
 }
 
@@ -468,7 +453,10 @@ test "ensureKeyFile does not overwrite a malformed existing key file" {
     try std.testing.expectEqualStrings("too-short", data);
 }
 
-test "ensureKeyFile stages the key and never leaves the final path on a staging failure" {
+test "ensureKeyFile writes exactly the key and leaves no staging file behind" {
+    // A failed staged write is covered by atomic_write's own tests; here the
+    // key file must hold the raw key with no trailing newline, or loadKey
+    // would reject it as malformed on the next start.
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var fixture = try tempHomeEnv();
     defer fixture.tmp.cleanup();
@@ -477,20 +465,29 @@ test "ensureKeyFile stages the key and never leaves the final path on a staging 
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
     const random = random_source.interface();
 
+    const key = (try ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random)).?;
+
     const path = try keyFilePath(std.testing.allocator, &fixture.env);
     defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        path,
+        std.testing.allocator,
+        .limited(key_length + 1),
+    );
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualSlices(u8, &key, data);
 
-    // A directory at the staging path forces the staged create to fail. The
-    // key must then never have been written straight to the final path.
-    const staging_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.tmp", .{path});
-    defer std.testing.allocator.free(staging_path);
-    try std.Io.Dir.cwd().createDirPath(std.testing.io, std.fs.path.dirname(path).?);
-    try std.Io.Dir.cwd().createDir(std.testing.io, staging_path, .default_dir);
-
-    try std.testing.expectError(error.IsDir, ensureKeyFile(std.testing.allocator, std.testing.io, &fixture.env, random));
-
-    // The final key file must not exist after the failed staged write.
-    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().statFile(std.testing.io, path, .{}));
+    var dir = try std.Io.Dir.cwd().openDir(
+        std.testing.io,
+        std.fs.path.dirname(path).?,
+        .{ .iterate = true },
+    );
+    defer dir.close(std.testing.io);
+    var it = dir.iterate();
+    while (try it.next(std.testing.io)) |entry| {
+        try std.testing.expect(!std.mem.endsWith(u8, entry.name, ".tmp"));
+    }
 }
 
 test "isEncrypted requires at least nonce plus tag bytes after the prefix" {

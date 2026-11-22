@@ -1,6 +1,6 @@
 const std = @import("std");
 const helpers = @import("../tools/helpers.zig");
-const atomic_write = @import("../sessions/atomic_write.zig");
+const atomic_write = @import("../core/atomic_write.zig");
 
 pub const base_ref = "origin/main";
 pub const report_filename = "review-results.md";
@@ -60,7 +60,16 @@ pub const SavedReport = struct {
 
 const ActiveReview = struct {
     scope: Scope,
-    saved: ?SavedReport = null,
+    /// The saved report's path is copied here rather than kept in the saving
+    /// caller's allocator, which may be scratch memory freed on return.
+    saved_path: [std.fs.max_path_bytes]u8 = undefined,
+    saved: ?struct { path_len: usize, outcome: Outcome } = null,
+
+    fn remember(self: *ActiveReview, saved: SavedReport) !void {
+        if (saved.path.len > self.saved_path.len) return error.NameTooLong;
+        @memcpy(self.saved_path[0..saved.path.len], saved.path);
+        self.saved = .{ .path_len = saved.path.len, .outcome = saved.outcome };
+    }
 };
 
 var active_review: ?ActiveReview = null;
@@ -429,7 +438,7 @@ pub fn saveActiveReport(
 ) !SavedReport {
     if (active_review == null) return error.NoActiveReview;
     const saved = try writeReport(allocator, io, active_review.?.scope, input);
-    active_review.?.saved = saved;
+    try active_review.?.remember(saved);
     return saved;
 }
 
@@ -439,14 +448,17 @@ pub fn finish(
     missing_report_reason: []const u8,
 ) !SavedReport {
     if (active_review == null) return error.NoActiveReview;
-    if (active_review.?.saved) |saved| return saved;
+    if (active_review.?.saved) |saved| return .{
+        .path = try allocator.dupe(u8, active_review.?.saved_path[0..saved.path_len]),
+        .outcome = saved.outcome,
+    };
     const saved = try writeFallbackReport(
         allocator,
         io,
         active_review.?.scope,
         missing_report_reason,
     );
-    active_review.?.saved = saved;
+    try active_review.?.remember(saved);
     return saved;
 }
 
@@ -457,7 +469,7 @@ pub fn failActive(
 ) !SavedReport {
     if (active_review == null) return error.NoActiveReview;
     const saved = try writeFallbackReport(allocator, io, active_review.?.scope, reason);
-    active_review.?.saved = saved;
+    try active_review.?.remember(saved);
     return saved;
 }
 
@@ -1057,4 +1069,51 @@ test "failActive replaces an earlier approval with an operational rejection" {
     try std.testing.expect(std.mem.indexOf(u8, content, "Provider failed after the tool call.") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: NO**") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "**MERGE WORTHY: YES**") == null);
+}
+
+test "finish returns a saved report whose saving allocator is gone" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const cwd = try std.process.currentPathAlloc(std.testing.io, arena);
+    const repo_root = try std.fs.path.join(arena, &.{ cwd, ".zig-cache", "tmp", &tmp.sub_path });
+    const scope = Scope{
+        .repo_root = repo_root,
+        .branch = "feature/scratch-save",
+        .base_ref = base_ref,
+        .base_sha = "1111111111111111111111111111111111111111",
+        .head_sha = "2222222222222222222222222222222222222222",
+        .merge_base_sha = "1111111111111111111111111111111111111111",
+        .commit_count = 1,
+        .changed_files = "M\tfeature.zig",
+        .diff_stat = " feature.zig | 1 +",
+        .dirty_worktree = "",
+    };
+
+    begin(scope);
+    defer reset();
+    var scratch_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const saved = try saveActiveReport(scratch_state.allocator(), std.testing.io, .{
+        .analysis_markdown =
+        \\## Change Summary
+        \\Change.
+        \\## Quality and Regression Assessment
+        \\No regression.
+        \\## Validation Performed
+        \\Checks passed.
+        \\## Findings
+        \\None.
+        ,
+        .conclusion = "Ready.",
+        .evidence_complete = true,
+        .merge_worthy = true,
+    });
+    const expected_path = try arena.dupe(u8, saved.path);
+    scratch_state.deinit();
+
+    const finished = try finish(arena, std.testing.io, "unused");
+    try std.testing.expectEqual(Outcome.merge_worthy, finished.outcome);
+    try std.testing.expectEqualStrings(expected_path, finished.path);
 }

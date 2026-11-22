@@ -7,6 +7,7 @@ const display = @import("display.zig");
 const persistence = @import("persistence.zig");
 const session_commands = @import("session_commands.zig");
 const context = @import("context.zig");
+const config = @import("../config/config.zig");
 const token_stats = @import("../tui/token_stats.zig");
 const commands = @import("../cli/commands.zig");
 const core_session = @import("../core/session.zig");
@@ -78,6 +79,8 @@ pub const ChatSession = struct {
             return;
         }
 
+        // One prompt per pass. Ends on Ctrl+C, end of input, /exit, or after
+        // the first turn of a one-shot run; a turn error propagates.
         while (true) {
             if (sigint.isTriggered()) {
                 finalizeSession(ctx);
@@ -163,7 +166,7 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .compact => {
-                    switch (try compactConversation(ctx, .forced)) {
+                    switch (try compactConversation(ctx, .forced, null)) {
                         .nothing_to_compact => {
                             try ctx.stdout_writer.print("\n{s}Nothing to compact.{s}\n", .{ ansi.dim, ansi.reset });
                             try ctx.stdout_writer.flush();
@@ -724,9 +727,19 @@ fn injectTyped(
     return lines;
 }
 
+/// Upper bound on model requests within one agentic turn, compaction
+/// summaries included. A model that keeps calling tools would otherwise loop,
+/// and bill, without end. Ordinary turns stay far below this; reaching it ends
+/// the turn with a notice, and because every tool call already has its result,
+/// the next prompt carries on cleanly.
+const max_model_requests_per_turn: u32 = 256;
+
 /// A line delivered as the model finished still needs an answer, so the loop
-/// goes round again.
-fn loopFinished(model_done: bool, delivered: usize) bool {
+/// goes round again, unless the turn has used its whole request budget.
+fn loopFinished(model_done: bool, delivered: usize, model_requests: u32) bool {
+    std.debug.assert(model_requests >= 1);
+    std.debug.assert(model_requests <= max_model_requests_per_turn);
+    if (model_requests == max_model_requests_per_turn) return true;
     return model_done and delivered == 0;
 }
 
@@ -740,15 +753,158 @@ fn injectsTyped(honor_oneshot: bool, oneshot: bool, review_active: bool, cancell
 
 /// Drives one agentic turn. `honor_oneshot` is false for orchestrate phases,
 /// which run several turns inside a single `--oneshot` invocation.
+/// Token and credit totals across every model request of one agentic turn,
+/// for the footer printed when it completes.
+const TurnTally = struct {
+    input_tokens: i64 = 0,
+    output_tokens: i64 = 0,
+    estimated: bool = false,
+    credits: ?token_stats.AiCredits = null,
+    /// A request reported no AI Credits, so `credits` is a lower bound.
+    credits_missing: bool = false,
+
+    fn add(self: *TurnTally, usage: ?openai.TurnUsage, estimated: bool) void {
+        if (usage) |u| {
+            self.input_tokens += u.input_tokens;
+            self.output_tokens += u.output_tokens;
+        }
+        if (if (usage) |u| u.nano_ai_credits else null) |nano| {
+            const so_far: i64 = if (self.credits) |c| c.nano else 0;
+            self.credits = .{ .nano = so_far + nano };
+        } else {
+            self.credits_missing = true;
+        }
+        self.estimated = self.estimated or estimated;
+    }
+
+    fn printFooter(self: *TurnTally, ctx: *ChatLoopContext) !void {
+        // Only Copilot bills in AI Credits and only Zen bills in US dollars;
+        // after switching away, /stats keeps the session's costs but the
+        // footer goes back to tokens alone.
+        const stats_now = ctx.session_stats;
+        const session_credits = if (ctx.prov.* == .copilot) stats_now.totalAiCredits() else null;
+        const session_usd = if (stats_now.billsUsd()) stats_now.totalUsd() else null;
+        const turn_usd = if (stats_now.billsUsd()) stats_now.turnUsd() else null;
+        if (self.credits) |*c| c.partial = self.credits_missing;
+        try token_stats.printTokenFooter(
+            ctx.stdout_writer,
+            self.input_tokens,
+            self.output_tokens,
+            self.estimated,
+            ctx.session_stats.totalTokens(),
+            self.credits,
+            session_credits,
+            turn_usd,
+            session_usd,
+        );
+    }
+};
+
+/// Compacts the conversation when the next request would come near the
+/// context limit. Returns null when no compaction was needed. A `failed` or
+/// `cancelled` outcome means the caller stops trying for the rest of the turn.
+fn compactIfNearLimit(ctx: *ChatLoopContext, tally: *TurnTally) !?CompactOutcome {
+    const limit = ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*) orelse return null;
+    const estimate = ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());
+    if (!compact.shouldCompact(estimate, limit)) return null;
+    return try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) }, tally);
+}
+
+/// Delivers lines the user typed while the model worked, recording each in
+/// the chat log and prompt history. Returns the lines delivered.
+fn deliverTypedLines(ctx: *ChatLoopContext) ![]const []const u8 {
+    const delivered = try injectTyped(
+        ctx.messages_arena.allocator(),
+        ctx.messages,
+        ctx.stdout_writer,
+        &cancel.typed,
+    );
+    for (delivered) |line| {
+        if (ctx.chat_log) |log| log.print("[USER]\n{s}\n\n", .{line});
+        try ctx.history.add(line);
+        try ctx.history.save(ctx.io);
+    }
+    return delivered;
+}
+
+/// Saves the verdict of a review this turn ran, or records why it has none.
+fn finishActiveReview(ctx: *ChatLoopContext, report: orchestrate.TurnReport) !void {
+    std.debug.assert(branch_review.isActive());
+    const saved = if (report.cancelled or report.had_error or report.incomplete)
+        try branch_review.failActive(
+            ctx.messages_arena.allocator(),
+            ctx.io,
+            if (report.cancelled)
+                "Review execution was cancelled."
+            else if (report.had_error)
+                "The provider failed before the review completed."
+            else
+                "The review reached its model request limit before completing.",
+        )
+    else
+        try branch_review.finish(
+            ctx.messages_arena.allocator(),
+            ctx.io,
+            "The model returned without saving valid review results.",
+        );
+    branch_review.reset();
+    ctx.review_outcome.* = saved.outcome;
+    try printReviewResult(ctx.stdout_writer, saved);
+}
+
+/// Sends the conversation to the model once, with the thinking indicator
+/// shown until the reply or the tool calls it asked for are done.
+fn requestModel(ctx: *ChatLoopContext) !chat.TurnResult {
+    var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
+    try thinking_indicator.show(ctx.stdout_writer);
+    return chat.runTurnWithMode(
+        ctx.prov,
+        ctx.messages_arena.allocator(),
+        ctx.io,
+        ctx.stdout_writer,
+        ctx.session_stats,
+        ctx.parsed.show_thinking,
+        ctx.random,
+        ctx.model_key.*,
+        ctx.reasoning_effort.*,
+        ctx.messages,
+        ctx.activeToolDefinitions(),
+        &thinking_indicator,
+        if (ctx.chat_log) |log| log.writer else null,
+        ctx.mode.*,
+    ) catch |err| {
+        try thinking_indicator.finish(ctx.io, ctx.stdout_writer, 0, false, false, .error_, null);
+        return err;
+    };
+}
+
+const AbandonReason = enum { cancelled, failed };
+
+/// Ends a turn the user cancelled or the provider failed: rolls the
+/// conversation back, drops skills the turn loaded, and still counts the
+/// tokens it used. See `rollBackFailedTurn` for why a failure drops the prompt.
+fn abandonTurn(ctx: *ChatLoopContext, usage: ?openai.TurnUsage, reason: AbandonReason) !void {
+    switch (reason) {
+        .cancelled => rollBackCancelledTurn(ctx.messages),
+        .failed => rollBackFailedTurn(ctx.messages),
+    }
+    while (skills.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
+    ctx.session_stats.finalizeTurn(usage, false);
+    if (reason == .failed) {
+        try ctx.stdout_writer.print(
+            "\n{s}Removed that message from the conversation. Send it again to retry.{s}\n",
+            .{ ansi.dim, ansi.reset },
+        );
+        try ctx.stdout_writer.flush();
+    }
+}
+
 fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_complete = false;
     var turn_cancelled = false;
     var turn_had_error = false;
-    var turn_estimated = false;
-    var turn_in: i64 = 0;
-    var turn_out: i64 = 0;
-    var turn_credits: ?token_stats.AiCredits = null;
-    var turn_credits_missing = false;
+    var turn_incomplete = false;
+    var tally: TurnTally = .{};
     var compaction_failed = false;
 
     // A one-shot run has no next prompt to type towards.
@@ -765,81 +921,42 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     // its cost; the session counter resets it.
     ctx.session_stats.beginUsdTurn();
 
+    var model_requests: u32 = 0;
     while (!turn_complete) {
         // Zen prices are fetched once per model; every request this turn makes
         // is then priced, the compaction summary included.
         ctx.session_stats.setPrices(ctx.pricing_book.pricesFor(ctx.model_key.*));
 
-        if (!compaction_failed) {
-            if (ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*)) |limit| {
-                if (compact.shouldCompact(ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions()), limit)) {
-                    const outcome = try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) });
-                    compaction_failed = outcome == .failed or outcome == .cancelled;
-                }
+        // A compaction summary spends the turn's request budget too, and is
+        // skipped when only the turn's last request is left.
+        if (!compaction_failed and model_requests + 2 <= max_model_requests_per_turn) {
+            if (try compactIfNearLimit(ctx, &tally)) |outcome| {
+                if (outcome != .nothing_to_compact) model_requests += 1;
+                compaction_failed = outcome == .failed or outcome == .cancelled;
             }
         }
 
-        const active_tool_definitions = ctx.activeToolDefinitions();
+        model_requests += 1;
+        std.debug.assert(model_requests <= max_model_requests_per_turn);
+        const at_request_limit = model_requests == max_model_requests_per_turn;
 
-        var thinking_indicator = indicator.ThinkingIndicator.init(ctx.io);
-        try thinking_indicator.show(ctx.stdout_writer);
-
-        const chat_log_writer = if (ctx.chat_log) |log| log.writer else null;
         const request_message_count = ctx.messages.items.len;
-        const result = chat.runTurnWithMode(
-            ctx.prov,
-            ctx.messages_arena.allocator(),
-            ctx.io,
-            ctx.stdout_writer,
-            ctx.session_stats,
-            ctx.parsed.show_thinking,
-            ctx.random,
-            ctx.model_key.*,
-            ctx.reasoning_effort.*,
-            ctx.messages,
-            active_tool_definitions,
-            &thinking_indicator,
-            chat_log_writer,
-            ctx.mode.*,
-        ) catch |err| {
-            try thinking_indicator.finish(ctx.io, ctx.stdout_writer, 0, false, false, .error_, null);
-            return err;
-        };
+        const result = try requestModel(ctx);
 
         if (result.was_cancelled) {
             turn_cancelled = true;
-            rollBackCancelledTurn(ctx.messages);
-            while (skills.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
-            ctx.session_stats.finalizeTurn(result.usage, false);
+            try abandonTurn(ctx, result.usage, .cancelled);
             break;
         }
-
         if (result.had_error) {
             turn_had_error = true;
-            rollBackFailedTurn(ctx.messages);
-            while (skills.takePendingSkill(ctx.messages_arena.allocator())) |_| {}
-            ctx.session_stats.finalizeTurn(result.usage, false);
-            try ctx.stdout_writer.print(
-                "\n{s}Removed that message from the conversation. Send it again to retry.{s}\n",
-                .{ ansi.dim, ansi.reset },
-            );
-            try ctx.stdout_writer.flush();
+            try abandonTurn(ctx, result.usage, .failed);
             break;
         }
 
         ctx.context_budget.recordTurn(result.usage, result.usage_estimated, request_message_count);
 
-        if (result.usage) |u| {
-            turn_in += u.input_tokens;
-            turn_out += u.output_tokens;
-        }
-        if (if (result.usage) |u| u.nano_ai_credits else null) |nano| {
-            const so_far: i64 = if (turn_credits) |c| c.nano else 0;
-            turn_credits = .{ .nano = so_far + nano };
-        } else {
-            turn_credits_missing = true;
-        }
-        turn_estimated = turn_estimated or result.usage_estimated;
+        tally.add(result.usage, result.usage_estimated);
 
         if (skills.takePendingSkill(ctx.messages_arena.allocator())) |pending| {
             try appendSkillContext(ctx, pending.name, pending.content);
@@ -849,60 +966,51 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         ctx.session_stats.finalizeTurn(result.usage, result.turn_complete);
 
         // Tool results are in place by now, so every tool call stays paired.
+        // At the request limit, typed lines wait for the next prompt rather
+        // than joining a turn that cannot answer them.
         var delivered: []const []const u8 = &.{};
-        if (injectsTyped(honor_oneshot, ctx.parsed.oneshot, branch_review.isActive(), cancel.isCancelled())) {
-            delivered = try injectTyped(ctx.messages_arena.allocator(), ctx.messages, ctx.stdout_writer, &cancel.typed);
-            for (delivered) |line| {
-                if (ctx.chat_log) |log| log.print("[USER]\n{s}\n\n", .{line});
-                try ctx.history.add(line);
-                try ctx.history.save(ctx.io);
-            }
+        if (!at_request_limit and injectsTyped(
+            honor_oneshot,
+            ctx.parsed.oneshot,
+            branch_review.isActive(),
+            cancel.isCancelled(),
+        )) {
+            delivered = try deliverTypedLines(ctx);
         }
-        turn_complete = loopFinished(result.turn_complete, delivered.len);
-    }
-
-    if (turn_complete and !turn_cancelled and !turn_had_error) {
-        // Only Copilot bills in AI Credits and only Zen bills in US dollars;
-        // after switching away, /stats keeps the session's costs but the
-        // footer goes back to tokens alone.
-        const session_credits = if (ctx.prov.* == .copilot) ctx.session_stats.totalAiCredits() else null;
-        const session_usd = if (ctx.session_stats.billsUsd()) ctx.session_stats.totalUsd() else null;
-        const turn_usd = if (ctx.session_stats.billsUsd()) ctx.session_stats.turnUsd() else null;
-        if (turn_credits) |*c| c.partial = turn_credits_missing;
-        try token_stats.printTokenFooter(ctx.stdout_writer, turn_in, turn_out, turn_estimated, ctx.session_stats.totalTokens(), turn_credits, session_credits, turn_usd, session_usd);
-    }
-
-    if (branch_review.isActive()) {
-        const saved = if (turn_cancelled or turn_had_error)
-            try branch_review.failActive(
-                ctx.messages_arena.allocator(),
-                ctx.io,
-                if (turn_cancelled) "Review execution was cancelled." else "The provider failed before the review completed.",
-            )
-        else
-            try branch_review.finish(
-                ctx.messages_arena.allocator(),
-                ctx.io,
-                "The model returned without saving valid review results.",
+        turn_complete = loopFinished(result.turn_complete, delivered.len, model_requests);
+        if (at_request_limit and !result.turn_complete) {
+            turn_incomplete = true;
+            try printNotice(
+                ctx.stdout_writer,
+                "Stopped after {d} model requests this turn. Send a message to continue.",
+                .{max_model_requests_per_turn},
             );
-        branch_review.reset();
-        ctx.review_outcome.* = saved.outcome;
-        try printReviewResult(ctx.stdout_writer, saved);
+        }
     }
+
+    const report: orchestrate.TurnReport = .{
+        .cancelled = turn_cancelled,
+        .had_error = turn_had_error,
+        .incomplete = turn_incomplete,
+    };
+    if (turn_complete and !turn_cancelled and !turn_had_error) try tally.printFooter(ctx);
+    if (branch_review.isActive()) try finishActiveReview(ctx, report);
 
     // A one-shot run ends here, and `finalizeSession` saves exactly the state
     // this turn just produced. Saving first would serialize the whole
     // conversation and rewrite the whole index twice over, back to back.
     if (honor_oneshot and ctx.parsed.oneshot) {
         finalizeSession(ctx);
-        return .{ .cancelled = turn_cancelled, .had_error = turn_had_error, .exited = true };
+        var exited = report;
+        exited.exited = true;
+        return exited;
     }
 
     try persistence.saveMessages(ctx);
     try persistence.saveSessionMeta(ctx);
     upsertCurrentSession(ctx);
 
-    return .{ .cancelled = turn_cancelled, .had_error = turn_had_error };
+    return report;
 }
 
 fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
@@ -930,7 +1038,12 @@ const CompactOutcome = enum { compacted, nothing_to_compact, cancelled, failed }
 
 /// Summarizes older messages into one system message. A cancelled or failed
 /// summary leaves the conversation untouched.
-fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactOutcome {
+/// `tally`, when a turn is running, also counts the summary request.
+fn compactConversation(
+    ctx: *ChatLoopContext,
+    mode: compact.SplitMode,
+    tally: ?*TurnTally,
+) !CompactOutcome {
     // `/compact` runs outside the turn loop, so pick up the current model's
     // prices here too: after a model or provider switch the summary must not
     // be charged at the previous model's rates.
@@ -948,7 +1061,19 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
     defer scratch_state.deinit();
     const scratch = scratch_state.allocator();
     const request = try compact.buildSummaryRequest(scratch, ctx.messages.items[split.start..split.end]);
-    const outcome = try compact.summarize(ctx.prov, scratch, ctx.io, ctx.random, ctx.stdout_writer, ctx.session_stats, ctx.model_key.*, request);
+    var summary_usage: compact.SummaryUsage = .{};
+    const outcome = try compact.summarize(
+        ctx.prov,
+        scratch,
+        ctx.io,
+        ctx.random,
+        ctx.stdout_writer,
+        ctx.session_stats,
+        ctx.model_key.*,
+        request,
+        &summary_usage,
+    );
+    if (tally) |t| t.add(summary_usage.usage, summary_usage.estimated);
     switch (outcome) {
         .cancelled => {
             try ctx.stdout_writer.print("{s}Compaction cancelled.{s}\n", .{ ansi.dim, ansi.reset });
@@ -1022,22 +1147,49 @@ fn recycleMessagesArena(ctx: *ChatLoopContext) !void {
 /// Re-installs the standing system context after an arena reset: the system
 /// prompt, the skills listing, and the repository instructions file.
 fn installBaseContext(ctx: *ChatLoopContext) !void {
-    const alloc = ctx.messages_arena.allocator();
-    const system_prompt = try ctx.cfg.resolvePrompt(alloc, "system", prompts.system);
-    try ctx.messages.append(alloc, .{ .system = system_prompt });
+    try appendBaseContext(
+        ctx.messages_arena.allocator(),
+        ctx.arena,
+        ctx.io,
+        ctx.cfg,
+        if (ctx.parsed.no_skills) null else ctx.skill_registry,
+        ctx.messages,
+    );
+}
 
-    if (!ctx.parsed.no_skills and ctx.skill_registry.count() > 0) {
-        const skills_block = try ctx.skill_registry.buildListing(alloc);
-        try ctx.messages.append(alloc, .{ .system = skills_block });
+/// Appends the context every fresh conversation starts with: the system
+/// prompt, the skill listing when there are skills, and the repository's
+/// agent instructions when it has any. Message text lives in `messages_alloc`;
+/// `scratch` holds only what is freed before returning.
+pub fn appendBaseContext(
+    messages_alloc: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    io: std.Io,
+    cfg: *const config.Config,
+    skill_registry: ?*skills.Registry,
+    messages: *std.ArrayList(openai.Message),
+) !void {
+    const system_prompt = try cfg.resolvePrompt(messages_alloc, "system", prompts.system);
+    try messages.append(messages_alloc, .{ .system = system_prompt });
+
+    if (skill_registry) |registry| {
+        if (registry.count() > 0) {
+            const skills_block = try registry.buildListing(messages_alloc);
+            try messages.append(messages_alloc, .{ .system = skills_block });
+        }
     }
 
-    if (try git_root.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
-        defer ctx.arena.free(repo_root);
-        if (try instructions.load(ctx.arena, ctx.io, repo_root)) |result| {
-            defer ctx.arena.free(result.filename);
-            defer ctx.arena.free(result.content);
-            const labeled = try std.fmt.allocPrint(alloc, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
-            try ctx.messages.append(alloc, .{ .system = labeled });
+    if (try git_root.findGitRepoRoot(scratch, io)) |repo_root| {
+        defer scratch.free(repo_root);
+        if (try instructions.load(scratch, io, repo_root)) |result| {
+            defer scratch.free(result.filename);
+            defer scratch.free(result.content);
+            const labeled = try std.fmt.allocPrint(
+                messages_alloc,
+                "Instructions from {s}:\n{s}",
+                .{ result.filename, result.content },
+            );
+            try messages.append(messages_alloc, .{ .system = labeled });
         }
     }
 }
@@ -1047,7 +1199,7 @@ fn installBaseContext(ctx: *ChatLoopContext) !void {
 /// stats, same prompt history. That is what separates a phase boundary from
 /// `/reset`, which mints a whole new session.
 fn resetContextForPhase(ctx: *ChatLoopContext) anyerror!void {
-    persistence.saveMessages(ctx) catch {};
+    persistence.saveMessages(ctx) catch |err| warnSaveFailed("conversation", err);
     try recycleMessagesArena(ctx);
     ctx.context_budget.resetUsage();
     try installBaseContext(ctx);
@@ -1067,8 +1219,8 @@ fn runOrchestrate(ctx: *ChatLoopContext, spec: orchestrate.Spec) !orchestrate.St
         .reset_context = resetContextForPhase,
     });
     ctx.review_outcome.* = status.toOutcome();
-    persistence.saveMessages(ctx) catch {};
-    persistence.saveSessionMeta(ctx) catch {};
+    persistence.saveMessages(ctx) catch |err| warnSaveFailed("conversation", err);
+    persistence.saveSessionMeta(ctx) catch |err| warnSaveFailed("session metadata", err);
     upsertCurrentSession(ctx);
     return status;
 }
@@ -1324,12 +1476,24 @@ fn shouldRemoveSessionDir(restore_incomplete: bool, messages: []const openai.Mes
     return !restore_incomplete and !sessionHasContent(messages) and !core_session.sessionHasPlan(io, dir);
 }
 
+/// For saves that must not stop the caller: a phase boundary, the end of a
+/// run, exit. The writes log their own failures; this covers the rest, such as
+/// running out of memory while serializing.
+fn warnSaveFailed(what: []const u8, err: anyerror) void {
+    std.log.warn("failed to save the {s}: {s}", .{ what, @errorName(err) });
+}
+
 fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
     while (messages.items.len > 0) {
         switch (messages.items[messages.items.len - 1]) {
             .assistant, .tool => _ = messages.pop(),
             else => break,
         }
+    }
+    // No partial answer is left for the next request to send.
+    if (messages.items.len > 0) {
+        const last = messages.items[messages.items.len - 1];
+        std.debug.assert(last != .assistant and last != .tool);
     }
 }
 
@@ -1350,6 +1514,7 @@ fn rollBackFailedTurn(messages: *std.ArrayList(openai.Message)) void {
         index -= 1;
         if (messages.items[index] == .user) {
             messages.shrinkRetainingCapacity(index);
+            std.debug.assert(messages.items.len == index);
             return;
         }
     }
@@ -1490,8 +1655,8 @@ test "prompt-file prompts persist in history as /file commands end to end" {
 }
 
 fn finalizeSession(ctx: *ChatLoopContext) void {
-    persistence.saveMessages(ctx) catch {};
-    persistence.saveSessionMeta(ctx) catch {};
+    persistence.saveMessages(ctx) catch |err| warnSaveFailed("conversation", err);
+    persistence.saveSessionMeta(ctx) catch |err| warnSaveFailed("session metadata", err);
     if (shouldRemoveSessionDir(ctx.restore_incomplete, ctx.messages.items, ctx.io, ctx.session.dir)) {
         core_session.removeSessionDir(ctx.io, ctx.session.dir);
         sessions.removeSessionFromIndex(ctx.arena, ctx.io, ctx.session.base, ctx.session.id) catch {};
@@ -1552,10 +1717,39 @@ test "injectTyped appends queued lines after the tool results and announces them
 }
 
 test "the loop finishes only when the model is done and nothing was delivered" {
-    try std.testing.expect(loopFinished(true, 0));
-    try std.testing.expect(!loopFinished(false, 0));
-    try std.testing.expect(!loopFinished(true, 1));
-    try std.testing.expect(!loopFinished(false, 2));
+    try std.testing.expect(loopFinished(true, 0, 1));
+    try std.testing.expect(!loopFinished(false, 0, 1));
+    try std.testing.expect(!loopFinished(true, 1, 1));
+    try std.testing.expect(!loopFinished(false, 2, 1));
+}
+
+test "TurnTally sums tokens and credits across requests" {
+    var tally: TurnTally = .{};
+    tally.add(.{ .input_tokens = 10, .output_tokens = 2, .nano_ai_credits = 5 }, false);
+    tally.add(.{ .input_tokens = 7, .output_tokens = 3, .nano_ai_credits = 4 }, true);
+    try std.testing.expectEqual(@as(i64, 17), tally.input_tokens);
+    try std.testing.expectEqual(@as(i64, 5), tally.output_tokens);
+    try std.testing.expect(tally.estimated);
+    try std.testing.expectEqual(@as(i64, 9), tally.credits.?.nano);
+    try std.testing.expect(!tally.credits_missing);
+}
+
+test "TurnTally marks credits partial when a request reports none" {
+    var tally: TurnTally = .{};
+    tally.add(.{ .input_tokens = 1, .output_tokens = 1, .nano_ai_credits = 5 }, false);
+    tally.add(null, false);
+    try std.testing.expectEqual(@as(i64, 5), tally.credits.?.nano);
+    try std.testing.expect(tally.credits_missing);
+    try std.testing.expect(!tally.estimated);
+}
+
+test "the loop finishes once the turn reaches its model request limit" {
+    const limit = max_model_requests_per_turn;
+    try std.testing.expect(!loopFinished(false, 0, limit - 1));
+    try std.testing.expect(!loopFinished(true, 1, limit - 1));
+    try std.testing.expect(loopFinished(false, 0, limit));
+    try std.testing.expect(loopFinished(true, 1, limit));
+    try std.testing.expect(loopFinished(true, 0, limit));
 }
 
 test "typed lines are injected into an ordinary chat loop" {

@@ -106,17 +106,7 @@ fn run(init: std.process.Init) !u8 {
     }
 
     if (parsed.prune) {
-        var buf: [1024]u8 = undefined;
-        var out: std.Io.File.Writer = .init(.stdout(), init.io, &buf);
-        const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
-        const keep_id = parsed.session orelse "";
-        try sessions.pruneSessions(arena, init.io, base_dir, keep_id);
-        if (keep_id.len > 0) {
-            try out.interface.print("Pruned all sessions except '{s}'.\n", .{keep_id});
-        } else {
-            try out.interface.print("Pruned all sessions.\n", .{});
-        }
-        try out.interface.flush();
+        try runPrune(arena, init.io, init.environ_map, parsed.session orelse "");
         return 0;
     }
 
@@ -124,50 +114,15 @@ fn run(init: std.process.Init) !u8 {
     // before any provider/model initialization work happens. The loaded
     // content becomes the pending prompt, exactly like `--prompt`.
     if (parsed.prompt_file) |source| {
-        const outcome = prompt_file.load(arena, init.io, source);
-        switch (outcome) {
-            .ok => |content| {
-                if (content.len == 0) {
-                    printStartupError(init.io, source, "prompt file is empty");
-                    std.process.exit(1);
-                }
-                parsed.prompt = content;
-            },
-            .err => |e| {
-                defer if (e.owned) arena.free(e.message);
-                printStartupError(init.io, source, e.message);
-                std.process.exit(1);
-            },
-        }
+        parsed.prompt = loadPromptFileOrExit(arena, init.io, source);
     }
 
     var startup_review_scope: ?branch_review.Scope = null;
     if (parsed.review) {
-        const prepared = try branch_review.prepare(arena, init.io);
-        switch (prepared) {
-            .invalid => |failure| {
-                printStandaloneReviewError(init.io, failure.message);
-                return 2;
-            },
-            .operational_failure => |failure| {
-                const saved = branch_review.writeOperationalFailure(arena, init.io, failure) catch |err| {
-                    printStandaloneReviewWriteError(init.io, err);
-                    return 2;
-                };
-                printStandaloneReviewResult(init.io, saved);
-                return saved.outcome.exitCode();
-            },
-            .no_changes => |scope| {
-                const saved = branch_review.writeNoChanges(arena, init.io, scope) catch |err| {
-                    printStandaloneReviewWriteError(init.io, err);
-                    return 2;
-                };
-                printStandaloneReviewResult(init.io, saved);
-                return saved.outcome.exitCode();
-            },
+        switch (try prepareStartupReview(arena, init.io)) {
+            .exit => |code| return code,
             .ready => |scope| {
                 startup_review_scope = scope;
-                branch_review.begin(scope);
                 parsed.prompt = branch_review.request_prompt;
             },
         }
@@ -176,10 +131,7 @@ fn run(init: std.process.Init) !u8 {
     var debug_buffer: [4096]u8 = undefined;
     var debug_file_writer: std.Io.File.Writer = undefined;
     var debug_log: ?DebugLog = if (parsed.debug) blk: {
-        const file = try std.Io.Dir.cwd().createFile(init.io, log_files.http_log, .{});
-        if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, log_files.http_log, @fromBackingInt(0o600), .{}) catch {};
-        }
+        const file = try createLogFile(init.io, log_files.http_log);
         debug_file_writer = .init(file, init.io, &debug_buffer);
         break :blk DebugLog{
             .file = file,
@@ -195,10 +147,7 @@ fn run(init: std.process.Init) !u8 {
     var chat_buffer: [4096]u8 = undefined;
     var chat_file_writer: std.Io.File.Writer = undefined;
     var chat_log: ?ChatLog = if (parsed.chat_log) blk: {
-        const file = try std.Io.Dir.cwd().createFile(init.io, log_files.chat_log, .{});
-        if (comptime @import("builtin").os.tag != .windows) {
-            std.Io.Dir.cwd().setFilePermissions(init.io, log_files.chat_log, @fromBackingInt(0o600), .{}) catch {};
-        }
+        const file = try createLogFile(init.io, log_files.chat_log);
         chat_file_writer = .init(file, init.io, &chat_buffer);
         break :blk ChatLog{
             .file = file,
@@ -243,30 +192,7 @@ fn run(init: std.process.Init) !u8 {
 
     const base_dir = try core_sess.sessionBaseDir(arena, init.environ_map);
 
-    var restore_target: ?sessions.SessionInfo = null;
-    if (parsed.session) |sid| {
-        if (sessions.findSessionByPrefix(arena, init.io, base_dir, sid)) |maybe_s| {
-            if (maybe_s) |s| {
-                if (s.has_conversation) {
-                    restore_target = s;
-                } else {
-                    try stdout_writer.print("Session '{s}' has no saved conversation. Starting fresh.\n", .{sid});
-                    try stdout_writer.flush();
-                }
-            } else {
-                try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
-                try stdout_writer.flush();
-            }
-        } else |_| {}
-    } else if (parsed.do_resume) {
-        if (sessions.findLatestSession(arena, init.io, base_dir)) |maybe_latest| {
-            restore_target = maybe_latest;
-            if (maybe_latest == null) {
-                try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
-                try stdout_writer.flush();
-            }
-        } else |_| {}
-    }
+    const restore_target = try findRestoreTarget(arena, init.io, base_dir, parsed, stdout_writer);
 
     // The session id is generated before the provider so every request,
     // the model list included, is attributed to this conversation.
@@ -309,20 +235,14 @@ fn run(init: std.process.Init) !u8 {
     var messages: std.ArrayList(openai.Message) = .empty;
     defer messages.deinit(messages_arena);
 
-    var current_session: core_sess.Session = undefined;
-    if (restore_target) |s| {
-        const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", s.id });
-        current_session = try core_sess.Session.fromDir(
-            arena,
-            s.id,
-            base_dir,
-            dir,
-            try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
-            try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
-        );
-    } else {
-        current_session = try core_sess.Session.initWithId(arena, base_dir, session_id, init.io);
-    }
+    var current_session = try openCurrentSession(
+        arena,
+        messages_arena,
+        init.io,
+        base_dir,
+        restore_target,
+        session_id,
+    );
 
     var context_budget = compact.ContextBudget.init(parsed.max_context, cfg.max_context_tokens);
     context_budget.setStartupTier(parsed.context_tier orelse cfg.context_tier);
@@ -362,18 +282,17 @@ fn run(init: std.process.Init) !u8 {
     }, stdout_writer);
 
     if (restore_target) |s| {
-        const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
-        const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &agent_mode, &messages, stdout_writer);
-        const now = std.Io.Clock.Timestamp.now(init.io, .awake);
-        const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
+        const restore_result = try restoreAndShowSession(
+            messages_arena,
+            init.io,
+            base_dir,
+            s,
+            &agent_mode,
+            &messages,
+            stdout_writer,
+        );
         session_restored = restore_result.restored;
         restore_incomplete = restore_result.incomplete;
-        if (restore_result.restored) {
-            var header_buf: [256]u8 = undefined;
-            try stdout_writer.print("\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
-            try display.printConversation(stdout_writer, messages.items);
-            try stdout_writer.flush();
-        }
     }
 
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
@@ -390,35 +309,18 @@ fn run(init: std.process.Init) !u8 {
 
     var skill_registry = skills.Registry.init(arena);
     defer skill_registry.deinit();
-    if (!parsed.no_skills) {
-        if (try skills.homeDir(arena, init.environ_map)) |home| {
-            const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
-            try skill_registry.lightScan(init.io, global_path);
-        }
-        if (try git_root.findGitRepoRoot(arena, init.io)) |repo_root| {
-            const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
-            try skill_registry.lightScan(init.io, repo_path);
-        }
-        skill_registry.fullScan(init.io) catch {};
-    }
+    if (!parsed.no_skills) try scanSkills(arena, init.io, init.environ_map, &skill_registry);
     skills.setGlobalRegistry(&skill_registry);
 
     if (!session_restored) {
-        const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
-        try messages.append(messages_arena, .{ .system = system_prompt });
-        if (skill_registry.count() > 0) {
-            const skills_block = try skill_registry.buildListing(messages_arena);
-            try messages.append(messages_arena, .{ .system = skills_block });
-        }
-        if (try git_root.findGitRepoRoot(arena, init.io)) |repo_root| {
-            defer arena.free(repo_root);
-            if (try instructions.load(arena, init.io, repo_root)) |result| {
-                defer arena.free(result.filename);
-                defer arena.free(result.content);
-                const labeled = try std.fmt.allocPrint(messages_arena, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
-                try messages.append(messages_arena, .{ .system = labeled });
-            }
-        }
+        try session.appendBaseContext(
+            messages_arena,
+            arena,
+            init.io,
+            cfg,
+            &skill_registry,
+            &messages,
+        );
         if (startup_review_scope) |scope| {
             core_sess.setWriteBlocked(true);
             const review_prompt = try cfg.resolvePrompt(messages_arena, "review", prompts.review);
@@ -473,23 +375,85 @@ fn run(init: std.process.Init) !u8 {
     crash.setPhase("chat turn");
     try chat_session.run();
 
-    // After the interactive session ends, surface a pending update notice
-    // written by the detached update-check child process. Clear stale flags
-    // that no longer represent a newer version.
-    if (update_check.availableUpdateIfNewer(init.io, arena, init.environ_map)) |maybe_latest| {
-        if (maybe_latest) |latest| {
-            update_check.printUpdateNotice(stdout_writer, latest) catch {};
-            stdout_writer.flush() catch {};
-        }
-    } else |_| {}
+    printPendingUpdateNotice(init.io, arena, init.environ_map, stdout_writer);
+    return exitCode(parsed, review_outcome);
+}
 
-    if (parsed.review) {
-        const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
-        return outcome.exitCode();
+/// Loads skills from the user's and the repository's `.agents/skills`.
+/// Skills are optional: a full scan that fails keeps the ones found so far.
+fn scanSkills(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    registry: *skills.Registry,
+) !void {
+    if (try skills.homeDir(arena, environ_map)) |home| {
+        const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
+        try registry.lightScan(io, global_path);
     }
-    if (parsed.orchestrate) {
-        // An orchestrate run that never reached a verdict is an operational
-        // failure, the same as a review that could not start.
+    if (try git_root.findGitRepoRoot(arena, io)) |repo_root| {
+        const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
+        try registry.lightScan(io, repo_path);
+    }
+    registry.fullScan(io) catch |err| {
+        std.log.warn("failed to load skills: {s}", .{@errorName(err)});
+    };
+}
+
+/// Loads a saved conversation and, when it loads, replays it under a header
+/// saying how long that took.
+fn restoreAndShowSession(
+    messages_arena: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    target: sessions.SessionInfo,
+    agent_mode: *AgentMode,
+    messages: *std.ArrayList(openai.Message),
+    stdout_writer: *std.Io.Writer,
+) !RestoreResult {
+    const load_start = std.Io.Clock.Timestamp.now(io, .awake);
+    const result = try loadRestoredSession(
+        messages_arena,
+        io,
+        base_dir,
+        target,
+        agent_mode,
+        messages,
+        stdout_writer,
+    );
+    const now = std.Io.Clock.Timestamp.now(io, .awake);
+    const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
+    if (result.restored) {
+        var header_buf: [256]u8 = undefined;
+        try stdout_writer.print(
+            "\n{s}\n",
+            .{formatRestoreHeader(&header_buf, target.id, messages.items.len, elapsed_ns)},
+        );
+        try display.printConversation(stdout_writer, messages.items);
+        try stdout_writer.flush();
+    }
+    return result;
+}
+
+/// Shows the notice the detached update check left, if it names a newer
+/// version; a stale flag is cleared instead. Best-effort: the session is over.
+fn printPendingUpdateNotice(
+    io: std.Io,
+    arena: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    stdout_writer: *std.Io.Writer,
+) void {
+    const maybe_latest = update_check.availableUpdateIfNewer(io, arena, environ_map) catch return;
+    const latest = maybe_latest orelse return;
+    update_check.printUpdateNotice(stdout_writer, latest) catch {};
+    stdout_writer.flush() catch {};
+}
+
+/// The process exit code: a review or orchestrate run reports its verdict, an
+/// unreached verdict being an operational failure; a one-shot run reports one
+/// when it ran a review. Everything else succeeded by getting here.
+fn exitCode(parsed: cli.Options, review_outcome: ?branch_review.Outcome) u8 {
+    if (parsed.review or parsed.orchestrate) {
         const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
         return outcome.exitCode();
     }
@@ -497,6 +461,168 @@ fn run(init: std.process.Init) !u8 {
         if (review_outcome) |outcome| return outcome.exitCode();
     }
     return 0;
+}
+
+/// `--prune`: deletes every saved session except `keep_id`, when given.
+fn runPrune(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    keep_id: []const u8,
+) !void {
+    var buf: [1024]u8 = undefined;
+    var out: std.Io.File.Writer = .init(.stdout(), io, &buf);
+    const base_dir = try core_sess.sessionBaseDir(arena, environ_map);
+    try sessions.pruneSessions(arena, io, base_dir, keep_id);
+    if (keep_id.len > 0) {
+        try out.interface.print("Pruned all sessions except '{s}'.\n", .{keep_id});
+    } else {
+        try out.interface.print("Pruned all sessions.\n", .{});
+    }
+    try out.interface.flush();
+}
+
+/// Returns the prompt `--prompt-file` names, or explains the failure and
+/// exits: a run with no prompt to send has nothing to do.
+fn loadPromptFileOrExit(arena: std.mem.Allocator, io: std.Io, source: []const u8) []const u8 {
+    switch (prompt_file.load(arena, io, source)) {
+        .ok => |content| {
+            if (content.len == 0) {
+                printStartupError(io, source, "prompt file is empty");
+                std.process.exit(1);
+            }
+            return content;
+        },
+        .err => |e| {
+            defer if (e.owned) arena.free(e.message);
+            printStartupError(io, source, e.message);
+            std.process.exit(1);
+        },
+    }
+}
+
+const StartupReview = union(enum) {
+    /// The review was settled without a model: exit with this code.
+    exit: u8,
+    /// The review has begun and the model runs on this scope.
+    ready: branch_review.Scope,
+};
+
+/// `--review`: settles a branch that cannot be reviewed or has no changes on
+/// the spot, and otherwise begins the review the model will run.
+fn prepareStartupReview(arena: std.mem.Allocator, io: std.Io) !StartupReview {
+    switch (try branch_review.prepare(arena, io)) {
+        .invalid => |failure| {
+            printStandaloneReviewError(io, failure.message);
+            return .{ .exit = 2 };
+        },
+        .operational_failure => |failure| {
+            const saved = branch_review.writeOperationalFailure(arena, io, failure) catch |err| {
+                printStandaloneReviewWriteError(io, err);
+                return .{ .exit = 2 };
+            };
+            printStandaloneReviewResult(io, saved);
+            return .{ .exit = saved.outcome.exitCode() };
+        },
+        .no_changes => |scope| {
+            const saved = branch_review.writeNoChanges(arena, io, scope) catch |err| {
+                printStandaloneReviewWriteError(io, err);
+                return .{ .exit = 2 };
+            };
+            printStandaloneReviewResult(io, saved);
+            return .{ .exit = saved.outcome.exitCode() };
+        },
+        .ready => |scope| {
+            branch_review.begin(scope);
+            return .{ .ready = scope };
+        },
+    }
+}
+
+/// Creates (or truncates) a debug log in the working directory, owner-only
+/// where the platform allows: it records prompts and provider traffic.
+fn createLogFile(io: std.Io, path: []const u8) !std.Io.File {
+    const posix = comptime @import("builtin").os.tag != .windows;
+    // A new log is owner-only from creation; the chmod below covers one that
+    // already existed with a wider mode.
+    const options: std.Io.Dir.CreateFileOptions =
+        if (posix) .{ .permissions = @fromBackingInt(0o600) } else .{};
+    const file = try std.Io.Dir.cwd().createFile(io, path, options);
+    if (posix) {
+        std.Io.Dir.cwd().setFilePermissions(io, path, @fromBackingInt(0o600), .{}) catch |err| {
+            std.log.warn("failed to restrict permissions on {s}: {s}", .{ path, @errorName(err) });
+        };
+    }
+    return file;
+}
+
+/// The saved session `--session` or `--resume` asks for, or null for a fresh
+/// one. A session that cannot be found or has nothing to restore is
+/// explained, and the run starts fresh.
+fn findRestoreTarget(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    parsed: cli.Options,
+    stdout_writer: *std.Io.Writer,
+) !?sessions.SessionInfo {
+    if (parsed.session) |sid| {
+        const maybe_found = sessions.findSessionByPrefix(
+            arena,
+            io,
+            base_dir,
+            sid,
+        ) catch return null;
+        const found = maybe_found orelse {
+            try stdout_writer.print("Session '{s}' not found. Starting fresh.\n", .{sid});
+            try stdout_writer.flush();
+            return null;
+        };
+        if (found.has_conversation) return found;
+        try stdout_writer.print(
+            "Session '{s}' has no saved conversation. Starting fresh.\n",
+            .{sid},
+        );
+        try stdout_writer.flush();
+        return null;
+    }
+    if (parsed.do_resume) {
+        const latest = sessions.findLatestSession(arena, io, base_dir) catch return null;
+        if (latest == null) {
+            try stdout_writer.print("No saved conversations found. Starting fresh.\n", .{});
+            try stdout_writer.flush();
+        }
+        return latest;
+    }
+    return null;
+}
+
+/// The session this run writes to: the restored one's directory, or a new
+/// one under `session_id`.
+fn openCurrentSession(
+    arena: std.mem.Allocator,
+    messages_arena: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    restore_target: ?sessions.SessionInfo,
+    session_id: []const u8,
+) !core_sess.Session {
+    const restored = restore_target orelse return core_sess.Session.initWithId(
+        arena,
+        base_dir,
+        session_id,
+        io,
+    );
+    std.debug.assert(std.mem.eql(u8, restored.id, session_id));
+    const dir = try std.fs.path.join(messages_arena, &.{ base_dir, "sessions", restored.id });
+    return core_sess.Session.fromDir(
+        arena,
+        restored.id,
+        base_dir,
+        dir,
+        try std.fs.path.join(messages_arena, &.{ dir, "plan.md" }),
+        try std.fs.path.join(messages_arena, &.{ dir, "plan.html" }),
+    );
 }
 
 fn printStandaloneReviewError(io: std.Io, message: []const u8) void {
@@ -868,6 +994,19 @@ test "formatDuration boundary between ms and s" {
     try std.testing.expectEqualStrings("999 ms", result);
 }
 
+test "exitCode reports a review or orchestrate verdict and treats none as a failure" {
+    try std.testing.expectEqual(@as(u8, 0), exitCode(.{ .review = true }, .merge_worthy));
+    try std.testing.expectEqual(@as(u8, 1), exitCode(.{ .review = true }, .rejected));
+    try std.testing.expectEqual(@as(u8, 2), exitCode(.{ .review = true }, null));
+    try std.testing.expectEqual(@as(u8, 2), exitCode(.{ .orchestrate = true }, null));
+}
+
+test "exitCode reports a one-shot review verdict and succeeds otherwise" {
+    try std.testing.expectEqual(@as(u8, 1), exitCode(.{ .oneshot = true }, .rejected));
+    try std.testing.expectEqual(@as(u8, 0), exitCode(.{ .oneshot = true }, null));
+    try std.testing.expectEqual(@as(u8, 0), exitCode(.{}, .rejected));
+}
+
 test "formatRestoreHeader includes load time" {
     var buf: [256]u8 = undefined;
     const result = formatRestoreHeader(&buf, "abc123", 5, 42_000_000);
@@ -879,8 +1018,8 @@ test "formatRestoreHeader falls back when the buffer is too small" {
     try std.testing.expectEqualStrings("Restored session", formatRestoreHeader(&small, "abc123", 5, 42_000_000));
 }
 
-fn toolNames(definitions: []const openai.ToolDefinition) [][]const u8 {
-    const names = std.heap.page_allocator.alloc([]const u8, definitions.len) catch unreachable;
+fn toolNames(arena: std.mem.Allocator, definitions: []const openai.ToolDefinition) ![][]const u8 {
+    const names = try arena.alloc([]const u8, definitions.len);
     for (definitions, 0..) |definition, i| {
         names[i] = definition.function.object.get("name").?.string;
     }
@@ -894,7 +1033,7 @@ test "buildToolDefinitions excludes load_skill when skills are disabled" {
 
     var definitions = try buildToolDefinitions(arena, true);
     defer definitions.deinit(arena);
-    const names = toolNames(definitions.items);
+    const names = try toolNames(arena, definitions.items);
     for (names) |name| {
         try std.testing.expect(!std.mem.eql(u8, name, "load_skill"));
     }
@@ -923,7 +1062,7 @@ test "buildPlanningToolDefinitions excludes load_skill when skills are disabled"
 
     var definitions = try buildPlanningToolDefinitions(arena, true);
     defer definitions.deinit(arena);
-    const names = toolNames(definitions.items);
+    const names = try toolNames(arena, definitions.items);
     for (names) |name| {
         try std.testing.expect(!std.mem.eql(u8, name, "load_skill"));
     }
@@ -947,15 +1086,22 @@ test "include all module tests" {
     }
 }
 
-test "http log file is hardened with 0600 permissions on posix" {
-    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(128 * 1024));
-    defer std.testing.allocator.free(data);
-    try std.testing.expect(std.mem.indexOf(u8, data, "log_files.http_log") != null);
-    try std.testing.expect(std.mem.indexOf(u8, data, "setFilePermissions") != null);
-    try std.testing.expect(std.mem.indexOf(u8, data, "0o600") != null);
-    // ensure the http log path specifically is covered, not just chat log
-    try std.testing.expect(std.mem.indexOf(u8, data, "log_files.http_log, @fromBackingInt(0o600)") != null);
-    try std.testing.expectEqualStrings("puny_http.log", log_files.http_log);
+test "createLogFile makes an owner-only log on posix" {
+    if (comptime @import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fs.path.join(
+        std.testing.allocator,
+        &.{ ".zig-cache", "tmp", &tmp.sub_path, log_files.http_log },
+    );
+    defer std.testing.allocator.free(path);
+
+    const file = try createLogFile(std.testing.io, path);
+    file.close(std.testing.io);
+
+    const stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
+    try std.testing.expectEqual(@as(u32, 0o600), stat.permissions.toMode() & 0o777);
 }
 
 test "debug logging is always enabled for debug builds" {

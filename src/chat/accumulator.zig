@@ -302,7 +302,7 @@ pub const OpenAiAccumulator = struct {
 test "OpenAiAccumulator assembles content" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -317,7 +317,7 @@ test "OpenAiAccumulator assembles content" {
 test "OpenAiAccumulator streams content through the markdown renderer" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
@@ -340,7 +340,7 @@ test "OpenAiAccumulator streams content through the markdown renderer" {
 test "OpenAiAccumulator captures reasoning unconditionally" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -355,7 +355,7 @@ test "OpenAiAccumulator captures reasoning unconditionally" {
 test "OpenAiAccumulator updates SessionStats while streaming" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 10);
+    try session_stats.beginTurn("model-a", 10);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -372,7 +372,7 @@ test "OpenAiAccumulator updates SessionStats while streaming" {
 test "OpenAiAccumulator keeps partial stats on cancellation" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 16);
+    try session_stats.beginTurn("model-a", 16);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -395,7 +395,7 @@ test "OpenAiAccumulator estimates output chars including tool call args" {
     cancel.reset();
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -411,7 +411,7 @@ test "OpenAiAccumulator estimates output chars including streamed reasoning" {
     cancel.reset();
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -427,7 +427,7 @@ test "OpenAiAccumulator assembles tool call" {
     cancel.reset();
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -454,7 +454,7 @@ test "countNewlines counts line breaks" {
 test "OpenAiAccumulator ignores tool deltas for unknown indexes" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -467,7 +467,7 @@ test "OpenAiAccumulator ignores tool deltas for unknown indexes" {
 test "OpenAiAccumulator keeps the first tool call start for a repeated index" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -484,7 +484,7 @@ test "OpenAiAccumulator keeps the first tool call start for a repeated index" {
 test "OpenAiAccumulator assembles interleaved tool call deltas" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -506,7 +506,7 @@ test "OpenAiAccumulator assembles interleaved tool call deltas" {
 test "OpenAiAccumulator records usage events" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -521,7 +521,7 @@ test "OpenAiAccumulator records usage events" {
 test "OpenAiAccumulator cloneAssistantContent deep-copies" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -551,7 +551,7 @@ test "OpenAiAccumulator cloneAssistantContent deep-copies" {
 test "OpenAiAccumulator cloneAssistantContent returns null when empty" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -561,7 +561,7 @@ test "OpenAiAccumulator cloneAssistantContent returns null when empty" {
 test "OpenAiAccumulator finishStream returns zero without a stream" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -572,7 +572,7 @@ test "OpenAiAccumulator finishStream returns zero without a stream" {
 test "OpenAiAccumulator streamCallback reset clears partial state" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var acc = OpenAiAccumulator.init(std.testing.allocator, std.testing.io, null, &session_stats);
     defer acc.deinit();
 
@@ -596,7 +596,7 @@ test "OpenAiAccumulator streamCallback reset clears partial state" {
 test "OpenAiAccumulator prints dimmed reasoning when show thinking is enabled" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
@@ -621,7 +621,7 @@ test "OpenAiAccumulator prints dimmed reasoning when show thinking is enabled" {
 test "OpenAiAccumulator keeps reasoning on one line when empty content deltas interleave" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
@@ -652,7 +652,7 @@ test "OpenAiAccumulator keeps reasoning on one line when empty content deltas in
 test "OpenAiAccumulator finishReasoning closes the block once" {
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
@@ -675,7 +675,7 @@ test "OpenAiAccumulator cancellation clears content and tool calls" {
     defer cancel.reset();
     var session_stats = stats.SessionStats.init(std.testing.allocator, std.testing.io);
     defer session_stats.deinit();
-    session_stats.beginTurn("model-a", 0);
+    try session_stats.beginTurn("model-a", 0);
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     var acc = OpenAiAccumulator.init(arena_state.allocator(), std.testing.io, null, &session_stats);

@@ -82,6 +82,7 @@ pub const LineEditor = struct {
         std.mem.copyBackwards(u8, text[self.cursor + bytes.len ..], text[self.cursor..old_len]);
         @memcpy(text[self.cursor..][0..bytes.len], bytes);
         self.cursor += bytes.len;
+        std.debug.assert(self.cursor <= text.len);
         if (self.width == null and self.cursor == text.len) {
             try self.stdout_writer.writeAll(bytes);
             try self.stdout_writer.flush();
@@ -132,6 +133,8 @@ pub const LineEditor = struct {
 
     /// Removes `text[start..end]`, leaves the cursor at `start`, and redraws.
     fn deleteRange(self: *LineEditor, start: usize, end: usize) !void {
+        std.debug.assert(start <= end);
+        std.debug.assert(end <= self.line_alloc.written().len);
         if (start == end) return;
         const text = self.line_alloc.written();
         const deleted_width = textWidth(text[start..end]);
@@ -229,6 +232,7 @@ pub const LineEditor = struct {
     }
 
     fn moveTo(self: *LineEditor, pos: usize) !void {
+        std.debug.assert(pos <= self.line_alloc.written().len);
         if (pos == self.cursor) return;
         if (self.width != null) {
             self.cursor = pos;
@@ -247,6 +251,7 @@ pub const LineEditor = struct {
 
     /// Display width of the text before the cursor.
     fn prefixWidth(self: *LineEditor) usize {
+        std.debug.assert(self.cursor <= self.line_alloc.written().len);
         return textWidth(self.line_alloc.written()[0..self.cursor]);
     }
 

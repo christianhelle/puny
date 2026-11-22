@@ -124,6 +124,8 @@ pub fn pickFile(arena: std.mem.Allocator, io: std.Io) !?[]const u8 {
     try render(writer, query.items, files, match_indices.items, selected, offset, &drawn);
 
     var reader = KeyReader{};
+    // Runs until the user picks a file with Enter or backs out with Esc;
+    // every other key edits the query or moves the selection.
     while (true) {
         const key = reader.read(io) catch .unknown;
         switch (key) {
@@ -375,6 +377,8 @@ const KeyReader = struct {
         const STD_INPUT_HANDLE: u32 = @bitCast(@as(i32, -10));
         const hStdin = win.GetStdHandle(STD_INPUT_HANDLE);
 
+        // Skips console events that are not key presses and returns at the
+        // first key press or read failure.
         while (true) {
             var record: win.INPUT_RECORD = undefined;
             var events_read: win.DWORD = 0;

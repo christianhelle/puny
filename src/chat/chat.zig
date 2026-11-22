@@ -12,6 +12,7 @@ const diff_view = @import("diff_view.zig");
 const usage_estimator = @import("usage.zig");
 const accumulator = @import("accumulator.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
+const utf8 = @import("../core/utf8.zig");
 
 pub const OpenAiAccumulator = accumulator.OpenAiAccumulator;
 
@@ -99,7 +100,7 @@ pub fn runTurnWithMode(
 
     const tool_tokens = usage_estimator.estimateToolTokens(tool_definitions);
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens + tool_tokens;
-    session_stats.beginTurn(model_key, input_estimate);
+    try session_stats.beginTurn(model_key, input_estimate);
 
     var acc = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
     acc.show_thinking = show_thinking;
@@ -180,6 +181,8 @@ pub fn runTurnWithMode(
             }
         }
 
+        assertToolResultsPaired(messages.items, assistant_content.tool_calls.?);
+
         const cursor_offset = content_cursor_offset + tool_output_lines;
         if (indicator_opt) |i| try i.finish(io, stdout_writer, cursor_offset, false, has_streamed_content_after, .done, provider_ttft);
         return .{ .turn_complete = false, .usage = turn_usage, .usage_estimated = turn_usage_estimated };
@@ -215,10 +218,27 @@ fn printToolCall(
 
 const ToolRun = struct { result: []const u8, diff_rows: usize };
 
+/// The messages just appended answer `calls` one for one and in order, right
+/// after the assistant message that made them. A provider rejects every later
+/// request of a conversation with an unanswered call, so a break here would
+/// end the session.
+fn assertToolResultsPaired(messages: []const openai.Message, calls: []const openai.ToolCall) void {
+    std.debug.assert(calls.len > 0);
+    std.debug.assert(messages.len > calls.len);
+    const assistant = messages[messages.len - calls.len - 1];
+    std.debug.assert(assistant == .assistant);
+    std.debug.assert(assistant.assistant.tool_calls.?.len == calls.len);
+    const results = messages[messages.len - calls.len ..];
+    for (calls, results) |call, result| {
+        std.debug.assert(result == .tool);
+        std.debug.assert(std.mem.eql(u8, call.id, result.tool.tool_call_id));
+    }
+}
+
 /// Runs a tool call and prints the diff of any file it changed. The result
 /// lives in `arena`, the conversation's, because it is kept in the history.
-/// Everything the diff needs, which can be several times the size of the
-/// file, lives in a scratch arena freed before returning.
+/// Everything the tool and the diff need, which can be several times the size
+/// of the result, lives in a scratch arena freed before returning.
 fn runTool(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -231,7 +251,9 @@ fn runTool(
     var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer scratch.deinit();
     const snapshot = diff_view.capture(scratch.allocator(), io, tool_call);
-    const result = try executeTool(arena, io, tool_call, mode);
+    // The tool works in scratch memory, so only its bounded result, not every
+    // byte it read or produced, stays in the conversation.
+    const result = try arena.dupe(u8, try executeTool(scratch.allocator(), io, tool_call, mode));
     const diff_rows = try printDiff(scratch.allocator(), io, stdout_writer, snapshot, rows_used, height);
     return .{ .result = result, .diff_rows = diff_rows };
 }
@@ -262,7 +284,35 @@ fn printDiff(
     return rendered.rows;
 }
 
+/// Backstop above every tool's own limit (read_file and web_fetch keep 1 MiB,
+/// run_command 128 KiB per stream), so no tool result, a future tool's
+/// included, can grow the conversation without bound. Every later request
+/// resends it.
+const max_tool_result_bytes: usize = 2 * 1024 * 1024;
+
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
+    const result = try executeToolUnbounded(arena, io, tool_call, mode);
+    return boundToolResult(arena, result);
+}
+
+/// Cuts a result longer than `max_tool_result_bytes` and says so, so the
+/// model knows it saw only the start.
+fn boundToolResult(arena: std.mem.Allocator, result: []const u8) ![]const u8 {
+    if (result.len <= max_tool_result_bytes) return result;
+    const bounded = try std.fmt.allocPrint(arena, "{s}\n[tool result truncated after {d} bytes]", .{
+        utf8.prefix(result, max_tool_result_bytes),
+        max_tool_result_bytes,
+    });
+    std.debug.assert(bounded.len < max_tool_result_bytes + 64);
+    return bounded;
+}
+
+fn executeToolUnbounded(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    tool_call: openai.ToolCall,
+    mode: AgentMode,
+) ![]const u8 {
     const tool = tools.dispatchForMode(tool_call.function.name, mode) orelse {
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
     };
@@ -304,6 +354,26 @@ test "prints human-friendly tool call output" {
         "\n\x1b[2m🔧 Reading \"src/main.zig\"\x1b[0m",
         output.written(),
     );
+}
+
+test "boundToolResult keeps a result at the limit and cuts a longer one" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const at_limit = try arena.alloc(u8, max_tool_result_bytes);
+    @memset(at_limit, 'a');
+    try std.testing.expectEqual(at_limit.ptr, (try boundToolResult(arena, at_limit)).ptr);
+
+    const over_limit = try arena.alloc(u8, max_tool_result_bytes + 1);
+    @memset(over_limit, 'b');
+    const bounded = try boundToolResult(arena, over_limit);
+    try std.testing.expect(std.mem.endsWith(
+        u8,
+        bounded,
+        "\n[tool result truncated after 2097152 bytes]",
+    ));
+    try std.testing.expect(std.mem.allEqual(u8, bounded[0..max_tool_result_bytes], 'b'));
 }
 
 test "executeTool reports unknown tools" {
