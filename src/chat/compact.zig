@@ -197,7 +197,8 @@ pub const SummaryOutcome = union(enum) {
 
 /// Sends a summarization request built by `buildSummaryRequest`, without
 /// tools and without streaming the reply to the terminal. The tokens it uses
-/// are still counted in the session statistics.
+/// are still counted in the session statistics, and reported in `usage_out`
+/// (null when the provider reported none) for the turn that asked for it.
 pub fn summarize(
     prov: *provider.Provider,
     allocator: std.mem.Allocator,
@@ -207,6 +208,7 @@ pub fn summarize(
     session_stats: *stats.SessionStats,
     model_key: []const u8,
     request: []const openai.Message,
+    usage_out: *?openai.TurnUsage,
 ) !SummaryOutcome {
     try session_stats.beginTurn(model_key, usage.estimateUsage(request, 0).input_tokens);
     var acc = accumulator.OpenAiAccumulator.init(allocator, io, null, session_stats);
@@ -219,6 +221,7 @@ pub fn summarize(
         .stream = true,
     }, acc.streamCallback(), io, random, stdout_writer);
     session_stats.finalizeTurn(acc.usage, false);
+    usage_out.* = acc.usage;
 
     return switch (outcome) {
         .cancelled => .cancelled,
@@ -647,7 +650,18 @@ fn runSummarizeForTest(arena: std.mem.Allocator, request: []const openai.Message
     var output = std.Io.Writer.Allocating.init(arena);
     var session_stats = stats.SessionStats.init(arena, std.testing.io);
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
-    return summarize(&prov, arena, std.testing.io, random_source.interface(), &output.writer, &session_stats, "mock-model", request);
+    var summary_usage: ?openai.TurnUsage = null;
+    return summarize(
+        &prov,
+        arena,
+        std.testing.io,
+        random_source.interface(),
+        &output.writer,
+        &session_stats,
+        "mock-model",
+        request,
+        &summary_usage,
+    );
 }
 
 test "summarize returns the model's reply without streaming it" {

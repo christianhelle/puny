@@ -166,7 +166,7 @@ pub const ChatSession = struct {
                     continue;
                 },
                 .compact => {
-                    switch (try compactConversation(ctx, .forced)) {
+                    switch (try compactConversation(ctx, .forced, null)) {
                         .nothing_to_compact => {
                             try ctx.stdout_writer.print("\n{s}Nothing to compact.{s}\n", .{ ansi.dim, ansi.reset });
                             try ctx.stdout_writer.flush();
@@ -803,11 +803,11 @@ const TurnTally = struct {
 /// Compacts the conversation when the next request would come near the
 /// context limit. Returns null when no compaction was needed. A `failed` or
 /// `cancelled` outcome means the caller stops trying for the rest of the turn.
-fn compactIfNearLimit(ctx: *ChatLoopContext) !?CompactOutcome {
+fn compactIfNearLimit(ctx: *ChatLoopContext, tally: *TurnTally) !?CompactOutcome {
     const limit = ctx.context_budget.resolveLimit(ctx.prov, ctx.model_key.*) orelse return null;
     const estimate = ctx.context_budget.estimate(ctx.messages.items, ctx.activeToolDefinitions());
     if (!compact.shouldCompact(estimate, limit)) return null;
-    return try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) });
+    return try compactConversation(ctx, .{ .auto = compact.keepBudget(limit) }, tally);
 }
 
 /// Delivers lines the user typed while the model worked, recording each in
@@ -930,7 +930,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         // A compaction summary spends the turn's request budget too, and is
         // skipped when only the turn's last request is left.
         if (!compaction_failed and model_requests + 2 <= max_model_requests_per_turn) {
-            if (try compactIfNearLimit(ctx)) |outcome| {
+            if (try compactIfNearLimit(ctx, &tally)) |outcome| {
                 if (outcome != .nothing_to_compact) model_requests += 1;
                 compaction_failed = outcome == .failed or outcome == .cancelled;
             }
@@ -1038,7 +1038,12 @@ const CompactOutcome = enum { compacted, nothing_to_compact, cancelled, failed }
 
 /// Summarizes older messages into one system message. A cancelled or failed
 /// summary leaves the conversation untouched.
-fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactOutcome {
+/// `tally`, when a turn is running, also counts the summary request.
+fn compactConversation(
+    ctx: *ChatLoopContext,
+    mode: compact.SplitMode,
+    tally: ?*TurnTally,
+) !CompactOutcome {
     // `/compact` runs outside the turn loop, so pick up the current model's
     // prices here too: after a model or provider switch the summary must not
     // be charged at the previous model's rates.
@@ -1056,7 +1061,19 @@ fn compactConversation(ctx: *ChatLoopContext, mode: compact.SplitMode) !CompactO
     defer scratch_state.deinit();
     const scratch = scratch_state.allocator();
     const request = try compact.buildSummaryRequest(scratch, ctx.messages.items[split.start..split.end]);
-    const outcome = try compact.summarize(ctx.prov, scratch, ctx.io, ctx.random, ctx.stdout_writer, ctx.session_stats, ctx.model_key.*, request);
+    var summary_usage: ?openai.TurnUsage = null;
+    const outcome = try compact.summarize(
+        ctx.prov,
+        scratch,
+        ctx.io,
+        ctx.random,
+        ctx.stdout_writer,
+        ctx.session_stats,
+        ctx.model_key.*,
+        request,
+        &summary_usage,
+    );
+    if (tally) |t| t.add(summary_usage, summary_usage == null);
     switch (outcome) {
         .cancelled => {
             try ctx.stdout_writer.print("{s}Compaction cancelled.{s}\n", .{ ansi.dim, ansi.reset });
