@@ -12,6 +12,7 @@ const diff_view = @import("diff_view.zig");
 const usage_estimator = @import("usage.zig");
 const accumulator = @import("accumulator.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
+const utf8 = @import("../core/utf8.zig");
 
 pub const OpenAiAccumulator = accumulator.OpenAiAccumulator;
 
@@ -262,7 +263,30 @@ fn printDiff(
     return rendered.rows;
 }
 
+/// Backstop above every tool's own limit (read_file and web_fetch keep 1 MiB,
+/// run_command 128 KiB per stream), so no tool result, a future tool's
+/// included, can grow the conversation without bound. Every later request
+/// resends it.
+const max_tool_result_bytes: usize = 2 * 1024 * 1024;
+
 fn executeTool(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
+    const result = try executeToolUnbounded(arena, io, tool_call, mode);
+    return boundToolResult(arena, result);
+}
+
+/// Cuts a result longer than `max_tool_result_bytes` and says so, so the
+/// model knows it saw only the start.
+fn boundToolResult(arena: std.mem.Allocator, result: []const u8) ![]const u8 {
+    if (result.len <= max_tool_result_bytes) return result;
+    const bounded = try std.fmt.allocPrint(arena, "{s}\n[tool result truncated after {d} bytes]", .{
+        utf8.prefix(result, max_tool_result_bytes),
+        max_tool_result_bytes,
+    });
+    std.debug.assert(bounded.len < max_tool_result_bytes + 64);
+    return bounded;
+}
+
+fn executeToolUnbounded(arena: std.mem.Allocator, io: std.Io, tool_call: openai.ToolCall, mode: AgentMode) ![]const u8 {
     const tool = tools.dispatchForMode(tool_call.function.name, mode) orelse {
         return std.fmt.allocPrint(arena, "Unknown tool: {s}", .{tool_call.function.name});
     };
@@ -304,6 +328,22 @@ test "prints human-friendly tool call output" {
         "\n\x1b[2m🔧 Reading \"src/main.zig\"\x1b[0m",
         output.written(),
     );
+}
+
+test "boundToolResult keeps a result at the limit and cuts a longer one" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const at_limit = try arena.alloc(u8, max_tool_result_bytes);
+    @memset(at_limit, 'a');
+    try std.testing.expectEqual(at_limit.ptr, (try boundToolResult(arena, at_limit)).ptr);
+
+    const over_limit = try arena.alloc(u8, max_tool_result_bytes + 1);
+    @memset(over_limit, 'b');
+    const bounded = try boundToolResult(arena, over_limit);
+    try std.testing.expect(std.mem.endsWith(u8, bounded, "\n[tool result truncated after 2097152 bytes]"));
+    try std.testing.expect(std.mem.allEqual(u8, bounded[0..max_tool_result_bytes], 'b'));
 }
 
 test "executeTool reports unknown tools" {
