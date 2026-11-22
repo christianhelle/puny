@@ -34,17 +34,20 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.pr
     }
     var arena = parsed.arena.*;
     const arena_alloc = arena.allocator();
-    decryptStoredApiKeys(arena_alloc, io, environ_map, &cfg) catch {};
+    decryptStoredApiKeys(arena_alloc, io, environ_map, &cfg);
     allocator.destroy(parsed.arena);
     return .{ .config = cfg, .arena = arena, .file_existed = true };
 }
 
+/// Decrypts each stored API key in place. A key that cannot be decrypted is
+/// cleared and explained on stderr, so loading always succeeds and the user
+/// knows to re-enter it.
 fn decryptStoredApiKeys(
     allocator: std.mem.Allocator,
     io: std.Io,
     environ_map: *const std.process.Environ.Map,
     cfg: *schema.Config,
-) !void {
+) void {
     var warned_missing_key = false;
     var key_attempted = false;
     var key_load_error: ?anyerror = null;
@@ -283,7 +286,7 @@ test "decryptStoredApiKeys decrypts encrypted provider keys" {
         }
     }
 
-    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+    decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
 
     try std.testing.expectEqualStrings(plaintext, cfg.providerEntryConst(.lmstudio).apiKey.?);
     try std.testing.expectEqualStrings(blob, cfg.providerEntryConst(.lmstudio).stored_blob.?);
@@ -307,7 +310,7 @@ test "decryptStoredApiKeys preserves undecryptable blobs when no key exists" {
     var cfg = schema.Config.default();
     cfg.providerEntry(.lmstudio).apiKey = blob;
 
-    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+    decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
 
     try std.testing.expect(cfg.providerEntryConst(.lmstudio).apiKey == null);
     try std.testing.expectEqualStrings(blob, cfg.providerEntryConst(.lmstudio).stored_blob.?);
@@ -732,7 +735,7 @@ test "decryptStoredApiKeys warns once and nulls keys for multiple undecryptable 
     cfg.providerEntry(.lmstudio).apiKey = blob_a;
     cfg.providerEntry(.opencode_zen).apiKey = blob_b;
 
-    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+    decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
 
     try std.testing.expect(cfg.providerEntryConst(.lmstudio).apiKey == null);
     try std.testing.expectEqualStrings(blob_a, cfg.providerEntryConst(.lmstudio).stored_blob.?);
@@ -763,7 +766,7 @@ test "decryptStoredApiKeys warns when the key file cannot be read" {
     var cfg = schema.Config.default();
     cfg.providerEntry(.lmstudio).apiKey = blob;
 
-    try decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
+    decryptStoredApiKeys(std.testing.allocator, std.testing.io, &fixture.env, &cfg);
 
     try std.testing.expect(cfg.providerEntryConst(.lmstudio).apiKey == null);
     try std.testing.expectEqualStrings(blob, cfg.providerEntryConst(.lmstudio).stored_blob.?);
