@@ -237,8 +237,8 @@ fn assertToolResultsPaired(messages: []const openai.Message, calls: []const open
 
 /// Runs a tool call and prints the diff of any file it changed. The result
 /// lives in `arena`, the conversation's, because it is kept in the history.
-/// Everything the diff needs, which can be several times the size of the
-/// file, lives in a scratch arena freed before returning.
+/// Everything the tool and the diff need, which can be several times the size
+/// of the result, lives in a scratch arena freed before returning.
 fn runTool(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -251,7 +251,9 @@ fn runTool(
     var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer scratch.deinit();
     const snapshot = diff_view.capture(scratch.allocator(), io, tool_call);
-    const result = try executeTool(arena, io, tool_call, mode);
+    // The tool works in scratch memory, so only its bounded result, not every
+    // byte it read or produced, stays in the conversation.
+    const result = try arena.dupe(u8, try executeTool(scratch.allocator(), io, tool_call, mode));
     const diff_rows = try printDiff(scratch.allocator(), io, stdout_writer, snapshot, rows_used, height);
     return .{ .result = result, .diff_rows = diff_rows };
 }
