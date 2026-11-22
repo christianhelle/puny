@@ -4,7 +4,7 @@ const context = @import("context.zig");
 const core_session = @import("../core/session.zig");
 const AgentMode = @import("../core/mode.zig").AgentMode;
 const openai = @import("../providers/openai.zig");
-const atomic_write = @import("../sessions/atomic_write.zig");
+const atomic_write = @import("../core/atomic_write.zig");
 
 const ChatLoopContext = context.ChatLoopContext;
 

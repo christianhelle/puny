@@ -30,7 +30,7 @@ test "include review module tests" {
 test "include sessions module tests" {
     _ = @import("../sessions/sessions.zig");
     _ = @import("../sessions/index.zig");
-    _ = @import("../sessions/atomic_write.zig");
+    _ = @import("../core/atomic_write.zig");
     _ = @import("../sessions/query.zig");
     _ = @import("../sessions/types.zig");
     _ = @import("../sessions/validate.zig");

@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const core_session = @import("../core/session.zig");
-const atomic_write = @import("atomic_write.zig");
+const atomic_write = @import("../core/atomic_write.zig");
 const types = @import("types.zig");
 const validate = @import("validate.zig");
 

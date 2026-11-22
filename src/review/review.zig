@@ -1,6 +1,6 @@
 const std = @import("std");
 const helpers = @import("../tools/helpers.zig");
-const atomic_write = @import("../sessions/atomic_write.zig");
+const atomic_write = @import("../core/atomic_write.zig");
 
 pub const base_ref = "origin/main";
 pub const report_filename = "review-results.md";
