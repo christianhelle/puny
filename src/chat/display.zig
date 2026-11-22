@@ -270,6 +270,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, va
             '\t' => escaped = "\\t",
             else => {
                 if (byte < 0x20) {
+                    // Always 6 bytes ("\\u" plus 4 hex digits) for a byte below 0x20.
                     escaped = std.fmt.bufPrint(&escaped_buffer, "\\u{x:0>4}", .{byte}) catch unreachable;
                     escaped_display_length = escaped.len;
                 } else {

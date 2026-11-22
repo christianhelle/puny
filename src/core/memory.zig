@@ -35,6 +35,8 @@ pub fn formatBytes(buf: *[32]u8, bytes: u64) []const u8 {
 
     const value: f64 = @as(f64, @floatFromInt(bytes)) / @as(f64, @floatFromInt(divisor));
 
+    // `value` is below 1024 * 1024 (idx stops at GB), so "{d:.1}" needs at
+    // most 9 bytes; the unit adds at most 3 more to the 32-byte result.
     var num_buf: [16]u8 = undefined;
     const num_str = std.fmt.bufPrint(&num_buf, "{d:.1}", .{value}) catch unreachable;
 
