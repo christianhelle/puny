@@ -79,6 +79,8 @@ pub const ChatSession = struct {
             return;
         }
 
+        // One prompt per pass. Ends on Ctrl+C, end of input, /exit, or after
+        // the first turn of a one-shot run; a turn error propagates.
         while (true) {
             if (sigint.isTriggered()) {
                 finalizeSession(ctx);

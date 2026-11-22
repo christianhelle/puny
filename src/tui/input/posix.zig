@@ -32,6 +32,8 @@ fn readLineFrom(
 ) !common.ReadLineResult {
     var first_esc_ts: ?std.Io.Timestamp = null;
 
+    // One byte per pass until Enter submits, Ctrl+C interrupts, a double Esc
+    // or Ctrl+D on an empty line cancels, the input ends, or a read fails.
     while (true) {
         const byte = try source.read() orelse return .eof;
         if (byte != terminal.control.esc) first_esc_ts = null;

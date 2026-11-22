@@ -365,6 +365,8 @@ fn runPicker(
     try renderGrid(out, items, grid, selected, column_width, true);
     try out.flush();
 
+    // Runs until the user picks with Enter or backs out with Esc or q;
+    // arrow keys only move the selection.
     while (true) {
         const key = keys.read();
         const dir: ?GridDir = switch (key) {
@@ -704,6 +706,8 @@ fn readKeyWindows(io: std.Io) !Key {
     const STD_INPUT_HANDLE: u32 = @bitCast(@as(i32, -10));
     const hStdin = win.GetStdHandle(STD_INPUT_HANDLE);
 
+    // Skips console events that are not key presses (focus, mouse, resize,
+    // key releases) and returns at the first key press or read failure.
     while (true) {
         var record: win.INPUT_RECORD = undefined;
         var events_read: win.DWORD = 0;

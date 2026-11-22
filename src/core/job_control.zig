@@ -119,6 +119,8 @@ test "stop suspends tracked command groups and continues them with the job" {
     const command: linux.pid_t = @intCast(command_rc);
     if (command == 0) {
         _ = linux.setpgid(0, 0);
+        // The test's forked stand-in for a command: it waits until the
+        // parent kills it in the defer below.
         while (true) _ = linux.pause();
     }
     defer {

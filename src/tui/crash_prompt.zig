@@ -50,6 +50,8 @@ fn offerOne(
         .{ shortId(report.session_id), crash.repo },
     );
 
+    // Viewing the report returns to the choice; filing or deleting it,
+    // declining, or backing out ends it.
     while (true) {
         const picked = try list_picker.selectFromList(arena, io, title, &choices) orelse return false;
 
