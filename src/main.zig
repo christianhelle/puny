@@ -1081,15 +1081,22 @@ test "include all module tests" {
     }
 }
 
-test "http log file is hardened with 0600 permissions on posix" {
-    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(128 * 1024));
-    defer std.testing.allocator.free(data);
-    try std.testing.expect(std.mem.indexOf(u8, data, "log_files.http_log") != null);
-    try std.testing.expect(std.mem.indexOf(u8, data, "setFilePermissions") != null);
-    try std.testing.expect(std.mem.indexOf(u8, data, "0o600") != null);
-    // ensure the http log path specifically is covered, not just chat log
-    try std.testing.expect(std.mem.indexOf(u8, data, "log_files.http_log, @fromBackingInt(0o600)") != null);
-    try std.testing.expectEqualStrings("puny_http.log", log_files.http_log);
+test "createLogFile makes an owner-only log on posix" {
+    if (comptime @import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fs.path.join(
+        std.testing.allocator,
+        &.{ ".zig-cache", "tmp", &tmp.sub_path, log_files.http_log },
+    );
+    defer std.testing.allocator.free(path);
+
+    const file = try createLogFile(std.testing.io, path);
+    file.close(std.testing.io);
+
+    const stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{});
+    try std.testing.expectEqual(@as(u32, 0o600), stat.permissions.toMode() & 0o777);
 }
 
 test "debug logging is always enabled for debug builds" {
