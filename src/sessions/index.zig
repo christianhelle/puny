@@ -254,6 +254,8 @@ fn rebuildSessionsIndex(arena: std.mem.Allocator, io: std.Io, base_dir: []const 
 /// renames it into place. All transient path and buffer memory lives in a
 /// scratch arena released before returning.
 fn writeIndex(io: std.Io, allocator: std.mem.Allocator, base_dir: []const u8, entries: []const SessionInfo) !void {
+    // Readers rely on the order and only re-sort what they read from disk.
+    std.debug.assert(std.sort.isSorted(SessionInfo, entries, {}, lessThan));
     var scratch_arena = std.heap.ArenaAllocator.init(allocator);
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
