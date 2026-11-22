@@ -275,18 +275,9 @@ fn run(init: std.process.Init) !u8 {
     }, stdout_writer);
 
     if (restore_target) |s| {
-        const load_start = std.Io.Clock.Timestamp.now(init.io, .awake);
-        const restore_result = try loadRestoredSession(messages_arena, init.io, base_dir, s, &agent_mode, &messages, stdout_writer);
-        const now = std.Io.Clock.Timestamp.now(init.io, .awake);
-        const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
+        const restore_result = try restoreAndShowSession(messages_arena, init.io, base_dir, s, &agent_mode, &messages, stdout_writer);
         session_restored = restore_result.restored;
         restore_incomplete = restore_result.incomplete;
-        if (restore_result.restored) {
-            var header_buf: [256]u8 = undefined;
-            try stdout_writer.print("\n{s}\n", .{formatRestoreHeader(&header_buf, s.id, messages.items.len, elapsed_ns)});
-            try display.printConversation(stdout_writer, messages.items);
-            try stdout_writer.flush();
-        }
     }
 
     if (debug_log) |*log| session.attachHttpDebugObserver(&prov, log);
@@ -303,20 +294,7 @@ fn run(init: std.process.Init) !u8 {
 
     var skill_registry = skills.Registry.init(arena);
     defer skill_registry.deinit();
-    if (!parsed.no_skills) {
-        if (try skills.homeDir(arena, init.environ_map)) |home| {
-            const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
-            try skill_registry.lightScan(init.io, global_path);
-        }
-        if (try git_root.findGitRepoRoot(arena, init.io)) |repo_root| {
-            const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
-            try skill_registry.lightScan(init.io, repo_path);
-        }
-        // Skills are optional: a scan that fails leaves the ones found so far.
-        skill_registry.fullScan(init.io) catch |err| {
-            std.log.warn("failed to load skills: {s}", .{@errorName(err)});
-        };
-    }
+    if (!parsed.no_skills) try scanSkills(arena, init.io, init.environ_map, &skill_registry);
     skills.setGlobalRegistry(&skill_registry);
 
     if (!session_restored) {
@@ -375,23 +353,69 @@ fn run(init: std.process.Init) !u8 {
     crash.setPhase("chat turn");
     try chat_session.run();
 
-    // After the interactive session ends, surface a pending update notice
-    // written by the detached update-check child process. Clear stale flags
-    // that no longer represent a newer version.
-    if (update_check.availableUpdateIfNewer(init.io, arena, init.environ_map)) |maybe_latest| {
-        if (maybe_latest) |latest| {
-            update_check.printUpdateNotice(stdout_writer, latest) catch {};
-            stdout_writer.flush() catch {};
-        }
-    } else |_| {}
+    printPendingUpdateNotice(init.io, arena, init.environ_map, stdout_writer);
+    return exitCode(parsed, review_outcome);
+}
 
-    if (parsed.review) {
-        const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
-        return outcome.exitCode();
+/// Loads skills from the user's and the repository's `.agents/skills`.
+/// Skills are optional: a full scan that fails keeps the ones found so far.
+fn scanSkills(arena: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map, registry: *skills.Registry) !void {
+    if (try skills.homeDir(arena, environ_map)) |home| {
+        const global_path = try std.fs.path.join(arena, &.{ home, ".agents", "skills" });
+        try registry.lightScan(io, global_path);
     }
-    if (parsed.orchestrate) {
-        // An orchestrate run that never reached a verdict is an operational
-        // failure, the same as a review that could not start.
+    if (try git_root.findGitRepoRoot(arena, io)) |repo_root| {
+        const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
+        try registry.lightScan(io, repo_path);
+    }
+    registry.fullScan(io) catch |err| {
+        std.log.warn("failed to load skills: {s}", .{@errorName(err)});
+    };
+}
+
+/// Loads a saved conversation and, when it loads, replays it under a header
+/// saying how long that took.
+fn restoreAndShowSession(
+    messages_arena: std.mem.Allocator,
+    io: std.Io,
+    base_dir: []const u8,
+    target: sessions.SessionInfo,
+    agent_mode: *AgentMode,
+    messages: *std.ArrayList(openai.Message),
+    stdout_writer: *std.Io.Writer,
+) !RestoreResult {
+    const load_start = std.Io.Clock.Timestamp.now(io, .awake);
+    const result = try loadRestoredSession(messages_arena, io, base_dir, target, agent_mode, messages, stdout_writer);
+    const now = std.Io.Clock.Timestamp.now(io, .awake);
+    const elapsed_ns: u64 = @intCast(load_start.raw.durationTo(now.raw).nanoseconds);
+    if (result.restored) {
+        var header_buf: [256]u8 = undefined;
+        try stdout_writer.print("\n{s}\n", .{formatRestoreHeader(&header_buf, target.id, messages.items.len, elapsed_ns)});
+        try display.printConversation(stdout_writer, messages.items);
+        try stdout_writer.flush();
+    }
+    return result;
+}
+
+/// Shows the notice the detached update check left, if it names a newer
+/// version; a stale flag is cleared instead. Best-effort: the session is over.
+fn printPendingUpdateNotice(
+    io: std.Io,
+    arena: std.mem.Allocator,
+    environ_map: *const std.process.Environ.Map,
+    stdout_writer: *std.Io.Writer,
+) void {
+    const maybe_latest = update_check.availableUpdateIfNewer(io, arena, environ_map) catch return;
+    const latest = maybe_latest orelse return;
+    update_check.printUpdateNotice(stdout_writer, latest) catch {};
+    stdout_writer.flush() catch {};
+}
+
+/// The process exit code: a review or orchestrate run reports its verdict, an
+/// unreached verdict being an operational failure; a one-shot run reports one
+/// when it ran a review. Everything else succeeded by getting here.
+fn exitCode(parsed: cli.Options, review_outcome: ?branch_review.Outcome) u8 {
+    if (parsed.review or parsed.orchestrate) {
         const outcome: branch_review.Outcome = review_outcome orelse .operational_failure;
         return outcome.exitCode();
     }
@@ -907,6 +931,19 @@ test "formatDuration boundary between ms and s" {
     var buf: [64]u8 = undefined;
     const result = formatDuration(&buf, 999_000_000);
     try std.testing.expectEqualStrings("999 ms", result);
+}
+
+test "exitCode reports a review or orchestrate verdict and treats none as a failure" {
+    try std.testing.expectEqual(@as(u8, 0), exitCode(.{ .review = true }, .merge_worthy));
+    try std.testing.expectEqual(@as(u8, 1), exitCode(.{ .review = true }, .rejected));
+    try std.testing.expectEqual(@as(u8, 2), exitCode(.{ .review = true }, null));
+    try std.testing.expectEqual(@as(u8, 2), exitCode(.{ .orchestrate = true }, null));
+}
+
+test "exitCode reports a one-shot review verdict and succeeds otherwise" {
+    try std.testing.expectEqual(@as(u8, 1), exitCode(.{ .oneshot = true }, .rejected));
+    try std.testing.expectEqual(@as(u8, 0), exitCode(.{ .oneshot = true }, null));
+    try std.testing.expectEqual(@as(u8, 0), exitCode(.{}, .rejected));
 }
 
 test "formatRestoreHeader includes load time" {
