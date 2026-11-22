@@ -58,7 +58,7 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
     while (end > start) : (end -= 1) {
         if (!isExchangeBoundary(messages, end)) continue;
         switch (mode) {
-            .forced => return .{ .start = start, .end = end },
+            .forced => return checkedSplit(messages, .{ .start = start, .end = end }),
             .auto => |keep_budget| {
                 // The newest exchange is always kept, however large.
                 if (end == messages.len) continue;
@@ -69,7 +69,16 @@ pub fn planSplit(messages: []const openai.Message, mode: SplitMode) ?Split {
         }
     }
     const split_end = chosen orelse return null;
-    return .{ .start = start, .end = split_end };
+    return checkedSplit(messages, .{ .start = start, .end = split_end });
+}
+
+/// A split never cuts into the leading system context and always ends where
+/// an exchange begins, so no tool call is parted from its results.
+fn checkedSplit(messages: []const openai.Message, split: Split) Split {
+    std.debug.assert(split.start < split.end);
+    std.debug.assert(split.end <= messages.len);
+    std.debug.assert(isExchangeBoundary(messages, split.end));
+    return split;
 }
 
 fn isExchangeBoundary(messages: []const openai.Message, index: usize) bool {
