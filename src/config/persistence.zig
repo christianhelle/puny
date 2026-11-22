@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const schema = @import("schema.zig");
 const secrets = @import("secrets.zig");
+const atomic_write = @import("../core/atomic_write.zig");
 
 pub fn load(allocator: std.mem.Allocator, io: std.Io, environ_map: *const std.process.Environ.Map) !schema.LoadResult {
     const path = try configPath(allocator, environ_map);
@@ -221,28 +222,10 @@ pub fn save(
     const buffer = try std.json.Stringify.valueAlloc(allocator, to_write, .{ .whitespace = .indent_2 });
     defer allocator.free(buffer);
 
-    var random_source: std.Random.IoSource = .{ .io = io };
-    const random = random_source.interface();
-    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.{x}.tmp", .{ path, random.int(u64) });
-    defer allocator.free(tmp_path);
-
-    var file = try cwd.createFile(io, tmp_path, .{});
-    var file_open = true;
-    defer {
-        if (file_open) file.close(io);
-        cwd.deleteFile(io, tmp_path) catch {};
-    }
-
-    if (comptime builtin.os.tag != .windows) {
-        try cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{});
-    }
-
-    try file.writeStreamingAll(io, buffer);
-    try file.writeStreamingAll(io, "\n");
-    file.close(io);
-    file_open = false;
-
-    try cwd.rename(tmp_path, cwd, path, io);
+    // Owner-only before any byte is written: the file can hold API keys.
+    try atomic_write.writeAtomically(io, allocator, dir, std.fs.path.basename(path), buffer, .{
+        .restrict_permissions = true,
+    });
 }
 
 pub fn configPath(allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map) ![]const u8 {
