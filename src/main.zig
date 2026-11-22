@@ -399,7 +399,10 @@ fn run(init: std.process.Init) !u8 {
             const repo_path = try std.fs.path.join(arena, &.{ repo_root, ".agents", "skills" });
             try skill_registry.lightScan(init.io, repo_path);
         }
-        skill_registry.fullScan(init.io) catch {};
+        // Skills are optional: a scan that fails leaves the ones found so far.
+        skill_registry.fullScan(init.io) catch |err| {
+            std.log.warn("failed to load skills: {s}", .{@errorName(err)});
+        };
     }
     skills.setGlobalRegistry(&skill_registry);
 
