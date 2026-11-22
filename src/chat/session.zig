@@ -828,16 +828,18 @@ fn deliverTypedLines(ctx: *ChatLoopContext) ![]const []const u8 {
 }
 
 /// Saves the verdict of a review this turn ran, or records why it has none.
-fn finishActiveReview(ctx: *ChatLoopContext, cancelled: bool, had_error: bool) !void {
+fn finishActiveReview(ctx: *ChatLoopContext, report: orchestrate.TurnReport) !void {
     std.debug.assert(branch_review.isActive());
-    const saved = if (cancelled or had_error)
+    const saved = if (report.cancelled or report.had_error or report.incomplete)
         try branch_review.failActive(
             ctx.messages_arena.allocator(),
             ctx.io,
-            if (cancelled)
+            if (report.cancelled)
                 "Review execution was cancelled."
+            else if (report.had_error)
+                "The provider failed before the review completed."
             else
-                "The provider failed before the review completed.",
+                "The review reached its model request limit before completing.",
         )
     else
         try branch_review.finish(
@@ -901,6 +903,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
     var turn_complete = false;
     var turn_cancelled = false;
     var turn_had_error = false;
+    var turn_incomplete = false;
     var tally: TurnTally = .{};
     var compaction_failed = false;
 
@@ -969,6 +972,7 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         }
         turn_complete = loopFinished(result.turn_complete, delivered.len, model_requests);
         if (at_request_limit and !result.turn_complete) {
+            turn_incomplete = true;
             try printNotice(
                 ctx.stdout_writer,
                 "Stopped after {d} model requests this turn. Send a message to continue.",
@@ -977,22 +981,29 @@ fn runTurn(ctx: *ChatLoopContext, honor_oneshot: bool) !orchestrate.TurnReport {
         }
     }
 
+    const report: orchestrate.TurnReport = .{
+        .cancelled = turn_cancelled,
+        .had_error = turn_had_error,
+        .incomplete = turn_incomplete,
+    };
     if (turn_complete and !turn_cancelled and !turn_had_error) try tally.printFooter(ctx);
-    if (branch_review.isActive()) try finishActiveReview(ctx, turn_cancelled, turn_had_error);
+    if (branch_review.isActive()) try finishActiveReview(ctx, report);
 
     // A one-shot run ends here, and `finalizeSession` saves exactly the state
     // this turn just produced. Saving first would serialize the whole
     // conversation and rewrite the whole index twice over, back to back.
     if (honor_oneshot and ctx.parsed.oneshot) {
         finalizeSession(ctx);
-        return .{ .cancelled = turn_cancelled, .had_error = turn_had_error, .exited = true };
+        var exited = report;
+        exited.exited = true;
+        return exited;
     }
 
     try persistence.saveMessages(ctx);
     try persistence.saveSessionMeta(ctx);
     upsertCurrentSession(ctx);
 
-    return .{ .cancelled = turn_cancelled, .had_error = turn_had_error };
+    return report;
 }
 
 fn runChatTurn(ctx: *ChatLoopContext) !TurnResult {
