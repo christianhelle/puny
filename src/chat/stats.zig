@@ -99,7 +99,9 @@ pub const SessionStats = struct {
     }
 
     fn activeModelStats(self: *@This()) *PerModelStats {
-        return &self.models.items[self.active_model_index.?].stats;
+        const index = self.active_model_index.?;
+        std.debug.assert(index < self.models.items.len);
+        return &self.models.items[index].stats;
     }
 
     /// Begin tracking a new model call. Input tokens are known up front and are
@@ -114,6 +116,7 @@ pub const SessionStats = struct {
             try self.models.append(self.allocator, .{ .model_key = model_key, .stats = .{} });
             self.active_model_index = self.models.items.len - 1;
         }
+        std.debug.assert(std.mem.eql(u8, self.models.items[self.active_model_index.?].model_key, model_key));
 
         self.activeModelStats().request_count += 1;
         self.current_turn_input = input_tokens;
