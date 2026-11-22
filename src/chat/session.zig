@@ -1354,6 +1354,11 @@ fn rollBackCancelledTurn(messages: *std.ArrayList(openai.Message)) void {
             else => break,
         }
     }
+    // No partial answer is left for the next request to send.
+    if (messages.items.len > 0) {
+        const last = messages.items[messages.items.len - 1];
+        std.debug.assert(last != .assistant and last != .tool);
+    }
 }
 
 /// Returns the conversation to the state it had before the prompt that failed.
@@ -1373,6 +1378,7 @@ fn rollBackFailedTurn(messages: *std.ArrayList(openai.Message)) void {
         index -= 1;
         if (messages.items[index] == .user) {
             messages.shrinkRetainingCapacity(index);
+            std.debug.assert(messages.items.len == index);
             return;
         }
     }
