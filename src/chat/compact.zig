@@ -199,7 +199,7 @@ pub fn summarize(
     model_key: []const u8,
     request: []const openai.Message,
 ) !SummaryOutcome {
-    session_stats.beginTurn(model_key, usage.estimateUsage(request, 0).input_tokens);
+    try session_stats.beginTurn(model_key, usage.estimateUsage(request, 0).input_tokens);
     var acc = accumulator.OpenAiAccumulator.init(allocator, io, null, session_stats);
     defer acc.deinit();
 

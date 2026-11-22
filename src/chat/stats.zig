@@ -104,14 +104,14 @@ pub const SessionStats = struct {
 
     /// Begin tracking a new model call. Input tokens are known up front and are
     /// added to the running total immediately so cancellation still records them.
-    pub fn beginTurn(self: *@This(), model_key: []const u8, input_tokens: i64) void {
+    pub fn beginTurn(self: *@This(), model_key: []const u8, input_tokens: i64) std.mem.Allocator.Error!void {
         for (self.models.items, 0..) |entry, i| {
             if (std.mem.eql(u8, entry.model_key, model_key)) {
                 self.active_model_index = i;
                 break;
             }
         } else {
-            self.models.append(self.allocator, .{ .model_key = model_key, .stats = .{} }) catch unreachable;
+            try self.models.append(self.allocator, .{ .model_key = model_key, .stats = .{} });
             self.active_model_index = self.models.items.len - 1;
         }
 
@@ -383,7 +383,7 @@ pub const SessionStats = struct {
 test "SessionStats begins turn with input tokens" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 100);
+    try stats.beginTurn("model-a", 100);
     const model_stats = &stats.models.items[0].stats;
     try std.testing.expectEqual(@as(i64, 100), model_stats.input_tokens);
     try std.testing.expectEqual(@as(i64, 0), model_stats.output_tokens);
@@ -393,7 +393,7 @@ test "SessionStats begins turn with input tokens" {
 test "SessionStats accumulates streaming output" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, null);
     stats.addStreamingOutput(3, 2);
     const model_stats = &stats.models.items[0].stats;
@@ -405,7 +405,7 @@ test "SessionStats accumulates streaming output" {
 test "SessionStats records TTFT once" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addFirstTokenTiming(0.5);
     stats.addFirstTokenTiming(0.7);
     const model_stats = &stats.models.items[0].stats;
@@ -416,7 +416,7 @@ test "SessionStats records TTFT once" {
 test "SessionStats finalizes turn and reconciles usage" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, null);
     stats.addFirstTokenTiming(0.5);
     stats.finalizeTurn(.{
@@ -439,7 +439,7 @@ test "SessionStats finalizes turn and reconciles usage" {
 test "SessionStats keeps partial tokens on cancelled turn" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 20);
+    try stats.beginTurn("model-a", 20);
     stats.addStreamingOutput(7, null);
     stats.finalizeTurn(null, false);
 
@@ -453,11 +453,11 @@ test "SessionStats attributes usage to correct model" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
 
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, null);
     stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8 }, true);
 
-    stats.beginTurn("model-b", 20);
+    try stats.beginTurn("model-b", 20);
     stats.addStreamingOutput(4, null);
     stats.finalizeTurn(.{ .input_tokens = 22, .output_tokens = 6 }, true);
 
@@ -482,10 +482,10 @@ test "SessionStats reuses existing model entry" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
 
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.finalizeTurn(.{ .input_tokens = 10, .output_tokens = 5 }, true);
 
-    stats.beginTurn("model-a", 8);
+    try stats.beginTurn("model-a", 8);
     stats.finalizeTurn(.{ .input_tokens = 8, .output_tokens = 4 }, true);
 
     try std.testing.expectEqual(@as(usize, 1), stats.models.items.len);
@@ -499,10 +499,10 @@ test "SessionStats skips models without finalized turns" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
 
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.finalizeTurn(.{ .input_tokens = 10, .output_tokens = 5 }, true);
 
-    stats.beginTurn("model-b", 8);
+    try stats.beginTurn("model-b", 8);
     stats.finalizeTurn(null, false);
 
     try std.testing.expectEqual(@as(usize, 2), stats.models.items.len);
@@ -512,7 +512,7 @@ test "SessionStats skips models without finalized turns" {
 test "SessionStats.print per-model total includes reasoning tokens" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, 3);
     stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8, .reasoning_output_tokens = 3 }, true);
 
@@ -527,7 +527,7 @@ test "SessionStats.print per-model total includes reasoning tokens" {
 test "SessionStats.print groups large token counts with commas" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 1_234_567);
+    try stats.beginTurn("model-a", 1_234_567);
     stats.finalizeTurn(.{ .input_tokens = 1_234_567, .output_tokens = 89_012, .reasoning_output_tokens = 2_345 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -543,9 +543,9 @@ test "SessionStats.print groups large token counts with commas" {
 test "SessionStats.print shows cached share of input tokens" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 900);
+    try stats.beginTurn("model-a", 900);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 5, .cached_input_tokens = 800 }, true);
-    stats.beginTurn("model-a", 1_900);
+    try stats.beginTurn("model-a", 1_900);
     stats.finalizeTurn(.{ .input_tokens = 2_000, .output_tokens = 5, .cached_input_tokens = 1_000 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -558,7 +558,7 @@ test "SessionStats.print shows cached share of input tokens" {
 test "SessionStats.print groups large turn counts with commas" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 1);
+    try stats.beginTurn("model-a", 1);
     stats.models.items[0].stats.turn_count = 12_345;
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -573,7 +573,7 @@ test "SessionStats.print shows model with partial turn" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
 
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(2, null);
     stats.finalizeTurn(null, false);
 
@@ -607,11 +607,11 @@ test "SessionStats totalTokens sums input output and reasoning across models" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
 
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, null);
     stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8, .reasoning_output_tokens = 1 }, true);
 
-    stats.beginTurn("model-b", 20);
+    try stats.beginTurn("model-b", 20);
     stats.addStreamingOutput(4, null);
     stats.finalizeTurn(.{ .input_tokens = 22, .output_tokens = 6 }, true);
 
@@ -628,7 +628,7 @@ test "SessionStats totalTokens is zero for an empty session" {
 test "SessionStats totalTokens includes reasoning tokens" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 10);
+    try stats.beginTurn("model-a", 10);
     stats.addStreamingOutput(5, 3);
     stats.finalizeTurn(.{ .input_tokens = 12, .output_tokens = 8, .reasoning_output_tokens = 3 }, true);
 
@@ -651,9 +651,9 @@ test "SessionStats.print counts every request a turn makes" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     // One turn: a tool call, then the reply that follows its result.
-    stats.beginTurn("model-a", 100);
+    try stats.beginTurn("model-a", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, false);
-    stats.beginTurn("model-a", 200);
+    try stats.beginTurn("model-a", 200);
     stats.finalizeTurn(.{ .input_tokens = 200, .output_tokens = 5 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -667,11 +667,11 @@ test "SessionStats.print counts every request a turn makes" {
 test "SessionStats sums the AI Credits each request reports" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 100);
+    try stats.beginTurn("model-a", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 250_000_000 }, false);
-    stats.beginTurn("model-a", 200);
+    try stats.beginTurn("model-a", 200);
     stats.finalizeTurn(.{ .input_tokens = 200, .output_tokens = 5, .nano_ai_credits = 500_000_000 }, true);
-    stats.beginTurn("model-a", 300);
+    try stats.beginTurn("model-a", 300);
     stats.finalizeTurn(null, false);
 
     const model_stats = &stats.models.items[0].stats;
@@ -682,9 +682,9 @@ test "SessionStats sums the AI Credits each request reports" {
 test "SessionStats.print shows AI Credits per model and for the session" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 100);
+    try stats.beginTurn("model-a", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 1_234_500_000_000 }, true);
-    stats.beginTurn("model-b", 100);
+    try stats.beginTurn("model-b", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 71_277_500 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -700,9 +700,9 @@ test "SessionStats.print shows AI Credits per model and for the session" {
 test "SessionStats.print says when some requests reported no AI Credits" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 100);
+    try stats.beginTurn("model-a", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 2_000_000_000 }, false);
-    stats.beginTurn("model-a", 200);
+    try stats.beginTurn("model-a", 200);
     stats.finalizeTurn(null, false);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -715,14 +715,14 @@ test "SessionStats.print says when some requests reported no AI Credits" {
 test "SessionStats.totalAiCredits is partial only when a billed model missed a cost" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("billed", 100);
+    try stats.beginTurn("billed", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5, .nano_ai_credits = 2_000_000_000 }, true);
     // A model that never reports credits leaves the total complete.
-    stats.beginTurn("unbilled", 100);
+    try stats.beginTurn("unbilled", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, true);
     try std.testing.expectEqual(token_stats.AiCredits{ .nano = 2_000_000_000 }, stats.totalAiCredits().?);
 
-    stats.beginTurn("billed", 200);
+    try stats.beginTurn("billed", 200);
     stats.finalizeTurn(null, false);
     try std.testing.expectEqual(token_stats.AiCredits{ .nano = 2_000_000_000, .partial = true }, stats.totalAiCredits().?);
 }
@@ -730,7 +730,7 @@ test "SessionStats.totalAiCredits is partial only when a billed model missed a c
 test "SessionStats.print omits AI Credits when no request reports them" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 100);
+    try stats.beginTurn("model-a", 100);
     stats.finalizeTurn(.{ .input_tokens = 100, .output_tokens = 5 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -751,7 +751,7 @@ test "SessionStats prices a request with the rates set for the model" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.setPrices(.{ .priced = cheap_pricing });
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     // 1,000 in * $1/M + 500 out * $2/M = $0.002.
@@ -772,7 +772,7 @@ test "SessionStats prices a long prompt with the rates above its tier" {
             .rate = .{ .input = 3_000_000_000, .output = 2_000_000_000 },
         }},
     } });
-    stats.beginTurn("model-a", 300_000);
+    try stats.beginTurn("model-a", 300_000);
     stats.finalizeTurn(.{ .input_tokens = 300_000, .output_tokens = 0 }, true);
 
     // 300,000 * $3/M = $0.90.
@@ -784,10 +784,10 @@ test "SessionStats adds every request in a turn to its cost" {
     defer stats.deinit();
     stats.setPrices(.{ .priced = cheap_pricing });
     stats.beginUsdTurn();
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
     // A compaction summary between requests is charged the same way.
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     try std.testing.expectEqual(token_stats.Usd{ .nano = 4_000_000 }, stats.turnUsd().?);
@@ -801,10 +801,10 @@ test "SessionStats marks a turn partial when one request was unpriced" {
     defer stats.deinit();
     stats.setPrices(.{ .priced = cheap_pricing });
     stats.beginUsdTurn();
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
     stats.setPrices(.unknown);
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     try std.testing.expectEqual(token_stats.Usd{ .nano = 2_000_000, .partial = true }, stats.turnUsd().?);
@@ -813,7 +813,7 @@ test "SessionStats marks a turn partial when one request was unpriced" {
 test "SessionStats leaves costs out when the model has no prices" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     try std.testing.expectEqual(@as(?token_stats.Usd, null), stats.turnUsd());
@@ -826,9 +826,9 @@ test "SessionStats.totalUsd sums priced requests and marks a partial total" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.setPrices(.{ .priced = cheap_pricing });
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(null, true);
 
     try std.testing.expectEqual(token_stats.Usd{ .nano = 2_000_000, .partial = true }, stats.totalUsd().?);
@@ -838,7 +838,7 @@ test "SessionStats marks a total partial when a USD model has no prices" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.setPrices(.unknown);
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     try std.testing.expect(stats.billsUsd());
@@ -855,7 +855,7 @@ test "SessionStats.print shows an unknown cost as n/a with a plus" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.setPrices(.unknown);
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -871,7 +871,7 @@ test "SessionStats.print shows the cost per model and for the session" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.setPrices(.{ .priced = .{ .base = .{ .input = 1_000_000_000, .output = 2_000_000_000 } } });
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -887,9 +887,9 @@ test "SessionStats.print says when some requests were unpriced" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
     stats.setPrices(.{ .priced = cheap_pricing });
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, false);
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(null, false);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -902,7 +902,7 @@ test "SessionStats.print says when some requests were unpriced" {
 test "SessionStats.print omits cost when no request was priced" {
     var stats = SessionStats.init(std.testing.allocator, std.testing.io);
     defer stats.deinit();
-    stats.beginTurn("model-a", 1_000);
+    try stats.beginTurn("model-a", 1_000);
     stats.finalizeTurn(.{ .input_tokens = 1_000, .output_tokens = 500 }, true);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);

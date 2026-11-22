@@ -100,7 +100,7 @@ pub fn runTurnWithMode(
 
     const tool_tokens = usage_estimator.estimateToolTokens(tool_definitions);
     const input_estimate = usage_estimator.estimateUsage(request.messages, 0).input_tokens + tool_tokens;
-    session_stats.beginTurn(model_key, input_estimate);
+    try session_stats.beginTurn(model_key, input_estimate);
 
     var acc = OpenAiAccumulator.init(arena, io, stdout_writer, session_stats);
     acc.show_thinking = show_thinking;

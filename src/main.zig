@@ -879,8 +879,8 @@ test "formatRestoreHeader falls back when the buffer is too small" {
     try std.testing.expectEqualStrings("Restored session", formatRestoreHeader(&small, "abc123", 5, 42_000_000));
 }
 
-fn toolNames(definitions: []const openai.ToolDefinition) [][]const u8 {
-    const names = std.heap.page_allocator.alloc([]const u8, definitions.len) catch unreachable;
+fn toolNames(arena: std.mem.Allocator, definitions: []const openai.ToolDefinition) ![][]const u8 {
+    const names = try arena.alloc([]const u8, definitions.len);
     for (definitions, 0..) |definition, i| {
         names[i] = definition.function.object.get("name").?.string;
     }
@@ -894,7 +894,7 @@ test "buildToolDefinitions excludes load_skill when skills are disabled" {
 
     var definitions = try buildToolDefinitions(arena, true);
     defer definitions.deinit(arena);
-    const names = toolNames(definitions.items);
+    const names = try toolNames(arena, definitions.items);
     for (names) |name| {
         try std.testing.expect(!std.mem.eql(u8, name, "load_skill"));
     }
@@ -923,7 +923,7 @@ test "buildPlanningToolDefinitions excludes load_skill when skills are disabled"
 
     var definitions = try buildPlanningToolDefinitions(arena, true);
     defer definitions.deinit(arena);
-    const names = toolNames(definitions.items);
+    const names = try toolNames(arena, definitions.items);
     for (names) |name| {
         try std.testing.expect(!std.mem.eql(u8, name, "load_skill"));
     }
