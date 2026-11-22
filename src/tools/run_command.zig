@@ -20,50 +20,124 @@ pub fn runCommand(allocator: std.mem.Allocator, io: std.Io, argv: []const []cons
 
     // stderr is drained on a separate thread inside drainPipes, so the drain
     // buffers must come from a thread-safe allocator; page_allocator is.
-    var stdout: std.ArrayList(u8) = .empty;
+    var stdout: CapturedStream = .{};
     defer stdout.deinit(std.heap.page_allocator);
-    var stderr: std.ArrayList(u8) = .empty;
+    var stderr: CapturedStream = .{};
     defer stderr.deinit(std.heap.page_allocator);
 
     _ = try drainPipes(std.heap.page_allocator, io, &child, &stdout, &stderr, null);
 
     const term = try child.wait(io);
+    return formatCommandResult(allocator, term, &stdout, &stderr);
+}
 
+/// Most bytes kept from the start and from the end of each output stream. A
+/// command such as `yes` or a `cat` of a large log would otherwise grow memory
+/// until its timeout and then go to the model, whole, on every later request.
+/// Build and test logs put their verdict last, so the tail is kept as well as
+/// the head and only the middle is dropped.
+pub const max_kept_head_bytes: usize = 64 * 1024;
+pub const max_kept_tail_bytes: usize = 64 * 1024;
+
+/// One output stream of a child, held to `max_kept_head_bytes` plus
+/// `max_kept_tail_bytes` however much the child writes. Owned by the single
+/// thread that drains its pipe.
+const CapturedStream = struct {
+    head: std.ArrayList(u8) = .empty,
+    /// Once `head` is full, a ring of the most recent bytes; `tail_start` is
+    /// the oldest of them.
+    tail: std.ArrayList(u8) = .empty,
+    tail_start: usize = 0,
+    omitted_bytes: u64 = 0,
+
+    fn deinit(self: *CapturedStream, allocator: std.mem.Allocator) void {
+        self.head.deinit(allocator);
+        self.tail.deinit(allocator);
+    }
+
+    fn isEmpty(self: *const CapturedStream) bool {
+        return self.head.items.len == 0;
+    }
+
+    fn append(self: *CapturedStream, allocator: std.mem.Allocator, chunk: []const u8) !void {
+        const head_room = max_kept_head_bytes - self.head.items.len;
+        const head_len = @min(head_room, chunk.len);
+        try self.head.appendSlice(allocator, chunk[0..head_len]);
+
+        var rest = chunk[head_len..];
+        if (rest.len > 0 and self.tail.items.len < max_kept_tail_bytes) {
+            const tail_room = max_kept_tail_bytes - self.tail.items.len;
+            const tail_len = @min(tail_room, rest.len);
+            try self.tail.appendSlice(allocator, rest[0..tail_len]);
+            rest = rest[tail_len..];
+        }
+        // The ring is full: each new byte replaces the oldest kept one.
+        for (rest) |byte| {
+            self.tail.items[self.tail_start] = byte;
+            self.tail_start = (self.tail_start + 1) % max_kept_tail_bytes;
+        }
+        self.omitted_bytes += rest.len;
+
+        std.debug.assert(self.head.items.len <= max_kept_head_bytes);
+        std.debug.assert(self.tail.items.len <= max_kept_tail_bytes);
+        std.debug.assert(self.tail.items.len == 0 or self.head.items.len == max_kept_head_bytes);
+        std.debug.assert(self.tail_start < max_kept_tail_bytes);
+        std.debug.assert(self.omitted_bytes == 0 or self.tail.items.len == max_kept_tail_bytes);
+    }
+
+    /// Writes the kept bytes in the order the child wrote them, with a marker
+    /// where the middle was dropped.
+    fn writeTo(self: *const CapturedStream, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) !void {
+        try out.appendSlice(allocator, self.head.items);
+        if (self.omitted_bytes > 0) {
+            var marker: [64]u8 = undefined;
+            // 64 bytes holds the fixed text plus a u64 in decimal (20 digits).
+            const text = std.fmt.bufPrint(&marker, "\n[... {d} bytes omitted ...]\n", .{self.omitted_bytes}) catch unreachable;
+            try out.appendSlice(allocator, text);
+        }
+        try out.appendSlice(allocator, self.tail.items[self.tail_start..]);
+        try out.appendSlice(allocator, self.tail.items[0..self.tail_start]);
+    }
+};
+
+/// Formats a finished command as the tool result the model sees: the exit
+/// status, then each non-empty stream under its own heading.
+fn formatCommandResult(
+    allocator: std.mem.Allocator,
+    term: std.process.Child.Term,
+    stdout: *const CapturedStream,
+    stderr: *const CapturedStream,
+) ![]const u8 {
     var result: std.ArrayList(u8) = .empty;
     defer result.deinit(allocator);
 
     switch (term) {
-        .exited => |code| {
-            try result.appendSlice(allocator, "Exit code: ");
-            var buf: [32]u8 = undefined;
-            const n = try std.fmt.bufPrint(&buf, "{d}", .{code});
-            try result.appendSlice(allocator, n);
-        },
-        else => {
-            try result.appendSlice(allocator, "Terminated\n");
-        },
+        .exited => |code| try result.print(allocator, "Exit code: {d}", .{code}),
+        else => try result.appendSlice(allocator, "Terminated\n"),
     }
 
-    if (stdout.items.len > 0) {
+    if (!stdout.isEmpty()) {
         try result.appendSlice(allocator, "STDOUT:\n");
-        try result.appendSlice(allocator, stdout.items);
+        try stdout.writeTo(allocator, &result);
         try result.append(allocator, '\n');
     }
-    if (stderr.items.len > 0) {
+    if (!stderr.isEmpty()) {
         try result.appendSlice(allocator, "STDERR:\n");
-        try result.appendSlice(allocator, stderr.items);
+        try stderr.writeTo(allocator, &result);
         try result.append(allocator, '\n');
     }
 
     return ownedSliceOrEmpty(&result, allocator);
 }
 
-/// Reads a single child pipe into `out`, stopping early when `cancel` is set.
+/// Reads a single child pipe into `out` until EOF, stopping early when
+/// `cancel` is set. Reading continues past the kept-bytes limit so a child is
+/// never blocked on a full pipe; `out` drops the excess.
 fn drainPipe(
     allocator: std.mem.Allocator,
     io: std.Io,
     file: std.Io.File,
-    out: *std.ArrayList(u8),
+    out: *CapturedStream,
     cancel: ?*const std.atomic.Value(bool),
 ) !void {
     // The sink is separate from the reader's backing buffer: passing the
@@ -79,7 +153,7 @@ fn drainPipe(
         }
         const n = try reader.interface.readSliceShort(&sink);
         if (n == 0) break;
-        try out.appendSlice(allocator, sink[0..n]);
+        try out.append(allocator, sink[0..n]);
     }
 }
 
@@ -87,7 +161,7 @@ const PipeDrain = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     file: std.Io.File,
-    out: *std.ArrayList(u8),
+    out: *CapturedStream,
     cancel: ?*const std.atomic.Value(bool),
     result: anyerror!void = {},
 
@@ -111,8 +185,8 @@ fn drainPipes(
     allocator: std.mem.Allocator,
     io: std.Io,
     child: *std.process.Child,
-    stdout: *std.ArrayList(u8),
-    stderr: *std.ArrayList(u8),
+    stdout: *CapturedStream,
+    stderr: *CapturedStream,
     cancel: ?*const std.atomic.Value(bool),
 ) !bool {
     var stderr_drain: ?PipeDrain = null;
@@ -187,9 +261,9 @@ fn runCommandInArena(
 
     // stderr is drained on a separate thread inside drainPipes, so the drain
     // buffers must come from a thread-safe allocator; page_allocator is.
-    var stdout: std.ArrayList(u8) = .empty;
+    var stdout: CapturedStream = .{};
     defer stdout.deinit(std.heap.page_allocator);
-    var stderr: std.ArrayList(u8) = .empty;
+    var stderr: CapturedStream = .{};
     defer stderr.deinit(std.heap.page_allocator);
 
     const timed_out = try drainPipes(std.heap.page_allocator, io, child, &stdout, &stderr, cancel);
@@ -202,34 +276,7 @@ fn runCommandInArena(
     }
 
     const term = try child.wait(io);
-
-    var result: std.ArrayList(u8) = .empty;
-    defer result.deinit(allocator);
-
-    switch (term) {
-        .exited => |code| {
-            try result.appendSlice(allocator, "Exit code: ");
-            var buf: [32]u8 = undefined;
-            const n = try std.fmt.bufPrint(&buf, "{d}", .{code});
-            try result.appendSlice(allocator, n);
-        },
-        else => {
-            try result.appendSlice(allocator, "Terminated\n");
-        },
-    }
-
-    if (stdout.items.len > 0) {
-        try result.appendSlice(allocator, "STDOUT:\n");
-        try result.appendSlice(allocator, stdout.items);
-        try result.append(allocator, '\n');
-    }
-    if (stderr.items.len > 0) {
-        try result.appendSlice(allocator, "STDERR:\n");
-        try result.appendSlice(allocator, stderr.items);
-        try result.append(allocator, '\n');
-    }
-
-    return ownedSliceOrEmpty(&result, allocator);
+    return formatCommandResult(allocator, term, &stdout, &stderr);
 }
 
 /// Forcibly terminates the child and every process it spawned. Killing only
@@ -487,4 +534,68 @@ test "runCommandTimed propagates a spawn failure for a missing executable" {
     else
         &.{"/nonexistent-puny-binary-xyz"};
     try std.testing.expectError(error.FileNotFound, runCommandTimed(std.testing.allocator, std.testing.io, argv, null, 30 * std.time.ns_per_s));
+}
+
+fn testCapture(stream: *CapturedStream, byte_count: usize) !void {
+    var chunk: [4096]u8 = undefined;
+    var written: usize = 0;
+    while (written < byte_count) {
+        const n = @min(chunk.len, byte_count - written);
+        for (chunk[0..n], 0..) |*byte, i| byte.* = @intCast((written + i) % 251);
+        try stream.append(std.testing.allocator, chunk[0..n]);
+        written += n;
+    }
+}
+
+fn testRendered(stream: *const CapturedStream) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(std.testing.allocator);
+    try stream.writeTo(std.testing.allocator, &out);
+    return out.toOwnedSlice(std.testing.allocator);
+}
+
+test "CapturedStream keeps output up to the limit whole" {
+    var stream: CapturedStream = .{};
+    defer stream.deinit(std.testing.allocator);
+    try testCapture(&stream, max_kept_head_bytes + max_kept_tail_bytes);
+    try std.testing.expectEqual(@as(u64, 0), stream.omitted_bytes);
+
+    const rendered = try testRendered(&stream);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqual(max_kept_head_bytes + max_kept_tail_bytes, rendered.len);
+    for (rendered, 0..) |byte, i| try std.testing.expectEqual(@as(u8, @intCast(i % 251)), byte);
+}
+
+test "CapturedStream drops the middle of output past the limit" {
+    var stream: CapturedStream = .{};
+    defer stream.deinit(std.testing.allocator);
+    const total = max_kept_head_bytes + max_kept_tail_bytes + 1000;
+    try testCapture(&stream, total);
+    try std.testing.expectEqual(@as(u64, 1000), stream.omitted_bytes);
+
+    const rendered = try testRendered(&stream);
+    defer std.testing.allocator.free(rendered);
+    const marker = "\n[... 1000 bytes omitted ...]\n";
+    try std.testing.expectEqual(max_kept_head_bytes + marker.len + max_kept_tail_bytes, rendered.len);
+    try std.testing.expectEqualStrings(marker, rendered[max_kept_head_bytes..][0..marker.len]);
+    // The tail is the last bytes written, oldest first.
+    const tail = rendered[max_kept_head_bytes + marker.len ..];
+    for (tail, total - max_kept_tail_bytes..) |byte, i| try std.testing.expectEqual(@as(u8, @intCast(i % 251)), byte);
+}
+
+test "CapturedStream is empty until the child writes" {
+    var stream: CapturedStream = .{};
+    defer stream.deinit(std.testing.allocator);
+    try std.testing.expect(stream.isEmpty());
+    try stream.append(std.testing.allocator, "");
+    try std.testing.expect(stream.isEmpty());
+}
+
+test "runCommand bounds the output of a command that writes without end" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    const argv: []const []const u8 = &.{ "sh", "-c", "yes | head -c 2000000" };
+    const output = try runCommand(std.testing.allocator, std.testing.io, argv, null);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(output.len < max_kept_head_bytes + max_kept_tail_bytes + 256);
+    try std.testing.expect(std.mem.indexOf(u8, output, "bytes omitted") != null);
 }
