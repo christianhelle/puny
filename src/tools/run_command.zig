@@ -3,6 +3,7 @@ const event_wait = @import("../core/event_wait.zig");
 const job_control = @import("../core/job_control.zig");
 const cancellation = @import("../core/cancel.zig");
 const sigint = @import("../core/sigint.zig");
+const utf8 = @import("../core/utf8.zig");
 
 pub fn ownedSliceOrEmpty(list: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
     if (list.items.len == 0) return "";
@@ -86,25 +87,52 @@ const CapturedStream = struct {
     }
 
     /// Writes the kept bytes in the order the child wrote them, with a marker
-    /// where the middle was dropped.
+    /// where the middle was dropped. A code point the cut splits is dropped
+    /// whole and counted as omitted, so valid UTF-8 output stays valid.
     fn writeTo(
         self: *const CapturedStream,
         allocator: std.mem.Allocator,
         out: *std.ArrayList(u8),
     ) !void {
-        try out.appendSlice(allocator, self.head.items);
-        if (self.omitted_bytes > 0) {
-            var marker: [64]u8 = undefined;
-            // 64 bytes holds the fixed text plus a u64 in decimal (20 digits).
-            const text = std.fmt.bufPrint(
-                &marker,
-                "\n[... {d} bytes omitted ...]\n",
-                .{self.omitted_bytes},
-            ) catch unreachable;
-            try out.appendSlice(allocator, text);
+        const older = self.tail.items[self.tail_start..];
+        const newer = self.tail.items[0..self.tail_start];
+        if (self.omitted_bytes == 0) {
+            try out.appendSlice(allocator, self.head.items);
+            try out.appendSlice(allocator, older);
+            try out.appendSlice(allocator, newer);
+            return;
         }
-        try out.appendSlice(allocator, self.tail.items[self.tail_start..]);
-        try out.appendSlice(allocator, self.tail.items[0..self.tail_start]);
+
+        const head = self.head.items[0..utf8.completeLen(self.head.items)];
+        const skipped = self.tailContinuationLen();
+        const omitted = self.omitted_bytes + (self.head.items.len - head.len) + skipped;
+        var marker: [64]u8 = undefined;
+        // 64 bytes holds the fixed text plus a u64 in decimal (20 digits).
+        const text = std.fmt.bufPrint(
+            &marker,
+            "\n[... {d} bytes omitted ...]\n",
+            .{omitted},
+        ) catch unreachable;
+        try out.appendSlice(allocator, head);
+        try out.appendSlice(allocator, text);
+        if (skipped <= older.len) {
+            try out.appendSlice(allocator, older[skipped..]);
+            try out.appendSlice(allocator, newer);
+        } else {
+            try out.appendSlice(allocator, newer[skipped - older.len ..]);
+        }
+    }
+
+    /// Continuation bytes at the start of the kept tail: the rest of a code
+    /// point whose leading byte was dropped.
+    fn tailContinuationLen(self: *const CapturedStream) usize {
+        std.debug.assert(self.tail.items.len == max_kept_tail_bytes);
+        var count: usize = 0;
+        while (count < 3) : (count += 1) {
+            const byte = self.tail.items[(self.tail_start + count) % max_kept_tail_bytes];
+            if ((byte & 0xC0) != 0x80) break;
+        }
+        return count;
     }
 };
 
@@ -595,6 +623,25 @@ test "CapturedStream drops the middle of output past the limit" {
         @as(u8, @intCast(i % 251)),
         byte,
     );
+}
+
+test "CapturedStream drops a code point the cut splits" {
+    var stream: CapturedStream = .{};
+    defer stream.deinit(std.testing.allocator);
+    const filler = try std.testing.allocator.alloc(u8, max_kept_head_bytes - 1);
+    defer std.testing.allocator.free(filler);
+    @memset(filler, 'a');
+    try stream.append(std.testing.allocator, filler);
+    try stream.append(std.testing.allocator, "\u{20ac}");
+    try stream.append(std.testing.allocator, filler);
+    try std.testing.expectEqual(@as(u64, 1), stream.omitted_bytes);
+
+    const rendered = try testRendered(&stream);
+    defer std.testing.allocator.free(rendered);
+    const marker = "\n[... 3 bytes omitted ...]\n";
+    try std.testing.expectEqual(2 * filler.len + marker.len, rendered.len);
+    try std.testing.expectEqualStrings(marker, rendered[filler.len..][0..marker.len]);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(rendered));
 }
 
 test "CapturedStream is empty until the child writes" {

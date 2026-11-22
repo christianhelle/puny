@@ -14,6 +14,36 @@ pub fn prefix(bytes: []const u8, max_len: usize) []const u8 {
     return bytes[0..end];
 }
 
+/// Length of `bytes` without a code point its end cuts short, as when the
+/// bytes after it were dropped. Bytes that were not valid UTF-8 to begin with
+/// are left as they are.
+pub fn completeLen(bytes: []const u8) usize {
+    var lead = bytes.len;
+    var looked: usize = 0;
+    while (lead > 0 and looked < 4) : (looked += 1) {
+        lead -= 1;
+        if ((bytes[lead] & 0xC0) != 0x80) break;
+    } else return bytes.len;
+    const byte = bytes[lead];
+    const sequence_len: usize =
+        if (byte < 0xC0) 1 else if (byte < 0xE0) 2 else if (byte < 0xF0) 3 else 4;
+    const end = if (lead + sequence_len > bytes.len) lead else bytes.len;
+    std.debug.assert(end <= bytes.len);
+    std.debug.assert(bytes.len - end < 4);
+    return end;
+}
+
+test "completeLen keeps whole code points and drops a cut one" {
+    const text = "a\u{00e9}\u{20ac}"; // 1 + 2 + 3 bytes
+    try std.testing.expectEqual(@as(usize, 6), completeLen(text));
+    try std.testing.expectEqual(@as(usize, 3), completeLen(text[0..5]));
+    try std.testing.expectEqual(@as(usize, 3), completeLen(text[0..4]));
+    try std.testing.expectEqual(@as(usize, 3), completeLen(text[0..3]));
+    try std.testing.expectEqual(@as(usize, 1), completeLen(text[0..2]));
+    try std.testing.expectEqual(@as(usize, 0), completeLen(""));
+    try std.testing.expectEqual(@as(usize, 4), completeLen("\x80\x80\x80\x80"));
+}
+
 test "prefix returns input within the limit unchanged" {
     try std.testing.expectEqualStrings("abc", prefix("abc", 3));
     try std.testing.expectEqualStrings("abc", prefix("abc", 10));
