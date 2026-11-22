@@ -1061,7 +1061,7 @@ fn compactConversation(
     defer scratch_state.deinit();
     const scratch = scratch_state.allocator();
     const request = try compact.buildSummaryRequest(scratch, ctx.messages.items[split.start..split.end]);
-    var summary_usage: ?openai.TurnUsage = null;
+    var summary_usage: compact.SummaryUsage = .{};
     const outcome = try compact.summarize(
         ctx.prov,
         scratch,
@@ -1073,7 +1073,7 @@ fn compactConversation(
         request,
         &summary_usage,
     );
-    if (tally) |t| t.add(summary_usage, summary_usage == null);
+    if (tally) |t| t.add(summary_usage.usage, summary_usage.estimated);
     switch (outcome) {
         .cancelled => {
             try ctx.stdout_writer.print("{s}Compaction cancelled.{s}\n", .{ ansi.dim, ansi.reset });

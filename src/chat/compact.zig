@@ -189,6 +189,13 @@ pub fn apply(
     try messages.replaceRange(allocator, split.start, split.end - split.start, replacement.items);
 }
 
+/// What a summary request used: the provider's report, or an estimate from
+/// the request and reply text when it sent none.
+pub const SummaryUsage = struct {
+    usage: ?openai.TurnUsage = null,
+    estimated: bool = false,
+};
+
 pub const SummaryOutcome = union(enum) {
     ok: []const u8,
     cancelled,
@@ -198,7 +205,7 @@ pub const SummaryOutcome = union(enum) {
 /// Sends a summarization request built by `buildSummaryRequest`, without
 /// tools and without streaming the reply to the terminal. The tokens it uses
 /// are still counted in the session statistics, and reported in `usage_out`
-/// (null when the provider reported none) for the turn that asked for it.
+/// for the turn that asked for it.
 pub fn summarize(
     prov: *provider.Provider,
     allocator: std.mem.Allocator,
@@ -208,7 +215,7 @@ pub fn summarize(
     session_stats: *stats.SessionStats,
     model_key: []const u8,
     request: []const openai.Message,
-    usage_out: *?openai.TurnUsage,
+    usage_out: *SummaryUsage,
 ) !SummaryOutcome {
     try session_stats.beginTurn(model_key, usage.estimateUsage(request, 0).input_tokens);
     var acc = accumulator.OpenAiAccumulator.init(allocator, io, null, session_stats);
@@ -221,7 +228,10 @@ pub fn summarize(
         .stream = true,
     }, acc.streamCallback(), io, random, stdout_writer);
     session_stats.finalizeTurn(acc.usage, false);
-    usage_out.* = acc.usage;
+    usage_out.* = if (acc.usage) |reported|
+        .{ .usage = reported }
+    else
+        .{ .usage = usage.estimateUsage(request, acc.estimatedOutputChars()), .estimated = true };
 
     return switch (outcome) {
         .cancelled => .cancelled,
@@ -650,7 +660,7 @@ fn runSummarizeForTest(arena: std.mem.Allocator, request: []const openai.Message
     var output = std.Io.Writer.Allocating.init(arena);
     var session_stats = stats.SessionStats.init(arena, std.testing.io);
     var random_source: std.Random.IoSource = .{ .io = std.testing.io };
-    var summary_usage: ?openai.TurnUsage = null;
+    var summary_usage: SummaryUsage = .{};
     return summarize(
         &prov,
         arena,
