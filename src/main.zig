@@ -407,21 +407,7 @@ fn run(init: std.process.Init) !u8 {
     skills.setGlobalRegistry(&skill_registry);
 
     if (!session_restored) {
-        const system_prompt = try cfg.resolvePrompt(messages_arena, "system", prompts.system);
-        try messages.append(messages_arena, .{ .system = system_prompt });
-        if (skill_registry.count() > 0) {
-            const skills_block = try skill_registry.buildListing(messages_arena);
-            try messages.append(messages_arena, .{ .system = skills_block });
-        }
-        if (try git_root.findGitRepoRoot(arena, init.io)) |repo_root| {
-            defer arena.free(repo_root);
-            if (try instructions.load(arena, init.io, repo_root)) |result| {
-                defer arena.free(result.filename);
-                defer arena.free(result.content);
-                const labeled = try std.fmt.allocPrint(messages_arena, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
-                try messages.append(messages_arena, .{ .system = labeled });
-            }
-        }
+        try session.appendBaseContext(messages_arena, arena, init.io, cfg, &skill_registry, &messages);
         if (startup_review_scope) |scope| {
             core_sess.setWriteBlocked(true);
             const review_prompt = try cfg.resolvePrompt(messages_arena, "review", prompts.review);

@@ -7,6 +7,7 @@ const display = @import("display.zig");
 const persistence = @import("persistence.zig");
 const session_commands = @import("session_commands.zig");
 const context = @import("context.zig");
+const config = @import("../config/config.zig");
 const token_stats = @import("../tui/token_stats.zig");
 const commands = @import("../cli/commands.zig");
 const core_session = @import("../core/session.zig");
@@ -1045,22 +1046,45 @@ fn recycleMessagesArena(ctx: *ChatLoopContext) !void {
 /// Re-installs the standing system context after an arena reset: the system
 /// prompt, the skills listing, and the repository instructions file.
 fn installBaseContext(ctx: *ChatLoopContext) !void {
-    const alloc = ctx.messages_arena.allocator();
-    const system_prompt = try ctx.cfg.resolvePrompt(alloc, "system", prompts.system);
-    try ctx.messages.append(alloc, .{ .system = system_prompt });
+    try appendBaseContext(
+        ctx.messages_arena.allocator(),
+        ctx.arena,
+        ctx.io,
+        ctx.cfg,
+        if (ctx.parsed.no_skills) null else ctx.skill_registry,
+        ctx.messages,
+    );
+}
 
-    if (!ctx.parsed.no_skills and ctx.skill_registry.count() > 0) {
-        const skills_block = try ctx.skill_registry.buildListing(alloc);
-        try ctx.messages.append(alloc, .{ .system = skills_block });
+/// Appends the context every fresh conversation starts with: the system
+/// prompt, the skill listing when there are skills, and the repository's
+/// agent instructions when it has any. Message text lives in `messages_alloc`;
+/// `scratch` holds only what is freed before returning.
+pub fn appendBaseContext(
+    messages_alloc: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    io: std.Io,
+    cfg: *const config.Config,
+    skill_registry: ?*skills.Registry,
+    messages: *std.ArrayList(openai.Message),
+) !void {
+    const system_prompt = try cfg.resolvePrompt(messages_alloc, "system", prompts.system);
+    try messages.append(messages_alloc, .{ .system = system_prompt });
+
+    if (skill_registry) |registry| {
+        if (registry.count() > 0) {
+            const skills_block = try registry.buildListing(messages_alloc);
+            try messages.append(messages_alloc, .{ .system = skills_block });
+        }
     }
 
-    if (try git_root.findGitRepoRoot(ctx.arena, ctx.io)) |repo_root| {
-        defer ctx.arena.free(repo_root);
-        if (try instructions.load(ctx.arena, ctx.io, repo_root)) |result| {
-            defer ctx.arena.free(result.filename);
-            defer ctx.arena.free(result.content);
-            const labeled = try std.fmt.allocPrint(alloc, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
-            try ctx.messages.append(alloc, .{ .system = labeled });
+    if (try git_root.findGitRepoRoot(scratch, io)) |repo_root| {
+        defer scratch.free(repo_root);
+        if (try instructions.load(scratch, io, repo_root)) |result| {
+            defer scratch.free(result.filename);
+            defer scratch.free(result.content);
+            const labeled = try std.fmt.allocPrint(messages_alloc, "Instructions from {s}:\n{s}", .{ result.filename, result.content });
+            try messages.append(messages_alloc, .{ .system = labeled });
         }
     }
 }
