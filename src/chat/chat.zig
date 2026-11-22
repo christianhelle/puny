@@ -181,6 +181,8 @@ pub fn runTurnWithMode(
             }
         }
 
+        assertToolResultsPaired(messages.items, assistant_content.tool_calls.?);
+
         const cursor_offset = content_cursor_offset + tool_output_lines;
         if (indicator_opt) |i| try i.finish(io, stdout_writer, cursor_offset, false, has_streamed_content_after, .done, provider_ttft);
         return .{ .turn_complete = false, .usage = turn_usage, .usage_estimated = turn_usage_estimated };
@@ -215,6 +217,23 @@ fn printToolCall(
 }
 
 const ToolRun = struct { result: []const u8, diff_rows: usize };
+
+/// The messages just appended answer `calls` one for one and in order, right
+/// after the assistant message that made them. A provider rejects every later
+/// request of a conversation with an unanswered call, so a break here would
+/// end the session.
+fn assertToolResultsPaired(messages: []const openai.Message, calls: []const openai.ToolCall) void {
+    std.debug.assert(calls.len > 0);
+    std.debug.assert(messages.len > calls.len);
+    const assistant = messages[messages.len - calls.len - 1];
+    std.debug.assert(assistant == .assistant);
+    std.debug.assert(assistant.assistant.tool_calls.?.len == calls.len);
+    const results = messages[messages.len - calls.len ..];
+    for (calls, results) |call, result| {
+        std.debug.assert(result == .tool);
+        std.debug.assert(std.mem.eql(u8, call.id, result.tool.tool_call_id));
+    }
+}
 
 /// Runs a tool call and prints the diff of any file it changed. The result
 /// lives in `arena`, the conversation's, because it is kept in the history.
