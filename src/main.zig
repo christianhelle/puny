@@ -542,8 +542,13 @@ fn prepareStartupReview(arena: std.mem.Allocator, io: std.Io) !StartupReview {
 /// Creates (or truncates) a debug log in the working directory, owner-only
 /// where the platform allows: it records prompts and provider traffic.
 fn createLogFile(io: std.Io, path: []const u8) !std.Io.File {
-    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
-    if (comptime @import("builtin").os.tag != .windows) {
+    const posix = comptime @import("builtin").os.tag != .windows;
+    // A new log is owner-only from creation; the chmod below covers one that
+    // already existed with a wider mode.
+    const options: std.Io.Dir.CreateFileOptions =
+        if (posix) .{ .permissions = @fromBackingInt(0o600) } else .{};
+    const file = try std.Io.Dir.cwd().createFile(io, path, options);
+    if (posix) {
         std.Io.Dir.cwd().setFilePermissions(io, path, @fromBackingInt(0o600), .{}) catch |err| {
             std.log.warn("failed to restrict permissions on {s}: {s}", .{ path, @errorName(err) });
         };
