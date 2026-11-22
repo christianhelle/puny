@@ -11,6 +11,9 @@ pub const WriteOptions = struct {
     /// Tighten the staging file to owner-only (0600) before writing, so a
     /// permissive umask cannot leak the contents while they are staged.
     restrict_permissions: bool = false,
+    /// Append a newline after `contents`, matching the project's JSON
+    /// writers. Binary contents such as a key file turn it off.
+    trailing_newline: bool = true,
 };
 
 /// Staging files younger than this are left alone. A staging file that has
@@ -116,14 +119,27 @@ pub fn writeAtomically(
         };
     }
 
+    // Before any contents are written, so they are never readable by others,
+    // even briefly. A file that cannot be restricted is not written at all.
+    if (options.restrict_permissions) {
+        if (comptime builtin.os.tag != .windows) {
+            cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{}) catch |err| {
+                std.log.warn("failed to restrict permissions on {s}: {s}", .{ tmp_path, @errorName(err) });
+                return err;
+            };
+        }
+    }
+
     file.writeStreamingAll(io, contents) catch |err| {
         std.log.warn("failed to write {s}: {s}", .{ tmp_path, @errorName(err) });
         return err;
     };
-    file.writeStreamingAll(io, "\n") catch |err| {
-        std.log.warn("failed to write newline to {s}: {s}", .{ tmp_path, @errorName(err) });
-        return err;
-    };
+    if (options.trailing_newline) {
+        file.writeStreamingAll(io, "\n") catch |err| {
+            std.log.warn("failed to write newline to {s}: {s}", .{ tmp_path, @errorName(err) });
+            return err;
+        };
+    }
     file.close(io);
     file_open = false;
 
@@ -141,13 +157,9 @@ pub fn writeAtomically(
         }
     }
 
-    if (options.restrict_permissions) {
-        if (comptime builtin.os.tag != .windows) {
-            cwd.setFilePermissions(io, tmp_path, @fromBackingInt(0o600), .{}) catch {};
-        }
-    }
-
-    std.Io.Dir.renameAbsolute(tmp_path, final_path, io) catch |err| {
+    // Relative to the working directory, so `dir_path` may be relative or
+    // absolute.
+    cwd.rename(tmp_path, cwd, final_path, io) catch |err| {
         std.log.warn("failed to rename {s} into place: {s}", .{ final_path, @errorName(err) });
         return err;
     };
@@ -311,6 +323,36 @@ test "writeAtomically appends a newline to empty contents" {
     const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
     defer std.testing.allocator.free(data);
     try std.testing.expectEqualStrings("\n", data);
+}
+
+test "writeAtomically writes contents exactly without the trailing newline" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try testDir(std.testing.allocator, &tmp, "atomic-raw");
+    defer std.testing.allocator.free(dir);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "key", "\x00\x01\x02", .{ .trailing_newline = false });
+
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "key" });
+    defer std.testing.allocator.free(path);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualSlices(u8, "\x00\x01\x02", data);
+}
+
+test "writeAtomically accepts a directory relative to the working directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(dir);
+
+    try writeAtomically(std.testing.io, std.testing.allocator, dir, "out.json", "{}", .{});
+
+    const data = try tmp.dir.readFileAlloc(std.testing.io, "out.json", std.testing.allocator, std.Io.Limit.limited(1024));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("{}\n", data);
 }
 
 test "writeAtomically fails when the target directory is missing" {
