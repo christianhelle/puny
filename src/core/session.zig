@@ -18,6 +18,16 @@ pub fn isWriteBlocked() bool {
     return write_blocked_global;
 }
 
+pub const PrdOpener = *const fn (io: std.Io, html_path: []const u8) void;
+
+var prd_opener_global: ?PrdOpener = null;
+
+/// Installs the callback that runs after save_prd writes plan.html. Left unset
+/// (the default) so tests and --oneshot runs never open a browser.
+pub fn setPrdOpener(opener: ?PrdOpener) void {
+    prd_opener_global = opener;
+}
+
 pub fn setSessionPaths(prd: []const u8, html: []const u8) void {
     prd_path_global = prd;
     html_path_global = html;
@@ -57,6 +67,7 @@ pub const save_prd_tool = Tool{
             try html_file.writeStreamingAll(io, html.string);
             const abs_md = try resolvePath(allocator, io, prd_path_global);
             const abs_html = try resolvePath(allocator, io, html_path_global);
+            if (prd_opener_global) |open_fn| open_fn(io, abs_html);
             return std.fmt.allocPrint(
                 allocator,
                 " - {s}\n - {s}",
@@ -534,6 +545,41 @@ test "save_prd_tool writes the plan files and reports their paths" {
     const html_content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, html, std.testing.allocator, std.Io.Limit.limited(1 << 20));
     defer std.testing.allocator.free(html_content);
     try std.testing.expectEqualStrings("<h1>Plan</h1>", html_content);
+}
+
+var captured_prd_html: [std.fs.max_path_bytes]u8 = undefined;
+var captured_prd_html_len: usize = 0;
+
+fn captureOpener(io: std.Io, html_path: []const u8) void {
+    _ = io;
+    @memcpy(captured_prd_html[0..html_path.len], html_path);
+    captured_prd_html_len = html_path.len;
+}
+
+test "save_prd_tool hands the absolute plan.html path to the prd opener" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer std.testing.allocator.free(base);
+    const prd = try std.fs.path.join(std.testing.allocator, &.{ base, "plan.md" });
+    defer std.testing.allocator.free(prd);
+    const html = try std.fs.path.join(std.testing.allocator, &.{ base, "plan.html" });
+    defer std.testing.allocator.free(html);
+    setSessionPaths(prd, html);
+    defer setSessionPaths("", "");
+    setPrdOpener(captureOpener);
+    defer setPrdOpener(null);
+    captured_prd_html_len = 0;
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const args = try std.json.parseFromSliceLeaky(std.json.Value, arena_state.allocator(), "{\"markdown\":\"# Plan\\n\",\"html\":\"<h1>Plan</h1>\"}", .{});
+
+    _ = try save_prd_tool.execute(arena_state.allocator(), std.testing.io, args);
+
+    const opened = captured_prd_html[0..captured_prd_html_len];
+    try std.testing.expect(std.fs.path.isAbsolute(opened));
+    try std.testing.expect(std.mem.endsWith(u8, opened, "plan.html"));
 }
 
 test "save_prd_tool resolves relative plan paths against the working directory" {
