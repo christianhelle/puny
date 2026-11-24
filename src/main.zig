@@ -21,6 +21,7 @@ const http_client = @import("providers/client.zig");
 const model_selection = @import("models/select.zig");
 const openai = @import("providers/openai.zig");
 const core_sess = @import("core/session.zig");
+const browser = @import("core/browser.zig");
 const crash = @import("core/crash.zig");
 const AgentMode = @import("core/mode.zig").AgentMode;
 const git_root = @import("core/git_root.zig");
@@ -371,6 +372,7 @@ fn run(init: std.process.Init) !u8 {
         .context_budget = &context_budget,
     };
 
+    if (!parsed.oneshot) core_sess.setPrdOpener(browser.open);
     var chat_session = session.ChatSession.init(ctx);
     crash.setPhase("chat turn");
     try chat_session.run();
