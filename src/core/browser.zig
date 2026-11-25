@@ -25,13 +25,22 @@ pub fn command(os: std.Target.Os.Tag, path: []const u8) Argv {
 /// swallowed: failing to open a browser must never break a session.
 pub fn open(io: std.Io, path: []const u8) void {
     const argv = command(builtin.os.tag, path);
-    _ = std.process.spawn(io, .{
+    const child = std.process.spawn(io, .{
         .argv = argv.slice(),
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .ignore,
         .create_no_window = true,
-    }) catch {};
+    }) catch return;
+    // Reap the launcher off the chat thread so it never lingers as a zombie
+    // and the session never blocks on a launcher that waits for the browser.
+    const reaper = std.Thread.spawn(.{}, reap, .{ io, child }) catch return;
+    reaper.detach();
+}
+
+fn reap(io: std.Io, child: std.process.Child) void {
+    var owned = child;
+    _ = owned.wait(io) catch {};
 }
 
 fn expectArgv(expected: []const []const u8, actual: Argv) !void {
