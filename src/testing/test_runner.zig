@@ -22,6 +22,9 @@ test "include core.utf8 tests" {
 test "include core.git_root tests" {
     _ = @import("../core/git_root.zig");
 }
+test "include core.browser tests" {
+    _ = @import("../core/browser.zig");
+}
 
 test "include review module tests" {
     _ = @import("../review/review.zig");

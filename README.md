@@ -1065,8 +1065,9 @@ In planning mode the model can only read files, list directories, search code,
 check git status/diff, and fetch web pages — plus use the `save_prd` tool to
 write the final PRD. When the user confirms readiness, the model calls
 `save_prd` with markdown and HTML content, which writes both `plan.md` and
-`plan.html` to the session folder. Planning mode state is persisted in
-`session.json` and restored when the session is resumed.
+`plan.html` to the session folder. After the PRD is saved, `plan.html` opens in
+the default browser (interactive sessions only, not `--oneshot`). Planning mode
+state is persisted in `session.json` and restored when the session is resumed.
 
 When the model asks a multiple choice question it calls the `ask_user` tool,
 which opens a picker like the provider, model, and reasoning effort pickers.
