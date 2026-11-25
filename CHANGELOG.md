@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Open the plan in the default browser once planning saves it ([#247](https://github.com/christianhelle/puny/pull/247)) ([@christianhelle](https://github.com/christianhelle/))
 - Harden bound loops and buffers, assertions, atomic saves ([#246](https://github.com/christianhelle/puny/pull/246)) ([@christianhelle](https://github.com/christianhelle/))
 
 
