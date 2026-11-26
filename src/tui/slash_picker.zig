@@ -541,6 +541,9 @@ const KeyReader = struct {
             if (events_read == 0) continue;
             if (record.EventType != win.KEY_EVENT) continue;
             if (record.Event.KeyEvent.bKeyDown == .FALSE) continue;
+            // A modifier pressed on its own is not a picker key, so it must
+            // not dismiss the overlay like an unknown key would.
+            if (win.isModifier(record.Event.KeyEvent.wVirtualKeyCode)) continue;
 
             switch (record.Event.KeyEvent.wVirtualKeyCode) {
                 win.VK_UP => return .up,
@@ -579,9 +582,28 @@ const windows_api = if (builtin.os.tag == .windows) struct {
     pub const VK_BACK: u16 = 0x08;
     pub const VK_TAB: u16 = 0x09;
     pub const VK_ESCAPE: u16 = 0x1B;
+    pub const VK_SHIFT: u16 = 0x10;
+    pub const VK_CONTROL: u16 = 0x11;
+    pub const VK_MENU: u16 = 0x12;
     pub const VK_UP: u16 = 0x26;
     pub const VK_DOWN: u16 = 0x28;
+    pub const VK_LWIN: u16 = 0x5B;
+    pub const VK_RWIN: u16 = 0x5C;
+    pub const VK_LSHIFT: u16 = 0xA0;
+    pub const VK_RSHIFT: u16 = 0xA1;
+    pub const VK_LCONTROL: u16 = 0xA2;
+    pub const VK_RCONTROL: u16 = 0xA3;
+    pub const VK_LMENU: u16 = 0xA4;
+    pub const VK_RMENU: u16 = 0xA5;
     pub const KEY_EVENT: u16 = 0x0001;
+
+    /// True for a key-down event that only reports a modifier being held.
+    pub fn isModifier(vk: u16) bool {
+        return switch (vk) {
+            VK_SHIFT, VK_CONTROL, VK_MENU, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN => true,
+            else => false,
+        };
+    }
 
     pub const KEY_EVENT_RECORD = extern struct {
         bKeyDown: BOOL,
@@ -858,6 +880,17 @@ test "decodeByte maps the picker's keys" {
     try std.testing.expectEqual(Key.escape, decodeByte(0x04));
     try std.testing.expectEqual(Key.unknown, decodeByte(0x01));
     try std.testing.expectEqual(@as(u8, 'a'), decodeByte('a').char);
+}
+
+test "modifier key-down events are not picker keys" {
+    if (builtin.os.tag == .windows) {
+        try std.testing.expect(windows_api.isModifier(windows_api.VK_SHIFT));
+        try std.testing.expect(windows_api.isModifier(windows_api.VK_CONTROL));
+        try std.testing.expect(windows_api.isModifier(windows_api.VK_MENU));
+        try std.testing.expect(windows_api.isModifier(windows_api.VK_LWIN));
+        try std.testing.expect(!windows_api.isModifier(windows_api.VK_UP));
+        try std.testing.expect(!windows_api.isModifier('A'));
+    }
 }
 
 const test_items = [_]completion.Item{
