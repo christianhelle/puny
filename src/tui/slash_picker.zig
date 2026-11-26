@@ -267,6 +267,8 @@ pub const Step = union(enum) {
     redraw,
     /// Accept the selection, submitting the prompt when `submit` is set.
     accept: struct { submit: bool },
+    /// Accept the typed filter as a literal command, submitting the prompt.
+    literal,
     /// Close the picker, leaving the prompt untouched.
     cancel,
 };
@@ -334,7 +336,10 @@ pub const State = struct {
                 return .{ .accept = .{ .submit = false } };
             },
             .enter => {
-                if (self.match_indices.items.len == 0) return .ignore;
+                // A typed command may name an alias or carry an argument that
+                // no entry matches, so Enter keeps the text as a literal
+                // command instead of trapping the user in the picker.
+                if (self.match_indices.items.len == 0) return .literal;
                 return .{ .accept = .{ .submit = true } };
             },
             .escape, .unknown => return .cancel,
@@ -367,6 +372,13 @@ fn runPicker(
             .cancel => {
                 try cleanup(writer, drawn);
                 return null;
+            },
+            .literal => {
+                // No entry matched, so the picker hands the typed command
+                // back as literal text for the prompt to submit.
+                const text = try std.fmt.allocPrint(arena, "/{s}", .{state.filter.items});
+                try cleanup(writer, drawn);
+                return Accepted{ .text = text, .submit = true };
             },
             .accept => |decision| {
                 const item = state.selectedItem(items) orelse {
@@ -846,7 +858,7 @@ test "esc cancels and navigation is inert when nothing matches" {
     try std.testing.expectEqual(@as(usize, 0), state.match_indices.items.len);
     try expectStep(.ignore, try state.apply(std.testing.allocator, &test_items, .up));
     try expectStep(.ignore, try state.apply(std.testing.allocator, &test_items, .tab));
-    try expectStep(.ignore, try state.apply(std.testing.allocator, &test_items, .enter));
+    try expectStep(.literal, try state.apply(std.testing.allocator, &test_items, .enter));
 }
 
 fn expectStep(expected: std.meta.Tag(Step), actual: Step) !void {
@@ -894,8 +906,24 @@ test "runPicker returns null when the user backs out" {
     try std.testing.expect(try runScripted(std.testing.allocator, &.{.{ .char = 'm' }}) == null);
 }
 
-test "runPicker never accepts when nothing matches" {
-    try std.testing.expect(try runScripted(std.testing.allocator, &.{ .{ .char = 'z' }, .{ .char = 'z' }, .enter }) == null);
+test "enter on a filter that matches nothing accepts the typed command" {
+    const accepted = (try runScripted(std.testing.allocator, &.{ .{ .char = 'z' }, .{ .char = 'z' }, .enter })).?;
+    defer std.testing.allocator.free(accepted.text);
+    try std.testing.expectEqualStrings("/zz", accepted.text);
+    try std.testing.expect(accepted.submit);
+}
+
+test "enter keeps a directly typed command and its argument usable" {
+    const keys = comptime blk: {
+        var out: [14]Key = undefined;
+        for ("model example", 0..) |byte, i| out[i] = .{ .char = byte };
+        out[out.len - 1] = .enter;
+        break :blk out;
+    };
+    const accepted = (try runScripted(std.testing.allocator, &keys)).?;
+    defer std.testing.allocator.free(accepted.text);
+    try std.testing.expectEqualStrings("/model example", accepted.text);
+    try std.testing.expect(accepted.submit);
 }
 
 test "an arrow key then tab accepts the highlighted entry" {
