@@ -25,6 +25,17 @@ const column_gap = 2;
 
 /// What the picker decided. `text` is owned by the picker's arena and copied
 /// by the caller if it needs to outlive the call.
+pub const Outcome = union(enum) {
+    /// There was nothing to offer, so the slash belongs in the prompt as text.
+    no_items,
+    /// The user backed out; the prompt keeps whatever it had.
+    cancelled,
+    /// The user accepted an entry.
+    accepted: Accepted,
+};
+
+/// What the picker decided. `text` is owned by the picker's arena and copied
+/// by the caller if it needs to outlive the call.
 pub const Accepted = struct {
     /// Text to insert into the prompt.
     text: []const u8,
@@ -347,36 +358,37 @@ fn runPicker(
 }
 
 /// Opens the picker for the editor's completion source, assuming the terminal
-/// is already in raw mode. Returns null when there is nothing to offer or the
-/// user backed out; the caller redraws the prompt in that case.
+/// is already in raw mode. `no_items` means the caller should treat the slash
+/// as literal text; `cancelled` means the prompt must be redrawn unchanged.
 pub fn open(
     allocator: std.mem.Allocator,
     io: std.Io,
     editor: *line_editor.LineEditor,
-) !?Accepted {
-    const source = editor.slash orelse return null;
+) !Outcome {
+    const source = editor.slash orelse return .no_items;
 
     var scratch_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer scratch_state.deinit();
     const scratch = scratch_state.allocator();
 
-    const items = source.items(scratch) catch return null;
-    if (items.len == 0) return null;
+    const items = source.items(scratch) catch return .no_items;
+    if (items.len == 0) return .no_items;
 
     // The picker draws below the terminal cursor, so start it under the last
     // wrapped row instead of over the text after a mid-line cursor.
     try editor.parkAtInputEnd();
 
-    if (scripted()) |s| {
+    const accepted = if (scripted()) |s| blk: {
         var out = std.Io.Writer.Allocating.init(scratch);
-        return runPicker(allocator, &out.writer, s, items, screenWidth());
-    }
+        break :blk try runPicker(allocator, &out.writer, s, items, screenWidth());
+    } else blk: {
+        var stdout_buffer: [4096]u8 = undefined;
+        var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+        var reader = KeyReader{};
+        break :blk try runPicker(allocator, &stdout_file_writer.interface, &reader, items, screenWidth());
+    };
 
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-
-    var reader = KeyReader{};
-    return runPicker(allocator, &stdout_file_writer.interface, &reader, items, screenWidth());
+    return if (accepted) |result| .{ .accepted = result } else .cancelled;
 }
 
 /// Columns the picker may draw in.
@@ -910,14 +922,18 @@ test "open scripts its keys, filters and inserts the accepted command" {
     script = &s;
     defer script = null;
 
-    const accepted = (try open(allocator, std.testing.io, &editor)).?;
-    try std.testing.expectEqualStrings("/model ", accepted.text);
-    try std.testing.expect(!accepted.submit);
-    // The picker leaves the prompt row parked for the caller's redraw.
+    switch (try open(allocator, std.testing.io, &editor)) {
+        .accepted => |result| {
+            try std.testing.expectEqualStrings("/model ", result.text);
+            try std.testing.expect(!result.submit);
+        },
+        else => return error.TestExpectedAccept,
+    }
+    // The picker never touches the prompt itself.
     try std.testing.expectEqual(@as(usize, 0), editor.line_alloc.written().len);
 }
 
-test "open returns null when the source has nothing to offer" {
+test "open reports no items when the source is missing or empty" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const allocator = arena_state.allocator();
@@ -928,11 +944,33 @@ test "open returns null when the source has nothing to offer" {
     defer out.deinit();
 
     var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
-    try std.testing.expect(try open(allocator, std.testing.io, &editor) == null);
+    try std.testing.expectEqual(@as(std.meta.Tag(Outcome), .no_items), std.meta.activeTag(try open(allocator, std.testing.io, &editor)));
 
     const empty = completion.Source{ .ctx = null, .list = noItems };
     editor.slash = &empty;
-    try std.testing.expect(try open(allocator, std.testing.io, &editor) == null);
+    try std.testing.expectEqual(@as(std.meta.Tag(Outcome), .no_items), std.meta.activeTag(try open(allocator, std.testing.io, &editor)));
+}
+
+test "open reports a cancel without touching the prompt" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    const source = completion.Source{ .ctx = null, .list = fixedItems };
+    editor.slash = &source;
+
+    var s = Script{ .keys = &.{.{ .char = 'm' }, .escape} };
+    script = &s;
+    defer script = null;
+
+    try std.testing.expectEqual(Outcome.cancelled, try open(allocator, std.testing.io, &editor));
+    try std.testing.expectEqual(@as(usize, 0), editor.line_alloc.written().len);
 }
 
 fn fixedItems(_: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]completion.Item {
