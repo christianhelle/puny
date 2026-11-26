@@ -326,6 +326,34 @@ test "readLineFrom submits when the picker accepts with enter" {
     try std.testing.expectEqualStrings("/quit", result.submitted);
 }
 
+test "readLineFrom submits a typed command the picker does not match" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    const source = slash_picker_completion.Source{ .ctx = null, .list = twoCommands };
+    editor.slash = &source;
+
+    const typed_keys = comptime blk: {
+        var typed: [14]slash_picker.Key = undefined;
+        for ("model example", 0..) |byte, i| typed[i] = .{ .char = byte };
+        typed[typed.len - 1] = .enter;
+        break :blk typed;
+    };
+    var s = slash_picker.Script{ .keys = &typed_keys };
+    slash_picker.script = &s;
+    defer slash_picker.script = null;
+
+    var input_source: TestSource = .{ .events = &input("/") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &input_source, false);
+
+    try std.testing.expectEqualStrings("/model example", result.submitted);
+}
+
 test "readLineFrom leaves the prompt empty when the picker is dismissed" {
     const allocator = std.testing.allocator;
     var line_alloc: std.Io.Writer.Allocating = .init(allocator);
