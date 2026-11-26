@@ -227,7 +227,8 @@ test "the prompt starts from held text, shows it, and lets it be edited" {
     try std.testing.expectEqualStrings("draf", line_alloc.written());
 }
 
-test "the prompt starts empty with no held text" {    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+test "the prompt starts empty with no held text" {
+    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer line_alloc.deinit();
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();

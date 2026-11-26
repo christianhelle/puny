@@ -718,8 +718,6 @@ test "render never writes a row wider than the terminal" {
     }
 }
 
-
-
 /// Index just past the CSI sequence starting at `start`.
 fn skipEscape(text: []const u8, start: usize) usize {
     var i = start + 1;
@@ -988,7 +986,7 @@ test "open reports a cancel without touching the prompt" {
     const source = completion.Source{ .ctx = null, .list = fixedItems };
     editor.slash = &source;
 
-    var s = Script{ .keys = &.{.{ .char = 'm' }, .escape} };
+    var s = Script{ .keys = &.{ .{ .char = 'm' }, .escape } };
     script = &s;
     defer script = null;
 

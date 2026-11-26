@@ -316,7 +316,7 @@ test "readLineFrom submits when the picker accepts with enter" {
     const source = slash_picker_completion.Source{ .ctx = null, .list = twoCommands };
     editor.slash = &source;
 
-    var s = slash_picker.Script{ .keys = &.{.{ .char = 'q' }, .enter} };
+    var s = slash_picker.Script{ .keys = &.{ .{ .char = 'q' }, .enter } };
     slash_picker.script = &s;
     defer slash_picker.script = null;
 
