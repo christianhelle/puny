@@ -56,6 +56,23 @@ fn eqlIgnoreCase(a: []const u8, b: []const u8) bool {
     return std.ascii.eqlIgnoreCase(a, b);
 }
 
+/// Command tokens that exist only as convenience spellings of another token,
+/// so autocomplete lists the canonical name once instead of both.
+pub fn isAlias(token: []const u8) bool {
+    const aliases = [_][]const u8{ "/exit", "/new" };
+    for (aliases) |alias| {
+        if (eqlIgnoreCase(token, alias)) return true;
+    }
+    return false;
+}
+
+test "isAlias knows the convenience spellings" {
+    try std.testing.expect(isAlias("/exit"));
+    try std.testing.expect(isAlias("/new"));
+    try std.testing.expect(!isAlias("/quit"));
+    try std.testing.expect(!isAlias("/reset"));
+}
+
 pub fn parse(user_message: []const u8) Command {
     if (eqlIgnoreCase(user_message, "/quit") or eqlIgnoreCase(user_message, "/exit"))
         return .quit;
