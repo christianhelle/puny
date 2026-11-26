@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const cancel = @import("../core/cancel.zig");
 const common = @import("input/common.zig");
+const completion = @import("completion.zig");
 const line_editor = @import("input/line_editor.zig");
 const posix = @import("input/posix.zig");
 const prompt_history = @import("../prompts/history.zig");
@@ -11,6 +12,13 @@ const windows_impl = @import("input/windows.zig");
 
 pub const ReadLineResult = common.ReadLineResult;
 
+/// Everything the interactive chat prompt needs beyond the terminal itself.
+pub const ReadLineOptions = struct {
+    /// Where `/` completion gets its commands and skills. Null keeps a slash
+    /// literal, which is what plain prompts need.
+    slash: ?*const completion.Source = null,
+};
+
 pub fn readLine(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -19,6 +27,7 @@ pub fn readLine(
     stdin_buffer: []u8,
     history: ?*prompt_history.History,
     initial_text: []const u8,
+    options: ReadLineOptions,
 ) !ReadLineResult {
     line_alloc.clearRetainingCapacity();
     if (history) |h| h.resetNavigation();
@@ -34,7 +43,7 @@ pub fn readLine(
     };
     defer cancel.setRawMode(false) catch {};
 
-    var editor = try promptEditor(line_alloc, stdout_writer, history, terminal.terminalWidth(), initial_text);
+    var editor = try promptEditor(line_alloc, stdout_writer, history, terminal.terminalWidth(), initial_text, options.slash);
     const result = if (builtin.os.tag == .windows)
         try windows_impl.readLineWindows(allocator, io, &editor)
     else
@@ -50,8 +59,10 @@ fn promptEditor(
     history: ?*prompt_history.History,
     width: ?usize,
     initial_text: []const u8,
+    slash: ?*const completion.Source,
 ) !line_editor.LineEditor {
     var editor = line_editor.LineEditor.init(line_alloc, stdout_writer, history, width);
+    editor.slash = slash;
     if (initial_text.len > 0) try editor.appendSlice(initial_text);
     return editor;
 }
@@ -179,13 +190,34 @@ fn readLineSimpleCanonical(
     return result;
 }
 
+test "readLine hands the slash source to the chat prompt only" {
+    // The plain prompts (API key, URL, free-text answer) must keep a literal
+    // slash, so only the chat editor may carry a completion source.
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    const source = completion.Source{ .ctx = null, .list = noItems };
+    const editor = try promptEditor(&line_alloc, &out.writer, null, 80, "", &source);
+    try std.testing.expect(editor.slash != null);
+
+    const plain = try promptEditor(&line_alloc, &out.writer, null, 80, "", null);
+    try std.testing.expect(plain.slash == null);
+}
+
+fn noItems(_: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]completion.Item {
+    return allocator.alloc(completion.Item, 0);
+}
+
 test "the prompt starts from held text, shows it, and lets it be edited" {
     var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer line_alloc.deinit();
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
 
-    var editor = try promptEditor(&line_alloc, &out.writer, null, 80, "draft");
+    var editor = try promptEditor(&line_alloc, &out.writer, null, 80, "draft", null);
 
     try std.testing.expectEqualStrings("draft", line_alloc.written());
     try std.testing.expectEqual(@as(usize, 5), editor.cursor);
@@ -195,13 +227,12 @@ test "the prompt starts from held text, shows it, and lets it be edited" {
     try std.testing.expectEqualStrings("draf", line_alloc.written());
 }
 
-test "the prompt starts empty with no held text" {
-    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+test "the prompt starts empty with no held text" {    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer line_alloc.deinit();
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
 
-    const editor = try promptEditor(&line_alloc, &out.writer, null, 80, "");
+    const editor = try promptEditor(&line_alloc, &out.writer, null, 80, "", null);
 
     try std.testing.expectEqualStrings("", line_alloc.written());
     try std.testing.expectEqual(@as(usize, 0), editor.cursor);

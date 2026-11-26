@@ -12,6 +12,7 @@ const stats = @import("stats.zig");
 const compact = @import("compact.zig");
 const pricing = @import("pricing.zig");
 const skills = @import("../skills/skills.zig");
+const completion = @import("../tui/completion.zig");
 
 const ModelProvider = provider.ModelProvider;
 const DebugLog = debug_log.DebugLog;
@@ -56,7 +57,9 @@ pub const ChatLoopContext = struct {
     chat_log: ?*ChatLog,
     skill_registry: *skills.Registry,
     context_budget: *compact.ContextBudget,
-
+    /// Backs the chat prompt's `/` completion list. Owned by the caller and
+    /// outliving every prompt, because the editor holds a pointer into it.
+    slash: *completion.Provider,
     /// The tools offered to the model in the current mode.
     pub fn activeToolDefinitions(self: *const ChatLoopContext) []const openai.ToolDefinition {
         return switch (self.mode.*) {

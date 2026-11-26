@@ -84,6 +84,54 @@ fn skillBefore(_: void, a: Item, b: Item) bool {
     return order == .lt;
 }
 
+/// Hands a registry to a prompt as a `Source`. One `Provider` backs one
+/// prompt: the editor holds a pointer to it, so it has to outlive the call
+/// that made it — `ChatSession.run` keeps one for the whole session.
+pub const Provider = struct {
+    registry: ?*skills.Registry,
+
+    pub fn init(registry: ?*skills.Registry) Provider {
+        return .{ .registry = registry };
+    }
+
+    /// The `Source` an editor stores, backed by this provider.
+    pub fn source(self: *Provider) Source {
+        return .{ .ctx = self, .list = listFromContext };
+    }
+
+    fn listFromContext(ctx: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]Item {
+        const self: *Provider = @ptrCast(@alignCast(ctx.?));
+        return buildItems(allocator, self.registry);
+    }
+};
+
+test "a provider builds the same list its registry describes" {
+    var registry = skills.Registry.init(std.testing.allocator);
+    defer registry.deinit();
+    try addSkill(&registry, "tdd", "Test first");
+
+    var provider = Provider.init(&registry);
+    const source = provider.source();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const items = try source.items(arena_state.allocator());
+
+    try std.testing.expectEqual(catalog.command_completions.len + 1, items.len);
+    try std.testing.expectEqualStrings("/tdd", items[items.len - 1].name);
+    try std.testing.expectEqualStrings("Test first", items[items.len - 1].description);
+}
+
+test "a provider without a registry lists commands only" {
+    var provider = Provider.init(null);
+    const source = provider.source();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const items = try source.items(arena_state.allocator());
+    try std.testing.expectEqual(catalog.command_completions.len, items.len);
+}
+
 test "matches is a case-insensitive substring search on the name" {
     const item = Item{ .name = "/model", .hint = "[id]", .description = "Switch model", .kind = .command, .takes_arg = true };
     try std.testing.expect(matches("mod", item));
