@@ -1,4 +1,5 @@
 const std = @import("std");
+const completion = @import("../completion.zig");
 const markdown = @import("../markdown/markdown.zig");
 const prompt_history = @import("../../prompts/history.zig");
 const terminal = @import("../terminal.zig");
@@ -27,6 +28,9 @@ pub const LineEditor = struct {
     /// When false, `@` is inserted literally instead of opening the file
     /// picker, for plain prompts such as a URL or an API key.
     mentions_enabled: bool = true,
+    /// Where the `/` completion list comes from. Null on plain prompts, where
+    /// a leading slash is data (a URL path, an API key) rather than a command.
+    slash: ?*const completion.Source = null,
     /// Text in front of the input, redrawn with it. Empty for plain prompts
     /// such as a URL or an API key.
     prompt: []const u8,
@@ -436,6 +440,13 @@ pub fn rowsNeeded(start_col: usize, width: usize, text: []const u8) RowsInfo {
         i += cp.len;
     }
     return .{ .rows = rows, .ends_at_edge = col == width, .col = col };
+}
+
+/// Returns true when typing `byte` at the current prompt should open the slash
+/// completion picker: only a `/` on an otherwise empty prompt, because
+/// `parse` reads a slash as a command only at the very start of the line.
+pub fn isSlashTrigger(byte: u8, line: []const u8) bool {
+    return byte == '/' and line.len == 0;
 }
 
 /// Writes `text` to `writer`, wrapping attached-file mentions in the
@@ -909,6 +920,34 @@ test "writeMentionHighlighted handles a trailing at sign" {
     defer out.deinit();
     try writeMentionHighlighted(&out.writer, "@");
     try std.testing.expectEqualStrings("\x1b[32m@\x1b[0m", out.written());
+}
+
+test "editor offers slash completion only when a source is attached" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = LineEditor.init(&line_alloc, &out.writer, null, 80);
+    try std.testing.expect(editor.slash == null);
+
+    const source = completion.Source{ .ctx = null, .list = listWorks };
+    editor.slash = &source;
+    try std.testing.expect(editor.slash != null);
+}
+
+fn listWorks(_: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]completion.Item {
+    return allocator.alloc(completion.Item, 0);
+}
+
+test "isSlashTrigger accepts only a bare slash on an empty prompt" {
+    try std.testing.expect(isSlashTrigger('/', ""));
+    // A slash anywhere after the first character is ordinary text, because
+    // `parse` only reads a leading slash as a command.
+    try std.testing.expect(!isSlashTrigger('/', "a"));
+    try std.testing.expect(!isSlashTrigger('/', "/"));
+    try std.testing.expect(!isSlashTrigger('m', ""));
 }
 
 test "editor methods work when called out of line" {
