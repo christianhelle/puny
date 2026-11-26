@@ -40,6 +40,7 @@ const diff_view = @import("chat/diff_view.zig");
 const sigint = @import("core/sigint.zig");
 const instructions = @import("agents/instructions.zig");
 const skills = @import("skills/skills.zig");
+const completion = @import("tui/completion.zig");
 const tools = @import("tools/root.zig");
 const branch_review = @import("review/review.zig");
 const welcome = @import("tui/welcome.zig");
@@ -313,6 +314,10 @@ fn run(init: std.process.Init) !u8 {
     if (!parsed.no_skills) try scanSkills(arena, init.io, init.environ_map, &skill_registry);
     skills.setGlobalRegistry(&skill_registry);
 
+    // Backs the chat prompt's `/` completion list. Lives here so it outlives
+    // every prompt the session reads.
+    var slash_provider = completion.Provider.init(&skill_registry);
+
     if (!session_restored) {
         try session.appendBaseContext(
             messages_arena,
@@ -370,6 +375,7 @@ fn run(init: std.process.Init) !u8 {
         .chat_log = if (chat_log) |*log| log else null,
         .skill_registry = &skill_registry,
         .context_budget = &context_budget,
+        .slash = &slash_provider,
     };
 
     if (!parsed.oneshot) core_sess.setPrdOpener(browser.open);
