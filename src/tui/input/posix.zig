@@ -264,6 +264,14 @@ test "readLineFrom ignores unbound control bytes and inserts a literal @ without
     try expectReadLine(&input("@a\x07\r"), false, .submitted, "@a");
 }
 
+test "readLineFrom keeps a slash literal when no completion source is attached" {
+    try expectReadLine(&input("/help\r"), false, .submitted, "/help");
+}
+
+test "readLineFrom keeps a mid-prompt slash literal" {
+    try expectReadLine(&input("a/b\r"), false, .submitted, "a/b");
+}
+
 test "readLineFrom applies CSI arrow keys" {
     try expectReadLine(&input("ac\x1b[Db\r"), false, .submitted, "abc");
     try expectReadLine(&input("one two\x1b[1;5DX\r"), false, .submitted, "one Xtwo");

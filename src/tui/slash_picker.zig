@@ -367,6 +367,11 @@ pub fn open(
     // wrapped row instead of over the text after a mid-line cursor.
     try editor.parkAtInputEnd();
 
+    if (scripted()) |s| {
+        var out = std.Io.Writer.Allocating.init(scratch);
+        return runPicker(allocator, &out.writer, s, items, screenWidth());
+    }
+
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
 
@@ -864,4 +869,78 @@ test "an arrow key then tab accepts the highlighted entry" {
     const accepted = (try runScripted(std.testing.allocator, &.{ .down, .down, .tab })).?;
     defer std.testing.allocator.free(accepted.text);
     try std.testing.expectEqualStrings("/headroom", accepted.text);
+}
+
+/// Keys a test presses in place of the keyboard, so tests can drive the
+/// picker through `open` as well as `runPicker`. Mirrors
+/// `list_picker.Script`.
+pub const Script = struct {
+    keys: []const Key,
+    next: usize = 0,
+
+    fn read(self: *Script) Key {
+        if (self.next >= self.keys.len) return .escape;
+        defer self.next += 1;
+        return self.keys[self.next];
+    }
+};
+
+/// The script the picker follows in tests; see `Script`.
+pub var script: ?*Script = null;
+
+fn scripted() ?*Script {
+    return if (builtin.is_test) script else null;
+}
+
+test "open scripts its keys, filters and inserts the accepted command" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    const source = completion.Source{ .ctx = null, .list = fixedItems };
+    editor.slash = &source;
+
+    var s = Script{ .keys = &.{ .{ .char = 'm' }, .{ .char = 'o' }, .tab } };
+    script = &s;
+    defer script = null;
+
+    const accepted = (try open(allocator, std.testing.io, &editor)).?;
+    try std.testing.expectEqualStrings("/model ", accepted.text);
+    try std.testing.expect(!accepted.submit);
+    // The picker leaves the prompt row parked for the caller's redraw.
+    try std.testing.expectEqual(@as(usize, 0), editor.line_alloc.written().len);
+}
+
+test "open returns null when the source has nothing to offer" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    var line_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    try std.testing.expect(try open(allocator, std.testing.io, &editor) == null);
+
+    const empty = completion.Source{ .ctx = null, .list = noItems };
+    editor.slash = &empty;
+    try std.testing.expect(try open(allocator, std.testing.io, &editor) == null);
+}
+
+fn fixedItems(_: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]completion.Item {
+    const items = try allocator.alloc(completion.Item, test_items.len);
+    @memcpy(items, &test_items);
+    return items;
+}
+
+fn noItems(_: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]completion.Item {
+    return allocator.alloc(completion.Item, 0);
 }
