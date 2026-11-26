@@ -467,85 +467,64 @@ fn screenWidth() usize {
     return terminal.terminalWidth() orelse 80;
 }
 
+/// Reads one byte if it arrives within the escape-sequence window. Used to
+/// probe an escape without consuming the keys that follow it.
+fn readWithPoll(buffer: *[1]u8) bool {
+    const posix = std.posix;
+    var pfd = [1]posix.pollfd{
+        .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
+    };
+    const rc = posix.poll(&pfd, 30) catch return false;
+    if (rc == 0) return false;
+    if (pfd[0].revents & posix.POLL.IN == 0) return false;
+    const n = posix.read(0, buffer) catch return false;
+    return n > 0;
+}
+
 /// Reads keys straight from the terminal, interpreting the same escape
 /// sequences as `file_picker.KeyReader` plus Tab.
 const KeyReader = struct {
-    pending: [8]u8 = undefined,
-    pending_len: usize = 0,
-
     fn read(self: *KeyReader) Key {
         return if (builtin.os.tag == .windows) self.readWindows() else self.readPosix();
     }
 
     fn readPosix(self: *KeyReader) Key {
+        _ = self;
         const posix = std.posix;
-        var buf: [8]u8 = undefined;
-        var buf_len: usize = 0;
+        var byte: [1]u8 = undefined;
+        const n = posix.read(0, &byte) catch return .unknown;
+        if (n == 0) return .unknown;
+        if (byte[0] != 0x1b) return decodeByte(byte[0]);
 
-        if (self.pending_len > 0) {
-            const copy_len = @min(self.pending_len, buf.len);
-            @memcpy(buf[0..copy_len], self.pending[0..copy_len]);
-            buf_len = copy_len;
-            if (copy_len < self.pending_len) {
-                @memcpy(self.pending[0 .. self.pending_len - copy_len], self.pending[copy_len..self.pending_len]);
+        // An escape may lead an arrow sequence. Read it one byte at a time so
+        // keys typed after the picker closes stay in the terminal buffer for
+        // the prompt instead of being consumed and dropped here.
+        var second: [1]u8 = undefined;
+        if (!readWithPoll(&second)) return .escape;
+        if (second[0] != '[') {
+            // SS3 is not a picker key, but swallow its final byte so it
+            // cannot leak into the prompt as literal text.
+            if (second[0] == 'O') {
+                var third: [1]u8 = undefined;
+                _ = readWithPoll(&third);
             }
-            self.pending_len -= copy_len;
-        } else {
-            const n = posix.read(0, buf[0..]) catch return .unknown;
-            if (n == 0) return .unknown;
-            buf_len = n;
+            return .escape;
         }
 
-        if (buf[0] == 0x1b) {
-            var seq: [8]u8 = undefined;
-            var seq_len: usize = 0;
-            const copy_len = @min(buf_len, seq.len);
-            @memcpy(seq[0..copy_len], buf[0..copy_len]);
-            seq_len = copy_len;
-
-            while (seq_len < 8) {
-                var pfd = [1]posix.pollfd{
-                    .{ .fd = 0, .events = posix.POLL.IN, .revents = undefined },
+        // Consume the CSI parameter and intermediate bytes up to the final
+        // byte; only the arrow keys are mapped, as before.
+        while (true) {
+            var next: [1]u8 = undefined;
+            if (!readWithPoll(&next)) return .unknown;
+            if (next[0] >= 0x40 and next[0] <= 0x7e) {
+                return switch (next[0]) {
+                    'A' => .up,
+                    'B' => .down,
+                    else => .unknown,
                 };
-                const rc = posix.poll(&pfd, 30) catch break;
-                if (rc == 0) break;
-                const m = posix.read(0, seq[seq_len..][0..1]) catch break;
-                if (m == 0) break;
-                seq_len += 1;
             }
-
-            var consumed: usize = 1;
-            var result: Key = .escape;
-            if (seq_len == 1) {
-                result = .escape;
-            } else if (seq_len >= 2 and seq[1] == '[') {
-                consumed = 2;
-                if (seq_len >= 3) {
-                    consumed = 3;
-                    result = switch (seq[2]) {
-                        'A' => .up,
-                        'B' => .down,
-                        else => .unknown,
-                    };
-                } else {
-                    result = .unknown;
-                }
-            }
-
-            if (seq_len > consumed) {
-                const remaining = seq_len - consumed;
-                @memcpy(self.pending[0..remaining], seq[consumed..seq_len]);
-                self.pending_len = remaining;
-            }
-            return result;
+            if (next[0] < 0x20 or next[0] > 0x3f) return .unknown;
         }
-
-        if (buf_len > 1) {
-            @memcpy(self.pending[0 .. buf_len - 1], buf[1..buf_len]);
-            self.pending_len = buf_len - 1;
-        }
-
-        return decodeByte(buf[0]);
     }
 
     fn readWindows(self: *KeyReader) Key {
