@@ -295,6 +295,9 @@ test "include tui.input.common tests" {
 test "include tui.completion tests" {
     _ = @import("../tui/completion.zig");
 }
+test "include tui.slash_picker tests" {
+    _ = @import("../tui/slash_picker.zig");
+}
 test "include tui.list_picker tests" {
     _ = @import("../tui/list_picker.zig");
 }
