@@ -29,6 +29,7 @@ pub fn showHelp(writer: *std.Io.Writer) !void {
     try printCommand(writer, "@path", "Attach a file to the prompt");
     try writer.print("\n{s}Tip:{s} Keep typing while Puny works and press Enter to queue a message.\n", .{ ansi.yellow, ansi.reset });
     try writer.print("{s}Tip:{s} Type @ to search and attach files to your prompt.\n", .{ ansi.yellow, ansi.reset });
+    try writer.print("{s}Tip:{s} Type / to pick a command or skill, Tab to fill it in, Enter to run it.\n", .{ ansi.yellow, ansi.reset });
     try writer.flush();
 }
 
@@ -60,6 +61,7 @@ test "showHelp lists all commands" {
     try std.testing.expect(std.mem.indexOf(u8, text, "Available commands:") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Exit Puny") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Type @ to search and attach files") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Type / to pick a command or skill") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "press Enter to queue a message") != null);
 }
 
@@ -124,5 +126,5 @@ test "showHelp starts one blank line below the prompt and ends its own line" {
 
     const text = output.written();
     try std.testing.expect(std.mem.startsWith(u8, text, "\n" ++ ansi.yellow ++ "Available commands:"));
-    try std.testing.expect(std.mem.endsWith(u8, text, "prompt.\n"));
+    try std.testing.expect(std.mem.endsWith(u8, text, "run it.\n"));
 }
