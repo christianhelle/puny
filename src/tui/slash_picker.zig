@@ -69,10 +69,20 @@ pub fn collectMatches(
 }
 
 /// Scrolls the visible window just enough to keep `selected` on screen.
-fn scrollOffset(selected: usize, offset: usize) usize {
+fn scrollOffset(selected: usize, offset: usize, window: usize) usize {
     if (selected < offset) return selected;
-    if (selected >= offset + max_visible) return selected - max_visible + 1;
+    if (selected >= offset + window) return selected - window + 1;
     return offset;
+}
+
+/// List rows the picker may draw. The prompt takes the row above, the header
+/// and the trailing cursor row take one each, so the rest is the list. With
+/// no known terminal height nothing else bounds the overlay, so keep the
+/// fixed cap.
+fn visibleRows(height: ?usize) usize {
+    const rows = height orelse return max_visible;
+    if (rows <= 3) return 1;
+    return @min(max_visible, rows - 3);
 }
 
 /// Width of the name column: the widest `name` plus `hint` across the whole
@@ -199,6 +209,7 @@ fn render(
     offset: usize,
     drawn: *usize,
     width: usize,
+    rows: usize,
 ) !void {
     if (drawn.* > 0) {
         // Return to the first picker row and erase the previous list so a
@@ -225,7 +236,7 @@ fn render(
     }
 
     const name_column = nameColumnWidth(items);
-    const visible = @min(max_visible, match_indices.len - offset);
+    const visible = @min(rows, match_indices.len - offset);
     for (0..visible) |i| {
         const idx = offset + i;
         try renderRow(writer, items[match_indices[idx]], idx == selected, name_column, width);
@@ -300,6 +311,9 @@ pub const State = struct {
     filter: std.ArrayList(u8) = .empty,
     selected: usize = 0,
     offset: usize = 0,
+    /// List rows the picker may draw; set from the terminal height before
+    /// the first render.
+    window: usize = max_visible,
     match_indices: std.ArrayList(usize) = .empty,
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
@@ -326,13 +340,13 @@ pub const State = struct {
             .up => {
                 if (self.match_indices.items.len == 0) return .ignore;
                 self.selected = if (self.selected == 0) self.match_indices.items.len - 1 else self.selected - 1;
-                self.offset = scrollOffset(self.selected, self.offset);
+                self.offset = scrollOffset(self.selected, self.offset, self.window);
                 return .redraw;
             },
             .down => {
                 if (self.match_indices.items.len == 0) return .ignore;
                 self.selected = if (self.selected + 1 < self.match_indices.items.len) self.selected + 1 else 0;
-                self.offset = scrollOffset(self.selected, self.offset);
+                self.offset = scrollOffset(self.selected, self.offset, self.window);
                 return .redraw;
             },
             .char => |byte| {
@@ -380,16 +394,17 @@ fn runPicker(
 ) !?Accepted {
     var state = try State.init(arena, items);
     defer state.deinit(arena);
+    state.window = visibleRows(terminal.terminalHeight());
 
     var drawn: usize = 0;
-    try render(writer, state.filter.items, items, state.match_indices.items, state.selected, state.offset, &drawn, width);
+    try render(writer, state.filter.items, items, state.match_indices.items, state.selected, state.offset, &drawn, width, state.window);
 
     // Runs until the user accepts with Tab or Enter, or backs out with Esc,
     // Ctrl+C, Ctrl+D, or by backspacing past the slash that opened it.
     while (true) {
         switch (try state.apply(arena, items, keys.read())) {
             .ignore => {},
-            .redraw => try render(writer, state.filter.items, items, state.match_indices.items, state.selected, state.offset, &drawn, width),
+            .redraw => try render(writer, state.filter.items, items, state.match_indices.items, state.selected, state.offset, &drawn, width, state.window),
             .cancel => {
                 try cleanup(writer, drawn);
                 return null;
@@ -654,11 +669,20 @@ test "matching filters by name and keeps catalog order" {
 }
 
 test "scrollOffset keeps the selection inside the visible window" {
-    try std.testing.expectEqual(@as(usize, 5), scrollOffset(5, 5));
-    try std.testing.expectEqual(@as(usize, 3), scrollOffset(3, 5));
-    try std.testing.expectEqual(@as(usize, 6), scrollOffset(25, 5));
-    try std.testing.expectEqual(@as(usize, 1), scrollOffset(max_visible, 0));
-    try std.testing.expectEqual(@as(usize, 0), scrollOffset(max_visible - 1, 0));
+    try std.testing.expectEqual(@as(usize, 5), scrollOffset(5, 5, max_visible));
+    try std.testing.expectEqual(@as(usize, 3), scrollOffset(3, 5, max_visible));
+    try std.testing.expectEqual(@as(usize, 6), scrollOffset(25, 5, max_visible));
+    try std.testing.expectEqual(@as(usize, 1), scrollOffset(max_visible, 0, max_visible));
+    try std.testing.expectEqual(@as(usize, 0), scrollOffset(max_visible - 1, 0, max_visible));
+}
+
+test "visibleRows reserves the prompt, header and trailing cursor row" {
+    // Without a height the fixed cap is the only bound.
+    try std.testing.expectEqual(@as(usize, max_visible), visibleRows(null));
+    try std.testing.expectEqual(@as(usize, 7), visibleRows(10));
+    try std.testing.expectEqual(@as(usize, 1), visibleRows(4));
+    try std.testing.expectEqual(@as(usize, 1), visibleRows(1));
+    try std.testing.expectEqual(@as(usize, max_visible), visibleRows(1000));
 }
 
 test "render shows the filter header, the match count and the highlighted row" {
@@ -671,7 +695,7 @@ test "render shows the filter header, the match count and the highlighted row" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var drawn: usize = 0;
-    try render(&out.writer, "mod", &items, &indices, 0, 0, &drawn, 80);
+    try render(&out.writer, "mod", &items, &indices, 0, 0, &drawn, 80, max_visible);
 
     const text = out.written();
     try std.testing.expect(std.mem.startsWith(u8, text, "\r\n"));
@@ -689,7 +713,7 @@ test "render shows the type-to-filter hint for an empty query" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var drawn: usize = 0;
-    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 80);
+    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 80, max_visible);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "type to filter") != null);
     try std.testing.expectEqual(@as(usize, 2), drawn);
 }
@@ -699,7 +723,7 @@ test "render reports no matches and tracks the row count" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var drawn: usize = 0;
-    try render(&out.writer, "zzz", &.{}, &indices, 0, 0, &drawn, 80);
+    try render(&out.writer, "zzz", &.{}, &indices, 0, 0, &drawn, 80, max_visible);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "no matches") != null);
     try std.testing.expectEqual(@as(usize, 2), drawn);
 }
@@ -712,7 +736,7 @@ test "render redraws in place once something was drawn" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var drawn: usize = 3;
-    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 80);
+    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 80, max_visible);
     try std.testing.expect(std.mem.startsWith(u8, out.written(), "\x1b[3A\x1b[J"));
 }
 
@@ -743,7 +767,7 @@ test "render never writes a row wider than the terminal" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var drawn: usize = 0;
-    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 30);
+    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 30, max_visible);
 
     var rows = std.mem.splitScalar(u8, out.written(), '\n');
     while (rows.next()) |row| {
@@ -760,7 +784,7 @@ test "render clips a long header to one physical row" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var drawn: usize = 0;
-    try render(&out.writer, &query, &items, &indices, 0, 0, &drawn, 20);
+    try render(&out.writer, &query, &items, &indices, 0, 0, &drawn, 20, max_visible);
 
     const text = out.written();
     const start = (std.mem.indexOf(u8, text, "\r\n") orelse 0) + 2;
@@ -769,6 +793,20 @@ test "render clips a long header to one physical row" {
     try std.testing.expect(visibleWidth(header) <= 20);
     try std.testing.expect(std.mem.indexOf(u8, header, "\u{2026}") != null);
     try std.testing.expectEqual(@as(usize, 2), drawn);
+}
+
+test "render caps the list at the rows left below the prompt" {
+    const indices = [_]usize{ 0, 1, 2 };
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var drawn: usize = 0;
+    try render(&out.writer, "", &test_items, &indices, 0, 0, &drawn, 80, 2);
+
+    const text = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, text, "/quit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "/model") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "/headroom") == null);
+    try std.testing.expectEqual(@as(usize, 3), drawn);
 }
 
 /// Index just past the CSI sequence starting at `start`.
@@ -792,7 +830,7 @@ test "render lays descriptions on one column and truncates with an ellipsis" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     var drawn: usize = 0;
-    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 40);
+    try render(&out.writer, "", &items, &indices, 0, 0, &drawn, 40, max_visible);
 
     const text = out.written();
     try std.testing.expect(std.mem.indexOf(u8, text, "\u{2026}") != null);
