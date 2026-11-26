@@ -4,6 +4,8 @@ const common = @import("./common.zig");
 const keys = @import("./keys.zig");
 const line_editor = @import("./line_editor.zig");
 const mention = @import("./mention.zig");
+const slash_picker = @import("../slash_picker.zig");
+const slash_picker_completion = @import("../completion.zig");
 const sigint = @import("../../core/sigint.zig");
 const terminal = @import("../terminal.zig");
 const test_support = @import("../../testing/test_support.zig");
@@ -109,12 +111,19 @@ fn readLineFrom(
                 }
                 first_esc_ts = now;
             },
-            else => if (terminal.isIgnoredControlByte(byte)) {
-                // Unbound control keys do nothing.
-            } else if (byte == '@' and mention.isTrigger(editor.line_alloc.written()[0..editor.cursor])) {
-                try mention.insertMention(allocator, io, editor);
-            } else {
-                try editor.append(byte);
+            else => {
+                if (terminal.isIgnoredControlByte(byte)) {
+                    // Unbound control keys do nothing.
+                } else if (editor.slash != null and line_editor.isSlashTrigger(byte, editor.line_alloc.written())) {
+                    if (try slash_picker.completeSlash(allocator, io, editor)) {
+                        try editor.moveEnd();
+                        return .{ .submitted = editor.line_alloc.written() };
+                    }
+                } else if (byte == '@' and mention.isTrigger(editor.line_alloc.written()[0..editor.cursor])) {
+                    try mention.insertMention(allocator, io, editor);
+                } else {
+                    try editor.append(byte);
+                }
             },
         }
     }
@@ -262,6 +271,139 @@ test "readLineFrom kills text with Ctrl+W, Ctrl+K, and Ctrl+U" {
 
 test "readLineFrom ignores unbound control bytes and inserts a literal @ without mentions" {
     try expectReadLine(&input("@a\x07\r"), false, .submitted, "@a");
+}
+
+test "readLineFrom keeps a slash literal when no completion source is attached" {
+    try expectReadLine(&input("/help\r"), false, .submitted, "/help");
+}
+
+test "readLineFrom keeps a mid-prompt slash literal" {
+    try expectReadLine(&input("a/b\r"), false, .submitted, "a/b");
+}
+
+test "readLineFrom completes a slash command through the picker" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    const source = slash_picker_completion.Source{ .ctx = null, .list = twoCommands };
+    editor.slash = &source;
+
+    // "/" opens the picker, "m" filters to /model, Tab accepts it.
+    var s = slash_picker.Script{ .keys = &.{ .{ .char = 'm' }, .tab } };
+    slash_picker.script = &s;
+    defer slash_picker.script = null;
+
+    var input_source: TestSource = .{ .events = &input("/\r") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &input_source, false);
+
+    try std.testing.expectEqualStrings("/model ", result.submitted);
+}
+
+test "readLineFrom submits when the picker accepts with enter" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    const source = slash_picker_completion.Source{ .ctx = null, .list = twoCommands };
+    editor.slash = &source;
+
+    var s = slash_picker.Script{ .keys = &.{ .{ .char = 'q' }, .enter } };
+    slash_picker.script = &s;
+    defer slash_picker.script = null;
+
+    var input_source: TestSource = .{ .events = &input("/") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &input_source, false);
+
+    try std.testing.expectEqualStrings("/quit", result.submitted);
+}
+
+test "readLineFrom submits a typed command the picker does not match" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    const source = slash_picker_completion.Source{ .ctx = null, .list = twoCommands };
+    editor.slash = &source;
+
+    const typed_keys = comptime blk: {
+        var typed: [14]slash_picker.Key = undefined;
+        for ("model example", 0..) |byte, i| typed[i] = .{ .char = byte };
+        typed[typed.len - 1] = .enter;
+        break :blk typed;
+    };
+    var s = slash_picker.Script{ .keys = &typed_keys };
+    slash_picker.script = &s;
+    defer slash_picker.script = null;
+
+    var input_source: TestSource = .{ .events = &input("/") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &input_source, false);
+
+    try std.testing.expectEqualStrings("/model example", result.submitted);
+}
+
+test "readLineFrom leaves the prompt empty when the picker is dismissed" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    const source = slash_picker_completion.Source{ .ctx = null, .list = twoCommands };
+    editor.slash = &source;
+
+    var s = slash_picker.Script{ .keys = &.{.escape} };
+    slash_picker.script = &s;
+    defer slash_picker.script = null;
+
+    // "/" opens the picker, Esc closes it, then "/stats" is typed by hand.
+    var input_source: TestSource = .{ .events = &input("/\x1b/stats\r") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &input_source, false);
+
+    try std.testing.expectEqualStrings("/stats", result.submitted);
+}
+
+test "readLineFrom inserts a literal slash when the source offers nothing" {
+    const allocator = std.testing.allocator;
+    var line_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer line_alloc.deinit();
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    var editor = line_editor.LineEditor.init(&line_alloc, &out.writer, null, 80);
+    editor.mentions_enabled = false;
+    const source = slash_picker_completion.Source{ .ctx = null, .list = noCommands };
+    editor.slash = &source;
+
+    var input_source: TestSource = .{ .events = &input("/usr\r") };
+    const result = try readLineFrom(allocator, std.testing.io, &editor, &input_source, false);
+
+    try std.testing.expectEqualStrings("/usr", result.submitted);
+}
+
+fn twoCommands(_: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]slash_picker_completion.Item {
+    const items = try allocator.alloc(slash_picker_completion.Item, 2);
+    items[0] = .{ .name = "/quit", .hint = "", .description = "Exit Puny", .kind = .command, .takes_arg = false };
+    items[1] = .{ .name = "/model", .hint = "[id]", .description = "Switch", .kind = .command, .takes_arg = true };
+    return items;
+}
+
+fn noCommands(_: ?*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error![]slash_picker_completion.Item {
+    return allocator.alloc(slash_picker_completion.Item, 0);
 }
 
 test "readLineFrom applies CSI arrow keys" {

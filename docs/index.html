@@ -132,6 +132,10 @@
             </div>
             <div class="terminal-line">
               <span class="output yellow">Tip:</span><span class="output"> Type @ to search and attach files to your prompt.</span>
+              <br />
+            </div>
+            <div class="terminal-line">
+              <span class="output yellow">Tip:</span><span class="output"> Type / to pick a command or skill, Tab to fill it in, Enter to run it.</span>
               <br /><br />
             </div>
             <div class="terminal-line"></div>
@@ -308,6 +312,19 @@
             <code>Explain @src/main.zig and compare it with @src/config/config.zig</code>
           </div>
           <p>Each attachment is limited to 64 KiB. Unreadable files, larger files, and paths containing whitespace are not attached.</p>
+        </div>
+        <div class="install-card">
+          <h3>Complete commands and skills</h3>
+          <p>Type <code>/</code> on an empty prompt to open a picker listing every slash command and every discovered skill, each with its description. Keep typing to filter, use the arrow keys to move, then:</p>
+          <ul>
+            <li><code>Tab</code> fills the highlighted name into the prompt so you can add an argument</li>
+            <li><code>Enter</code> fills it in and runs it straight away</li>
+            <li><code>Esc</code>, or <code>Backspace</code> on an empty filter, closes the picker and leaves the prompt empty</li>
+          </ul>
+          <div class="install-code">
+            <code>/mod  →  /model</code>
+          </div>
+          <p>Commands that take an argument are inserted with a trailing space; commands that take none are inserted bare, so accepting them never changes what they do. The picker only opens at the start of an empty prompt, because a <code>/</code> anywhere else is ordinary text. Plain prompts — API keys, provider URLs, and free-text answers — never open it.</p>
         </div>
         <div class="install-card">
           <h3>Repository instructions</h3>

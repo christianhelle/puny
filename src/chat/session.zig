@@ -689,10 +689,16 @@ fn readUserInput(
         return .{ .message = p };
     }
 
+    // `--no-skills` leaves the list with the commands alone. The source lives
+    // in the context so the editor's pointer to it outlives every prompt.
+    const source = ctx.slash.source();
+
     // Whatever is still typed-ahead here was not sent: unfinished typing, or
     // lines held back by a cancelled or failed turn.
     const held_text = try cancel.typed.takeAll(ctx.arena);
-    const maybe_input = input.readLine(ctx.arena, ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history, held_text) catch |err| {
+    const maybe_input = input.readLine(ctx.arena, ctx.io, ctx.stdout_writer, line_alloc, stdin_buffer, ctx.history, held_text, .{
+        .slash = &source,
+    }) catch |err| {
         if (sigint.isTriggered()) {
             finalizeSession(ctx);
             return .exit;

@@ -78,6 +78,7 @@ test "include welcome tests" {
 test "include commands tests" {
     _ = @import("../cli/commands.zig");
     _ = @import("../cli/dispatch.zig");
+    _ = @import("../cli/command_catalog.zig");
 }
 
 test "include prompt file tests" {
@@ -290,6 +291,12 @@ test "include tui.input.common tests" {
     _ = @import("../tui/input/line_editor.zig");
     _ = @import("../tui/input/mention.zig");
     _ = @import("../tui/input/posix.zig");
+}
+test "include tui.completion tests" {
+    _ = @import("../tui/completion.zig");
+}
+test "include tui.slash_picker tests" {
+    _ = @import("../tui/slash_picker.zig");
 }
 test "include tui.list_picker tests" {
     _ = @import("../tui/list_picker.zig");

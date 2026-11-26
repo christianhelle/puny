@@ -343,5 +343,5 @@ test "print keeps one blank line around the command list" {
 
     const text = out.written();
     try std.testing.expect(std.mem.indexOf(u8, text, "test-model\n\n" ++ ansi.yellow ++ "Available commands:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "prompt.\n\n" ++ ansi.dim ++ "Session:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "run it.\n\n" ++ ansi.dim ++ "Session:") != null);
 }

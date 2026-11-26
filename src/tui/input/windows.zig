@@ -4,6 +4,7 @@ const common = @import("./common.zig");
 const keys = @import("./keys.zig");
 const line_editor = @import("./line_editor.zig");
 const mention = @import("./mention.zig");
+const slash_picker = @import("../slash_picker.zig");
 const sigint = @import("../../core/sigint.zig");
 
 const double_tap_window_ns: i96 = 500 * std.time.ns_per_ms;
@@ -100,7 +101,12 @@ pub fn readLineWindows(
                     } else {
                         pending_high = null;
                         if (ch < 0x80) {
-                            if (ch == '@' and mention.isTrigger(editor.line_alloc.written()[0..editor.cursor])) {
+                            if (editor.slash != null and line_editor.isSlashTrigger(@intCast(ch), editor.line_alloc.written())) {
+                                if (try slash_picker.completeSlash(allocator, io, editor)) {
+                                    try editor.moveEnd();
+                                    return .{ .submitted = editor.line_alloc.written() };
+                                }
+                            } else if (ch == '@' and mention.isTrigger(editor.line_alloc.written()[0..editor.cursor])) {
                                 try mention.insertMention(allocator, io, editor);
                             } else {
                                 try editor.append(@intCast(ch));

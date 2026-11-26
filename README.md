@@ -416,6 +416,27 @@ appends the contents of each readable file. Each attachment is limited to
 64 KiB; unreadable files, larger files, and paths containing whitespace are not
 attached.
 
+### Complete commands and skills
+
+Type `/` on an empty prompt to open a picker listing every slash command and
+every discovered skill, each with its description. Keep typing to filter the
+list, use `↑`/`↓` to move, and:
+
+- `Tab` fills the highlighted name into the prompt so you can add an argument
+- `Enter` fills it in and runs it straight away
+- `Esc`, or `Backspace` on an empty filter, closes the picker and leaves the
+  prompt empty
+
+```text
+> /mod        →  > /model
+```
+
+Commands that take an argument (`/model`, `/context`, `/thinking`, and others)
+are inserted with a trailing space; commands that take none are inserted bare,
+so accepting them never changes what they do. The picker only opens at the
+start of an empty prompt, because a `/` anywhere else is ordinary text. Plain
+prompts — API keys, provider URLs, and free-text answers — never open it.
+
 ### Repository instructions
 
 When Puny starts inside a Git repository, it loads the first instruction file

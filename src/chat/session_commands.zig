@@ -612,6 +612,7 @@ fn testChatLoopContext(
         .chat_log = null,
         .skill_registry = undefined,
         .context_budget = undefined,
+        .slash = undefined,
     };
 }
 
