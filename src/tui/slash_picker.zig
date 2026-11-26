@@ -223,6 +223,29 @@ fn cleanup(writer: *std.Io.Writer, drawn: usize) !void {
     try writer.flush();
 }
 
+/// Announces, completes, or declines a `/` typed on an empty prompt. Returns
+/// true when the user pressed Enter on an entry, so the caller submits the
+/// line. A done picker has already erased its overlay, so a cancel only needs
+/// the prompt reprinted, leaving the text exactly as the user typed it.
+pub fn completeSlash(allocator: std.mem.Allocator, io: std.Io, editor: *line_editor.LineEditor) !bool {
+    switch (try open(allocator, io, editor)) {
+        .accepted => |result| {
+            defer allocator.free(result.text);
+            try editor.appendSlice(result.text);
+            return result.submit;
+        },
+        .cancelled => {
+            try editor.redraw();
+            return false;
+        },
+        .no_items => {
+            // Nothing to offer, so the slash belongs in the prompt as text.
+            try editor.append('/');
+            return false;
+        },
+    }
+}
+
 /// Keys the picker understands. `tab` accepts and keeps editing, `enter`
 /// accepts and submits.
 pub const Key = union(enum) {

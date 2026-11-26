@@ -115,7 +115,7 @@ fn readLineFrom(
                 if (terminal.isIgnoredControlByte(byte)) {
                     // Unbound control keys do nothing.
                 } else if (editor.slash != null and line_editor.isSlashTrigger(byte, editor.line_alloc.written())) {
-                    if (try completeSlash(allocator, io, editor)) {
+                    if (try slash_picker.completeSlash(allocator, io, editor)) {
                         try editor.moveEnd();
                         return .{ .submitted = editor.line_alloc.written() };
                     }
@@ -126,28 +126,6 @@ fn readLineFrom(
                 }
             },
         }
-    }
-}
-
-/// Runs the slash picker for a `/` typed on an empty prompt. Returns true when
-/// the user pressed Enter on an entry, so the caller submits the line. A done
-/// picker has already erased its overlay, so a cancel only needs the prompt
-/// reprinted, leaving the text exactly as it was.
-fn completeSlash(allocator: std.mem.Allocator, io: std.Io, editor: *line_editor.LineEditor) !bool {
-    switch (try slash_picker.open(allocator, io, editor)) {
-        .accepted => |result| {
-            defer allocator.free(result.text);
-            try editor.appendSlice(result.text);
-            return result.submit;
-        },
-        .cancelled => {
-            try editor.redraw();
-            return false;
-        },
-        .no_items => {
-            try editor.append('/');
-            return false;
-        },
     }
 }
 
