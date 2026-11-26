@@ -156,6 +156,38 @@ fn renderRow(writer: *std.Io.Writer, item: completion.Item, selected: bool, name
     try writer.writeAll("\r\n");
 }
 
+/// Writes the picker's header row: the slash, the query, and the match count,
+/// clipped to `width` columns so a long query never wraps onto a second row.
+fn renderHeader(writer: *std.Io.Writer, query: []const u8, match_count: usize, width: usize) !void {
+    if (width == 0) return;
+
+    try writer.writeAll(ansi.bright);
+    try writer.writeByte('/');
+    var used: usize = 1;
+
+    // Keep the gap and the match count only when they fit; a query that
+    // fills the row is truncated instead of pushing the header onto a new
+    // physical row.
+    const gap = @min(column_gap, width - used);
+    const query_room = width - used - gap;
+    try writeTruncated(writer, query, query_room);
+    used += @min(text_width.displayWidth(query), query_room);
+    try writer.writeAll(ansi.reset);
+    try writer.splatByteAll(' ', gap);
+    used += gap;
+
+    try writer.writeAll(ansi.dim);
+    const status_room = width - used;
+    if (query.len == 0) {
+        try writeTruncated(writer, "type to filter", status_room);
+    } else {
+        var buffer: [32]u8 = undefined;
+        const status = std.fmt.bufPrint(&buffer, "{d} match(es)", .{match_count}) catch "many match(es)";
+        try writeTruncated(writer, status, status_room);
+    }
+    try writer.writeAll(ansi.reset);
+}
+
 /// Draws the picker below the prompt row and tracks how many rows it occupies
 /// so a later redraw or cleanup can reposition the cursor.
 fn render(
@@ -178,18 +210,7 @@ fn render(
         try writer.writeAll("\r\n");
     }
 
-    try writer.writeAll(ansi.bright);
-    try writer.writeByte('/');
-    try writer.writeAll(query);
-    try writer.writeAll(ansi.reset);
-    try writer.writeAll("  ");
-    try writer.writeAll(ansi.dim);
-    if (query.len == 0) {
-        try writer.writeAll("type to filter");
-    } else {
-        try writer.print("{d} match(es)", .{match_indices.len});
-    }
-    try writer.writeAll(ansi.reset);
+    try renderHeader(writer, query, match_indices.len, width);
     try writer.writeAll("\r\n");
 
     if (match_indices.len == 0) {
@@ -728,6 +749,26 @@ test "render never writes a row wider than the terminal" {
     while (rows.next()) |row| {
         try std.testing.expect(visibleWidth(row) <= 31);
     }
+}
+
+test "render clips a long header to one physical row" {
+    const query: [40]u8 = @splat('q');
+    const items = [_]completion.Item{
+        .{ .name = "/help", .hint = "", .description = "", .kind = .command, .takes_arg = false },
+    };
+    const indices = [_]usize{0};
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    var drawn: usize = 0;
+    try render(&out.writer, &query, &items, &indices, 0, 0, &drawn, 20);
+
+    const text = out.written();
+    const start = (std.mem.indexOf(u8, text, "\r\n") orelse 0) + 2;
+    const end = std.mem.indexOfPos(u8, text, start, "\r\n").?;
+    const header = text[start..end];
+    try std.testing.expect(visibleWidth(header) <= 20);
+    try std.testing.expect(std.mem.indexOf(u8, header, "\u{2026}") != null);
+    try std.testing.expectEqual(@as(usize, 2), drawn);
 }
 
 /// Index just past the CSI sequence starting at `start`.
