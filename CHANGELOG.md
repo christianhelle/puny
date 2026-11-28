@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased Changes]
+
+### Features
+- Drop unwind tables from size-optimized builds ([#251](https://github.com/christianhelle/puny/pull/251)) ([@christianhelle](https://github.com/christianhelle/))
+
+
 ## [v0.6.1](https://github.com/christianhelle/puny/releases/tag/v0.6.1) (2026-11-28)
 
 ### Features
