@@ -294,7 +294,7 @@ pub const ChatSession = struct {
                         ctx.history.clear();
                         ctx.context_budget.resetConversation();
                         try ctx.stdout_writer.print("Session restored — {d} messages:\n", .{ctx.messages.items.len});
-                        try display.printConversation(ctx.arena, ctx.stdout_writer, ctx.messages.items, terminal.terminalWidth() orelse 80);
+                        try display.printConversation(std.heap.page_allocator, ctx.stdout_writer, ctx.messages.items, terminal.terminalWidth() orelse 80);
                         try ctx.stdout_writer.flush();
                     } else {
                         try ctx.stdout_writer.print("\n{s}No matching session found.{s}\n", .{ ansi.dim, ansi.reset });

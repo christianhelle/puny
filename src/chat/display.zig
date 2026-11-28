@@ -60,7 +60,9 @@ pub fn toolCallRows(name: []const u8, result: []const u8) usize {
 /// messages after the prompt marker, assistant text as markdown, a line per
 /// tool call, and the `↳ answer` row of each answered ask_user. System
 /// messages and all other tool output are skipped. Shared by the restore
-/// flow and the one-shot startup path.
+/// flow and the one-shot startup path. `allocator` backs a scratch arena
+/// that is reset per message and freed before returning, so pass a general
+/// purpose allocator, not a long-lived arena that would keep every copy.
 pub fn printConversation(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -70,7 +72,11 @@ pub fn printConversation(
     // The tool calls of the latest assistant message, so a tool result can
     // be matched back to the tool that produced it.
     var pending_tool_calls: []const openai.ToolCall = &.{};
+    var scratch_state = std.heap.ArenaAllocator.init(allocator);
+    defer scratch_state.deinit();
+    const scratch = scratch_state.allocator();
     for (messages) |msg| {
+        _ = scratch_state.reset(.retain_capacity);
         switch (msg) {
             .user => |content| {
                 try writer.print("\n{s}{s}{s} ", .{ ansi.bright, prompts.prompt_text, ansi.reset });
@@ -83,12 +89,12 @@ pub fn printConversation(
                     // Live output starts the text on a new row the same way,
                     // so the replay lines up with it.
                     try writer.writeAll("\r\n");
-                    try stream_markdown.StreamRenderer.renderComplete(allocator, writer, terminal_width, content);
+                    try stream_markdown.StreamRenderer.renderComplete(scratch, writer, terminal_width, content);
                 }
                 pending_tool_calls = assistant.tool_calls orelse &.{};
                 if (assistant.tool_calls) |tool_calls| {
                     for (tool_calls) |tool_call| {
-                        try writeToolCallLine(allocator, writer, tool_call, terminal_width);
+                        try writeToolCallLine(scratch, writer, tool_call, terminal_width);
                     }
                 }
             },
@@ -99,7 +105,7 @@ pub fn printConversation(
                 if (!std.mem.eql(u8, call.function.name, "ask_user")) continue;
                 const answer = question_picker.answerFromResult(tool.content) orelse continue;
                 try writer.writeAll("\n");
-                try question_picker.writeAnswerRow(allocator, writer, answer, terminal_width);
+                try question_picker.writeAnswerRow(scratch, writer, answer, terminal_width);
             },
             else => {},
         }
