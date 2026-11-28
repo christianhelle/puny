@@ -3,6 +3,7 @@
 ## [Unreleased Changes]
 
 ### Features
+- Render resumed sessions like the live session ([#250](https://github.com/christianhelle/puny/pull/250)) ([@christianhelle](https://github.com/christianhelle/))
 - Fix install.sh failing on macOS bash 3.2 ([#249](https://github.com/christianhelle/puny/pull/249)) ([@christianhelle](https://github.com/christianhelle/))
 - Add slash command and skill autocomplete to the prompt ([#248](https://github.com/christianhelle/puny/pull/248)) ([@christianhelle](https://github.com/christianhelle/))
 - Open the plan in the default browser once planning saves it ([#247](https://github.com/christianhelle/puny/pull/247)) ([@christianhelle](https://github.com/christianhelle/))
