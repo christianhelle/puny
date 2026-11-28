@@ -83,10 +83,7 @@ pub fn printConversation(
                     // Live output starts the text on a new row the same way,
                     // so the replay lines up with it.
                     try writer.writeAll("\r\n");
-                    var stream = stream_markdown.StreamRenderer.init(allocator, writer, terminal_width);
-                    defer stream.deinit();
-                    try stream.push(content);
-                    try stream.finish();
+                    try stream_markdown.StreamRenderer.renderComplete(allocator, writer, terminal_width, content);
                 }
                 pending_tool_calls = assistant.tool_calls orelse &.{};
                 if (assistant.tool_calls) |tool_calls| {
@@ -723,4 +720,20 @@ test "printConversation shows the ask_user answer and no other tool output" {
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Postgres") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "The user chose") == null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "secret file body") == null);
+}
+
+test "printConversation writes finished text without streaming repaints" {
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = "Intro with **bold**.\n\n| name | archived |\n|---|---|\n| a | yes |\n| b | no |\n\nlast line without a newline" } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
+
+    // A log or pipe gets each line once, with no cursor moves or erases.
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[J") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "A\x1b[G") == null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "last line without a newline"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "archived"));
 }
