@@ -254,6 +254,9 @@ fn addPunyExecutable(
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            // Size builds have no debug info or stack tracing, so unwind
+            // tables are dead weight there; dropping them costs no speed.
+            .unwind_tables = if (optimize == .small) .none else null,
         }),
     });
     exe.root_module.addOptions("build_options", build_options);
