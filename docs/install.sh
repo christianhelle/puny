@@ -133,8 +133,8 @@ download_and_install() {
   local archive_path
   local archive_entry
   local archive_entries
+  local binary_entries
   local binary_entry_count
-  local -a binary_entries
 
   temp_dir=$(mktemp -d)
   archive_path="$temp_dir/$archive_name"
@@ -165,13 +165,15 @@ download_and_install() {
     return 1
   fi
 
-  mapfile -t binary_entries < <(awk -F/ -v name="$BINARY_NAME" '$NF == name && $0 !~ /\/$/ { print }' <<<"$archive_entries")
-  binary_entry_count=${#binary_entries[@]}
+  # macOS ships bash 3.2, which has no mapfile/readarray, so collect the
+  # matching entries with portable awk output instead of arrays.
+  binary_entries=$(awk -F/ -v name="$BINARY_NAME" '$NF == name && $0 !~ /\/$/ { print }' <<<"$archive_entries")
+  binary_entry_count=$(printf '%s\n' "$binary_entries" | awk 'NF { count++ } END { print count + 0 }')
   if [[ "$binary_entry_count" -ne 1 ]]; then
     log_error "Expected exactly one '$BINARY_NAME' entry in '$archive_name', found $binary_entry_count."
     return 1
   fi
-  archive_entry="${binary_entries[0]}"
+  archive_entry=$(printf '%s\n' "$binary_entries" | awk 'NF { print; exit }')
 
   if ! tar -tvzf "$archive_path" "$archive_entry" | awk 'NR == 1 { exit (substr($1, 1, 1) == "-" ? 0 : 1) } END { if (NR == 0) exit 1 }'; then
     log_error "The '$BINARY_NAME' entry in '$archive_name' is not a regular file."
