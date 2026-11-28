@@ -759,3 +759,22 @@ test "printConversation writes finished text without streaming repaints" {
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "last line without a newline"));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "archived"));
 }
+
+test "printConversation keeps the call line of an unanswered or failed ask_user" {
+    const tool_calls = [_]openai.ToolCall{
+        .{ .id = "call_failed", .function = .{ .name = "ask_user", .arguments = "{\"question\":\"Which database?\"}" } },
+        .{ .id = "call_unanswered", .function = .{ .name = "ask_user", .arguments = "{\"question\":\"Which port?\"}" } },
+    };
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = null, .tool_calls = &tool_calls } },
+        .{ .tool = .{ .tool_call_id = "call_failed", .content = "Error: no terminal" } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
+
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, out.written(), "🔧"));
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "↳") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "no terminal") == null);
+}
