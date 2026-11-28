@@ -72,7 +72,9 @@ pub fn printConversation(
         switch (msg) {
             .user => |content| {
                 try writer.print("\n{s}{s}{s} ", .{ ansi.bright, prompts.prompt_text, ansi.reset });
-                try writer.print("{s}\n\n", .{content});
+                // One line break ends the message. The assistant's leading
+                // "\r\n" supplies the blank row live output shows here.
+                try writer.print("{s}\n", .{content});
             },
             .assistant => |assistant| {
                 if (assistant.content) |content| {
