@@ -3,6 +3,8 @@ const ansi = @import("../tui/ansi.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");
 const question_picker = @import("../tui/question_picker.zig");
+const stream_markdown = @import("../tui/stream_markdown.zig");
+const FakeScreen = @import("../tui/fake_screen.zig").FakeScreen;
 const text_width = @import("../tui/markdown/width.zig");
 
 const max_value_length = 120;
@@ -51,8 +53,6 @@ pub fn printConversation(
     messages: []const openai.Message,
     terminal_width: usize,
 ) !void {
-    _ = allocator;
-    _ = terminal_width;
     for (messages) |msg| {
         switch (msg) {
             .user => |content| {
@@ -61,7 +61,13 @@ pub fn printConversation(
             },
             .assistant => |assistant| {
                 if (assistant.content) |content| {
-                    try writer.print("{s}\n", .{content});
+                    // Live output starts the text on a new row the same way,
+                    // so the replay lines up with it.
+                    try writer.writeAll("\r\n");
+                    var stream = stream_markdown.StreamRenderer.init(allocator, writer, terminal_width);
+                    defer stream.deinit();
+                    try stream.push(content);
+                    try stream.finish();
                 }
             },
             else => {},
@@ -608,4 +614,28 @@ test "printConversation skips assistant messages without content" {
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "hello") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "null") == null);
+}
+
+test "printConversation renders assistant text as markdown" {
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = "# Title\n\nsome **bold** text" } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
+
+    // The tail of the last line is shown raw while it streams, then erased,
+    // so check what is left on screen rather than the raw bytes.
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var screen = FakeScreen{ .width = 80 };
+    defer screen.deinit(arena);
+    try screen.feed(arena, out.written());
+    const text = try screen.toText(arena);
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "**") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "bold text") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), ansi.bold_start) != null);
 }
