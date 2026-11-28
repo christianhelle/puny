@@ -212,8 +212,7 @@ fn printToolCall(
     tool_call: openai.ToolCall,
 ) !void {
     const columns = terminal.terminalWidth() orelse std.math.maxInt(usize);
-    const rendered_tool_call = try tool_display.renderToolCallFitting(arena, tool_call, columns);
-    try stdout_writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered_tool_call, ansi.reset });
+    try tool_display.writeToolCallLine(arena, stdout_writer, tool_call, columns);
 }
 
 const ToolRun = struct { result: []const u8, diff_rows: usize };

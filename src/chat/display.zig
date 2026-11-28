@@ -36,6 +36,18 @@ pub fn renderToolCallFitting(allocator: std.mem.Allocator, tool_call: openai.Too
     return output.toOwnedSlice(allocator);
 }
 
+/// Prints the line a tool call shows while it runs. The live chat loop and
+/// the resumed-session replay share it, so both read the same.
+pub fn writeToolCallLine(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    tool_call: openai.ToolCall,
+    columns: usize,
+) !void {
+    const rendered = try renderToolCallFitting(allocator, tool_call, columns);
+    try writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered, ansi.reset });
+}
+
 /// Terminal rows a tool call leaves on screen: its own line, plus the
 /// `↳ answer` row ask_user prints below it when it ran and got an answer.
 /// An ask_user call that failed before reaching the picker prints no row.
