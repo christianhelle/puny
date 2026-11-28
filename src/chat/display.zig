@@ -3,6 +3,8 @@ const ansi = @import("../tui/ansi.zig");
 const openai = @import("../providers/openai.zig");
 const prompts = @import("../prompts/prompts.zig");
 const question_picker = @import("../tui/question_picker.zig");
+const stream_markdown = @import("../tui/stream_markdown.zig");
+const FakeScreen = @import("../tui/fake_screen.zig").FakeScreen;
 const text_width = @import("../tui/markdown/width.zig");
 
 const max_value_length = 120;
@@ -34,6 +36,18 @@ pub fn renderToolCallFitting(allocator: std.mem.Allocator, tool_call: openai.Too
     return output.toOwnedSlice(allocator);
 }
 
+/// Prints the line a tool call shows while it runs. The live chat loop and
+/// the resumed-session replay share it, so both read the same.
+pub fn writeToolCallLine(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    tool_call: openai.ToolCall,
+    columns: usize,
+) !void {
+    const rendered = try renderToolCallFitting(allocator, tool_call, columns);
+    try writer.print("\n{s}🔧 {s}{s}", .{ ansi.dim, rendered, ansi.reset });
+}
+
 /// Terminal rows a tool call leaves on screen: its own line, plus the
 /// `↳ answer` row ask_user prints below it when it ran and got an answer.
 /// An ask_user call that failed before reaching the picker prints no row.
@@ -42,24 +56,78 @@ pub fn toolCallRows(name: []const u8, result: []const u8) usize {
     return if (answered) 2 else 1;
 }
 
-/// Prints the conversation history, prefixing user messages with the prompt
-/// marker and skipping system/tool messages. Shared by the restore flow and
-/// the one-shot startup path.
-pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Message) !void {
-    for (messages) |msg| {
+/// Prints the conversation history as the live chat loop showed it: user
+/// messages after the prompt marker, assistant text as markdown, a line per
+/// tool call, and the `↳ answer` row of each answered ask_user. System
+/// messages and all other tool output are skipped. Shared by the restore
+/// flow and the one-shot startup path. `allocator` backs a scratch arena
+/// that is reset per message and freed before returning, so pass a general
+/// purpose allocator, not a long-lived arena that would keep every copy.
+/// `terminal_width` is null without a terminal; each part then falls back
+/// to the width its live counterpart uses.
+pub fn printConversation(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    messages: []const openai.Message,
+    terminal_width: ?usize,
+) !void {
+    // The stream renderer and the ask_user picker assume 80 columns; the
+    // tool line is left uncut, as `chat.printToolCall` leaves it.
+    const render_width = terminal_width orelse 80;
+    const tool_line_width = terminal_width orelse std.math.maxInt(usize);
+    // The tool calls of the latest assistant message, so a tool result can
+    // be matched back to the tool that produced it.
+    var scratch_state = std.heap.ArenaAllocator.init(allocator);
+    defer scratch_state.deinit();
+    const scratch = scratch_state.allocator();
+    for (messages, 0..) |msg, index| {
+        _ = scratch_state.reset(.retain_capacity);
         switch (msg) {
             .user => |content| {
                 try writer.print("\n{s}{s}{s} ", .{ ansi.bright, prompts.prompt_text, ansi.reset });
-                try writer.print("{s}\n\n", .{content});
+                // One line break ends the message. The assistant's leading
+                // "\r\n" supplies the blank row live output shows here.
+                try writer.print("{s}\n", .{content});
             },
             .assistant => |assistant| {
                 if (assistant.content) |content| {
-                    try writer.print("{s}\n", .{content});
+                    // Live output starts the text on a new row the same way,
+                    // so the replay lines up with it.
+                    try writer.writeAll("\r\n");
+                    try stream_markdown.StreamRenderer.renderComplete(scratch, writer, render_width, content);
+                }
+                // Live, each call runs before the next one prints, so an
+                // ask_user answer goes right under its own call line. Only
+                // that answer row comes from a result: other tool output
+                // stays out of the replay.
+                const results = toolResultsAfter(messages[index + 1 ..]);
+                for (assistant.tool_calls orelse &.{}) |tool_call| {
+                    try writeToolCallLine(scratch, writer, tool_call, tool_line_width);
+                    if (!std.mem.eql(u8, tool_call.function.name, "ask_user")) continue;
+                    const result = findToolResult(results, tool_call.id) orelse continue;
+                    const answer = question_picker.answerFromResult(result) orelse continue;
+                    try writer.writeAll("\n");
+                    try question_picker.writeAnswerRow(scratch, writer, answer, render_width);
                 }
             },
             else => {},
         }
     }
+}
+
+/// The tool results that answer an assistant message: the run of tool
+/// messages right after it.
+fn toolResultsAfter(rest: []const openai.Message) []const openai.Message {
+    var end: usize = 0;
+    while (end < rest.len and rest[end] == .tool) end += 1;
+    return rest[0..end];
+}
+
+fn findToolResult(results: []const openai.Message, id: []const u8) ?[]const u8 {
+    for (results) |msg| {
+        if (std.mem.eql(u8, msg.tool.tool_call_id, id)) return msg.tool.content;
+    }
+    return null;
 }
 
 fn renderKnown(
@@ -580,7 +648,7 @@ test "printConversation renders user and assistant messages and skips the rest" 
 
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printConversation(&out.writer, &messages);
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), prompts.prompt_text) != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "hello") != null);
@@ -597,8 +665,116 @@ test "printConversation skips assistant messages without content" {
 
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printConversation(&out.writer, &messages);
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "hello") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "null") == null);
+}
+
+test "printConversation renders assistant text as markdown" {
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = "# Title\n\nsome **bold** text" } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
+
+    // The tail of the last line is shown raw while it streams, then erased,
+    // so check what is left on screen rather than the raw bytes.
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var screen = FakeScreen{ .width = 80 };
+    defer screen.deinit(arena);
+    try screen.feed(arena, out.written());
+    const text = try screen.toText(arena);
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "**") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "bold text") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), ansi.bold_start) != null);
+}
+
+test "printConversation shows the tool calls of an assistant message" {
+    const tool_calls = [_]openai.ToolCall{.{
+        .id = "call_1",
+        .function = .{ .name = "read_file", .arguments = "{\"path\":\"src/main.zig\"}" },
+    }};
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = null, .tool_calls = &tool_calls } },
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(arena_state.allocator(), &out.writer, &messages, 80);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "🔧") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Reading \"src/main.zig\"") != null);
+}
+
+test "printConversation shows the ask_user answer and no other tool output" {
+    const tool_calls = [_]openai.ToolCall{
+        .{ .id = "call_ask", .function = .{ .name = "ask_user", .arguments = "{\"question\":\"Which database?\"}" } },
+        .{ .id = "call_read", .function = .{ .name = "read_file", .arguments = "{\"path\":\"notes.txt\"}" } },
+    };
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = null, .tool_calls = &tool_calls } },
+        .{ .tool = .{ .tool_call_id = "call_ask", .content = "The user chose: Postgres" } },
+        .{ .tool = .{ .tool_call_id = "call_read", .content = "secret file body" } },
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(arena_state.allocator(), &out.writer, &messages, 80);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "↳ ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Postgres") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "The user chose") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "secret file body") == null);
+    // Live, each call runs before the next prints, so the answer sits right
+    // under its own call line.
+    const answer_at = std.mem.indexOf(u8, out.written(), "Postgres").?;
+    const read_at = std.mem.indexOf(u8, out.written(), "Reading").?;
+    try std.testing.expect(answer_at < read_at);
+}
+
+test "printConversation writes finished text without streaming repaints" {
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = "Intro with **bold**.\n\n| name | archived |\n|---|---|\n| a | yes |\n| b | no |\n\nlast line without a newline" } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
+
+    // A log or pipe gets each line once, with no cursor moves or erases.
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "\x1b[J") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "A\x1b[G") == null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "last line without a newline"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out.written(), "archived"));
+}
+
+test "printConversation keeps the call line of an unanswered or failed ask_user" {
+    const tool_calls = [_]openai.ToolCall{
+        .{ .id = "call_failed", .function = .{ .name = "ask_user", .arguments = "{\"question\":\"Which database?\"}" } },
+        .{ .id = "call_unanswered", .function = .{ .name = "ask_user", .arguments = "{\"question\":\"Which port?\"}" } },
+    };
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = null, .tool_calls = &tool_calls } },
+        .{ .tool = .{ .tool_call_id = "call_failed", .content = "Error: no terminal" } },
+    };
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
+
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, out.written(), "🔧"));
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "↳") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "no terminal") == null);
 }

@@ -26,6 +26,11 @@ pub const StreamRenderer = struct {
     pending_rows: usize,
     pending_trailing_newline: bool,
     finished: bool,
+    /// The whole text is known up front, as when a saved conversation is
+    /// replayed: each line and table is written once, in final form, with
+    /// no live tail and no cursor moves or erases. Output piped to a file
+    /// stays plain.
+    final: bool,
 
     pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer, terminal_width: usize) StreamRenderer {
         return .{
@@ -41,7 +46,18 @@ pub const StreamRenderer = struct {
             .pending_rows = 0,
             .pending_trailing_newline = false,
             .finished = false,
+            .final = false,
         };
+    }
+
+    /// Writes `text`, already complete, with the same formatting a stream of
+    /// it would end with, but without the repaints a stream needs.
+    pub fn renderComplete(allocator: std.mem.Allocator, writer: *std.Io.Writer, terminal_width: usize, text: []const u8) !void {
+        var self = init(allocator, writer, terminal_width);
+        self.final = true;
+        defer self.deinit();
+        try self.push(text);
+        try self.finish();
     }
 
     pub fn deinit(self: *StreamRenderer) void {
@@ -55,6 +71,14 @@ pub const StreamRenderer = struct {
     pub fn push(self: *StreamRenderer, text: []const u8) !void {
         if (self.finished) return;
         try self.content.appendSlice(self.allocator, text);
+
+        if (self.final) {
+            while (try self.takeNextLine()) |line| {
+                try self.processLine(line);
+            }
+            try self.writer.flush();
+            return;
+        }
 
         const has_lines = std.mem.indexOfScalar(u8, self.content.items[self.consumed..], '\n') != null;
         if (has_lines) {
@@ -89,6 +113,7 @@ pub const StreamRenderer = struct {
             try self.commitRunAsParagraphs();
         }
 
+        try self.commitTable();
         self.closeTable();
         try self.erasePending();
     }
@@ -111,9 +136,10 @@ pub const StreamRenderer = struct {
             if (markdown.isTableLine(line)) {
                 const t = &self.table.?;
                 try t.lines.append(self.allocator, try self.allocator.dupe(u8, line));
-                try self.repaintTable();
+                if (!self.final) try self.repaintTable();
                 return;
             }
+            try self.commitTable();
             self.closeTable();
         }
 
@@ -163,7 +189,7 @@ pub const StreamRenderer = struct {
         defer self.allocator.free(rendered);
 
         self.table = .{ .lines = lines, .start_row = self.rows_printed };
-        try self.applyTableRepaint(rendered);
+        if (!self.final) try self.applyTableRepaint(rendered);
         return true;
     }
 
@@ -191,6 +217,16 @@ pub const StreamRenderer = struct {
             t.lines.deinit(self.allocator);
         }
         self.table = null;
+    }
+
+    /// In final mode a table is held back until its last line, then written
+    /// once. A live stream has already painted it.
+    fn commitTable(self: *StreamRenderer) !void {
+        if (!self.final) return;
+        const t = &(self.table orelse return);
+        const rendered = try markdown.renderTable(self.allocator, t.lines.items, self.terminal_width);
+        defer self.allocator.free(rendered);
+        try self.printCommitted(rendered);
     }
 
     fn repaintTable(self: *StreamRenderer) !void {
@@ -528,4 +564,30 @@ test "stream renderer matches batch render for a table followed by a blank line 
 
 test {
     _ = @import("fake_screen.zig");
+}
+
+test "renderComplete matches a batch render and never repaints" {
+    const content = "# Heading\n\nSome **bold** text.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```zig\nconst x = 1;\n```\n\ntail without newline";
+    const md = markdown.Markdown.init();
+    const rendered = try md.render(std.testing.allocator, content);
+    defer std.testing.allocator.free(rendered);
+    const stripped = try stripAnsi(std.testing.allocator, rendered);
+    defer std.testing.allocator.free(stripped);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+    try StreamRenderer.renderComplete(std.testing.allocator, &output.writer, 200, content);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), terminal.erase_display) == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), terminal.move_to_line_start) == null);
+
+    var screen = FakeScreen{};
+    defer screen.deinit(arena);
+    try screen.feed(arena, output.written());
+    const screen_text = try screen.toText(arena);
+    try std.testing.expectEqualStrings(trimRight(stripped, "\n"), trimRight(screen_text, "\n"));
 }

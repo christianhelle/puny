@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("../tui/ansi.zig");
+const terminal = @import("../tui/terminal.zig");
 const chat = @import("chat.zig");
 const stats = @import("stats.zig");
 const debug_log = @import("debug_log.zig");
@@ -293,7 +294,7 @@ pub const ChatSession = struct {
                         ctx.history.clear();
                         ctx.context_budget.resetConversation();
                         try ctx.stdout_writer.print("Session restored — {d} messages:\n", .{ctx.messages.items.len});
-                        try display.printConversation(ctx.stdout_writer, ctx.messages.items);
+                        try display.printConversation(std.heap.page_allocator, ctx.stdout_writer, ctx.messages.items, terminal.terminalWidth());
                         try ctx.stdout_writer.flush();
                     } else {
                         try ctx.stdout_writer.print("\n{s}No matching session found.{s}\n", .{ ansi.dim, ansi.reset });

@@ -127,7 +127,8 @@ fn askOn(
 ) !Answer {
     if (!C.isTty(io)) {
         // Still leave the one answer row the chat loop counts on.
-        try stdout_writer.print("\n{s}↳ {s}{s}", .{ ansi.dim, echoText(.cancelled, 80), ansi.reset });
+        try stdout_writer.writeAll("\n");
+        try writeAnswerRow(arena, stdout_writer, .cancelled, 80);
         try stdout_writer.flush();
         return .cancelled;
     }
@@ -151,7 +152,7 @@ fn askOn(
     // The picker leaves the cursor on the blank row above its title, just
     // below the tool call line. The echo takes that row.
     try stdout_writer.writeAll(terminal.move_to_line_start ++ terminal.erase_display);
-    try stdout_writer.print("{s}↳ {s}{s}", .{ ansi.dim, try oneLine(arena, echoText(answer, width -| 4)), ansi.reset });
+    try writeAnswerRow(arena, stdout_writer, answer, width);
     try stdout_writer.flush();
     return answer;
 }
@@ -181,6 +182,22 @@ fn readTypedAnswer(comptime C: type, arena: std.mem.Allocator, io: std.Io, stdou
 
 /// Terminal rows that one line of `text` occupies at `width` columns.
 pub const rowsFor = list_picker.rowsFor;
+
+/// Writes the `↳ answer` row for `answer` in dim text, with no line break
+/// before it, cut to fit one row of a `width` column terminal. The picker and
+/// the resumed-session replay both print the row through here.
+pub fn writeAnswerRow(arena: std.mem.Allocator, writer: *std.Io.Writer, answer: Answer, width: usize) !void {
+    try writer.print("{s}↳ {s}{s}", .{ ansi.dim, try oneLine(arena, echoText(answer, width -| 4)), ansi.reset });
+}
+
+/// The answer `result` reports, the inverse of `toolResult`, or null when
+/// `result` did not come from it.
+pub fn answerFromResult(result: []const u8) ?Answer {
+    if (std.mem.startsWith(u8, result, chose_prefix)) return .{ .picked = result[chose_prefix.len..] };
+    if (std.mem.startsWith(u8, result, answered_prefix)) return .{ .typed = result[answered_prefix.len..] };
+    if (std.mem.eql(u8, result, dismissed_result)) return .cancelled;
+    return null;
+}
 
 /// The answer as echoed under the question, cut to at most `max_bytes` so
 /// it never wraps: the indicator rewinds a counted number of rows.
@@ -547,4 +564,17 @@ test "ask places the answer correctly when the typed answer ends at the right ed
     const asked = try askOnFakeScreen(arena_state.allocator(), "Which database?");
     try std.testing.expectEqualStrings("🔧 Asking\n↳ abcdefghijklmnopqrs", asked.text);
     try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
+}
+
+test "answerFromResult reads back every answer toolResult writes" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const picked = answerFromResult(try toolResult(arena, .{ .picked = "Postgres" })).?;
+    try std.testing.expectEqualStrings("Postgres", picked.picked);
+    const typed = answerFromResult(try toolResult(arena, .{ .typed = "SQLite please" })).?;
+    try std.testing.expectEqualStrings("SQLite please", typed.typed);
+    try std.testing.expect(answerFromResult(try toolResult(arena, .cancelled)).? == .cancelled);
+    try std.testing.expect(answerFromResult("some other tool output") == null);
 }
