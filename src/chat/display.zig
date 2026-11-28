@@ -81,6 +81,11 @@ pub fn printConversation(
                     try stream.push(content);
                     try stream.finish();
                 }
+                if (assistant.tool_calls) |tool_calls| {
+                    for (tool_calls) |tool_call| {
+                        try writeToolCallLine(allocator, writer, tool_call, terminal_width);
+                    }
+                }
             },
             else => {},
         }
@@ -650,4 +655,24 @@ test "printConversation renders assistant text as markdown" {
     try std.testing.expect(std.mem.indexOf(u8, text, "**") == null);
     try std.testing.expect(std.mem.indexOf(u8, text, "bold text") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), ansi.bold_start) != null);
+}
+
+test "printConversation shows the tool calls of an assistant message" {
+    const tool_calls = [_]openai.ToolCall{.{
+        .id = "call_1",
+        .function = .{ .name = "read_file", .arguments = "{\"path\":\"src/main.zig\"}" },
+    }};
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = null, .tool_calls = &tool_calls } },
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(arena_state.allocator(), &out.writer, &messages, 80);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "🔧") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Reading \"src/main.zig\"") != null);
 }
