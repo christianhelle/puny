@@ -56,9 +56,11 @@ pub fn toolCallRows(name: []const u8, result: []const u8) usize {
     return if (answered) 2 else 1;
 }
 
-/// Prints the conversation history, prefixing user messages with the prompt
-/// marker and skipping system/tool messages. Shared by the restore flow and
-/// the one-shot startup path.
+/// Prints the conversation history as the live chat loop showed it: user
+/// messages after the prompt marker, assistant text as markdown, a line per
+/// tool call, and the `↳ answer` row of each answered ask_user. System
+/// messages and all other tool output are skipped. Shared by the restore
+/// flow and the one-shot startup path.
 pub fn printConversation(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
