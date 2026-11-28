@@ -46,6 +46,7 @@ const branch_review = @import("review/review.zig");
 const welcome = @import("tui/welcome.zig");
 const crash_prompt = @import("tui/crash_prompt.zig");
 const ansi = @import("tui/ansi.zig");
+const terminal = @import("tui/terminal.zig");
 const vt = @import("tui/vt.zig");
 const update_check = @import("upgrade/update_check.zig");
 
@@ -437,7 +438,7 @@ fn restoreAndShowSession(
             "\n{s}\n",
             .{formatRestoreHeader(&header_buf, target.id, messages.items.len, elapsed_ns)},
         );
-        try display.printConversation(stdout_writer, messages.items);
+        try display.printConversation(messages_arena, stdout_writer, messages.items, terminal.terminalWidth() orelse 80);
         try stdout_writer.flush();
     }
     return result;

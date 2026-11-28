@@ -45,7 +45,14 @@ pub fn toolCallRows(name: []const u8, result: []const u8) usize {
 /// Prints the conversation history, prefixing user messages with the prompt
 /// marker and skipping system/tool messages. Shared by the restore flow and
 /// the one-shot startup path.
-pub fn printConversation(writer: *std.Io.Writer, messages: []const openai.Message) !void {
+pub fn printConversation(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    messages: []const openai.Message,
+    terminal_width: usize,
+) !void {
+    _ = allocator;
+    _ = terminal_width;
     for (messages) |msg| {
         switch (msg) {
             .user => |content| {
@@ -580,7 +587,7 @@ test "printConversation renders user and assistant messages and skips the rest" 
 
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printConversation(&out.writer, &messages);
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), prompts.prompt_text) != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "hello") != null);
@@ -597,7 +604,7 @@ test "printConversation skips assistant messages without content" {
 
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try printConversation(&out.writer, &messages);
+    try printConversation(std.testing.allocator, &out.writer, &messages, 80);
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "hello") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "null") == null);
