@@ -565,3 +565,16 @@ test "ask places the answer correctly when the typed answer ends at the right ed
     try std.testing.expectEqualStrings("🔧 Asking\n↳ abcdefghijklmnopqrs", asked.text);
     try std.testing.expectEqual(@as(usize, 1), asked.cursor_row);
 }
+
+test "answerFromResult reads back every answer toolResult writes" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const picked = answerFromResult(try toolResult(arena, .{ .picked = "Postgres" })).?;
+    try std.testing.expectEqualStrings("Postgres", picked.picked);
+    const typed = answerFromResult(try toolResult(arena, .{ .typed = "SQLite please" })).?;
+    try std.testing.expectEqualStrings("SQLite please", typed.typed);
+    try std.testing.expect(answerFromResult(try toolResult(arena, .cancelled)).? == .cancelled);
+    try std.testing.expect(answerFromResult("some other tool output") == null);
+}
