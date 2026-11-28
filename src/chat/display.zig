@@ -63,12 +63,18 @@ pub fn toolCallRows(name: []const u8, result: []const u8) usize {
 /// flow and the one-shot startup path. `allocator` backs a scratch arena
 /// that is reset per message and freed before returning, so pass a general
 /// purpose allocator, not a long-lived arena that would keep every copy.
+/// `terminal_width` is null without a terminal; each part then falls back
+/// to the width its live counterpart uses.
 pub fn printConversation(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
     messages: []const openai.Message,
-    terminal_width: usize,
+    terminal_width: ?usize,
 ) !void {
+    // The stream renderer and the ask_user picker assume 80 columns; the
+    // tool line is left uncut, as `chat.printToolCall` leaves it.
+    const render_width = terminal_width orelse 80;
+    const tool_line_width = terminal_width orelse std.math.maxInt(usize);
     // The tool calls of the latest assistant message, so a tool result can
     // be matched back to the tool that produced it.
     var pending_tool_calls: []const openai.ToolCall = &.{};
@@ -89,12 +95,12 @@ pub fn printConversation(
                     // Live output starts the text on a new row the same way,
                     // so the replay lines up with it.
                     try writer.writeAll("\r\n");
-                    try stream_markdown.StreamRenderer.renderComplete(scratch, writer, terminal_width, content);
+                    try stream_markdown.StreamRenderer.renderComplete(scratch, writer, render_width, content);
                 }
                 pending_tool_calls = assistant.tool_calls orelse &.{};
                 if (assistant.tool_calls) |tool_calls| {
                     for (tool_calls) |tool_call| {
-                        try writeToolCallLine(scratch, writer, tool_call, terminal_width);
+                        try writeToolCallLine(scratch, writer, tool_call, tool_line_width);
                     }
                 }
             },
@@ -105,7 +111,7 @@ pub fn printConversation(
                 if (!std.mem.eql(u8, call.function.name, "ask_user")) continue;
                 const answer = question_picker.answerFromResult(tool.content) orelse continue;
                 try writer.writeAll("\n");
-                try question_picker.writeAnswerRow(scratch, writer, answer, terminal_width);
+                try question_picker.writeAnswerRow(scratch, writer, answer, render_width);
             },
             else => {},
         }

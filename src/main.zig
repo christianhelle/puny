@@ -438,7 +438,7 @@ fn restoreAndShowSession(
             "\n{s}\n",
             .{formatRestoreHeader(&header_buf, target.id, messages.items.len, elapsed_ns)},
         );
-        try display.printConversation(std.heap.page_allocator, stdout_writer, messages.items, terminal.terminalWidth() orelse 80);
+        try display.printConversation(std.heap.page_allocator, stdout_writer, messages.items, terminal.terminalWidth());
         try stdout_writer.flush();
     }
     return result;
