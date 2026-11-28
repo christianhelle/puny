@@ -190,6 +190,15 @@ pub fn writeAnswerRow(arena: std.mem.Allocator, writer: *std.Io.Writer, answer: 
     try writer.print("{s}↳ {s}{s}", .{ ansi.dim, try oneLine(arena, echoText(answer, width -| 4)), ansi.reset });
 }
 
+/// The answer `result` reports, the inverse of `toolResult`, or null when
+/// `result` did not come from it.
+pub fn answerFromResult(result: []const u8) ?Answer {
+    if (std.mem.startsWith(u8, result, chose_prefix)) return .{ .picked = result[chose_prefix.len..] };
+    if (std.mem.startsWith(u8, result, answered_prefix)) return .{ .typed = result[answered_prefix.len..] };
+    if (std.mem.eql(u8, result, dismissed_result)) return .cancelled;
+    return null;
+}
+
 /// The answer as echoed under the question, cut to at most `max_bytes` so
 /// it never wraps: the indicator rewinds a counted number of rows.
 pub fn echoText(answer: Answer, max_bytes: usize) []const u8 {

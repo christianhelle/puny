@@ -65,6 +65,9 @@ pub fn printConversation(
     messages: []const openai.Message,
     terminal_width: usize,
 ) !void {
+    // The tool calls of the latest assistant message, so a tool result can
+    // be matched back to the tool that produced it.
+    var pending_tool_calls: []const openai.ToolCall = &.{};
     for (messages) |msg| {
         switch (msg) {
             .user => |content| {
@@ -81,15 +84,32 @@ pub fn printConversation(
                     try stream.push(content);
                     try stream.finish();
                 }
+                pending_tool_calls = assistant.tool_calls orelse &.{};
                 if (assistant.tool_calls) |tool_calls| {
                     for (tool_calls) |tool_call| {
                         try writeToolCallLine(allocator, writer, tool_call, terminal_width);
                     }
                 }
             },
+            .tool => |tool| {
+                // Only ask_user prints anything from its result: the answer
+                // row. Other tool output stays out of the replay.
+                const call = findToolCall(pending_tool_calls, tool.tool_call_id) orelse continue;
+                if (!std.mem.eql(u8, call.function.name, "ask_user")) continue;
+                const answer = question_picker.answerFromResult(tool.content) orelse continue;
+                try writer.writeAll("\n");
+                try question_picker.writeAnswerRow(allocator, writer, answer, terminal_width);
+            },
             else => {},
         }
     }
+}
+
+fn findToolCall(tool_calls: []const openai.ToolCall, id: []const u8) ?openai.ToolCall {
+    for (tool_calls) |tool_call| {
+        if (std.mem.eql(u8, tool_call.id, id)) return tool_call;
+    }
+    return null;
 }
 
 fn renderKnown(
@@ -675,4 +695,28 @@ test "printConversation shows the tool calls of an assistant message" {
 
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "🔧") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Reading \"src/main.zig\"") != null);
+}
+
+test "printConversation shows the ask_user answer and no other tool output" {
+    const tool_calls = [_]openai.ToolCall{
+        .{ .id = "call_ask", .function = .{ .name = "ask_user", .arguments = "{\"question\":\"Which database?\"}" } },
+        .{ .id = "call_read", .function = .{ .name = "read_file", .arguments = "{\"path\":\"notes.txt\"}" } },
+    };
+    const messages = [_]openai.Message{
+        .{ .assistant = .{ .content = null, .tool_calls = &tool_calls } },
+        .{ .tool = .{ .tool_call_id = "call_ask", .content = "The user chose: Postgres" } },
+        .{ .tool = .{ .tool_call_id = "call_read", .content = "secret file body" } },
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try printConversation(arena_state.allocator(), &out.writer, &messages, 80);
+
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "↳ ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "Postgres") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "The user chose") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "secret file body") == null);
 }
