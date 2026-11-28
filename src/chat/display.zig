@@ -77,11 +77,10 @@ pub fn printConversation(
     const tool_line_width = terminal_width orelse std.math.maxInt(usize);
     // The tool calls of the latest assistant message, so a tool result can
     // be matched back to the tool that produced it.
-    var pending_tool_calls: []const openai.ToolCall = &.{};
     var scratch_state = std.heap.ArenaAllocator.init(allocator);
     defer scratch_state.deinit();
     const scratch = scratch_state.allocator();
-    for (messages) |msg| {
+    for (messages, 0..) |msg, index| {
         _ = scratch_state.reset(.retain_capacity);
         switch (msg) {
             .user => |content| {
@@ -97,30 +96,36 @@ pub fn printConversation(
                     try writer.writeAll("\r\n");
                     try stream_markdown.StreamRenderer.renderComplete(scratch, writer, render_width, content);
                 }
-                pending_tool_calls = assistant.tool_calls orelse &.{};
-                if (assistant.tool_calls) |tool_calls| {
-                    for (tool_calls) |tool_call| {
-                        try writeToolCallLine(scratch, writer, tool_call, tool_line_width);
-                    }
+                // Live, each call runs before the next one prints, so an
+                // ask_user answer goes right under its own call line. Only
+                // that answer row comes from a result: other tool output
+                // stays out of the replay.
+                const results = toolResultsAfter(messages[index + 1 ..]);
+                for (assistant.tool_calls orelse &.{}) |tool_call| {
+                    try writeToolCallLine(scratch, writer, tool_call, tool_line_width);
+                    if (!std.mem.eql(u8, tool_call.function.name, "ask_user")) continue;
+                    const result = findToolResult(results, tool_call.id) orelse continue;
+                    const answer = question_picker.answerFromResult(result) orelse continue;
+                    try writer.writeAll("\n");
+                    try question_picker.writeAnswerRow(scratch, writer, answer, render_width);
                 }
-            },
-            .tool => |tool| {
-                // Only ask_user prints anything from its result: the answer
-                // row. Other tool output stays out of the replay.
-                const call = findToolCall(pending_tool_calls, tool.tool_call_id) orelse continue;
-                if (!std.mem.eql(u8, call.function.name, "ask_user")) continue;
-                const answer = question_picker.answerFromResult(tool.content) orelse continue;
-                try writer.writeAll("\n");
-                try question_picker.writeAnswerRow(scratch, writer, answer, render_width);
             },
             else => {},
         }
     }
 }
 
-fn findToolCall(tool_calls: []const openai.ToolCall, id: []const u8) ?openai.ToolCall {
-    for (tool_calls) |tool_call| {
-        if (std.mem.eql(u8, tool_call.id, id)) return tool_call;
+/// The tool results that answer an assistant message: the run of tool
+/// messages right after it.
+fn toolResultsAfter(rest: []const openai.Message) []const openai.Message {
+    var end: usize = 0;
+    while (end < rest.len and rest[end] == .tool) end += 1;
+    return rest[0..end];
+}
+
+fn findToolResult(results: []const openai.Message, id: []const u8) ?[]const u8 {
+    for (results) |msg| {
+        if (std.mem.eql(u8, msg.tool.tool_call_id, id)) return msg.tool.content;
     }
     return null;
 }
@@ -732,6 +737,11 @@ test "printConversation shows the ask_user answer and no other tool output" {
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "Postgres") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "The user chose") == null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "secret file body") == null);
+    // Live, each call runs before the next prints, so the answer sits right
+    // under its own call line.
+    const answer_at = std.mem.indexOf(u8, out.written(), "Postgres").?;
+    const read_at = std.mem.indexOf(u8, out.written(), "Reading").?;
+    try std.testing.expect(answer_at < read_at);
 }
 
 test "printConversation writes finished text without streaming repaints" {
