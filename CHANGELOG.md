@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased Changes]
+## [v0.6.1](https://github.com/christianhelle/puny/releases/tag/v0.6.1) (2026-11-28)
 
 ### Features
 - Render resumed sessions like the live session ([#250](https://github.com/christianhelle/puny/pull/250)) ([@christianhelle](https://github.com/christianhelle/))
